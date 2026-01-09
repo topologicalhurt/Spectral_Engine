@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <string.h>
+#include <unistd.h>
 
 #define PI          3.14159265358979323846f
 #define TWO_PI      6.283185307179586f
@@ -80,6 +81,64 @@ static inline SynthParams make_synth_params(float stretch, float pitch, size_t o
 }
 
 #endif
+
+// Binary segment file format header
+typedef struct {
+    char magic[4];      // "SPEC"
+    uint32_t version;   // 1
+    uint32_t sr;
+    float stretch;
+    float pitch;
+    uint64_t count;
+} SegmentFileHeader;
+
+static inline int segments_save(const char* path, const SegmentArray* sa, int sr, float stretch, float pitch) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return -1;
+    
+    SegmentFileHeader hdr = {
+        .magic = {'S', 'P', 'E', 'C'},
+        .version = 1,
+        .sr = (uint32_t)sr,
+        .stretch = stretch,
+        .pitch = pitch,
+        .count = sa->count
+    };
+    
+    if (fwrite(&hdr, sizeof(hdr), 1, f) != 1) { fclose(f); return -2; }
+    if (fwrite(sa->segs, sizeof(Segment), sa->count, f) != sa->count) { fclose(f); return -3; }
+    
+    fclose(f);
+    return 0;
+}
+
+static inline int segments_load(const char* path, SegmentArray* sa, int* sr, float* stretch, float* pitch) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return -1;
+    
+    SegmentFileHeader hdr;
+    if (fread(&hdr, sizeof(hdr), 1, f) != 1) { fclose(f); return -2; }
+    
+    if (memcmp(hdr.magic, "SPEC", 4) != 0 || hdr.version != 1) { fclose(f); return -3; }
+    
+    sa->count = hdr.count;
+    sa->capacity = hdr.count;
+    sa->segs = (Segment*)malloc(hdr.count * sizeof(Segment));
+    if (!sa->segs) { fclose(f); return -4; }
+    
+    if (fread(sa->segs, sizeof(Segment), hdr.count, f) != hdr.count) {
+        free(sa->segs);
+        fclose(f);
+        return -5;
+    }
+    
+    *sr = (int)hdr.sr;
+    *stretch = hdr.stretch;
+    *pitch = hdr.pitch;
+    
+    fclose(f);
+    return 0;
+}
 
 #ifdef __CUDACC__
 __device__ __forceinline__ float fast_sin_device(float x) {

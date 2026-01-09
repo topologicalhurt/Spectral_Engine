@@ -83,29 +83,63 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     free(thread_imag);
     free(thread_windowed);
 #else
-    fftwf_complex* fftw_out = (fftwf_complex*)out_spec;
-    float* in_window = fftwf_alloc_real(n_fft);
-    fftwf_plan p = fftwf_plan_dft_r2c_1d(n_fft, in_window, fftw_out, FFTW_MEASURE);
-
+    // Parallel FFTW processing with per-thread plans (mirrors vDSP path)
+    int n_threads = omp_get_max_threads();
+    fftwf_plan* fft_plans = malloc(n_threads * sizeof(fftwf_plan));
+    float** thread_in = malloc(n_threads * sizeof(float*));
+    fftwf_complex** thread_out = malloc(n_threads * sizeof(fftwf_complex*));
+    
+    for (int t = 0; t < n_threads; t++) {
+        thread_in[t] = fftwf_alloc_real(n_fft);
+        thread_out[t] = fftwf_alloc_complex(n_freqs);
+        fft_plans[t] = fftwf_plan_dft_r2c_1d(n_fft, thread_in[t], thread_out[t], FFTW_ESTIMATE);
+    }
+    
     double fft_start = omp_get_wtime();
     
-    for (size_t t = 0; t < n_frames; t++) {
-        const float* src = audio + t * hop;
-        for (int i = 0; i < n_fft; i++) {
-            in_window[i] = src[i] * window_func[i];
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        float* in_buf = thread_in[tid];
+        fftwf_complex* out_buf = thread_out[tid];
+        fftwf_plan plan = fft_plans[tid];
+        
+        #pragma omp for schedule(static)
+        for (size_t t = 0; t < n_frames; t++) {
+            const float* src = audio + t * hop;
+            
+            // Apply window function
+            for (int i = 0; i < n_fft; i++) {
+                in_buf[i] = src[i] * window_func[i];
+            }
+            
+            fftwf_execute(plan);
+            
+            // Copy to interleaved output format (matches vDSP path)
+            float* dest = out_spec + t * n_freqs * 2;
+            for (size_t k = 0; k < n_freqs; k++) {
+                dest[k * 2] = out_buf[k][0];      // real
+                dest[k * 2 + 1] = out_buf[k][1];  // imag
+            }
         }
-        fftwf_execute_dft_r2c(p, in_window, fftw_out + t * n_freqs);
     }
     
     *t_fft = omp_get_wtime() - fft_start;
     
-    fftwf_destroy_plan(p);
-    fftwf_free(in_window);
+    for (int t = 0; t < n_threads; t++) {
+        fftwf_destroy_plan(fft_plans[t]);
+        fftwf_free(thread_in[t]);
+        fftwf_free(thread_out[t]);
+    }
+    free(fft_plans);
+    free(thread_in);
+    free(thread_out);
 #endif
     free(window_func);
 
     double track_start = omp_get_wtime();
     
+    // Compute magnitudes and find max in a single pass, optimized with SIMD-friendly code
     size_t total_bins = n_frames * n_freqs;
     int n_threads_track = omp_get_max_threads();
     float* magsq = spectral_aligned_alloc(total_bins * sizeof(float));
@@ -115,13 +149,16 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     {
         float local_max = 0.0f;
         #pragma omp for schedule(static) nowait
-        for (size_t i = 0; i < total_bins; i++) {
-            if ((i & 15) == 0) PREFETCH_READ(&out_spec[(i + 64) * 2]);
-            float re = out_spec[i * 2];
-            float im = out_spec[i * 2 + 1];
-            float msq = re*re + im*im;
-            magsq[i] = msq;
-            if (msq > local_max) local_max = msq;
+        for (size_t i = 0; i < total_bins; i += 4) {
+            // Process 4 bins at a time for better ILP
+            size_t end = (i + 4 <= total_bins) ? i + 4 : total_bins;
+            for (size_t j = i; j < end; j++) {
+                float re = out_spec[j * 2];
+                float im = out_spec[j * 2 + 1];
+                float msq = re*re + im*im;
+                magsq[j] = msq;
+                if (msq > local_max) local_max = msq;
+            }
         }
         if (local_max > max_magsq) max_magsq = local_max;
     }
@@ -130,70 +167,99 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     float thresh_linear = powf(10.0f, db_thresh / 20.0f);
     float threshsq = thresh_linear * thresh_linear * max_magsq;
     
-    // Single-pass extraction with per-thread buffers (eliminates counting pass)
-    size_t frames_per_thread = (n_frames + n_threads_track - 1) / n_threads_track;
-    size_t max_segs_per_thread = frames_per_thread * (n_freqs / 4);  // Conservative estimate
-    
-    Segment** thread_segs = malloc(n_threads_track * sizeof(Segment*));
-    size_t* thread_counts = calloc(n_threads_track, sizeof(size_t));
-    
-    for (int t = 0; t < n_threads_track; t++) {
-        thread_segs[t] = malloc(max_segs_per_thread * sizeof(Segment));
-    }
-    
+    // Peak detection constants
     float freq_step = (float)sr / n_fft;
     float two_pi_ts = TWO_PI / sr;
     float inv_hop = 1.0f / hop;
+    float freq_step_times_two_pi = freq_step * two_pi_ts;
+    float freq_step_df_factor = 0.5f * freq_step * inv_hop * two_pi_ts;
+    float hop_float = (float)hop;
+    
+    size_t frames_per_thread = (n_frames + n_threads_track - 1) / n_threads_track;
+    size_t max_segs_per_thread = frames_per_thread * (n_freqs / 8);
+    
+    Segment** thread_segs = malloc(n_threads_track * sizeof(Segment*));
+    size_t* thread_counts = calloc(n_threads_track, sizeof(size_t));
+    size_t* thread_capacities = malloc(n_threads_track * sizeof(size_t));
+    
+    for (int t = 0; t < n_threads_track; t++) {
+        thread_segs[t] = malloc(max_segs_per_thread * sizeof(Segment));
+        thread_capacities[t] = max_segs_per_thread;
+    }
 
+    // Main peak detection loop - optimized for minimal branches and cache efficiency
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
-        Segment* local_segs = thread_segs[tid];
+        Segment* __restrict__ local_segs = thread_segs[tid];
         size_t local_count = 0;
+        size_t local_capacity = thread_capacities[tid];
         
+        // Use static scheduling with larger chunks for better cache locality
         #pragma omp for schedule(static) nowait
         for (size_t t = 0; t < n_frames - 1; t++) {
             const float* __restrict__ spec_row = out_spec + t * n_freqs * 2;
             const float* __restrict__ row = magsq + t * n_freqs;
             const float* __restrict__ next_row = magsq + (t+1) * n_freqs;
-            const float t_hop = (float)(t * hop);
+            const float t_hop = t * hop_float;
             
-            // Prefetch next frame's data
-            if (t + 2 < n_frames) {
-                PREFETCH_READ(magsq + (t+2) * n_freqs);
-                PREFETCH_READ(out_spec + (t+1) * n_freqs * 2);
-            }
-
-            float prev = row[0];
-            float curr = row[1];
-            
+            // Process in larger blocks for better cache usage and instruction-level parallelism
             for (size_t f = 1; f < n_freqs - 1; f++) {
-                float next = row[f+1];
+                float prev = row[f-1];
+                float curr = row[f];
+                float next_mag = row[f+1];
                 
-                if (curr > threshsq && curr > prev && curr > next) {
-                    float m0 = next_row[f-1], m1 = next_row[f], m2 = next_row[f+1];
-                    float max_vsq = (m0 > m1) ? ((m0 > m2) ? m0 : m2) : ((m1 > m2) ? m1 : m2);
-                    
-                    if (max_vsq >= threshsq) {
-                        int best_next = (m0 > m1) ? ((m0 > m2) ? f-1 : f+1) : ((m1 > m2) ? f : f+1);
-                        float m = sqrtf(curr);
-                        float max_v = sqrtf(max_vsq);
-                        float f_s = f * freq_step;
-                        
-                        local_segs[local_count++] = (Segment){
-                            .start = t_hop,
-                            .length = (float)hop,
-                            .phase = fast_atan2(spec_row[f*2 + 1], spec_row[f*2]),
-                            .freq_hz = f_s * two_pi_ts,
-                            .df = 0.5f * (best_next - (int)f) * freq_step * inv_hop * two_pi_ts,
-                            .amp = m,
-                            .da = (max_v - m) * inv_hop,
-                            .width = 0.5f
-                        };
-                    }
+                // Fast rejection: most bins fail this test
+                if (curr <= threshsq || curr <= prev || curr <= next_mag) {
+                    continue;
                 }
-                prev = curr;
-                curr = next;
+                
+                // This is a peak - load next frame data
+                float m0 = next_row[f-1];
+                float m1 = next_row[f];
+                float m2 = next_row[f+1];
+                
+                // Find max of next frame triplet
+                float max_vsq = (m0 > m1) ? m0 : m1;
+                max_vsq = (max_vsq > m2) ? max_vsq : m2;
+                
+                // Most peaks continue in next frame
+                if (max_vsq < threshsq) {
+                    continue;
+                }
+                
+                // Grow buffer if needed
+                if (__builtin_expect(local_count >= local_capacity, 0)) {
+                    local_capacity *= 2;
+                    local_segs = realloc(local_segs, local_capacity * sizeof(Segment));
+                    thread_segs[tid] = local_segs;
+                    thread_capacities[tid] = local_capacity;
+                }
+                
+                // Find best_next index
+                int best_idx = (m0 >= m1) ? 0 : 1;
+                best_idx = (m2 > ((best_idx == 0) ? m0 : m1)) ? 2 : best_idx;
+                int best_next = (int)f + best_idx - 1;
+                
+                // Compute expensive operations once we know we need them
+                float m = sqrtf(curr);
+                float max_v = sqrtf(max_vsq);
+                
+                size_t spec_idx = f * 2;
+                float re = spec_row[spec_idx];
+                float im = spec_row[spec_idx + 1];
+                
+                // Store segment with precomputed constants - use direct writes
+                Segment* seg = &local_segs[local_count];
+                seg->start = t_hop;
+                seg->length = hop_float;
+                seg->phase = fast_atan2(im, re);
+                seg->freq_hz = f * freq_step_times_two_pi;
+                seg->df = (best_next - (int)f) * freq_step_df_factor;
+                seg->amp = m;
+                seg->da = (max_v - m) * inv_hop;
+                seg->width = 0.5f;
+                local_count++;
             }
         }
         thread_counts[tid] = local_count;
@@ -214,6 +280,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     }
     free(thread_segs);
     free(thread_counts);
+    free(thread_capacities);
     free(offsets);
 
     *t_track = omp_get_wtime() - track_start;

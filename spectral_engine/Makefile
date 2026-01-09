@@ -9,6 +9,9 @@ OBJS_OBJC = $(SRCS_OBJC:.m=.o)
 
 UNAME_S := $(shell uname -s)
 
+# Check for CUDA/nvcc
+NVCC := $(shell command -v nvcc 2>/dev/null)
+
 ifeq ($(UNAME_S),Darwin)
     CC = clang
     OMP_PREFIX := $(shell brew --prefix libomp 2>/dev/null || echo /opt/homebrew/opt/libomp)
@@ -25,8 +28,18 @@ ifeq ($(UNAME_S),Darwin)
 else
     CC = gcc
     CFLAGS = -std=c11 -O3 -march=native -ffast-math -Wall -Wextra -Wno-unknown-pragmas -fopenmp
-    LDFLAGS = -lm -lsndfile -lfftw3 -fopenmp
-    OBJS = $(OBJS_C)
+    LDFLAGS = -lm -lsndfile -lfftw3f -fopenmp
+    
+    # Add CUDA support if nvcc is available
+    ifneq ($(NVCC),)
+        CFLAGS += -DUSE_CUDA
+        NVCC_FLAGS = -O3 -Xcompiler -fPIC --compiler-options -ffast-math
+        CUDA_LDFLAGS = -L/usr/local/cuda/lib64 -lcudart
+        LDFLAGS += $(CUDA_LDFLAGS)
+        OBJS = $(OBJS_C) spectral_synth_cuda.o
+    else
+        OBJS = $(OBJS_C)
+    endif
 endif
 
 all: $(TARGET)
@@ -34,12 +47,42 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $(TARGET) $(LDFLAGS)
 	@echo "Built $(TARGET)"
+ifneq ($(NVCC),)
+	@echo "  (with CUDA backend support)"
+endif
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.m $(HEADERS)
 	$(CC) $(OBJCFLAGS) -c $< -o $@
+
+# CUDA object file compilation
+spectral_synth_cuda.o: spectral_synth_cuda.cu $(HEADERS)
+ifneq ($(NVCC),)
+	$(NVCC) $(NVCC_FLAGS) -c spectral_synth_cuda.cu -o spectral_synth_cuda.o
+endif
+
+# ==========================================
+#              CUDA Target
+# ==========================================
+
+CUDA_TARGET = spectral_cuda
+CUDA_SRCS = spectral_cuda.cu
+NVCC := $(shell command -v nvcc 2>/dev/null)
+NVCC_FLAGS = -O3 -arch=sm_70
+CUDA_LIBS = -lsndfile
+
+cuda:
+ifeq ($(NVCC),)
+	@echo "Error: nvcc not found. Please install CUDA toolkit:"
+	@echo "  Ubuntu/Debian: sudo apt install nvidia-cuda-toolkit"
+	@echo "  Or download from: https://developer.nvidia.com/cuda-downloads"
+	@exit 1
+else
+	$(NVCC) $(NVCC_FLAGS) $(CUDA_SRCS) -o $(CUDA_TARGET) $(CUDA_LIBS)
+	@echo "Built $(CUDA_TARGET)"
+endif
 
 # ==========================================
 #              Utilities
@@ -50,7 +93,7 @@ debug: OBJCFLAGS += -g -O0
 debug: clean $(TARGET)
 
 clean:
-	rm -f $(OBJS_C) $(OBJS_OBJC) $(TARGET) spectral_cuda out_c.wav segments.bin
+	rm -f $(OBJS_C) $(OBJS_OBJC) spectral_synth_cuda.o $(TARGET) $(CUDA_TARGET) out_c.wav segments.bin
 	@echo "Cleaned."
 
 info:
@@ -73,4 +116,4 @@ else
 	sudo apt-get install -y libsndfile1-dev libfftw3-dev libomp-dev
 endif
 
-.PHONY: all clean debug info deps
+.PHONY: all clean debug info deps cuda
