@@ -1,0 +1,40 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+spectral_engine/spectral
+spectral_engine/spectral_cuda
+
+resources/*
+!resources/motormouth_recites_shakespeare_he_saw_the_cat.wav
+!resources/motormouth\ test\ 1.txt
+
+# Output files
+*.wav
+*.bin
+
+# Python
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.nbc
+*.nbi
+
+# Build directories
+build/
+
+# macOS
+.DS_Store
+._*
+
+# Editor
+.vscode/
+*.swp
+*~
+
+# Env
+*.env
+/env/
