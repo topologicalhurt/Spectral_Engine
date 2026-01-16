@@ -5,6 +5,7 @@
 *.dylib
 spectral_engine/spectral
 spectral_engine/spectral_cuda
+bin/
 
 resources/*
 !resources/motormouth_recites_shakespeare_he_saw_the_cat.wav

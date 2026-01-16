@@ -1,83 +1,63 @@
-SPECTRAL - Additive Spectral Audio Processor
+SPECTRAL
 
-This is a real-time spectral analysis and resynthesis tool targeting the following platforms:
+Real-time spectral analysis and resynthesis engine.
 
-- LLVM software renderer (Cross-platform)
-- Metal (MacOS)
-- Cuda (Linux)
+Platforms: Desktop (macOS/Linux), Metal GPU, CUDA GPU, ARM Cortex-M7
 
-It extracts sinusoidal partials from audio via FFT peak tracking
-and resynthesizes them with time stretching and pitch shifting.
+BUILD
 
-It also currently supports additive resynthesis with some rudimentary
-oscillator shapes.
+Native build
+```
+  cd spectral_engine
+  make deps && make
+```
 
-BUILDING
+Cross-compiled build (currently supports arm cortex-M4/7 & daisy seed)
+```
+cd spectral_engine
+make deps && make embedded <target>
+```
 
-  Requirements (macOS):
-    - Xcode command line tools
-    - Homebrew packages: libomp, libsndfile
+Emulator build (for simulating cross-compiled code on desktop)
+```
+cd spectral_engine
+make deps && make emulator <target>
+```
 
-  Requirements (Linux):
-    - GCC with OpenMP support
-    - FFTW3, libsndfile
-
-  To build:
-    cd spectral_engine
-    make deps
+Refer to make info for more
 
 USAGE
 
-  ./spectral input.wav [timbre] [stretch] [pitch] [n_fft] [hop] [db_thresh] [threads] [backend]
+  ./bin/spectral input.wav [timbre] [stretch] [pitch] [n_fft] [hop] [thresh] [threads] [backend]
 
-  Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=4096 hop=128 db_thresh=-85 threads=auto backend=auto
-
-  Timbres: 0=sine 1=saw 2=square 3=triangle 4=asin 5=parabola 6=quantized 7=pwm
-
+  Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm
   Backends: 0=auto 1=cpu 2=metal 3=cuda 4=export
 
-  Output is written to out_c.wav
+FEATURES & WORKFLOW
 
-PERFORMANCE
+The full-fledged desktop version builds with offline processing features & other QOL features not afforded on embedded targets, including (but not limited to):
 
-  Here is a program dump for metal:
+STFT spectral analysis / resynthesis, wavelett transforms, essentially unlimited polyphony count, much larger sample sizes, complex oscillator design, exporting segment binaries, GPU acceleration, multi-threading support, full floats as opposed to q8.8 / q15 half-word format, 64bit support (& more) tools for sound design.
 
+However, the embedded cross-compiled targets all build with a real-time assurance for the CMSIS platform (Arm Cortex A/M series), subject to certain parameter thresholds*, supporting dynamic (real-time!) resynthesis of imported segment binaries with up to 512 concurrent voices of polyphony. For a specific application refer to the daisy_seed api.
+
+The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices flash (DMA support coming soon!) I.e.
 ```
-Analyzing 1725440 frames (n_fft=8192, hop=1024, db_thresh=-100.0, threads=12)...
-Found 1336294 segments.
-Metal: Apple M1 Pro
-Rendering with Metal GPU (tile-parallel, 1336294 segs, density=0.8)...
-Metal: 1336294 segs, 6740 tiles, avg 991 segs/tile
-
---- Timing ---
-FFT:       8.365 ms
-Tracking:  22.318 ms
-Synthesis: 58.186 ms
-Normalize: 0.186 ms
-Total:     89.055 ms
-
---- Throughput ---
-Audio:     39.13 sec
-Realtime:  439.3x
-Segs/sec:  15005 K
-
---- Performance Metrics ---
-Memory (physical):
-  RSS:            286 MB
-  Peak tracked:   94.7 MB
-CPU Time:
-  User:           119.8 ms
-  System:         152.2 ms
-  Total CPU:      272.0 ms
-Utilization:
-  Threads used:   12 / 8 cores
-  Core util:      17.8% (of 12 threads)
-  Parallelism:    2.13x effective
-
-Done.
+make && ../bin/spectral ../resources/motormouth_recites_shakespeare_he_saw_the_cat.wav 0 1 0 4096 128 -90 8 4 && make emulator daisy && ../bin/spectral_emulator_daisy segments.bin
 ```
+
+It is currently being investigated whether or not it is possible to support real-time tracking on embedded devices* by running the firmware on top of an RTOS.
+
+STRUCTURE
+
+  spectral_engine/    Core analysis and synthesis
+  api/                Platform-specific wrappers
+  examples/           Example applications & Demo's
+  tools/              Useful scripts or toolings
+  resources/          Location for auxiliary files
+  bin/                Compiled binaries
 
 AUTHOR
 
-  Connor Sinclair / topologicalhurt
+  Connor Sinclair
   csin0659@uni.sydney.edu.au
