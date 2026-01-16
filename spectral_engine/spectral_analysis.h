@@ -1,4 +1,15 @@
-/* spectral_analysis.h - FFT and peak tracking */
+/* spectral_analysis.h - FFT-Based Spectral Analysis
+ * 
+ * Performs Short-Time Fourier Transform (STFT) analysis on audio input,
+ * extracts spectral peaks above a threshold, and tracks them across frames
+ * to create "segments" representing individual sinusoidal components.
+ * 
+ * The output SegmentArray can be used directly for resynthesis or saved
+ * to a binary file for later use (including on embedded targets).
+ * 
+ * Uses vDSP (macOS) or FFTW (Linux) for FFT computation.
+ * Multi-threaded with OpenMP.
+ */
 
 #ifndef SPECTRAL_ANALYSIS_H
 #define SPECTRAL_ANALYSIS_H

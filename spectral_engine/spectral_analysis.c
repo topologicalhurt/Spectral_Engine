@@ -1,33 +1,56 @@
-/* spectral_analysis.c - FFT and peak tracking */
+/* spectral_analysis.c - FFT-Based Spectral Analysis Implementation
+ * 
+ * Analysis Pipeline:
+ *   1. Apply Hann window to overlapping frames
+ *   2. Compute FFT (vDSP on macOS, FFTW on Linux)
+ *   3. Convert to magnitude/phase
+ *   4. Detect local maxima above threshold
+ *   5. Track peaks across frames to form segments
+ * 
+ * Multi-threading:
+ *   - FFT computation parallelized per-frame
+ *   - Peak tracking uses thread-local segment buffers
+ *   - Final merge combines all thread results
+ * 
+ * Memory:
+ *   - Pre-allocates thread-local FFT plans and buffers
+ *   - Avoids allocation in inner loops
+ */
 
 #include "spectral_analysis.h"
 #include <omp.h>
 
-#ifdef __APPLE__
+#if SPECTRAL_USE_VDSP
 #include <Accelerate/Accelerate.h>
-#define USE_VDSP 1
 #else
 #include <fftw3.h>
-#define USE_VDSP 0
 #endif
 
 SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr, 
                            int n_fft, int hop, float db_thresh,
                            double* t_fft, double* t_track) {
+    SegmentArray empty_result = {NULL, 0, 0};
     size_t n_frames = (n_samples - n_fft) / hop + 1;
     size_t n_freqs = n_fft / 2 + 1;
     
     float* out_spec = spectral_aligned_alloc(n_frames * n_freqs * 2 * sizeof(float));
     float* window_func = spectral_aligned_alloc(n_fft * sizeof(float));
-#if USE_VDSP
+    if (!out_spec || !window_func) {
+        free(out_spec);
+        free(window_func);
+        *t_fft = 0;
+        *t_track = 0;
+        return empty_result;
+    }
+#if SPECTRAL_USE_VDSP
     vDSP_hann_window(window_func, n_fft, vDSP_HANN_NORM);
 #else
     for(int i=0; i<n_fft; i++) {
-        window_func[i] = 0.5f * (1.0f - cosf(2.0f * PI * i / (n_fft - 1)));
+        window_func[i] = 0.5f * (1.0f - cosf(2.0f * SPECTRAL_PI * i / (n_fft - 1)));
     }
 #endif
     
-#if USE_VDSP
+#if SPECTRAL_USE_VDSP
     vDSP_Length log2n = (vDSP_Length)log2(n_fft);
     int n_threads = omp_get_max_threads();
     FFTSetup* fft_setups = malloc(n_threads * sizeof(FFTSetup));
@@ -35,11 +58,43 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     float** thread_imag = malloc(n_threads * sizeof(float*));
     float** thread_windowed = malloc(n_threads * sizeof(float*));
     
+    if (!fft_setups || !thread_real || !thread_imag || !thread_windowed) {
+        free(fft_setups); free(thread_real); free(thread_imag); free(thread_windowed);
+        free(out_spec); free(window_func);
+        *t_fft = 0; *t_track = 0;
+        return empty_result;
+    }
+    
+    /* Initialize to NULL for safe cleanup on partial allocation failure */
     for (int t = 0; t < n_threads; t++) {
+        fft_setups[t] = NULL;
+        thread_real[t] = NULL;
+        thread_imag[t] = NULL;
+        thread_windowed[t] = NULL;
+    }
+    
+    int alloc_success = 1;
+    for (int t = 0; t < n_threads && alloc_success; t++) {
         fft_setups[t] = vDSP_create_fftsetup(log2n, FFT_RADIX2);
         thread_real[t] = spectral_aligned_alloc(n_fft * sizeof(float));
         thread_imag[t] = spectral_aligned_alloc(n_fft * sizeof(float));
         thread_windowed[t] = spectral_aligned_alloc(n_fft * sizeof(float));
+        if (!fft_setups[t] || !thread_real[t] || !thread_imag[t] || !thread_windowed[t]) {
+            alloc_success = 0;
+        }
+    }
+    
+    if (!alloc_success) {
+        for (int t = 0; t < n_threads; t++) {
+            if (fft_setups[t]) vDSP_destroy_fftsetup(fft_setups[t]);
+            free(thread_real[t]);
+            free(thread_imag[t]);
+            free(thread_windowed[t]);
+        }
+        free(fft_setups); free(thread_real); free(thread_imag); free(thread_windowed);
+        free(out_spec); free(window_func);
+        *t_fft = 0; *t_track = 0;
+        return empty_result;
     }
     
     double fft_start = omp_get_wtime();
@@ -89,10 +144,42 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     float** thread_in = malloc(n_threads * sizeof(float*));
     fftwf_complex** thread_out = malloc(n_threads * sizeof(fftwf_complex*));
     
+    if (!fft_plans || !thread_in || !thread_out) {
+        free(fft_plans); free(thread_in); free(thread_out);
+        free(out_spec); free(window_func);
+        *t_fft = 0; *t_track = 0;
+        return empty_result;
+    }
+    
+    /* Initialize to NULL for safe cleanup on partial allocation failure */
     for (int t = 0; t < n_threads; t++) {
+        fft_plans[t] = NULL;
+        thread_in[t] = NULL;
+        thread_out[t] = NULL;
+    }
+    
+    int alloc_success = 1;
+    for (int t = 0; t < n_threads && alloc_success; t++) {
         thread_in[t] = fftwf_alloc_real(n_fft);
         thread_out[t] = fftwf_alloc_complex(n_freqs);
-        fft_plans[t] = fftwf_plan_dft_r2c_1d(n_fft, thread_in[t], thread_out[t], FFTW_ESTIMATE);
+        if (!thread_in[t] || !thread_out[t]) {
+            alloc_success = 0;
+        } else {
+            fft_plans[t] = fftwf_plan_dft_r2c_1d(n_fft, thread_in[t], thread_out[t], FFTW_ESTIMATE);
+            if (!fft_plans[t]) alloc_success = 0;
+        }
+    }
+    
+    if (!alloc_success) {
+        for (int t = 0; t < n_threads; t++) {
+            if (fft_plans[t]) fftwf_destroy_plan(fft_plans[t]);
+            fftwf_free(thread_in[t]);
+            fftwf_free(thread_out[t]);
+        }
+        free(fft_plans); free(thread_in); free(thread_out);
+        free(out_spec); free(window_func);
+        *t_fft = 0; *t_track = 0;
+        return empty_result;
     }
     
     double fft_start = omp_get_wtime();
@@ -143,6 +230,11 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     size_t total_bins = n_frames * n_freqs;
     int n_threads_track = omp_get_max_threads();
     float* magsq = spectral_aligned_alloc(total_bins * sizeof(float));
+    if (!magsq) {
+        free(out_spec);
+        *t_track = 0;
+        return empty_result;
+    }
     float max_magsq = 0.0f;
     
     #pragma omp parallel reduction(max:max_magsq)
@@ -182,8 +274,22 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     size_t* thread_counts = calloc(n_threads_track, sizeof(size_t));
     size_t* thread_capacities = malloc(n_threads_track * sizeof(size_t));
     
+    if (!thread_segs || !thread_counts || !thread_capacities) {
+        free(thread_segs); free(thread_counts); free(thread_capacities);
+        free(out_spec); free(magsq);
+        *t_track = 0;
+        return empty_result;
+    }
+    
     for (int t = 0; t < n_threads_track; t++) {
         thread_segs[t] = malloc(max_segs_per_thread * sizeof(Segment));
+        if (!thread_segs[t]) {
+            for (int i = 0; i < t; i++) free(thread_segs[i]);
+            free(thread_segs); free(thread_counts); free(thread_capacities);
+            free(out_spec); free(magsq);
+            *t_track = 0;
+            return empty_result;
+        }
         thread_capacities[t] = max_segs_per_thread;
     }
 
@@ -231,7 +337,12 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
                 // Grow buffer if needed
                 if (__builtin_expect(local_count >= local_capacity, 0)) {
                     local_capacity *= 2;
-                    local_segs = realloc(local_segs, local_capacity * sizeof(Segment));
+                    Segment* new_segs = realloc(local_segs, local_capacity * sizeof(Segment));
+                    if (!new_segs) {
+                        /* Allocation failed - stop collecting more segments */
+                        break;
+                    }
+                    local_segs = new_segs;
                     thread_segs[tid] = local_segs;
                     thread_capacities[tid] = local_capacity;
                 }
@@ -267,12 +378,26 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     
     size_t total_segs = 0;
     size_t* offsets = malloc(n_threads_track * sizeof(size_t));
+    if (!offsets) {
+        for (int t = 0; t < n_threads_track; t++) free(thread_segs[t]);
+        free(thread_segs); free(thread_counts); free(thread_capacities);
+        free(out_spec); free(magsq);
+        *t_track = 0;
+        return empty_result;
+    }
     for (int t = 0; t < n_threads_track; t++) {
         offsets[t] = total_segs;
         total_segs += thread_counts[t];
     }
     
-    Segment* segs = malloc(total_segs * sizeof(Segment));
+    Segment* segs = (total_segs > 0) ? malloc(total_segs * sizeof(Segment)) : NULL;
+    if (total_segs > 0 && !segs) {
+        for (int t = 0; t < n_threads_track; t++) free(thread_segs[t]);
+        free(thread_segs); free(thread_counts); free(thread_capacities);
+        free(offsets); free(out_spec); free(magsq);
+        *t_track = 0;
+        return empty_result;
+    }
     #pragma omp parallel for schedule(static)
     for (int t = 0; t < n_threads_track; t++) {
         memcpy(segs + offsets[t], thread_segs[t], thread_counts[t] * sizeof(Segment));
@@ -290,7 +415,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
 
     SegmentArray res;
     res.segs = segs;
-    res.count = total_segs;
-    res.capacity = total_segs;
+    res.count = (uint32_t)total_segs;
+    res.capacity = (uint32_t)total_segs;
     return res;
 }
