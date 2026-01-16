@@ -3,6 +3,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #include "spectral_synth.h"
+#include "spectral_utils.h"
 #include <omp.h>
 
 static const char* metalKernelSource = 
@@ -29,6 +30,7 @@ static const char* metalKernelSource =
 "    uint out_len;\n"
 "    uint num_segments;\n"
 "    uint tile_size;\n"
+"    uint timbre;\n"
 "};\n"
 "\n"
 "struct TileRange {\n"
@@ -36,12 +38,53 @@ static const char* metalKernelSource =
 "    uint count;\n"
 "};\n"
 "\n"
+"/* Timbre enum values (must match host) */\n"
+"#define TIMBRE_SINE     0\n"
+"#define TIMBRE_SAW      1\n"
+"#define TIMBRE_SQUARE   2\n"
+"#define TIMBRE_TRIANGLE 3\n"
+"#define TIMBRE_ASIN     4\n"
+"#define TIMBRE_PARABOLA 5\n"
+"\n"
+"#define PI 3.14159265358979f\n"
+"#define TWO_PI 6.283185307179586f\n"
+"#define INV_TWO_PI 0.159154943091895f\n"
+"#define INV_PI 0.318309886183791f\n"
+"#define TWO_INV_PI 0.636619772367581f\n"
+"#define INV_PI_SQ 0.101321183642338f\n"
+"\n"
 "inline float fast_sin(float x) {\n"
-"    const float TWO_PI = 6.283185307179586f;\n"
-"    const float INV_TWO_PI = 0.159154943091895f;\n"
 "    x = x - TWO_PI * floor(x * INV_TWO_PI + 0.5f);\n"
 "    float x2 = x * x;\n"
 "    return x * (9.8696044f - x2) / (9.8696044f + 0.25f * x2);\n"
+"}\n"
+"\n"
+"/* Normalize phase to [-PI, PI) */\n"
+"inline float normalize_phase(float p) {\n"
+"    float norm = p * INV_TWO_PI;\n"
+"    return TWO_PI * (norm - floor(norm) - 0.5f);\n"
+"}\n"
+"\n"
+"/* Oscillator function for different timbres */\n"
+"inline float oscillator(float phase, uint timbre) {\n"
+"    float rads = normalize_phase(phase);\n"
+"    \n"
+"    switch (timbre) {\n"
+"        case TIMBRE_SINE:\n"
+"            return fast_sin(phase);\n"
+"        case TIMBRE_SAW:\n"
+"            return rads * -INV_PI;\n"
+"        case TIMBRE_SQUARE:\n"
+"            return (rads > 0.0f) ? 1.0f : -1.0f;\n"
+"        case TIMBRE_TRIANGLE: {\n"
+"            float abs_r = abs(rads);\n"
+"            return (1.0f - abs_r * TWO_INV_PI) * 2.0f - 1.0f;\n"
+"        }\n"
+"        case TIMBRE_PARABOLA:\n"
+"            return 1.0f - rads * rads * INV_PI_SQ;\n"
+"        default:\n"
+"            return fast_sin(phase);  /* Fall back to sine */\n"
+"    }\n"
 "}\n"
 "\n"
 "#define THREADS_PER_TILE 512\n"
@@ -62,6 +105,7 @@ static const char* metalKernelSource =
 "    TileRange range = tile_ranges[tile_idx];\n"
 "    uint sample_idx = tile_idx * params.tile_size + tid;\n"
 "    float sample_pos = (float)sample_idx;\n"
+"    uint timbre = params.timbre;\n"
 "    \n"
 "    float sum = 0.0f;\n"
 "    \n"
@@ -90,7 +134,7 @@ static const char* metalKernelSource =
 "                float d_a = seg.da * params.inv_stretch;\n"
 "                \n"
 "                float p = seg.phase + j * (alpha + beta * j);\n"
-"                sum += (seg.amp + d_a * j) * fast_sin(p);\n"
+"                sum += (seg.amp + d_a * j) * oscillator(p, timbre);\n"
 "            }\n"
 "        }\n"
 "        \n"
@@ -128,11 +172,11 @@ void metal_init(void) {
         }
         
         if (!metalDevice) {
-            fprintf(stderr, "Metal: No GPU found\n");
+            SPECTRAL_WARN("Metal: No GPU found");
             return;
         }
         
-        fprintf(stderr, "Metal: %s\n", [[metalDevice name] UTF8String]);
+        SPECTRAL_DBG("Metal: %s", [[metalDevice name] UTF8String]);
         
         metalQueue = [metalDevice newCommandQueue];
         
@@ -143,14 +187,14 @@ void metal_init(void) {
         NSString* source = [NSString stringWithUTF8String:metalKernelSource];
         id<MTLLibrary> library = [metalDevice newLibraryWithSource:source options:options error:&error];
         if (error) {
-            fprintf(stderr, "Metal: Shader error: %s\n", [[error localizedDescription] UTF8String]);
+            SPECTRAL_WARN("Metal: Shader error: %s", [[error localizedDescription] UTF8String]);
             return;
         }
         
         id<MTLFunction> synthKernel = [library newFunctionWithName:@"synthesize_tile_parallel"];
         metalSynthPipeline = [metalDevice newComputePipelineStateWithFunction:synthKernel error:&error];
         if (error) {
-            fprintf(stderr, "Metal: Pipeline error: %s\n", [[error localizedDescription] UTF8String]);
+            SPECTRAL_WARN("Metal: Pipeline error: %s", [[error localizedDescription] UTF8String]);
             return;
         }
         
@@ -163,15 +207,41 @@ int metal_available(void) {
 }
 
 void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
-                 float stretch, float pitch, double* t_synth) {
+                 float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
     @autoreleasepool {
+        double dummy_t;
+        if (!t_synth) t_synth = &dummy_t;
+        
+        if (!out_buffer || out_len == 0) {
+            *t_synth = 0;
+            return;
+        }
+        
+        if (sa.count == 0 || !sa.segs) {
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return;
+        }
+        
         double synth_start = omp_get_wtime();
         uint32_t num_tiles = ((uint32_t)out_len + TILE_SIZE - 1) / TILE_SIZE;
         int n_threads = omp_get_max_threads();
         
         uint32_t** thread_counts = malloc(n_threads * sizeof(uint32_t*));
+        if (!thread_counts) {
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return;
+        }
         for (int t = 0; t < n_threads; t++) {
             thread_counts[t] = calloc(num_tiles, sizeof(uint32_t));
+            if (!thread_counts[t]) {
+                for (int i = 0; i < t; i++) free(thread_counts[i]);
+                free(thread_counts);
+                memset(out_buffer, 0, out_len * sizeof(float));
+                *t_synth = 0;
+                return;
+            }
         }
         
         #pragma omp parallel
@@ -197,6 +267,13 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         }
         
         uint32_t* tile_counts = calloc(num_tiles, sizeof(uint32_t));
+        if (!tile_counts) {
+            for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
+            free(thread_counts);
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return;
+        }
         for (int t = 0; t < n_threads; t++) {
             for (uint32_t i = 0; i < num_tiles; i++) {
                 tile_counts[i] += thread_counts[t][i];
@@ -206,6 +283,12 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         free(thread_counts);
         
         TileRange* tile_ranges = malloc(num_tiles * sizeof(TileRange));
+        if (!tile_ranges) {
+            free(tile_counts);
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return;
+        }
         uint32_t total_refs = 0;
         for (uint32_t t = 0; t < num_tiles; t++) {
             tile_ranges[t].start = total_refs;
@@ -215,6 +298,15 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         
         uint32_t* tile_segment_ids = malloc(total_refs * sizeof(uint32_t));
         uint32_t* tile_cursors = calloc(num_tiles, sizeof(uint32_t));
+        if (!tile_segment_ids || !tile_cursors) {
+            free(tile_counts);
+            free(tile_ranges);
+            free(tile_segment_ids);
+            free(tile_cursors);
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return;
+        }
         
         #pragma omp parallel for schedule(static)
         for (size_t i = 0; i < sa.count; i++) {
@@ -238,7 +330,9 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         free(tile_counts);
         free(tile_cursors);
         
+#if SPECTRAL_DEBUG && !defined(NDEBUG)
         float avg_segs = (float)total_refs / num_tiles;
+#endif
         
         struct {
             float stretch;
@@ -248,14 +342,16 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             uint32_t out_len;
             uint32_t num_segments;
             uint32_t tile_size;
+            uint32_t timbre;
         } params = {
             .stretch = stretch,
             .inv_stretch = 1.0f / stretch,
             .inv_stretch_sq = 1.0f / (stretch * stretch),
             .pitch_factor = powf(2.0f, pitch / 12.0f),
             .out_len = (uint32_t)out_len,
-            .num_segments = (uint32_t)sa.count,
-            .tile_size = TILE_SIZE
+            .num_segments = sa.count,
+            .tile_size = TILE_SIZE,
+            .timbre = (uint32_t)timbre
         };
         
         size_t segment_buf_size = sa.count * sizeof(Segment);
@@ -263,7 +359,7 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         size_t tile_ranges_size = num_tiles * sizeof(TileRange);
         size_t output_size = out_len * sizeof(float);
         
-        fprintf(stderr, "Metal: %zu segs, %u tiles, avg %.0f segs/tile\n", 
+        SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile", 
                 sa.count, num_tiles, avg_segs);
         
         id<MTLBuffer> segmentBuffer = [metalDevice newBufferWithBytes:sa.segs
