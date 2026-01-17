@@ -57,7 +57,7 @@ static void segment_to_le(Segment* seg) {
     seg->start = swap_float(seg->start);
     seg->length = swap_float(seg->length);
     seg->phase = swap_float(seg->phase);
-    seg->freq_hz = swap_float(seg->freq_hz);
+    seg->omega = swap_float(seg->omega);
     seg->df = swap_float(seg->df);
     seg->amp = swap_float(seg->amp);
     seg->da = swap_float(seg->da);
@@ -70,7 +70,7 @@ static void segment_from_le(Segment* seg) {
 
 /* Returns 1 if segment values are finite and in valid range, 0 if corrupt */
 static int segment_validate(const Segment* seg) {
-    if (!isfinite(seg->freq_hz) || seg->freq_hz < 0.0f) return 0;
+    if (!isfinite(seg->omega) || seg->omega < 0.0f) return 0;
     if (!isfinite(seg->amp)) return 0;
     if (!isfinite(seg->start) || seg->start < 0.0f) return 0;
     if (!isfinite(seg->length) || seg->length < 0.0f) return 0;
@@ -165,7 +165,16 @@ int segments_load(const char* path, SegmentArray* sa, int* out_sr, float* out_st
     
     sa->count = hdr.count;
     sa->capacity = hdr.count;
+
+/* Overflow check - tautologically false on 64-bit but needed for 32-bit portability */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
+#endif
     if (hdr.count > SIZE_MAX / sizeof(Segment)) { fclose(f); return SEGMENT_PARSER_ERR_MEMORY; }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
     sa->segs = (Segment*)malloc(hdr.count * sizeof(Segment));
     if (!sa->segs) { fclose(f); return SEGMENT_PARSER_ERR_MEMORY; }
     

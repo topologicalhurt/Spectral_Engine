@@ -38,7 +38,14 @@ typedef enum {
     SPECTRAL_ERR_PROTO_CHECKSUM  = -200,
     SPECTRAL_ERR_PROTO_CMD       = -201,
     SPECTRAL_ERR_PROTO_OVERFLOW  = -202,
-    SPECTRAL_ERR_PROTO_TIMEOUT   = -203
+    SPECTRAL_ERR_PROTO_TIMEOUT   = -203,
+
+    /* Emulator (-250 to -299) */
+    SPECTRAL_ERR_EMU_UNAVAIL     = -250,
+    SPECTRAL_ERR_EMU_SEG_FAIL    = -251,
+    SPECTRAL_ERR_EMU_ACCUM_FAIL  = -252,
+    
+
 } SpectralError;
 
 const char* spectral_strerror(SpectralError err);

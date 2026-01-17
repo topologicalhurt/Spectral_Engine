@@ -23,6 +23,13 @@
 #define SPECTRAL_MAX_SEGS       0
 #endif
 
+/* Embedded float mode: use FPU instead of Q15 integer for synthesis
+ * Storage remains Q15 for memory efficiency, but synthesis uses float.
+ * Requires FPU (Cortex-M4F/M7 with VFPv4). */
+#ifndef SPECTRAL_EMBEDDED_FLOAT
+#define SPECTRAL_EMBEDDED_FLOAT 0
+#endif
+
 /* Q15 compact mode: 14-byte segments, no chirp */
 #ifndef SPECTRAL_Q15_COMPACT
 #define SPECTRAL_Q15_COMPACT    0
@@ -96,8 +103,11 @@ typedef enum {
     TIMBRE_COUNT    = 8
 } SpectralTimbre;
 
-#define TIMBRE_MIN  TIMBRE_SINE
-#define TIMBRE_MAX  TIMBRE_PWM
+#define TIMBRE_MIN          TIMBRE_SINE
+#define TIMBRE_MAX          TIMBRE_PWM
+/* It is possible to maintain an (improper) subset of the supported cpu waveforms
+on different platforms / backends */
+#define OSC_GPU_MAX_TIMBRE  TIMBRE_PARABOLA
 
 #ifndef SPECTRAL_BACKEND_TIMBRE_MAX
 #define SPECTRAL_BACKEND_TIMBRE_MAX     TIMBRE_MAX
@@ -151,6 +161,45 @@ typedef enum {
 #define SPECTRAL_USE_VDSP       0
 #endif
 
+/* FMA (fused multiply-add) detection
+ * Available on: x86 with FMA3/FMA4, ARM with VFPv4, Apple Silicon */
+#ifndef SPECTRAL_HAS_FMA
+#if defined(__FMA__) || defined(__ARM_FEATURE_FMA) || defined(__ARM_ARCH_7EM__)
+#define SPECTRAL_HAS_FMA        1
+#else
+#define SPECTRAL_HAS_FMA        0
+#endif
+#endif
+
+/* FMA-based sine approximation (divide-free)
+ * Enable when submodule is integrated. Requires SPECTRAL_HAS_FMA. */
+#ifndef SPECTRAL_USE_FMA
+#define SPECTRAL_USE_FMA    0
+#endif
+
+/* Platform detection for SIMD backend selection */
+#if defined(__APPLE__)
+    #define OSC_SIMD_VDSP 1
+    #include <Accelerate/Accelerate.h>
+#elif defined(ARM_MATH_CM4) || defined(ARM_MATH_CM7) || defined(ARM_MATH_ARMV8MML)
+    #define OSC_SIMD_CMSIS 1
+    #include "arm_math.h"
+#elif defined(__AVX2__) || defined(__AVX__)
+    #define OSC_SIMD_AVX 1
+    #include <immintrin.h>
+#elif defined(__SSE4_1__) || defined(__SSE2__)
+    #define OSC_SIMD_SSE 1
+    #include <emmintrin.h>
+    #ifdef __SSE4_1__
+        #include <smmintrin.h>
+    #endif
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    #define OSC_SIMD_NEON 1
+    #include <arm_neon.h>
+#else
+    #define OSC_SIMD_NONE 1
+#endif
+
 /* Compiler hints */
 #if defined(__GNUC__) && !defined(__clang__)
 #define SPECTRAL_UNROLL_4       _Pragma("GCC unroll 4")
@@ -179,6 +228,11 @@ typedef enum {
 #define SPECTRAL_TWO_INV_PI     0.6366197723675814f
 #define SPECTRAL_PI_SQ          9.8696044f
 #define SPECTRAL_INV_PI_SQ      0.10132118364233778f
+
+/* Q31 phase conversion: radians to Q31 fixed-point increment
+ * Q31 uses full 32-bit range: 2^32 steps per 2*pi radians.
+ * Used for high-precision phase accumulators in embedded synth. */
+#define SPECTRAL_Q31_PER_RAD    (4294967296.0 / SPECTRAL_TWO_PI)  /* ~683565275.6 */
 
 /* Analysis defaults */
 #if SPECTRAL_EMBEDDED

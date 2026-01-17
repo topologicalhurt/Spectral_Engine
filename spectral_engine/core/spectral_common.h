@@ -23,9 +23,20 @@
 #define PI_SQ       SPECTRAL_PI_SQ
 #endif
 
-/* 64-byte segment (desktop) - cache-line aligned */
+/* 64-byte segment (desktop) - cache-line aligned
+ * 
+ * Fields:
+ *   start  - Start sample index (pre-stretch)
+ *   length - Duration in samples (pre-stretch)
+ *   phase  - Initial phase in radians
+ *   omega  - Angular frequency (radians per sample, pre-pitch/stretch)
+ *   df     - Frequency delta per sample (chirp rate)
+ *   amp    - Amplitude [0, 1]
+ *   da     - Amplitude delta per sample
+ *   width  - Timbre-specific parameter (PWM duty, quantization level)
+ */
 typedef struct __attribute__((aligned(64))) {
-    float start, length, phase, freq_hz, df, amp, da;
+    float start, length, phase, omega, df, amp, da;
     union {
         float _pad[9];
         struct { float width; float _pad_w[8]; };
@@ -36,9 +47,9 @@ typedef struct __attribute__((aligned(64))) {
 _Static_assert(sizeof(Segment) == 64, "Segment size");
 #endif
 
-/* 32-byte segment (embedded) */
+/* 32-byte segment (embedded) - see Segment for field documentation */
 typedef struct __attribute__((aligned(4))) {
-    float start, length, phase, freq_hz, df, amp, da;
+    float start, length, phase, omega, df, amp, da;
     union {
         float _pad[1];
         struct { float width; };
@@ -80,12 +91,8 @@ typedef struct {
 #ifndef __CUDACC__
 void* spectral_aligned_alloc(size_t size);
 float fast_atan2(float y, float x);
-float fast_sin(float x);
+float phase_to_rads(float p);
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs);
-#endif
-
-#ifdef __CUDACC__
-__device__ __forceinline__ float fast_sin_device(float x);
 #endif
 
 #if !SPECTRAL_NO_PERF

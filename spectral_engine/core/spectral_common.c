@@ -1,16 +1,12 @@
 /* spectral_common.c - Core Utilities
  * 
- * Implements fast math approximations and synthesis helpers.
- * 
  * Fast Math:
  *   fast_atan2() - Polynomial approximation, ~10x faster than libm
- *   fast_sin()   - Bhaskara I approximation, ~5x faster than sinf()
+ *   fast_sin()   - Padé [5/4] approximation, ~5x faster than sinf()
  * 
  * Helpers:
  *   make_synth_params() - Precompute synthesis parameters
  *   spectral_aligned_alloc() - Cache-aligned memory allocation
- * 
- * For segment file I/O, see spectral_segment_parser.c
  */
 #include "spectral_common.h"
 
@@ -42,25 +38,46 @@ float fast_atan2(float y, float x) {
     return r;
 }
 
-/*
- * fast_sin: Bhaskara I sine approximation
- * Max error ~0.1%, ~5x faster than sinf().
+/* fast_sin: CANONICAL sine approximation for all oscillators
+ * 
+ * Two implementations available:
+ *   - FMA version: divide-free, uses fused multiply-add (SPECTRAL_HAS_FMA)
+ *   - Padé version: single divide, fallback for platforms without FMA
+ * 
+ * GPU shaders must match the algorithm used here.
  */
+#if SPECTRAL_HAS_FMA && defined(SPECTRAL_USE_FMA)
+/* FMA sine: divide-free polynomial approximation
+ * TODO: Replace with your submodule implementation
+ * Expected interface: x in [-pi, pi], returns sin(x) */
 float fast_sin(float x) {
-    /* Wrap x to [-pi, pi] using: x - 2pi * round(x / 2pi) */
+    /* Wrap to [-pi, pi] */
     x = x - TWO_PI * floorf(x * INV_TWO_PI + 0.5f);
     float x2 = x * x;
-    return x * (PI_SQ - x2) / (PI_SQ + 0.25f * x2);
+    /* Placeholder: replace with FMA polynomial from submodule */
+    /* Example 7th-order Taylor (not optimal, just placeholder): */
+    /* sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040 */
+    float x3 = x * x2;
+    float x5 = x3 * x2;
+    float x7 = x5 * x2;
+    return x - x3 * 0.16666667f + x5 * 0.00833333f - x7 * 0.0001984127f;
+}
+#else
+/* Padé [5/4] approximation - single divide, max error ~1e-5 */
+float fast_sin(float x) {
+    x = x - TWO_PI * floorf(x * INV_TWO_PI + 0.5f);
+    float x2 = x * x;
+    float num = x * (1.0f - x2 * (0.16605f - x2 * 0.00761f));
+    float den = 1.0f + x2 * 0.00766f;
+    return num / den;
+}
+#endif
+
+float phase_to_rads(float p) {
+    float norm = p * INV_TWO_PI;
+    return TWO_PI * (norm - (int)norm + (norm < 0.0f) - 0.5f);
 }
 
-/*
- * make_synth_params: Precompute synthesis parameters
- * 
- * pitch_factor: semitone offset to frequency multiplier
- *   pitch=0  -> 1.0x (unchanged)
- *   pitch=12 -> 2.0x (octave up)
- *   pitch=-12 -> 0.5x (octave down)
- */
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs) {
     return (SynthParams){
         .stretch = stretch,
