@@ -3,6 +3,7 @@
 #define SPECTRAL_Q15_H
 
 #include <stdint.h>
+#include <math.h>
 #include "spectral_config.h"
 
 #ifdef __cplusplus
@@ -25,6 +26,24 @@ typedef uint16_t uq16_t;
 #define Q15_TO_FLOAT(q) ((float)(q) * SPECTRAL_INV_Q15_SCALE)
 #define FLOAT_TO_Q31(f) ((q31_t)((f) >= 1.0f ? Q31_MAX : (f) <= -1.0f ? Q31_MIN : (q31_t)((f) * SPECTRAL_Q31_SCALE)))
 #define Q31_TO_FLOAT(q) ((float)(q) * SPECTRAL_INV_Q31_SCALE)
+
+/* Phase conversion: radians [0, 2pi) -> signed Q15 [-32768, 32767]
+ * Normalizes to [0,1), subtracts 0.5 to center at 0, scales to Q15. */
+#define PHASE_RAD_TO_Q15(rad) ({ \
+    float _n = fmodf((float)(rad), (float)SPECTRAL_TWO_PI) / (float)SPECTRAL_TWO_PI; \
+    if (_n < 0.0f) _n += 1.0f; \
+    (q15_t)((_n - 0.5f) * 65536.0f); \
+})
+
+/* Omega (rad/sample) to Q8.8 frequency format.
+ * Values > 255 are divided by 4 before encoding. */
+#define OMEGA_TO_Q88(omega) ({ \
+    float _o = (float)(omega); \
+    if (_o > 255.0f) _o /= 4.0f; \
+    if (_o > 255.0f) _o = 255.0f; \
+    if (_o < 0.0f) _o = 0.0f; \
+    (uint16_t)(_o * 256.0f); \
+})
 
 #if defined(__GNUC__)
 #define Q15_HOT __attribute__((hot))

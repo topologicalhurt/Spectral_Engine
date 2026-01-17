@@ -18,6 +18,7 @@
  */
 
 #include "spectral_analysis.h"
+#include "spectral_windows.h"
 #include <omp.h>
 
 #if SPECTRAL_USE_VDSP
@@ -42,13 +43,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
         *t_track = 0;
         return empty_result;
     }
-#if SPECTRAL_USE_VDSP
-    vDSP_hann_window(window_func, n_fft, vDSP_HANN_NORM);
-#else
-    for(int i=0; i<n_fft; i++) {
-        window_func[i] = 0.5f * (1.0f - cosf(2.0f * SPECTRAL_PI * i / (n_fft - 1)));
-    }
-#endif
+    spectral_window_hann(window_func, n_fft);
     
 #if SPECTRAL_USE_VDSP
     vDSP_Length log2n = (vDSP_Length)log2(n_fft);
@@ -365,7 +360,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
                 seg->start = t_hop;
                 seg->length = hop_float;
                 seg->phase = fast_atan2(im, re);
-                seg->freq_hz = f * freq_step_times_two_pi;
+                seg->omega = f * freq_step_times_two_pi;
                 seg->df = (best_next - (int)f) * freq_step_df_factor;
                 seg->amp = m;
                 seg->da = (max_v - m) * inv_hop;
@@ -379,9 +374,6 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     size_t total_segs = 0;
     size_t* offsets = malloc(n_threads_track * sizeof(size_t));
     if (!offsets) {
-        for (int t = 0; t < n_threads_track; t++) free(thread_segs[t]);
-        free(thread_segs); free(thread_counts); free(thread_capacities);
-        free(out_spec); free(magsq);
         *t_track = 0;
         return empty_result;
     }

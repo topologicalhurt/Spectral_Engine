@@ -35,11 +35,11 @@ extern "C" {
 /* Core types */
 
 typedef struct SpectralSegmentCompact {
-    float start, length, phase, freq_hz, df, amp, da, width;
+    float start, length, phase, omega, df, amp, da, width;
 } SpectralSegmentCompact;
 
 typedef struct SpectralSegment {
-    float start, length, phase, freq_hz, df, amp, da, width;
+    float start, length, phase, omega, df, amp, da, width;
     float _pad[8];
 } SpectralSegment;
 

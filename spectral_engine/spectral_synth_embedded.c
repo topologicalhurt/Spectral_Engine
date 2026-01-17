@@ -272,15 +272,13 @@ int spectral_embedded_load(SpectralEmbeddedCtx* ctx,
 
 void spectral_embedded_set_amplitude(SpectralEmbeddedCtx* ctx, float amplitude) {
     if (!ctx) return;
-    if (amplitude < 0.0f) amplitude = 0.0f;
-    if (amplitude > 1.0f) amplitude = 1.0f;
+    amplitude = CLAMP(amplitude, 0.0f, 1.0f);
     ctx->amplitude_q15 = (q15_t)(amplitude * Q15_ONE);
 }
 
 void spectral_embedded_set_stretch(SpectralEmbeddedCtx* ctx, float stretch) {
     if (!ctx) return;
-    if (stretch < 0.1f) stretch = 0.1f;
-    if (stretch > 10.0f) stretch = 10.0f;
+    stretch = CLAMP(stretch, 0.1f, 10.0f);
     ctx->stretch_q214 = (q15_t)(stretch * Q214_UNITY);
 }
 

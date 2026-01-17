@@ -1,12 +1,21 @@
-/* spectral_synth_metal.m - Metal GPU synthesis (macOS) */
+/* spectral_synth_metal.m - Metal GPU synthesis (macOS)
+ * 
+ * Uses oscillator functions from oscillator.h for GPU waveform generation.
+ * The Metal shader source (oscillator_metal_source) is defined in oscillator.c.
+ * 
+ */
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #include "spectral_synth.h"
+#include "spectral_synth_internal.h"
 #include "spectral_utils.h"
+#include "oscillator.h"
 #include <omp.h>
 
-static const char* metalKernelSource = 
+/* Metal kernel source - struct definitions and synthesis kernel.
+ * Oscillator functions come from oscillator_metal_source (defined in oscillator.c) */
+static const char* metalKernelStructs = 
 "#include <metal_stdlib>\n"
 "using namespace metal;\n"
 "\n"
@@ -14,7 +23,7 @@ static const char* metalKernelSource =
 "    float start;\n"
 "    float length;\n"
 "    float phase;\n"
-"    float freq_hz;\n"
+"    float omega;\n"
 "    float df;\n"
 "    float amp;\n"
 "    float da;\n"
@@ -37,56 +46,9 @@ static const char* metalKernelSource =
 "    uint start;\n"
 "    uint count;\n"
 "};\n"
-"\n"
-"/* Timbre enum values (must match host) */\n"
-"#define TIMBRE_SINE     0\n"
-"#define TIMBRE_SAW      1\n"
-"#define TIMBRE_SQUARE   2\n"
-"#define TIMBRE_TRIANGLE 3\n"
-"#define TIMBRE_ASIN     4\n"
-"#define TIMBRE_PARABOLA 5\n"
-"\n"
-"#define PI 3.14159265358979f\n"
-"#define TWO_PI 6.283185307179586f\n"
-"#define INV_TWO_PI 0.159154943091895f\n"
-"#define INV_PI 0.318309886183791f\n"
-"#define TWO_INV_PI 0.636619772367581f\n"
-"#define INV_PI_SQ 0.101321183642338f\n"
-"\n"
-"inline float fast_sin(float x) {\n"
-"    x = x - TWO_PI * floor(x * INV_TWO_PI + 0.5f);\n"
-"    float x2 = x * x;\n"
-"    return x * (9.8696044f - x2) / (9.8696044f + 0.25f * x2);\n"
-"}\n"
-"\n"
-"/* Normalize phase to [-PI, PI) */\n"
-"inline float normalize_phase(float p) {\n"
-"    float norm = p * INV_TWO_PI;\n"
-"    return TWO_PI * (norm - floor(norm) - 0.5f);\n"
-"}\n"
-"\n"
-"/* Oscillator function for different timbres */\n"
-"inline float oscillator(float phase, uint timbre) {\n"
-"    float rads = normalize_phase(phase);\n"
-"    \n"
-"    switch (timbre) {\n"
-"        case TIMBRE_SINE:\n"
-"            return fast_sin(phase);\n"
-"        case TIMBRE_SAW:\n"
-"            return rads * -INV_PI;\n"
-"        case TIMBRE_SQUARE:\n"
-"            return (rads > 0.0f) ? 1.0f : -1.0f;\n"
-"        case TIMBRE_TRIANGLE: {\n"
-"            float abs_r = abs(rads);\n"
-"            return (1.0f - abs_r * TWO_INV_PI) * 2.0f - 1.0f;\n"
-"        }\n"
-"        case TIMBRE_PARABOLA:\n"
-"            return 1.0f - rads * rads * INV_PI_SQ;\n"
-"        default:\n"
-"            return fast_sin(phase);  /* Fall back to sine */\n"
-"    }\n"
-"}\n"
-"\n"
+"\n";
+
+static const char* metalKernelCode = 
 "#define THREADS_PER_TILE 512\n"
 "#define SEGMENT_CACHE_SIZE 128\n"
 "\n"
@@ -129,7 +91,7 @@ static const char* metalKernelSource =
 "                if (sample_pos < seg_start || sample_pos >= seg_end) continue;\n"
 "                \n"
 "                float j = sample_pos - seg_start;\n"
-"                float alpha = seg.freq_hz * params.pitch_factor * params.inv_stretch;\n"
+"                float alpha = seg.omega * params.pitch_factor * params.inv_stretch;\n"
 "                float beta = seg.df * params.pitch_factor * params.inv_stretch_sq;\n"
 "                float d_a = seg.da * params.inv_stretch;\n"
 "                \n"
@@ -184,7 +146,11 @@ void metal_init(void) {
         MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
         options.fastMathEnabled = YES;
         
-        NSString* source = [NSString stringWithUTF8String:metalKernelSource];
+        /* Combine shader sources: structs + oscillator (from oscillator.c) + kernel */
+        NSString* source = [NSString stringWithFormat:@"%s%s%s", 
+                           metalKernelStructs, 
+                           oscillator_metal_source,  /* From oscillator.c */
+                           metalKernelCode];
         id<MTLLibrary> library = [metalDevice newLibraryWithSource:source options:options error:&error];
         if (error) {
             SPECTRAL_WARN("Metal: Shader error: %s", [[error localizedDescription] UTF8String]);
@@ -209,17 +175,13 @@ int metal_available(void) {
 void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
                  float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
     @autoreleasepool {
-        double dummy_t;
-        if (!t_synth) t_synth = &dummy_t;
-        
-        if (!out_buffer || out_len == 0) {
-            *t_synth = 0;
+        /* Shared input validation */
+        if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
             return;
         }
         
-        if (sa.count == 0 || !sa.segs) {
-            memset(out_buffer, 0, out_len * sizeof(float));
-            *t_synth = 0;
+        /* Check timbre support - fall back to CPU for unsupported timbres */
+        if (!gpu_check_timbre_or_fallback("Metal", sa, out_buffer, out_len, stretch, pitch, timbre, t_synth)) {
             return;
         }
         

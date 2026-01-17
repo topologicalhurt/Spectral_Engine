@@ -130,10 +130,11 @@ void emulator_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
 void emulator_set_verbose(int verbose);
 
 /* Desktop wrapper: converts float segments to Q15, runs embedded synth.
- * n_threads is IGNORED - embedded is single-threaded. */
-void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
-                              float stretch, float pitch, SpectralTimbre timbre,
-                              int n_threads, double* t_synth);
+ * n_threads is IGNORED - embedded is single-threaded.
+ * Returns: SPECTRAL_OK on success, negative error code on failure */
+int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
+                             float stretch, float pitch, SpectralTimbre timbre,
+                             int n_threads, double* t_synth);
 
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
 #define synth_cpu synth_embedded_emulation

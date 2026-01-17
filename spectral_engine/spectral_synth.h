@@ -48,14 +48,14 @@ SpectralBackendCaps spectral_backend_get_caps(SynthBackend backend);
 SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu);
 int spectral_backend_available(SynthBackend backend);
 
-/* CPU synthesis */
-void synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len, 
-               float stretch, float pitch, SpectralTimbre timbre, int n_threads, double* t_synth);
+/* CPU synthesis - returns SPECTRAL_OK on success, error code on failure */
+int synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len, 
+              float stretch, float pitch, SpectralTimbre timbre, int n_threads, double* t_synth);
 
-void synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
-                         float stretch, float pitch,
-                         const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                         int n_threads, double* t_synth);
+int synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
+                        float stretch, float pitch,
+                        const SpectralWavetableBank* bank, SpectralTimbre timbre,
+                        int n_threads, double* t_synth);
 
 /* Metal backend (macOS) */
 #if defined(__APPLE__) && !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
