@@ -8,8 +8,9 @@
 #   make emulator           Desktop emulation of Q15 embedded synth path
 #   make emulator daisy     Desktop emulation with Daisy Seed config
 #   make cuda               Standalone CUDA-only build
-#   make embedded arm       Cross-compile: ARM Q15 with FFT analysis
-#   make embedded arm_restricted  Cross-compile: ARM Q15, NO analysis
+#   make embedded_arm            Cross-compile: ARM Q15 with FFT analysis
+#   make embedded_arm_float       Cross-compile: ARM float synth (FPU) with analysis
+#   make embedded_arm_restricted  Cross-compile: ARM Q15, NO analysis
 #   make daisy              Cross-compile for Daisy Seed (via api/daisy_seed)
 #   make clean              Remove all build artifacts
 #   make info               Show build configuration matrix
@@ -22,8 +23,9 @@
 # emulator                  | YES      | spectral_synth_emulator | NO | Q15->float | Desktop
 # emulator daisy            | NO       | spectral_synth_emulator | NO | Q15->float | Desktop
 # cuda                      | YES      | CUDA standalone    | YES  | float       | Desktop
-# embedded arm              | YES      | spectral_synth_embedded | NO | Q15        | ARM
-# embedded arm_restricted   | NO       | spectral_synth_embedded | NO | Q15        | ARM
+# embedded_arm              | YES      | spectral_synth_embedded | NO | Q15        | ARM
+# embedded_arm_float        | YES      | spectral_synth_embedded | NO | Q15->float | ARM
+# embedded_arm_restricted   | NO       | spectral_synth_embedded | NO | Q15        | ARM
 # daisy                     | NO       | (via api/)         | NO   | Q15         | ARM
 #
 # COMPILE FLAGS REFERENCE:
@@ -31,6 +33,7 @@
 # Flag                      | Description
 # --------------------------|--------------------------------------------------
 # SPECTRAL_EMBEDDED         | 1=Q15 fixed-point, 0=float (default)
+# SPECTRAL_EMBEDDED_FLOAT   | 1=Use FPU for synth on embedded (requires FPU)
 # SPECTRAL_RESTRICTED_MODE  | 1=No FFT analysis/GPU, 0=full features (default)
 # SPECTRAL_EMBEDDED_EMULATION | 1=Desktop emulating Q15 path (testing)
 # SPECTRAL_USE_EMBEDDED_SYNTH | 1=Use embedded synth instead of CPU synth
@@ -49,50 +52,73 @@
 #                              CONFIGURATION
 # 
 
-# Output directories
-BIN_DIR     := ../bin
-OBJ_DIR     := $(BIN_DIR)/obj
-OBJ_ARM_DIR := $(BIN_DIR)/obj_arm
-OBJ_RES_DIR := $(BIN_DIR)/obj_restricted
-
-# Binary names
-TARGET_DESKTOP    := spectral
-TARGET_ARM        := spectral_arm
-TARGET_RESTRICTED := spectral_arm_restricted
-TARGET_CUDA       := spectral_cuda
-
-# Platform detection
 UNAME_S := $(shell uname -s)
+ARCH    := $(shell uname -m)
 NVCC    := $(shell command -v nvcc 2>/dev/null)
+
+# Parallel compilation (use all available cores)
+NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+MAKEFLAGS += -j$(NPROCS)
+
+CC ?= $(if $(filter Darwin,$(UNAME_S)),clang,gcc)
+
+HAS_METAL := 0
+HAS_CUDA  := 0
+ifeq ($(UNAME_S),Darwin)
+    HAS_METAL := 1
+    GPU_BACKEND := metal
+else ifneq ($(NVCC),)
+    HAS_CUDA := 1
+    GPU_BACKEND := cuda
+else
+    GPU_BACKEND := native
+endif
+
+BIN_DIR := ../bin
+
+OBJ_DIR           := $(BIN_DIR)/obj_$(ARCH)_$(GPU_BACKEND)_desktop
+OBJ_EMU_DIR       := $(BIN_DIR)/obj_$(ARCH)_native_emulator
+OBJ_EMU_DAISY_DIR := $(BIN_DIR)/obj_$(ARCH)_native_emulator_daisy
+OBJ_EMBEDDED_ARM_DIR       := $(BIN_DIR)/obj_embedded_arm
+OBJ_EMBEDDED_ARM_FLOAT_DIR := $(BIN_DIR)/obj_embedded_arm_float
+OBJ_EMBEDDED_ARM_RES_DIR   := $(BIN_DIR)/obj_embedded_arm_restricted
+
+TARGET_DESKTOP              := spectral_$(ARCH)_$(GPU_BACKEND)_desktop
+TARGET_EMULATOR             := spectral_$(ARCH)_native_emulator
+TARGET_EMULATOR_DAISY       := spectral_$(ARCH)_native_emulator_daisy
+TARGET_EMBEDDED_ARM         := spectral_embedded_arm
+TARGET_EMBEDDED_ARM_FLOAT   := spectral_embedded_arm_float
+TARGET_EMBEDDED_ARM_RES     := spectral_embedded_arm_restricted
+TARGET_CUDA           := spectral_$(ARCH)_cuda_standalone
 
 # 
 #                      COMPILER VERSION CHECK
 # 
-# Minimum required versions:
-#   - clang 14+ (macOS)
-#   - gcc 11+ (Linux)
-#
-# To override version check: make SKIP_VERSION_CHECK=1
+# Override: make SKIP_VERSION_CHECK=1
+
+MIN_CLANG_VERSION := 14.0.0
+MIN_GCC_VERSION   := 11.0.0
+
+CC_IS_CLANG := $(findstring clang,$(shell $(CC) --version 2>/dev/null | head -1))
+ifneq ($(CC_IS_CLANG),)
+    CC_VERSION := $(shell $(CC) --version 2>/dev/null | grep -oE 'version [0-9]+\.[0-9]+' | head -1 | cut -d' ' -f2)
+    MIN_VERSION := $(MIN_CLANG_VERSION)
+else
+    CC_VERSION := $(shell $(CC) -dumpversion 2>/dev/null)
+    MIN_VERSION := $(MIN_GCC_VERSION)
+endif
+
+CC_VERSION_OK := $(shell printf '%s\n%s' "$(MIN_VERSION)" "$(CC_VERSION)" | sort -V | head -1 | grep -qF "$(MIN_VERSION)" && echo 1 || echo 0)
+
+# Skip version check for non-build targets
+NON_BUILD_TARGETS := clean help info deps update_submodules
+IS_BUILD_TARGET := $(if $(filter-out $(NON_BUILD_TARGETS),$(MAKECMDGOALS)),1,$(if $(MAKECMDGOALS),,1))
 
 ifndef SKIP_VERSION_CHECK
-ifeq ($(UNAME_S),Darwin)
-    # Check clang version (minimum 14)
-    CLANG_VERSION := $(shell clang --version 2>/dev/null | head -1 | sed 's/.*version \([0-9]*\).*/\1/')
-    CLANG_VERSION_OK := $(shell [ "$(CLANG_VERSION)" -ge 14 ] 2>/dev/null && echo 1 || echo 0)
-    ifeq ($(CLANG_VERSION_OK),0)
-        $(error Clang version $(CLANG_VERSION) is too old. Minimum required: 14. \
-                Update with: xcode-select --install or brew install llvm. \
-                To skip this check: make SKIP_VERSION_CHECK=1)
-    endif
-else
-    # Check gcc version (minimum 11)
-    GCC_VERSION := $(shell gcc -dumpversion 2>/dev/null | cut -d. -f1)
-    GCC_VERSION_OK := $(shell [ "$(GCC_VERSION)" -ge 11 ] 2>/dev/null && echo 1 || echo 0)
-    ifeq ($(GCC_VERSION_OK),0)
-        $(error GCC version $(GCC_VERSION) is too old. Minimum required: 11. \
-                Update with: sudo apt install gcc-11 or equivalent. \
-                To skip this check: make SKIP_VERSION_CHECK=1)
-    endif
+ifeq ($(CC_VERSION_OK),0)
+ifeq ($(IS_BUILD_TARGET),1)
+$(error $(CC) version $(CC_VERSION) is too old. Minimum: $(MIN_VERSION). Skip: make SKIP_VERSION_CHECK=1)
+endif
 endif
 endif
 
@@ -100,55 +126,32 @@ endif
 #                            SOURCE FILE GROUPS
 # 
 
-# Core sources (always included)
-SRCS_CORE := oscillator.c spectral_common.c spectral_config.c \
-			 spectral_error.c spectral_in.c spectral_out.c \
-			 spectral_segment_parser.c spectral_segment_pool.c \
-			 spectral_segment_mt.c spectral_synth_internal.c spectral_wavetable.c
+CORE_DIR := core
+VPATH    := $(CORE_DIR)
+HEADERS  := $(wildcard *.h) $(wildcard $(CORE_DIR)/*.h)
 
-# Performance/debug
-SRCS_PERF := spectral_perf.c
-SRCS_DEBUG_EMBEDDED := spectral_debug_embedded_arm.c
+SRCS_CORE := $(wildcard $(CORE_DIR)/*.c)
+SRCS_MONITORING := spectral_perf.c
 
-# Analysis module (requires FFT - desktop only)
-SRCS_ANALYSIS := spectral_analysis.c
+SRCS_ANALYSIS       := spectral_analysis.c
+SRCS_SYNTH_CPU      := spectral_synth_cpu.c
+SRCS_SYNTH_EMBEDDED := spectral_synth_embedded.c $(CORE_DIR)/spectral_q15.c
+SRCS_SYNTH_EMULATOR := spectral_synth_emulator.c
 
-# Synthesis backends (mutually exclusive in most builds)
-SRCS_SYNTH_CPU      := spectral_synth_cpu.c       # Desktop floating-point
-SRCS_SYNTH_EMBEDDED := spectral_synth_embedded.c spectral_q15.c  # ARM Q15 optimized
-SRCS_SYNTH_EMULATOR := spectral_synth_emulator.c  # Desktop wrapper for Q15 synth
-
-# GPU backends (desktop only)
 SRCS_METAL := spectral_synth_metal.m
 SRCS_CUDA  := spectral_synth_cuda.cu
-
-# All headers (for dependency tracking)
-HEADERS := spectral_common.h spectral_config.h spectral_error.h spectral_analysis.h \
-           spectral_synth.h spectral_synth_internal.h spectral_synth_embedded.h \
-           spectral_wavetable.h spectral_perf.h spectral_q15.h spectral_debug_embedded_arm.h \
-           spectral_segment_pool.h spectral_segment_mt.h \
-           oscillator.h spectral_utils.h spectral_segment_parser.h spectral_io.h \
-           spectral_cli.h spectral_cli_pipeline.h
 
 # 
 #                         PLATFORM-SPECIFIC CONFIG
 # 
-# Compiler flags optimized for real-time audio synthesis:
-#   - Aggressive floating-point optimization (assumes no NaN/Inf)
-#   - SIMD vectorization for batch sample processing
-#   - Loop unrolling for inner synthesis loops
-#   - LTO for cross-function inlining
-#   - Native CPU tuning for maximum throughput
-#
 
-# Common audio DSP optimization flags (both platforms)
 AUDIO_OPT_FLAGS := -ffast-math -fno-signed-zeros -fno-trapping-math \
                    -fassociative-math -freciprocal-math -ffp-contract=fast \
                    -funroll-loops -ftree-vectorize -fomit-frame-pointer
 
 ifeq ($(UNAME_S),Darwin)
-    # macOS configuration (clang 14+)
-    CC := clang
+    # macOS configuration
+    # Note: CC already set in CONFIGURATION section
     
     # Homebrew prefix detection (Apple Silicon vs Intel)
     BREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
@@ -170,7 +173,7 @@ ifeq ($(UNAME_S),Darwin)
     CFLAGS_BASE := -O3 -march=native -mtune=native $(AUDIO_OPT_FLAGS) \
                    -flto=thin -fvectorize -fslp-vectorize \
                    -Wall -Wextra -Wno-unknown-pragmas \
-                   -I$(OMP_PREFIX)/include -I$(SNDFILE_PREFIX)/include \
+                   -I. -I$(CORE_DIR) -I$(OMP_PREFIX)/include -I$(SNDFILE_PREFIX)/include \
                    -Xpreprocessor -fopenmp
     
     OBJCFLAGS := $(CFLAGS_BASE) -fobjc-arc
@@ -179,11 +182,10 @@ ifeq ($(UNAME_S),Darwin)
     LDFLAGS_BASE := -flto=thin -lm -L$(OMP_PREFIX)/lib -lomp -L$(SNDFILE_PREFIX)/lib -lsndfile
     LDFLAGS_GPU  := $(LDFLAGS_BASE) -framework Accelerate -framework Metal -framework Foundation
     LDFLAGS_CPU  := $(LDFLAGS_BASE) -framework Accelerate
-    
-    HAS_METAL_PLATFORM := 1
+
 else
-    # Linux configuration (gcc 11+)
-    CC := gcc
+    # Linux configuration
+    # Note: CC already set in CONFIGURATION section
     
     # Base flags with audio DSP optimizations
     # -flto=auto: Full LTO with automatic parallelism
@@ -192,17 +194,15 @@ else
     # -fipa-pta: Interprocedural pointer analysis for better aliasing
     CFLAGS_BASE  := -std=c11 -O3 -march=native -mtune=native $(AUDIO_OPT_FLAGS) \
                     -flto=auto -floop-nest-optimize -fgraphite-identity -fipa-pta \
-                    -Wall -Wextra -Wno-unknown-pragmas -fopenmp
+                    -Wall -Wextra -Wno-unknown-pragmas -I. -I$(CORE_DIR) -fopenmp
     
     # LTO requires passing flags to linker
     LDFLAGS_BASE := -flto=auto -lm -lsndfile -lfftw3f -fopenmp
     LDFLAGS_GPU  := $(LDFLAGS_BASE)
     LDFLAGS_CPU  := $(LDFLAGS_BASE)
     
-    HAS_METAL_PLATFORM := 0
-    
     # CUDA support on Linux
-    ifneq ($(NVCC),)
+    ifeq ($(HAS_CUDA),1)
         CFLAGS_BASE  += -DUSE_CUDA
         # CUDA optimization: use fast math, enable FMA, tune for architecture
         NVCC_FLAGS   := -O3 -use_fast_math --fmad=true \
@@ -226,16 +226,21 @@ endif
 SRCS_CLI := spectral_cli.c spectral_cli_pipeline.c spectral_utils.c
 
 DESKTOP_CFLAGS := $(CFLAGS_BASE)
-DESKTOP_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_CPU) $(SRCS_CORE) $(SRCS_PERF)
+DESKTOP_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_CPU) $(SRCS_CORE) $(SRCS_MONITORING)
 
-ifeq ($(UNAME_S),Darwin)
+# Convert source paths to flat object paths (core/foo.c -> foo.o)
+define src_to_obj
+$(addprefix $(1)/,$(notdir $(2:.c=.o)))
+endef
+
+ifeq ($(HAS_METAL),1)
     DESKTOP_SRCS_OBJC := $(SRCS_METAL)
-    DESKTOP_OBJS := $(addprefix $(OBJ_DIR)/,$(DESKTOP_SRCS_C:.c=.o)) \
+    DESKTOP_OBJS := $(call src_to_obj,$(OBJ_DIR),$(DESKTOP_SRCS_C)) \
                     $(addprefix $(OBJ_DIR)/,$(DESKTOP_SRCS_OBJC:.m=.o))
     DESKTOP_LDFLAGS := $(LDFLAGS_GPU)
 else
-    DESKTOP_OBJS := $(addprefix $(OBJ_DIR)/,$(DESKTOP_SRCS_C:.c=.o))
-    ifneq ($(NVCC),)
+    DESKTOP_OBJS := $(call src_to_obj,$(OBJ_DIR),$(DESKTOP_SRCS_C))
+    ifeq ($(HAS_CUDA),1)
         DESKTOP_OBJS += $(OBJ_DIR)/spectral_synth_cuda.o
     endif
     DESKTOP_LDFLAGS := $(LDFLAGS_GPU)
@@ -252,10 +257,10 @@ desktop: $(BIN_DIR)/$(TARGET_DESKTOP)
 	@echo "Full desktop build:"
 	@echo "  - FFT analysis enabled"
 	@echo "  - Floating-point synthesis"
-ifeq ($(UNAME_S),Darwin)
+ifeq ($(HAS_METAL),1)
 	@echo "  - Metal GPU backend"
 endif
-ifneq ($(NVCC),)
+ifeq ($(HAS_CUDA),1)
 	@echo "  - CUDA GPU backend"
 endif
 	@echo ""
@@ -281,14 +286,11 @@ $(BIN_DIR)/$(TARGET_DESKTOP): $(DESKTOP_OBJS) | $(BIN_DIR)
 # Use this to test/debug the embedded Q15 synthesis path on desktop
 # with full tooling support. Output is identical to ARM hardware.
 
-TARGET_EMULATOR := spectral_emulator
-OBJ_EMU_DIR     := $(BIN_DIR)/obj_emulator
-
 EMULATOR_CFLAGS := $(CFLAGS_BASE) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
                    -DSPECTRAL_EMBEDDED_EMULATION=1
 EMULATOR_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) \
-                   $(SRCS_CORE) $(SRCS_PERF)
-EMULATOR_OBJS   := $(addprefix $(OBJ_EMU_DIR)/,$(EMULATOR_SRCS_C:.c=.o))
+                   $(SRCS_CORE) $(SRCS_MONITORING)
+EMULATOR_OBJS   := $(call src_to_obj,$(OBJ_EMU_DIR),$(EMULATOR_SRCS_C))
 
 # Emulator target dispatcher
 .PHONY: emulator
@@ -316,14 +318,11 @@ emulator-generic: $(BIN_DIR)/$(TARGET_EMULATOR)
 	@echo "================================================"
 
 # Daisy Seed emulator target
-TARGET_EMULATOR_DAISY := spectral_emulator_daisy
-OBJ_EMU_DAISY_DIR     := $(BIN_DIR)/obj_emulator_daisy
-
 EMULATOR_DAISY_CFLAGS := $(CFLAGS_BASE) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
                          -DSPECTRAL_EMBEDDED_EMULATION=1 -DSPECTRAL_RESTRICTED_MODE=1 \
                          -DEMULATOR_TARGET_DAISY=1
-EMULATOR_DAISY_SRCS_C := main.c $(SRCS_CLI) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_PERF)
-EMULATOR_DAISY_OBJS   := $(addprefix $(OBJ_EMU_DAISY_DIR)/,$(EMULATOR_DAISY_SRCS_C:.c=.o))
+EMULATOR_DAISY_SRCS_C := main.c $(SRCS_CLI) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
+EMULATOR_DAISY_OBJS   := $(call src_to_obj,$(OBJ_EMU_DAISY_DIR),$(EMULATOR_DAISY_SRCS_C))
 
 .PHONY: emulator-daisy
 emulator-daisy: $(BIN_DIR)/$(TARGET_EMULATOR_DAISY)
@@ -372,9 +371,9 @@ ARM_EMBEDDED_FLAGS := -ffast-math -funsafe-math-optimizations \
                       -fdata-sections -ffunction-sections \
                       -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1
 
-ARM_CFLAGS := $(CFLAGS_BASE) $(ARM_EMBEDDED_FLAGS)
-ARM_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_PERF)
-ARM_OBJS   := $(addprefix $(OBJ_ARM_DIR)/,$(ARM_SRCS_C:.c=.o))
+EMBEDDED_ARM_CFLAGS := $(CFLAGS_BASE) $(ARM_EMBEDDED_FLAGS)
+EMBEDDED_ARM_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
+EMBEDDED_ARM_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_DIR),$(EMBEDDED_ARM_SRCS_C))
 
 # 
 #                       TARGET: embedded arm_restricted
@@ -396,55 +395,70 @@ EMBEDDED_OPT_FLAGS := -ffast-math -funsafe-math-optimizations \
                       -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_RESTRICTED_MODE=1 \
                       -DSPECTRAL_USE_EMBEDDED_SYNTH=1 -DSPECTRAL_NO_PERF=1
 
-RESTRICTED_CFLAGS := $(CFLAGS_BASE) $(EMBEDDED_OPT_FLAGS)
-RESTRICTED_SRCS_C := main.c $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE)
-RESTRICTED_OBJS   := $(addprefix $(OBJ_RES_DIR)/,$(RESTRICTED_SRCS_C:.c=.o))
+EMBEDDED_ARM_RES_CFLAGS := $(CFLAGS_BASE) $(EMBEDDED_OPT_FLAGS)
+EMBEDDED_ARM_RES_SRCS_C := main.c $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE)
+EMBEDDED_ARM_RES_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_RES_DIR),$(EMBEDDED_ARM_RES_SRCS_C))
 
-# Embedded target dispatcher
-.PHONY: embedded
-embedded:
-	@if [ -z "$(filter arm arm_restricted,$(MAKECMDGOALS))" ]; then \
-		echo "Usage: make embedded <target>"; \
-		echo ""; \
-		echo "Available targets (CROSS-COMPILATION for ARM):"; \
-		echo "  arm            - Q15 synth + FFT analysis"; \
-		echo "  arm_restricted - Q15 synth, NO analysis (Daisy Seed)"; \
-		echo ""; \
-		echo "To test Q15 path on desktop, use: make emulator"; \
-		echo ""; \
-		echo "Examples:"; \
-		echo "  make embedded arm"; \
-		echo "  make embedded arm_restricted"; \
-		exit 1; \
-	fi
-
-# ARM target (with analysis)
-.PHONY: arm
-arm: $(BIN_DIR)/$(TARGET_ARM)
+.PHONY: embedded_arm
+embedded_arm: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM)
 	@echo ""
 	@echo "================================================"
-	@echo "Built: $(BIN_DIR)/$(TARGET_ARM)"
+	@echo "Built: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM)"
 	@echo "================================================"
-	@echo "ARM Cross-Compile (with analysis):"
+	@echo "Embedded ARM Cross-Compile (with analysis):"
 	@echo "  - FFT analysis enabled"
 	@echo "  - Q15 fixed-point synthesis"
-	@echo "  - Target: ARM architecture"
+	@echo "  - Target: ARM Cortex-M"
 	@echo ""
 	@echo "NOTE: Binary won't run on this machine."
 	@echo "      Use 'make emulator' to test Q15 path on desktop."
 	@echo "================================================"
 
-$(BIN_DIR)/$(TARGET_ARM): $(ARM_OBJS) | $(BIN_DIR)
-	$(CC) $(ARM_OBJS) -o $@ $(LDFLAGS_CPU)
+$(BIN_DIR)/$(TARGET_EMBEDDED_ARM): $(EMBEDDED_ARM_OBJS) | $(BIN_DIR)
+	$(CC) $(EMBEDDED_ARM_OBJS) -o $@ $(LDFLAGS_CPU)
 
-# ARM restricted target (no analysis, Daisy-like)
-.PHONY: arm_restricted
-arm_restricted: $(BIN_DIR)/$(TARGET_RESTRICTED)
+# ARM float target (FPU synthesis, with analysis)
+ARM_FLOAT_FLAGS := -ffast-math -funsafe-math-optimizations \
+                   -fdata-sections -ffunction-sections \
+                   -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_EMBEDDED_FLOAT=1 \
+                   -DSPECTRAL_USE_EMBEDDED_SYNTH=1
+
+EMBEDDED_ARM_FLOAT_CFLAGS := $(CFLAGS_BASE) $(ARM_FLOAT_FLAGS)
+EMBEDDED_ARM_FLOAT_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
+EMBEDDED_ARM_FLOAT_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_FLOAT_DIR),$(EMBEDDED_ARM_FLOAT_SRCS_C))
+
+$(OBJ_EMBEDDED_ARM_FLOAT_DIR):
+	mkdir -p $@
+
+$(OBJ_EMBEDDED_ARM_FLOAT_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMBEDDED_ARM_FLOAT_DIR)
+	$(CC) $(EMBEDDED_ARM_FLOAT_CFLAGS) -c $< -o $@
+
+.PHONY: embedded_arm_float
+embedded_arm_float: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_FLOAT)
 	@echo ""
 	@echo "================================================"
-	@echo "Built: $(BIN_DIR)/$(TARGET_RESTRICTED)"
+	@echo "Built: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_FLOAT)"
 	@echo "================================================"
-	@echo "ARM Cross-Compile Restricted (Daisy Seed):"
+	@echo "Embedded ARM Cross-Compile Float (with analysis):"
+	@echo "  - FFT analysis enabled"
+	@echo "  - Float FPU synthesis (SPECTRAL_EMBEDDED_FLOAT=1)"
+	@echo "  - Q15 storage, float compute"
+	@echo "  - Target: ARM with VFPv4 FPU"
+	@echo ""
+	@echo "NOTE: Binary won't run on this machine."
+	@echo "      Requires ARM with hardware FPU."
+	@echo "================================================"
+
+$(BIN_DIR)/$(TARGET_EMBEDDED_ARM_FLOAT): $(EMBEDDED_ARM_FLOAT_OBJS) | $(BIN_DIR)
+	$(CC) $(EMBEDDED_ARM_FLOAT_OBJS) -o $@ $(LDFLAGS_CPU)
+
+.PHONY: embedded_arm_restricted
+embedded_arm_restricted: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES)
+	@echo ""
+	@echo "================================================"
+	@echo "Built: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES)"
+	@echo "================================================"
+	@echo "Embedded ARM Cross-Compile Restricted (Daisy Seed):"
 	@echo "  - NO FFT analysis (load pre-analyzed segments)"
 	@echo "  - Q15 fixed-point synthesis"
 	@echo "  - Target: ARM architecture"
@@ -453,8 +467,8 @@ arm_restricted: $(BIN_DIR)/$(TARGET_RESTRICTED)
 	@echo "      Use 'make emulator' to test Q15 path on desktop."
 	@echo "================================================"
 
-$(BIN_DIR)/$(TARGET_RESTRICTED): $(RESTRICTED_OBJS) | $(BIN_DIR)
-	$(CC) $(RESTRICTED_OBJS) -o $@ $(LDFLAGS_CPU)
+$(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES): $(EMBEDDED_ARM_RES_OBJS) | $(BIN_DIR)
+	$(CC) $(EMBEDDED_ARM_RES_OBJS) -o $@ $(LDFLAGS_CPU)
 
 # 
 #                             TARGET: cuda
@@ -462,7 +476,7 @@ $(BIN_DIR)/$(TARGET_RESTRICTED): $(RESTRICTED_OBJS) | $(BIN_DIR)
 # Standalone CUDA build (Linux only)
 
 cuda: $(BIN_DIR)
-ifeq ($(NVCC),)
+ifeq ($(HAS_CUDA),0)
 	@echo "Error: nvcc not found. Please install CUDA toolkit:"
 	@echo "  Ubuntu/Debian: sudo apt install nvidia-cuda-toolkit"
 	@echo "  Or download from: https://developer.nvidia.com/cuda-downloads"
@@ -481,7 +495,7 @@ endif
 # Requires: arm-none-eabi-gcc toolchain
 #
 # Note: "daisy" is also used as a modifier for "make emulator daisy"
-# When used as modifier, daisy-build is skipped (emulator-daisy handles it)
+# When used as modifier, daisy-build is skipped
 
 ARM_GCC := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 
@@ -517,7 +531,7 @@ daisy-clean:
 # 
 
 # Create directories
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_ARM_DIR) $(OBJ_RES_DIR) $(OBJ_EMU_DIR) $(OBJ_EMU_DAISY_DIR):
+$(BIN_DIR) $(OBJ_DIR) $(OBJ_EMBEDDED_ARM_DIR) $(OBJ_EMBEDDED_ARM_RES_DIR) $(OBJ_EMU_DIR) $(OBJ_EMU_DAISY_DIR):
 	@mkdir -p $@
 
 # Desktop object files
@@ -528,17 +542,17 @@ $(OBJ_DIR)/%.o: %.m $(HEADERS) | $(OBJ_DIR)
 	$(CC) $(OBJCFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/spectral_synth_cuda.o: spectral_synth_cuda.cu $(HEADERS) | $(OBJ_DIR)
-ifneq ($(NVCC),)
+ifeq ($(HAS_CUDA),1)
 	$(NVCC) $(NVCC_FLAGS) -c $< -o $@
 endif
 
-# ARM object files (with analysis)
-$(OBJ_ARM_DIR)/%.o: %.c $(HEADERS) | $(OBJ_ARM_DIR)
-	$(CC) $(ARM_CFLAGS) -c $< -o $@
+# Embedded ARM object files (with analysis)
+$(OBJ_EMBEDDED_ARM_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMBEDDED_ARM_DIR)
+	$(CC) $(EMBEDDED_ARM_CFLAGS) -c $< -o $@
 
-# Restricted object files (no analysis)
-$(OBJ_RES_DIR)/%.o: %.c $(HEADERS) | $(OBJ_RES_DIR)
-	$(CC) $(RESTRICTED_CFLAGS) -c $< -o $@
+# Embedded ARM restricted object files (no analysis)
+$(OBJ_EMBEDDED_ARM_RES_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMBEDDED_ARM_RES_DIR)
+	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -c $< -o $@
 
 # 
 #                              UTILITIES
@@ -547,38 +561,54 @@ $(OBJ_RES_DIR)/%.o: %.c $(HEADERS) | $(OBJ_RES_DIR)
 .PHONY: debug clean info deps help
 
 debug: DESKTOP_CFLAGS += -g -O0 -DDEBUG
-debug: ARM_CFLAGS += -g -O0 -DDEBUG
-debug: RESTRICTED_CFLAGS += -g -O0 -DDEBUG
+debug: EMBEDDED_ARM_CFLAGS += -g -O0 -DDEBUG
+debug: EMBEDDED_ARM_RES_CFLAGS += -g -O0 -DDEBUG
 debug: clean all
 
 clean:
 	rm -rf $(BIN_DIR) out_c.wav segments.bin
 	@echo "Cleaned all build artifacts."
 
+#
+#                               HELP & INFO
+#
+
 help:
-	@echo "Spectral Engine Build System"
-	@echo "============================"
 	@echo ""
-	@echo "Primary Targets:"
-	@echo "  make                    Build full desktop version"
-	@echo "  make desktop            Same as above"
-	@echo "  make emulator           Q15 emulator (generic Cortex-M7)"
-	@echo "  make emulator daisy     Q15 emulator (Daisy Seed config)"
-	@echo "  make embedded arm       ARM Q15 synth with FFT analysis"
-	@echo "  make embedded arm_restricted  ARM Q15 synth, no analysis"
-	@echo "  make cuda               Standalone CUDA build"
-	@echo "  make daisy              Cross-compile for Daisy Seed"
+	@echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+	@echo "║                         SPECTRAL ENGINE BUILD SYSTEM                      ║"
+	@echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Build Targets:"
+	@printf "  %-26s %s\n" "desktop" "Full desktop build (Metal/CUDA, FFT, float) [default]"
+	@printf "  %-26s %s\n" "emulator" "Q15 embedded emulation on desktop"
+	@printf "  %-26s %s\n" "emulator daisy" "Daisy Seed emulation (STM32H750 @ 480MHz)"
+	@printf "  %-26s %s\n" "embedded_arm" "Cross-compile embedded ARM Q15 + FFT"
+	@printf "  %-26s %s\n" "embedded_arm_float" "Cross-compile embedded ARM float FPU + FFT"
+	@printf "  %-26s %s\n" "embedded_arm_restricted" "Cross-compile embedded ARM Q15, no analysis"
+	@printf "  %-26s %s\n" "cuda" "Standalone CUDA build (Linux only)"
+	@printf "  %-26s %s\n" "daisy" "Cross-compile for Daisy Seed hardware"
 	@echo ""
 	@echo "Utility Targets:"
-	@echo "  make clean              Remove all build artifacts"
-	@echo "  make debug              Build with debug symbols"
-	@echo "  make info               Show detailed build matrix"
-	@echo "  make deps               Install dependencies"
-	@echo "  make help               Show this message"
+	@printf "  %-26s %s\n" "clean" "Remove all build artifacts"
+	@printf "  %-26s %s\n" "debug" "Build with debug symbols (-g -O0)"
+	@printf "  %-26s %s\n" "deps" "Install dependencies + pull subtrees"
+	@printf "  %-26s %s\n" "update_submodules" "Pull specific git subtrees"
+	@printf "  %-26s %s\n" "convert_segments" "Build segment conversion tool"
+	@printf "  %-26s %s\n" "syntax-test" "Verify all configurations compile"
+	@printf "  %-26s %s\n" "daisy-flash" "Flash firmware to Daisy Seed"
+	@printf "  %-26s %s\n" "info" "Show build matrix and system info"
+	@printf "  %-26s %s\n" "help" "Show this help message"
 	@echo ""
-	@echo "Test Targets:"
-	@echo "  make syntax-test        Test all configurations compile"
-	@echo "  make convert_segments   Build segment conversion tool"
+	@echo "Current binary: $(TARGET_DESKTOP)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make                       Build desktop version"
+	@echo "  make emulator daisy        Build Daisy Seed emulator"
+	@echo "  make embedded_arm_float    Cross-compile for embedded ARM FPU"
+	@echo ""
 
 info:
 	@echo ""
@@ -590,8 +620,9 @@ info:
 	@echo "| desktop (default)       | YES      | CPU float  | YES   | float  | Desk  |"
 	@echo "| emulator                | YES      | Q15 emu    | NO    | Q15    | Desk  |"
 	@echo "| emulator daisy          | NO       | Q15 emu    | NO    | Q15    | Desk  |"
-	@echo "| embedded arm            | YES      | Embedded   | NO    | Q15    | ARM   |"
-	@echo "| embedded arm_restricted | NO       | Embedded   | NO    | Q15    | ARM   |"
+	@echo "| embedded_arm            | YES      | Embedded   | NO    | Q15    | ARM   |"
+	@echo "| embedded_arm_float      | YES      | Embedded   | NO    | float  | ARM   |"
+	@echo "| embedded_arm_restricted | NO       | Embedded   | NO    | Q15    | ARM   |"
 	@echo "| daisy                   | NO       | (api/)     | NO    | Q15    | ARM   |"
 	@echo "+-------------------------+----------+------------+-------+--------+-------+"
 	@echo ""
@@ -626,6 +657,10 @@ endif
 	@echo "Minimum compiler requirements: clang 14+ (macOS), gcc 11+ (Linux)"
 	@echo "To skip version check: make SKIP_VERSION_CHECK=1"
 	@echo ""
+	@echo "Source structure:"
+	@echo "  Headers: $(words $(HEADERS)) files (auto-discovered)"
+	@echo "  Core sources: $(words $(SRCS_CORE)) files in $(CORE_DIR)/"
+	@echo ""
 
 # 
 #                             TEST TARGETS
@@ -641,22 +676,22 @@ syntax-test:
 	$(CC) $(DESKTOP_CFLAGS) -fsyntax-only spectral_synth_cpu.c
 	@echo "      Desktop: OK"
 	@echo ""
-	@echo "[2/4] ARM configuration (with analysis)..."
-	$(CC) $(ARM_CFLAGS) -fsyntax-only main.c
-	$(CC) $(ARM_CFLAGS) -fsyntax-only spectral_analysis.c
-	$(CC) $(ARM_CFLAGS) -fsyntax-only spectral_synth_embedded.c
-	@echo "      ARM: OK"
+	@echo "[2/4] Embedded ARM configuration (with analysis)..."
+	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only main.c
+	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only spectral_analysis.c
+	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only spectral_synth_embedded.c
+	@echo "      Embedded ARM: OK"
 	@echo ""
-	@echo "[3/4] ARM restricted configuration..."
-	$(CC) $(RESTRICTED_CFLAGS) -fsyntax-only main.c
-	$(CC) $(RESTRICTED_CFLAGS) -fsyntax-only spectral_synth_embedded.c
-	@echo "      ARM restricted: OK"
+	@echo "[3/4] Embedded ARM restricted configuration..."
+	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -fsyntax-only main.c
+	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -fsyntax-only spectral_synth_embedded.c
+	@echo "      Embedded ARM restricted: OK"
 	@echo ""
 	@echo "[4/4] Core modules..."
-	$(CC) $(CFLAGS_BASE) -fsyntax-only spectral_common.c
-	$(CC) $(CFLAGS_BASE) -fsyntax-only spectral_wavetable.c
-	$(CC) $(CFLAGS_BASE) -fsyntax-only spectral_q15.c
-	$(CC) $(CFLAGS_BASE) -fsyntax-only spectral_perf.c
+	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_common.c
+	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_wavetable.c
+	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_q15.c
+	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_perf.c
 	@echo "      Core: OK"
 	@echo ""
 	@echo "All syntax tests passed!"
@@ -672,6 +707,21 @@ convert_segments: $(BIN_DIR) ../tools/convert_segments.c spectral_common.h
 # 
 #                            DEPENDENCIES
 # 
+
+# Third party libraries update (managed via git subtrees)
+# Usage: make update_submodules SUBTREE_ARGS="lib/a lib/b"
+#        make deps  (pulls all subtrees)
+SUBTREE_ARGS ?=
+update_submodules:
+	@if [ -z "$(SUBTREE_ARGS)" ]; then \
+		echo "Usage: make update_submodules SUBTREE_ARGS=\"lib/a lib/b\""; \
+		echo ""; \
+		echo "To update ALL subtrees, run: make deps update_submodules"; \
+		echo "Or directly: ../submodules/update.sh pull"; \
+		exit 1; \
+	else \
+		bash ../submodules/update.sh pull $(SUBTREE_ARGS); \
+	fi
 
 deps:
 ifeq ($(UNAME_S),Darwin)
@@ -697,10 +747,15 @@ else
 	@echo ""
 	@echo "Dependencies installed. Run 'make info' to verify configuration."
 endif
+ifneq ($(filter update_submodules,$(MAKECMDGOALS)),)
+	@echo ""
+	@echo "Pulling third-party subtrees..."
+	@bash ../submodules/update.sh pull
+endif
 
 # 
 #                              PHONY TARGETS
 # 
 
-.PHONY: all desktop embedded arm arm_restricted cuda daisy daisy-flash daisy-clean \
-        debug clean info deps help syntax-test convert_segments
+.PHONY: all desktop embedded_arm embedded_arm_float embedded_arm_restricted cuda daisy daisy-flash daisy-clean \
+        debug clean info deps help syntax-test convert_segments update_submodules

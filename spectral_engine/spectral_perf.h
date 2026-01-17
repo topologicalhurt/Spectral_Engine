@@ -23,6 +23,20 @@
 extern "C" {
 #endif
 
+/* Portable high-resolution timing
+ * Uses OpenMP when available, falls back to clock_gettime. */
+#ifdef _OPENMP
+#include <omp.h>
+#define spectral_get_time_sec() omp_get_wtime()
+#else
+#include <time.h>
+static inline double spectral_get_time_sec(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+#endif
+
 typedef struct {
     size_t peak_resident_mb;
     size_t current_resident_mb;

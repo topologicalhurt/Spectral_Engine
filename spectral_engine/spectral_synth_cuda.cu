@@ -1,12 +1,12 @@
 /*
- * spectral_synth_cuda.cu - CUDA synthesis backend for integration with main binary
- * 
- * Supports timbres 0-5 (sine, saw, square, triangle, asin, parabola)
- * Quantized and PWM timbres require width parameter - use CPU fallback
+ * spectral_synth_cuda.cu - CUDA synthesis backend
  */
 
 #include <cuda_runtime.h>
 #include "spectral_common.h"
+#include "spectral_synth.h"
+#include "spectral_synth_internal.h"
+#include "oscillator.h"
 
 #define CUDA_CHECK(call) { \
     cudaError_t err = call; \
@@ -17,45 +17,6 @@
 }
 
 static int g_cuda_available = -1;  // -1 = not checked, 0 = no, 1 = yes
-
-/* Normalize phase to [-PI, PI] range */
-__device__ __forceinline__ float normalize_phase_cuda(float p) {
-    p = fmodf(p, 6.283185307f);  /* TWO_PI */
-    if (p > 3.141592654f) p -= 6.283185307f;
-    if (p < -3.141592654f) p += 6.283185307f;
-    return p;
-}
-
-/* Multi-timbre oscillator
- * timbre: 0=sine, 1=saw, 2=square, 3=triangle, 4=asin, 5=parabola
- */
-__device__ __forceinline__ float oscillator_cuda(float phase, int timbre) {
-    float p = normalize_phase_cuda(phase);
-    float pn = p * 0.318309886f;  /* p / PI -> range [-1, 1] */
-    
-    switch (timbre) {
-        case 0:  /* Sine */
-            return fast_sin_device(p);
-            
-        case 1:  /* Saw (naive, will alias at high freqs) */
-            return pn;
-            
-        case 2:  /* Square */
-            return (p >= 0.0f) ? 1.0f : -1.0f;
-            
-        case 3:  /* Triangle */
-            return 2.0f * fabsf(pn) - 1.0f;
-            
-        case 4:  /* Asin (warped sine) */
-            return asinf(fast_sin_device(p)) * 0.636619772f;  /* 2/PI normalize */
-            
-        case 5:  /* Parabola */
-            return 1.0f - 2.0f * pn * pn;
-            
-        default:
-            return fast_sin_device(p);
-    }
-}
 
 // 
 // CUDA Kernel: Segment-parallel synthesis with timbre support
@@ -82,7 +43,7 @@ __global__ void synthesize_kernel(
     }
     
     // Precompute synthesis parameters
-    float alpha = seg.freq_hz * params.pitch_factor * params.inv_stretch;
+    float alpha = seg.omega * params.pitch_factor * params.inv_stretch;
     float beta = seg.df * params.pitch_factor * params.inv_stretch_sq;
     float d_a = seg.da * params.inv_stretch;
     float phase = seg.phase;
@@ -92,8 +53,6 @@ __global__ void synthesize_kernel(
     for (unsigned int j = 0; j < seg_len; j++) {
         float p = phase + (float)j * (alpha + beta * (float)j);
         float val = (amp + d_a * (float)j) * oscillator_cuda(p, timbre);
-        
-        // Native atomic float add - hardware accelerated on modern NVIDIA GPUs
         atomicAdd(&output[start_idx + j], val);
     }
 }
@@ -151,33 +110,25 @@ extern "C" void synth_cuda(
     SpectralTimbre timbre,
     double* t_synth
 ) {
-    double t_dummy = 0;
-    if (!t_synth) t_synth = &t_dummy;
+    /* Shared input validation */
+    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
+        return;
+    }
     
+    /* Check CUDA availability */
     if (!cuda_available()) {
-        fprintf(stderr, "CUDA: Not available\n");
-        *t_synth = 0;
-        return;
-    }
-    
-    if (!out_buffer || out_len == 0) {
-        *t_synth = 0;
-        return;
-    }
-    
-    if (!sa.segs || sa.count == 0) {
+        SPECTRAL_WARN("CUDA: Not available");
         memset(out_buffer, 0, out_len * sizeof(float));
         *t_synth = 0;
         return;
     }
     
-    /* Check timbre support - CUDA supports 0-5 (sine through parabola) */
-    int timbre_id = (int)timbre;
-    if (timbre_id > TIMBRE_PARABOLA) {
-        fprintf(stderr, "CUDA: Timbre %d not supported (max %d), falling back to sine\n",
-                timbre_id, TIMBRE_PARABOLA);
-        timbre_id = TIMBRE_SINE;
+    /* Check timbre support - fall back to CPU for unsupported timbres */
+    if (!gpu_check_timbre_or_fallback("CUDA", sa, out_buffer, out_len, stretch, pitch, timbre, t_synth)) {
+        return;
     }
+    
+    int timbre_id = (int)timbre;
     
     cudaEvent_t start, stop;
     CUDA_CHECK(cudaEventCreate(&start));

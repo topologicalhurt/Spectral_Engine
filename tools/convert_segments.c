@@ -14,12 +14,7 @@
 #include "spectral_config.h"
 #include "spectral_q15.h"
 #include "spectral_segment_parser.h"
-
-/* Desktop segment (matches Segment in spectral_common.h) */
-typedef struct {
-    float start, length, phase, freq_hz, df, amp, da, width;
-    float _pad[8];
-} SegmentFloat;
+#include "spectral_common.h"
 
 /* Embedded memory pool defaults */
 #ifndef EMBEDDED_SEGMENT_POOL_MB
@@ -28,23 +23,6 @@ typedef struct {
 #define EMBEDDED_SEGMENT_POOL_SIZE  ((size_t)EMBEDDED_SEGMENT_POOL_MB * 1024 * 1024)
 #define EMBEDDED_MAX_SEGMENTS       (EMBEDDED_SEGMENT_POOL_SIZE / sizeof(SpectralSegmentQ15))
 #define EMBEDDED_MAX_LENGTH         65535
-
-/* Frequency to Q8.8 conversion */
-static inline uint16_t freq_to_q88(float freq_hz) {
-    /* Q8.8 format: values > 255 Hz encoded as /4 */
-    if (freq_hz > 255.0f) freq_hz /= 4.0f;
-    if (freq_hz > 255.0f) freq_hz = 255.0f;
-    if (freq_hz < 0.0f) freq_hz = 0.0f;
-    return (uint16_t)(freq_hz * 256.0f);
-}
-
-/* Phase to Q15 conversion: [0, 2pi) -> [-32768, 32767] */
-static inline int16_t phase_to_q15(float phase_rad) {
-    /* Normalize to [0, 1), subtract 0.5 to center, scale to Q15 */
-    float norm = fmodf(phase_rad, SPECTRAL_TWO_PI) / SPECTRAL_TWO_PI;
-    if (norm < 0.0f) norm += 1.0f;
-    return (int16_t)((norm - 0.5f) * 65536.0f);
-}
 
 static void print_usage(const char* prog) {
     printf("Usage: %s input.bin output.spq [max_segments] [pool_mb]\n", prog);
@@ -83,7 +61,7 @@ int main(int argc, char** argv) {
     printf("Input: %s\n", input_path);
     printf("  SR: %u Hz  Stretch: %.3f  Pitch: %.1f  Segs: %u  Size: %.2f MB\n",
            header.sr, header.stretch, header.pitch, header.count,
-           (header.count * sizeof(SegmentFloat)) / (1024.0 * 1024.0));
+           (header.count * sizeof(Segment)) / (1024.0 * 1024.0));
     
     uint32_t output_count = header.count;
     if (max_segments > 0 && output_count > max_segments) output_count = max_segments;
@@ -92,7 +70,7 @@ int main(int argc, char** argv) {
         output_count = (uint32_t)pool_max_segs;
     }
     
-    SegmentFloat* float_segs = malloc(output_count * sizeof(SegmentFloat));
+    Segment* float_segs = malloc(output_count * sizeof(Segment));
     SpectralSegmentQ15* q15_segs = malloc(output_count * sizeof(SpectralSegmentQ15));
     if (!float_segs || !q15_segs) { 
         fprintf(stderr, "Error: Out of memory\n"); 
@@ -101,7 +79,7 @@ int main(int argc, char** argv) {
         return 1; 
     }
     
-    size_t read_count = fread(float_segs, sizeof(SegmentFloat), output_count, fin);
+    size_t read_count = fread(float_segs, sizeof(Segment), output_count, fin);
     fclose(fin);
     if (read_count != output_count) {
         printf("Warning: Read %zu of %u segments\n", read_count, output_count);
@@ -114,7 +92,7 @@ int main(int argc, char** argv) {
     uint32_t output_length = 0, truncated = 0, high_freq = 0;
     
     for (uint32_t i = 0; i < output_count; i++) {
-        SegmentFloat* src = &float_segs[i];
+        Segment* src = &float_segs[i];
         SpectralSegmentQ15* dst = &q15_segs[i];
         
         dst->start = (uint32_t)src->start;
@@ -125,9 +103,9 @@ int main(int argc, char** argv) {
         uint32_t seg_end = dst->start + dst->length;
         if (seg_end > output_length) output_length = seg_end;
         
-        if (src->freq_hz > 255.0f) high_freq++;
-        dst->freq_q88 = freq_to_q88(src->freq_hz);
-        dst->phase_q15 = phase_to_q15(src->phase);
+        if (src->omega > 255.0f) high_freq++;
+        dst->freq_q88 = OMEGA_TO_Q88(src->omega);
+        dst->phase_q15 = PHASE_RAD_TO_Q15(src->phase);
         dst->amp_q15 = FLOAT_TO_Q15(CLAMP(src->amp, -1.0f, 1.0f));
         dst->da_q15 = FLOAT_TO_Q15(CLAMP(src->da / 1000.0f, -1.0f, 1.0f));
         

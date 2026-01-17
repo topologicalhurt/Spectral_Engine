@@ -6,6 +6,8 @@
 #define SPECTRAL_EMBEDDED_EMULATION 1
 
 #include "spectral_synth_embedded.h"
+#include "spectral_synth_internal.h"
+#include "spectral_error.h"
 #include "spectral_common.h"
 #include "spectral_q15.h"
 #include "spectral_wavetable.h"
@@ -17,17 +19,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#else
-#include <time.h>
-static double omp_get_wtime(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec * 1e-9;
-}
-#endif
 
 /* Emulator configuration */
 
@@ -86,25 +77,22 @@ static void segment_to_emulator(const Segment* src, EmulatorSegment* dst,
     
     /* Frequency: compute Q31 phase increment per sample
      * Apply pitch_factor (2^(semitones/12)) and inv_stretch to match desktop synth.
-     * freq_inc = freq_hz * pitch_factor * inv_stretch * 2^32 / (2pi * sample_rate)
+     * omega is already in radians/sample, so: freq_inc = omega * pitch * inv_stretch * 2^32 / 2pi
      * We use double precision to avoid overflow */
-    double freq_scaled = src->freq_hz * pitch_factor * inv_stretch;
-    double freq_inc = freq_scaled * (4294967296.0 / SPECTRAL_TWO_PI);
+    double freq_scaled = src->omega * pitch_factor * inv_stretch;
+    double freq_inc = freq_scaled * SPECTRAL_Q31_PER_RAD;
     dst->freq_inc = (q31_t)CLAMP(freq_inc, (double)Q31_MIN, (double)Q31_MAX);
     
 #if SPECTRAL_HAS_CHIRP
     /* Chirp (df): frequency change per sample, converted to Q31 increment delta
      * Apply pitch_factor and inv_stretch^2 to match desktop synth */
     double df_scaled = src->df * pitch_factor * inv_stretch * inv_stretch;
-    double df_inc = df_scaled * (4294967296.0 / SPECTRAL_TWO_PI);
+    double df_inc = df_scaled * SPECTRAL_Q31_PER_RAD;
     dst->df_inc = (q31_t)CLAMP(df_inc, (double)Q31_MIN, (double)Q31_MAX);
 #endif
     
-    /* Phase: convert [0, 2pi) to signed Q15 [-pi, pi) representation
-     * Normalize to [0, 1), subtract 0.5 to center at 0, scale to Q15 */
-    double phase_norm = fmod(src->phase, SPECTRAL_TWO_PI) / SPECTRAL_TWO_PI;
-    if (phase_norm < 0.0) phase_norm += 1.0;
-    dst->phase_q15 = (int16_t)((phase_norm - 0.5) * 65536.0);
+    /* Phase: convert [0, 2pi) to signed Q15 [-pi, pi) representation */
+    dst->phase_q15 = PHASE_RAD_TO_Q15(src->phase);
     
     /* Amplitude: scale and saturate to Q15 */
     float amp_scaled = CLAMP(src->amp * amp_scale, 0.0f, 1.0f);
@@ -145,27 +133,17 @@ typedef struct {
 
 /* Desktop emulation entry point */
 
-void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
+int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
                               float stretch, float pitch, SpectralTimbre timbre,
                               int n_threads, double* t_synth) {
     (void)n_threads;
     (void)timbre;  /* TODO: support non-sine timbres in emulator */
     
-    double dummy_t;
-    if (!t_synth) t_synth = &dummy_t;
-    
-    if (!out_buffer || out_len == 0) {
-        *t_synth = 0;
-        return;
+    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
+        return SPECTRAL_OK;
     }
-    
-    if (sa.count == 0 || !sa.segs) {
-        memset(out_buffer, 0, out_len * sizeof(float));
-        *t_synth = 0;
-        return;
-    }
-    
-    double start_time = omp_get_wtime();
+
+    double start_time = spectral_get_time_sec();
     
     /* Compute pitch factor: 2^(semitones/12) */
     float pitch_factor = powf(2.0f, pitch / 12.0f);
@@ -182,10 +160,10 @@ void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len
     /* Convert segments to emulator format */
     EmulatorSegment* emu_segs = (EmulatorSegment*)malloc(sa.count * sizeof(EmulatorSegment));
     if (!emu_segs) {
-        SPECTRAL_WARN("Emulator: failed to allocate segments");
+        SPECTRAL_WARN("Emulator: segment buffer allocation failed (%zu segments)", sa.count);
         memset(out_buffer, 0, out_len * sizeof(float));
-        *t_synth = 0;
-        return;
+        if (t_synth) *t_synth = 0;
+        return SPECTRAL_ERR_MEMORY;
     }
     
     for (size_t i = 0; i < sa.count; i++) {
@@ -204,8 +182,8 @@ void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len
         for (size_t i = 0; i < 5 && i < sa.count; i++) {
             Segment* s = &sa.segs[i];
             EmulatorSegment* e = &emu_segs[i];
-            SPECTRAL_DBG("  [%zu] desktop: start=%.0f len=%.0f freq_hz=%.6f phase=%.3f amp=%.6f da=%.6f",
-                   i, s->start, s->length, s->freq_hz, s->phase, s->amp, s->da);
+            SPECTRAL_DBG("  [%zu] desktop: start=%.0f len=%.0f omega=%.6f phase=%.3f amp=%.6f da=%.6f",
+                   i, s->start, s->length, s->omega, s->phase, s->amp, s->da);
             SPECTRAL_DBG("       emulator: start=%u len=%u freq_inc=%d phase_q15=%d amp_q15=%d da_q15=%d",
                    e->start, e->length, e->freq_inc, e->phase_q15, e->amp_q15, e->da_q15);
         }
@@ -235,11 +213,11 @@ void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len
     const uint32_t block_size = 256;
     int64_t* accum = (int64_t*)calloc(block_size, sizeof(int64_t));
     if (!accum) {
-        SPECTRAL_WARN("Emulator: failed to allocate accumulator buffer");
+        SPECTRAL_WARN("Emulator: accumulator buffer allocation failed (%u samples)", block_size);
         free(emu_segs);
         memset(out_buffer, 0, out_len * sizeof(float));
-        *t_synth = 0;
-        return;
+        if (t_synth) *t_synth = 0;
+        return SPECTRAL_ERR_MEMORY;
     }
     
     /* Active segment tracking */
@@ -384,7 +362,7 @@ void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len
     free(accum);
     free(emu_segs);
     
-    double elapsed = omp_get_wtime() - start_time;
+    double elapsed = spectral_get_time_sec() - start_time;
     *t_synth = elapsed;
     
     /* Calculate and print embedded target performance estimates using actual op counts */
@@ -402,6 +380,8 @@ void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len
         cfg->max_memory_kb
     );
     embedded_memory_print(&mem);
+    
+    return SPECTRAL_OK;
 }
 
 /* synth_cpu is provided via macro in spectral_synth_embedded.h
@@ -409,15 +389,15 @@ void synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len
 
 /* Wavetable version - falls back to emulation (wavetables not yet supported) */
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
-void synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
-                         float stretch, float pitch,
-                         const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                         int n_threads, double* t_synth) {
+int synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
+                        float stretch, float pitch,
+                        const SpectralWavetableBank* bank, SpectralTimbre timbre,
+                        int n_threads, double* t_synth) {
     (void)bank;
     if (bank != NULL) {
         SPECTRAL_WARN_ONCE(TIMBRE_COUNT + 1, "Wavetable not supported in embedded emulation, using default sine");
     }
-    synth_embedded_emulation(sa, out_buffer, out_len, stretch, pitch,
-                             timbre, n_threads, t_synth);
+    return synth_embedded_emulation(sa, out_buffer, out_len, stretch, pitch,
+                                    timbre, n_threads, t_synth);
 }
 #endif

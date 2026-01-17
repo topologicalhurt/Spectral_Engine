@@ -10,6 +10,7 @@
 #include <sndfile.h>
 #include "spectral_common.h"
 #include "spectral_segment_parser.h"
+#include "oscillator.h"
 
 #define CUDA_CHECK(call) { \
     cudaError_t err = call; \
@@ -30,11 +31,8 @@ typedef struct {
     unsigned int count;
 } TileRange;
 
-__device__ __forceinline__ float fast_sin_device(float x) {
-    x = x - TWO_PI * floorf(x * INV_TWO_PI + 0.5f);
-    float x2 = x * x;
-    return x * (PI_SQ - x2) / (PI_SQ + 0.25f * x2);
-}
+/* Use centralized oscillator from oscillator.h */
+#define fast_sin_device oscillator_fast_sin_cuda
 
 /* Tile-parallel synthesis kernel
  * 
@@ -89,7 +87,7 @@ __global__ void synthesize_tile_kernel(
                 if (sample_pos < seg_start || sample_pos >= seg_end) continue;
                 
                 float j = sample_pos - seg_start;
-                float alpha = seg.freq_hz * params.pitch_factor * params.inv_stretch;
+                float alpha = seg.omega * params.pitch_factor * params.inv_stretch;
                 float beta = seg.df * params.pitch_factor * params.inv_stretch_sq;
                 float d_a = seg.da * params.inv_stretch;
                 
@@ -133,7 +131,7 @@ __global__ void synthesize_kernel(
     }
     
     // Precompute synthesis parameters
-    float alpha = seg.freq_hz * params.pitch_factor * params.inv_stretch;
+    float alpha = seg.omega * params.pitch_factor * params.inv_stretch;
     float beta = seg.df * params.pitch_factor * params.inv_stretch_sq;
     float d_a = seg.da * params.inv_stretch;
     float phase = seg.phase;
@@ -344,7 +342,7 @@ void run_demo() {
         segments[i].start = (float)(rand() % (int)(out_len * 0.9f));
         segments[i].length = 32.0f + (float)(rand() % 128);
         segments[i].phase = (float)(rand() % 1000) / 1000.0f * TWO_PI;
-        segments[i].freq_hz = 100.0f + (float)(rand() % 2000);
+        segments[i].omega = 100.0f + (float)(rand() % 2000);
         segments[i].df = 0.0f;
         segments[i].amp = 0.001f + (float)(rand() % 100) / 10000.0f;
         segments[i].da = 0.0f;

@@ -14,9 +14,9 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+static void omp_set_num_threads_wrapper(int n) { omp_set_num_threads(n); }
 #else
-static double omp_get_wtime(void) { return 0; }
-static void omp_set_num_threads(int n) { (void)n; }
+static void omp_set_num_threads_wrapper(int n) { (void)n; }
 #endif
 
 /* Analysis is only available when NOT in restricted mode */
@@ -27,7 +27,7 @@ static void omp_set_num_threads(int n) { (void)n; }
 #define HAS_ANALYSIS 0
 #endif
 
-/* Perf tracking */
+/* Perf tracking (includes spectral_get_time_sec) */
 #if !SPECTRAL_NO_PERF
 #include "spectral_perf.h"
 #define HAS_PERF 1
@@ -83,7 +83,6 @@ static void run_synthesis(const SpectralCliOptions* opts, SegmentArray sa,
     
 #elif HAS_METAL
     if (opts->backend != BACKEND_CPU && opts->backend != BACKEND_CUDA) metal_init();
-    /* Metal supports timbres 0-5 (sine through parabola) */
     int metal_supports_timbre = (opts->timbre <= BACKEND_METAL_TIMBRE_MAX);
     int use_metal = (opts->backend == BACKEND_METAL) || 
                     (opts->backend == BACKEND_AUTO && metal_available() && metal_supports_timbre);
@@ -160,9 +159,9 @@ PipelineResult spectral_pipeline_run(const SpectralCliOptions* opts,
     if (!opts || !opts->valid) return PIPELINE_ERR_INPUT;
     
     SpectralTimingResults t = {0};
-    double wall_start = omp_get_wtime();
+    double wall_start = spectral_get_time_sec();
     
-    omp_set_num_threads(opts->n_threads);
+    omp_set_num_threads_wrapper(opts->n_threads);
     
 #if HAS_PERF
     perf_reset_tracking();
@@ -274,9 +273,9 @@ PipelineResult spectral_pipeline_run(const SpectralCliOptions* opts,
     run_synthesis(opts, sa, out_buf, out_len, wt_bank_ptr, &t.t_synth);
     
     /* Normalize */
-    double norm_start = omp_get_wtime();
+    double norm_start = spectral_get_time_sec();
     spectral_normalize_float(out_buf, out_len, NORMALIZE_HEADROOM);
-    t.t_norm = omp_get_wtime() - norm_start;
+    t.t_norm = spectral_get_time_sec() - norm_start;
     
     /* Write output */
     if (spectral_audio_write("out_c.wav", out_buf, out_len, sample_rate, 1) != SPECTRAL_OK) {
