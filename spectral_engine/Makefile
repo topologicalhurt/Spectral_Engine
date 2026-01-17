@@ -717,10 +717,10 @@ update_submodules:
 		echo "Usage: make update_submodules SUBTREE_ARGS=\"lib/a lib/b\""; \
 		echo ""; \
 		echo "To update ALL subtrees, run: make deps update_submodules"; \
-		echo "Or directly: ../submodules/update.sh pull"; \
+		echo "Or directly: ../subtrees/update.sh pull"; \
 		exit 1; \
 	else \
-		bash ../submodules/update.sh pull $(SUBTREE_ARGS); \
+		bash ../subtrees/update.sh pull $(SUBTREE_ARGS); \
 	fi
 
 deps:
@@ -750,12 +750,21 @@ endif
 ifneq ($(filter update_submodules,$(MAKECMDGOALS)),)
 	@echo ""
 	@echo "Pulling third-party subtrees..."
-	@bash ../submodules/update.sh pull
+	@bash ../subtrees/update.sh pull
 endif
+
+# 
+#                            OUT OF SOURCE BUILDS
+# 
+
+SUBTREES_TO_MAKE := ../subtrees/LLAC/Src/Allocator/Core/libs/
+
+build_subtrees: 
+	${foreach subtree, $(SUBTREES_TO_MAKE), $(MAKE) -C $(subtree);}
 
 # 
 #                              PHONY TARGETS
 # 
 
 .PHONY: all desktop embedded_arm embedded_arm_float embedded_arm_restricted cuda daisy daisy-flash daisy-clean \
-        debug clean info deps help syntax-test convert_segments update_submodules
+        debug clean info deps help syntax-test convert_segments update_submodules build_subtrees

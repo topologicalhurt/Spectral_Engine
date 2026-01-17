@@ -14,7 +14,7 @@
 #   <repo_url>,<local_path>,<branch>
 #
 # Example:
-#   https://github.com/user/repo,submodules/mylib,main
+#   https://github.com/user/repo,subtrees/mylib,main
 
 set -uo pipefail
 
