@@ -1,1 +1,1 @@
-https://github.com/topologicalhurt/thesis, LLAC, research
+https://github.com/topologicalhurt/thesis, submodules/LLAC, research
