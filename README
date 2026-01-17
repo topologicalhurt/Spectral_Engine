@@ -37,9 +37,9 @@ FEATURES & WORKFLOW
 
 The full-fledged desktop version builds with offline processing features & other QOL features not afforded on embedded targets, including (but not limited to):
 
-STFT spectral analysis / resynthesis, wavelett transforms, essentially unlimited polyphony count, much larger sample sizes, complex oscillator design, exporting segment binaries, GPU acceleration, multi-threading support, full floats as opposed to q8.8 / q15 half-word format, 64bit support (& more) tools for sound design.
+STFT spectral analysis / resynthesis, wavelett transforms, essentially unlimited polyphony count, much larger sample sizes, complex oscillator design (envelope design per voice), exporting segment binaries, GPU acceleration, multi-threading support, full floats as opposed to q8.8 / q15 half-word format, 64bit support (& more) tools for sound design.
 
-However, the embedded cross-compiled targets all build with a real-time assurance for the CMSIS platform (Arm Cortex A/M series), subject to certain parameter thresholds*, supporting dynamic (real-time!) resynthesis of imported segment binaries with up to 512 concurrent voices of polyphony. For a specific application refer to the daisy_seed api.
+However, the embedded cross-compiled targets all build with a real-time assurance for the CMSIS platform (Arm Cortex A/M series) [*subject to certain parameter choices*], supporting dynamic (real-time!) resynthesis of imported segment binaries with up to 512 concurrent voices of polyphony. For a specific application refer to the daisy_seed api.
 
 The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices flash (DMA support coming soon!) I.e.
 ```

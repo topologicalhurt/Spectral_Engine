@@ -12,7 +12,6 @@ resources/*
 !resources/motormouth\ test\ 1.txt
 
 # Output files
-*.wav
 *.bin
 
 # Python
