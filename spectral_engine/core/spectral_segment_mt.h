@@ -19,11 +19,11 @@ typedef struct SegmentArrayMT {
     int initialized;
 } SegmentArrayMT;
 
-int segment_array_mt_init(SegmentArrayMT* sa);
+SpectralError segment_array_mt_init(SegmentArrayMT* sa);
 void segment_array_mt_destroy(SegmentArrayMT* sa);
-int segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t count);
+SpectralError segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t count);
 void segment_array_mt_get(SegmentArrayMT* sa, SegmentArray* out);
-int segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out);
+SpectralError segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out);
 
 #endif
 #endif

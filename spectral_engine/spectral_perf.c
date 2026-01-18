@@ -59,7 +59,7 @@ int perf_get_num_cores(void) {
     int cores = 0;
     size_t len = sizeof(cores);
     sysctlbyname("hw.ncpu", &cores, &len, NULL, 0);
-    return cores;
+    return (cores > 0) ? cores : 1;
 }
 
 #else /* Linux */
@@ -89,7 +89,8 @@ void perf_get_cpu_time(double* user_ms, double* sys_ms) {
 }
 
 int perf_get_num_cores(void) {
-    return (int)sysconf(_SC_NPROCESSORS_ONLN);
+    int cores = (int)sysconf(_SC_NPROCESSORS_ONLN);
+    return (cores > 0) ? cores : 1;
 }
 
 #endif /* __APPLE__ */
@@ -135,6 +136,7 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
     double wall_delta = end->wall_time_ms - start->wall_time_ms;
     double total_cpu = user_delta + sys_delta;
     double utilization = (wall_delta > 0) ? 100.0 * total_cpu / (wall_delta * n_threads) : 0;
+    double parallelism = (wall_delta > 0) ? (total_cpu / wall_delta) : 0.0;
     
     printf("\n--- Performance Metrics ---\n");
     printf("Memory:  RSS %zu MB, Peak tracked %.1f MB\n", 
@@ -142,7 +144,7 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
     printf("CPU:     User %.1f ms, Sys %.1f ms, Total %.1f ms\n", 
            user_delta, sys_delta, total_cpu);
     printf("Threads: %d / %d cores, Util %.1f%%, Parallelism %.2fx\n",
-           n_threads, end->num_cores, utilization, total_cpu / wall_delta);
+        n_threads, end->num_cores, utilization, parallelism);
 }
 
 /*
@@ -216,8 +218,13 @@ EmbeddedMemoryUsage embedded_memory_usage(
     
     /* Constraint check */
     size_t target_bytes = target_kb * 1024;
-    mem.usage_percent = 100.0 * (double)mem.total_bytes / target_bytes;
-    mem.fits_in_target = (mem.total_bytes <= target_bytes) ? 1 : 0;
+    if (target_bytes == 0) {
+        mem.usage_percent = 0.0;
+        mem.fits_in_target = 0;
+    } else {
+        mem.usage_percent = 100.0 * (double)mem.total_bytes / target_bytes;
+        mem.fits_in_target = (mem.total_bytes <= target_bytes) ? 1 : 0;
+    }
     
     return mem;
 }

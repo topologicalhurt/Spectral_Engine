@@ -338,6 +338,14 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         id<MTLBuffer> paramsBuffer = [metalDevice newBufferWithBytes:&params
                                                               length:sizeof(params)
                                                              options:MTLResourceStorageModeShared];
+
+        if (!segmentBuffer || !tileIdsBuffer || !tileRangesBuffer || !outputBuffer || !paramsBuffer) {
+            free(tile_ranges);
+            free(tile_segment_ids);
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return;
+        }
         
         id<MTLCommandBuffer> cmdBuffer = [metalQueue commandBuffer];
         id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];

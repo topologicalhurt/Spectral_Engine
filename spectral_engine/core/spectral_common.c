@@ -48,7 +48,7 @@ float fast_atan2(float y, float x) {
  */
 #if SPECTRAL_HAS_FMA && defined(SPECTRAL_USE_FMA)
 /* FMA sine: divide-free polynomial approximation
- * TODO: Replace with your submodule implementation
+ * TODO: Replace with submodule implementation
  * Expected interface: x in [-pi, pi], returns sin(x) */
 float fast_sin(float x) {
     /* Wrap to [-pi, pi] */

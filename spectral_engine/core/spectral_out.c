@@ -17,6 +17,13 @@
 #include <Accelerate/Accelerate.h>
 #endif
 
+#if defined(ARM_MATH_CM7) || defined(ARM_MATH_CM4)
+#include "arm_math.h"
+#define SPECTRAL_USE_CMSIS 1
+#else
+#define SPECTRAL_USE_CMSIS 0
+#endif
+
 /*
  * Normalization
  */
@@ -57,10 +64,21 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
     
     /* Find maximum absolute value */
     q15_t max_val = 0;
+    
+#if SPECTRAL_USE_CMSIS
+    uint32_t max_idx;
+    arm_absmax_q15(buffer, (uint32_t)len, &max_val, &max_idx);
+#else
     for (size_t i = 0; i < len; i++) {
-        q15_t abs_val = (buffer[i] < 0) ? -buffer[i] : buffer[i];
+        q15_t abs_val;
+        if (buffer[i] == Q15_MIN) {
+            abs_val = Q15_MAX;
+        } else {
+            abs_val = (buffer[i] < 0) ? (q15_t)-buffer[i] : buffer[i];
+        }
         if (abs_val > max_val) max_val = abs_val;
     }
+#endif
     
     /* Determine if normalization needed (prevent clipping) */
     int shift_amt = 0;
@@ -72,10 +90,14 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
             shift_amt++;
         }
         
-        /* Apply shift */
+        /* Apply shift - CMSIS arm_shift_q15 uses SIMD on M7 */
+#if SPECTRAL_USE_CMSIS
+        arm_shift_q15(buffer, -shift_amt, buffer, (uint32_t)len);
+#else
         for (size_t i = 0; i < len; i++) {
             buffer[i] >>= shift_amt;
         }
+#endif
     }
     
     if (shift) *shift = shift_amt;
@@ -146,18 +168,22 @@ SpectralError spectral_audio_write(const char* path, const float* buffer,
     info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
     
     SNDFILE* file = sf_open(path, SFM_WRITE, &info);
-    if (!file) return SPECTRAL_ERR_FILE;
+    if (!file) return SPECTRAL_ERR_FILE_OPEN;
     
     sf_count_t written = sf_writef_float(file, buffer, (sf_count_t)num_frames);
     sf_close(file);
     
-    return (written == (sf_count_t)num_frames) ? SPECTRAL_OK : SPECTRAL_ERR_IO;
+    return (written == (sf_count_t)num_frames) ? SPECTRAL_OK : SPECTRAL_ERR_FILE_WRITE;
 }
 
 SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
                                 size_t num_frames, int sample_rate) {
     if (!path || !mono || num_frames == 0 || sample_rate <= 0) {
         return SPECTRAL_ERR_PARAM;
+    }
+
+    if (num_frames > SIZE_MAX / (2 * sizeof(float))) {
+        return SPECTRAL_ERR_OVERFLOW;
     }
     
     /* Allocate stereo buffer */

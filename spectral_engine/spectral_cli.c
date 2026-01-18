@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -131,12 +132,36 @@ int spectral_cli_validate(SpectralCliOptions* opts) {
         opts->error_message = "n_fft must be power of 2 >= 64";
         return 0;
     }
+
+    if (opts->hop <= 0 || opts->hop > opts->n_fft) {
+        opts->valid = 0;
+        opts->error_message = "hop must be > 0 and <= n_fft";
+        return 0;
+    }
 #endif
     
     /* Validate timbre */
-    if (!opts->use_wavetable && (opts->timbre < TIMBRE_MIN || opts->timbre > TIMBRE_MAX)) {
+    if (opts->timbre < TIMBRE_MIN || opts->timbre > TIMBRE_MAX) {
         opts->valid = 0;
         opts->error_message = "timbre must be 0-7";
+        return 0;
+    }
+
+    if (!isfinite(opts->stretch) || opts->stretch <= 0.0f) {
+        opts->valid = 0;
+        opts->error_message = "stretch must be > 0";
+        return 0;
+    }
+
+    if (!isfinite(opts->pitch)) {
+        opts->valid = 0;
+        opts->error_message = "pitch must be finite";
+        return 0;
+    }
+
+    if (!isfinite(opts->start_sec) || !isfinite(opts->end_sec)) {
+        opts->valid = 0;
+        opts->error_message = "start/end times must be finite";
         return 0;
     }
     

@@ -101,6 +101,11 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
         f_close(&file);
         return DAISY_ERR_FORMAT;
     }
+
+    if (header.version != SPQ_FILE_VERSION) {
+        f_close(&file);
+        return DAISY_ERR_FORMAT;
+    }
     
     if (header.num_segments > ctx->synth.segments_capacity) {
         f_close(&file);
@@ -150,9 +155,12 @@ DaisyResult daisy_spectral_load_buffer(DaisySpectralCtx* ctx,
     if (!ctx || !data) return DAISY_ERR_PARAM;
     
     /* Delegate to embedded loader */
-    int result = spectral_embedded_load(&ctx->synth, data, num_segments, output_len);
-    if (result < 0) {
-        return (result == -2) ? DAISY_ERR_MEMORY : DAISY_ERR_PARAM;
+    SpectralError result = spectral_embedded_load(&ctx->synth, data, num_segments, output_len);
+    if (result != SPECTRAL_OK) {
+        if (result == SPECTRAL_ERR_OVERFLOW || result == SPECTRAL_ERR_MEMORY) {
+            return DAISY_ERR_MEMORY;
+        }
+        return DAISY_ERR_PARAM;
     }
     
     /* Update memory tracking */

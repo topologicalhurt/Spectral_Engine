@@ -46,6 +46,10 @@ typedef struct {
     uint8_t  reserved[15];
 } SpectralWavetableHeader;
 
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(SpectralWavetableHeader) == 32, "SpectralWavetableHeader must be 32 bytes");
+#endif
+
 #define SPECTRAL_WAVETABLE_MAGIC "SPWT"
 #define SPECTRAL_WAVETABLE_VERSION 1
 
@@ -70,7 +74,8 @@ typedef enum {
     WAVETABLE_ERR_SIZE      = -4,
     WAVETABLE_ERR_FULL      = -5,
     WAVETABLE_ERR_NOT_FOUND = -6,
-    WAVETABLE_ERR_VERSION   = -7
+    WAVETABLE_ERR_VERSION   = -7,
+    WAVETABLE_ERR_MEMORY    = -8
 } WavetableResult;
 
 /* Initialization and builtin generation */

@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "../spectral_engine/core/spectral_error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,15 +64,15 @@ typedef struct SpectralStreamCtx {
     void* user_data;
 } SpectralStreamCtx;
 
-typedef enum SpectralResult {
-    SPECTRAL_OK             =  0,
-    SPECTRAL_ERR_MEMORY     = -1,
-    SPECTRAL_ERR_PARAM      = -2,
-    SPECTRAL_ERR_FORMAT     = -3,
-    SPECTRAL_ERR_IO         = -4,
-    SPECTRAL_ERR_OVERFLOW   = -5,
-    SPECTRAL_ERR_NOTINIT    = -6
-} SpectralResult;
+typedef SpectralError SpectralResult;
+
+/* API legacy aliases */
+#ifndef SPECTRAL_ERR_FORMAT
+#define SPECTRAL_ERR_FORMAT   SPECTRAL_ERR_FILE_FORMAT
+#endif
+#ifndef SPECTRAL_ERR_IO
+#define SPECTRAL_ERR_IO       SPECTRAL_ERR_FILE_READ
+#endif
 
 typedef enum SpectralBackend {
     SPECTRAL_BACKEND_AUTO   = 0,
