@@ -133,9 +133,9 @@ typedef struct {
 
 /* Desktop emulation entry point */
 
-int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
-                              float stretch, float pitch, SpectralTimbre timbre,
-                              int n_threads, double* t_synth) {
+SpectralError synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
+                                      float stretch, float pitch, SpectralTimbre timbre,
+                                      int n_threads, double* t_synth) {
     (void)n_threads;
     (void)timbre;  /* TODO: support non-sine timbres in emulator */
     
@@ -195,8 +195,9 @@ int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
         for (size_t i = 0; i < sa.count; i++) {
             sum_amp += sa.segs[i].amp;
         }
-        SPECTRAL_DBG("Segment amp stats: max=%.6f avg=%.6f total=%.3f", 
-               max_amp, sum_amp / sa.count, sum_amp);
+        float avg_amp = (sa.count > 0) ? (sum_amp / sa.count) : 0.0f;
+        SPECTRAL_DBG("Segment amp stats: max=%.6f avg=%.6f total=%.3f",
+               max_amp, avg_amp, sum_amp);
     }
 #endif
     
@@ -389,10 +390,10 @@ int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
 
 /* Wavetable version - falls back to emulation (wavetables not yet supported) */
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
-int synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
-                        float stretch, float pitch,
-                        const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                        int n_threads, double* t_synth) {
+SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
+                                  float stretch, float pitch,
+                                  const SpectralWavetableBank* bank, SpectralTimbre timbre,
+                                  int n_threads, double* t_synth) {
     (void)bank;
     if (bank != NULL) {
         SPECTRAL_WARN_ONCE(TIMBRE_COUNT + 1, "Wavetable not supported in embedded emulation, using default sine");

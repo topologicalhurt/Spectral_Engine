@@ -155,6 +155,31 @@ on different platforms / backends */
 #define SPECTRAL_ARM_M7         0
 #endif
 
+/* ARM32 embedded synthesis configuration */
+#if SPECTRAL_ARM_M7
+
+/* ARM Cortex-M7 Memory Regions (STM32H7):
+ *   DTCM: 128KB @ 0x20000000 - Zero wait states, tightly coupled
+ *   ITCM: 64KB @ 0x00000000 - Instruction TCM
+ *   AXI SRAM: 512KB - Cached
+ *   SDRAM: External, higher latency
+ * Place oscillator LUT in DTCM for best performance (1024-entry = 2KB). */
+#define SPECTRAL_DTCM_SIZE_KB   128
+#define SPECTRAL_DTCM_SIZE      (SPECTRAL_DTCM_SIZE_KB * 1024)
+#define SPECTRAL_CACHE_LINE     32
+
+/* Optimization level: 0=safe, 1=balanced (default), 2=aggressive, 3=reserved */
+#ifndef SPECTRAL_OPT_LEVEL
+#define SPECTRAL_OPT_LEVEL      1
+#endif
+
+/* Max concurrent active segments for ARM32 (polyphony limit) */
+#ifndef SPECTRAL_ARM32_MAX_ACTIVE
+#define SPECTRAL_ARM32_MAX_ACTIVE    512
+#endif
+
+#endif /* SPECTRAL_ARM_M7 */
+
 #ifdef __APPLE__
 #define SPECTRAL_USE_VDSP       1
 #else
