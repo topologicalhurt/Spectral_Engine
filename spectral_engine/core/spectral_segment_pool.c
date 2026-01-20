@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-int segment_pool_init(SegmentPool* pool, uint32_t expected_count) {
-    if (!pool) return -1;
+SpectralError segment_pool_init(SegmentPool* pool, uint32_t expected_count) {
+    if (!pool) return SPECTRAL_ERR_PARAM;
     
     pool->block_size = SEGMENT_POOL_BLOCK_SIZE;
     pool->num_blocks = 0;
@@ -15,11 +15,11 @@ int segment_pool_init(SegmentPool* pool, uint32_t expected_count) {
     
     pool->max_blocks = est_blocks;
     pool->blocks = (Segment**)calloc(est_blocks, sizeof(Segment*));
-    return pool->blocks ? 0 : -1;
+    return pool->blocks ? SPECTRAL_OK : SPECTRAL_ERR_MEMORY;
 }
 
-int segment_pool_push(SegmentPool* pool, const Segment* seg) {
-    if (!pool || !seg) return -1;
+SpectralError segment_pool_push(SegmentPool* pool, const Segment* seg) {
+    if (!pool || !seg) return SPECTRAL_ERR_PARAM;
     
     uint32_t block_idx = pool->count / pool->block_size;
     uint32_t slot_idx = pool->count % pool->block_size;
@@ -27,22 +27,22 @@ int segment_pool_push(SegmentPool* pool, const Segment* seg) {
     if (block_idx >= pool->num_blocks) {
         if (block_idx >= pool->max_blocks) {
             uint32_t new_max = pool->max_blocks * 2;
-            if (new_max < pool->max_blocks) return -1;  /* Overflow */
+            if (new_max < pool->max_blocks) return SPECTRAL_ERR_OVERFLOW;
             Segment** new_blocks = (Segment**)realloc(pool->blocks, new_max * sizeof(Segment*));
-            if (!new_blocks) return -1;
+            if (!new_blocks) return SPECTRAL_ERR_MEMORY;
             pool->blocks = new_blocks;
             pool->max_blocks = new_max;
         }
         
         Segment* new_block = (Segment*)malloc(pool->block_size * sizeof(Segment));
-        if (!new_block) return -1;
+        if (!new_block) return SPECTRAL_ERR_MEMORY;
         pool->blocks[block_idx] = new_block;
         pool->num_blocks++;
     }
     
     pool->blocks[block_idx][slot_idx] = *seg;
     pool->count++;
-    return 0;
+    return SPECTRAL_OK;
 }
 
 SegmentArray segment_pool_to_array(SegmentPool* pool) {

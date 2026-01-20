@@ -164,6 +164,13 @@ typedef struct {
 
 static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t element_size) {
     ThreadBuffers tb = {0};
+
+    if (n_threads <= 0 || element_size == 0 || out_len == 0) {
+        return tb;
+    }
+    if (out_len > SIZE_MAX / element_size) {
+        return tb;
+    }
     
     /* Calculate buffer size and aligned stride */
     tb.buf_size = out_len * element_size;
@@ -178,7 +185,13 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
     }
     
     /* Single arena allocation for all thread buffers */
-    size_t arena_size = tb.buf_stride * n_threads + CACHE_ALIGN;
+    if (tb.buf_stride > SIZE_MAX / (size_t)n_threads) {
+        free(tb.bufs);
+        tb.bufs = NULL;
+        tb.n_threads = 0;
+        return tb;
+    }
+    size_t arena_size = tb.buf_stride * (size_t)n_threads + CACHE_ALIGN;
     tb.arena = malloc(arena_size);
     if (!tb.arena) {
         free(tb.bufs);
@@ -237,9 +250,11 @@ static void thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sampl
 
 /* Float output synthesis */
 
-int synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len, 
-              float stretch, float pitch, SpectralTimbre timbre, int n_threads,
-              double* t_synth) {
+SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
+                        float stretch, float pitch, SpectralTimbre timbre, int n_threads,
+                        double* t_synth) {
+
+    if (n_threads < 1) n_threads = 1;
     
     if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
         return SPECTRAL_OK;  /* Early exit is not an error */
@@ -282,10 +297,12 @@ int synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
 
 /* Wavetable synthesis */
 
-int synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
-                        float stretch, float pitch,
-                        const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                        int n_threads, double* t_synth) {
+SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
+                                  float stretch, float pitch,
+                                  const SpectralWavetableBank* bank, SpectralTimbre timbre,
+                                  int n_threads, double* t_synth) {
+
+    if (n_threads < 1) n_threads = 1;
     
     /* No wavetable bank - fall back to regular synthesis */
     if (!bank) {
@@ -344,6 +361,8 @@ int synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
 void synth_cpu_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
                       float stretch, float pitch, SpectralTimbre timbre, int n_threads,
                       double* t_synth) {
+
+    if (n_threads < 1) n_threads = 1;
     
     if (!SYNTH_VALIDATE_NATIVE(out_buffer, out_len, sa, &t_synth)) {
         return;
@@ -389,6 +408,8 @@ void synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out_buffer, 
                                 float stretch, float pitch,
                                 const SpectralWavetableBank* bank, SpectralTimbre timbre,
                                 int n_threads, double* t_synth) {
+
+    if (n_threads < 1) n_threads = 1;
     
     /* No wavetable bank - fall back to regular synthesis */
     if (!bank) {

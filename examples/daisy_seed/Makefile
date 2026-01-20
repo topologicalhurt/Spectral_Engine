@@ -2,7 +2,7 @@
 #
 # This builds the example application. The API library is in api/daisy_seed/
 #
-# NOTE: spectral_synth_embedded.c is the ARM-optimized Q15 synthesis backend.
+# NOTE: spectral_synth_arm32.c is the ARM-optimized Q15 synthesis backend.
 #       It can be compiled on desktop for testing but is cross-compiled here
 #       for ARM Cortex-M7 (Daisy Seed).
 
@@ -39,7 +39,7 @@ C_INCLUDES += -I$(ENGINE_DIR)
 
 # Additional source files from API
 C_SOURCES += $(API_DIR)/daisy_seed_spectral.c
-C_SOURCES += $(ENGINE_DIR)/spectral_synth_embedded.c
+C_SOURCES += $(ENGINE_DIR)/spectral_synth_arm32.c
 C_SOURCES += $(ENGINE_DIR)/spectral_q15.c
 C_SOURCES += $(ENGINE_DIR)/spectral_wavetable.c
 C_SOURCES += $(ENGINE_DIR)/spectral_debug_embedded_arm.c

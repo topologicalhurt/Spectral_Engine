@@ -132,8 +132,8 @@ int  spectral_debug_once(int id, SpectralDebugLevel level, const char* fmt, ...)
 #define SPECTRAL_WARN(...)      spectral_warn(__VA_ARGS__)
 #define SPECTRAL_WARN_ONCE(id, ...) spectral_debug_once((id), DEBUG_LEVEL_WARN, __VA_ARGS__)
 
-/* 
- * Box Drawing Characters (ASCII set)
+/*
+ * Box drawing character sets
  */
 
 typedef struct {

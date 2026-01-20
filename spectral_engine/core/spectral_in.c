@@ -17,14 +17,23 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
     
     SF_INFO sfinfo = {0};
     SNDFILE* file = sf_open(path, SFM_READ, &sfinfo);
-    if (!file) return SPECTRAL_ERR_FILE;
+    if (!file) return SPECTRAL_ERR_FILE_OPEN;
+
+    if (sfinfo.frames <= 0 || sfinfo.channels <= 0) {
+        sf_close(file);
+        return SPECTRAL_ERR_FILE_FORMAT;
+    }
     
     info->sample_rate = sfinfo.samplerate;
     info->channels = sfinfo.channels;
     info->frames = (size_t)sfinfo.frames;
     
     /* Read all audio data */
-    size_t total_samples = (size_t)sfinfo.frames * sfinfo.channels;
+    if ((size_t)sfinfo.frames > SIZE_MAX / (size_t)sfinfo.channels) {
+        sf_close(file);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+    size_t total_samples = (size_t)sfinfo.frames * (size_t)sfinfo.channels;
     float* audio = malloc(total_samples * sizeof(float));
     if (!audio) {
         sf_close(file);
@@ -36,7 +45,7 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
     
     if (read != sfinfo.frames) {
         free(audio);
-        return SPECTRAL_ERR_IO;
+        return SPECTRAL_ERR_FILE_READ;
     }
     
     /* Convert to mono by taking first channel */

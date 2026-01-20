@@ -52,7 +52,7 @@ int gpu_check_timbre_or_fallback(const char* backend_name,
     if (!gpu_timbre_supported(timbre)) {
         SPECTRAL_DBG("%s: Timbre %d not supported on GPU (max %d), using CPU synthesis",
                      backend_name, (int)timbre, OSC_GPU_MAX_TIMBRE);
-        synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, 0, t_synth);
+        synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, 1, t_synth);
         return 0;  /* Used CPU fallback */
     }
     return 1;  /* GPU can handle this timbre */

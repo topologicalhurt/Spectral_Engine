@@ -10,18 +10,14 @@
 
 #include "spectral_config.h"
 
-#ifndef PI
-#define PI          SPECTRAL_PI
-#endif
-#ifndef TWO_PI
-#define TWO_PI      SPECTRAL_TWO_PI
-#endif
-#ifndef INV_TWO_PI
-#define INV_TWO_PI  SPECTRAL_INV_TWO_PI
-#endif
-#ifndef PI_SQ
-#define PI_SQ       SPECTRAL_PI_SQ
-#endif
+/* Convert semitones to pitch multiplier: 2^(semitones/12) */
+#define SPECTRAL_PITCH_FACTOR(semitones) powf(2.0f, (semitones) / 12.0f)
+
+/* Synthesis output cleanup on error */
+static inline void synth_fail_cleanup(float* buf, size_t len, double* t_synth) {
+    if (buf) memset(buf, 0, len * sizeof(float));
+    if (t_synth) *t_synth = 0.0;
+}
 
 /* 64-byte segment (desktop) - cache-line aligned
  * 
@@ -66,14 +62,6 @@ typedef SegmentCompact SegmentActive;
 #else
 typedef Segment SegmentActive;
 #define SEGMENT_SIZE 64
-#endif
-
-#if !SPECTRAL_EMBEDDED
-#define PREFETCH_READ(addr)  __builtin_prefetch((addr), 0, 3)
-#define PREFETCH_WRITE(addr) __builtin_prefetch((addr), 1, 3)
-#else
-#define PREFETCH_READ(addr)  ((void)0)
-#define PREFETCH_WRITE(addr) ((void)0)
 #endif
 
 typedef struct SegmentArray {

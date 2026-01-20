@@ -3,12 +3,12 @@
 
 #if !SPECTRAL_EMBEDDED
 
-int segment_array_mt_init(SegmentArrayMT* sa) {
-    if (!sa) return -1;
+SpectralError segment_array_mt_init(SegmentArrayMT* sa) {
+    if (!sa) return SPECTRAL_ERR_PARAM;
     memset(sa, 0, sizeof(*sa));
-    if (pthread_mutex_init(&sa->mutex, NULL) != 0) return -1;
+    if (pthread_mutex_init(&sa->mutex, NULL) != 0) return SPECTRAL_ERR_BUSY;
     sa->initialized = 1;
-    return 0;
+    return SPECTRAL_OK;
 }
 
 void segment_array_mt_destroy(SegmentArrayMT* sa) {
@@ -23,8 +23,8 @@ void segment_array_mt_destroy(SegmentArrayMT* sa) {
     sa->initialized = 0;
 }
 
-int segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t count) {
-    if (!sa || !sa->initialized) return -1;
+SpectralError segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t count) {
+    if (!sa || !sa->initialized) return SPECTRAL_ERR_PARAM;
     pthread_mutex_lock(&sa->mutex);
     free(sa->pending.segs);
     sa->pending.segs = segs;
@@ -32,7 +32,7 @@ int segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t count) {
     sa->pending.capacity = count;
     sa->pending_swap = 1;
     pthread_mutex_unlock(&sa->mutex);
-    return 0;
+    return SPECTRAL_OK;
 }
 
 void segment_array_mt_get(SegmentArrayMT* sa, SegmentArray* out) {
@@ -49,8 +49,8 @@ void segment_array_mt_get(SegmentArrayMT* sa, SegmentArray* out) {
     pthread_mutex_unlock(&sa->mutex);
 }
 
-int segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out) {
-    if (!sa || !sa->initialized || !out) return -1;
+SpectralError segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out) {
+    if (!sa || !sa->initialized || !out) return SPECTRAL_ERR_PARAM;
     pthread_mutex_lock(&sa->mutex);
     if (sa->pending_swap) {
         free(sa->array.segs);
@@ -66,12 +66,12 @@ int segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out) {
         out->segs = (Segment*)malloc(sa->array.count * sizeof(Segment));
         if (!out->segs) {
             pthread_mutex_unlock(&sa->mutex);
-            return -1;
+            return SPECTRAL_ERR_MEMORY;
         }
         memcpy(out->segs, sa->array.segs, sa->array.count * sizeof(Segment));
     }
     pthread_mutex_unlock(&sa->mutex);
-    return 0;
+    return SPECTRAL_OK;
 }
 
 #endif

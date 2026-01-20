@@ -31,6 +31,11 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
                            int n_fft, int hop, float db_thresh,
                            double* t_fft, double* t_track) {
     SegmentArray empty_result = {NULL, 0, 0};
+    if (!audio || !t_fft || !t_track || n_fft <= 0 || hop <= 0 || n_samples < (size_t)n_fft) {
+        if (t_fft) *t_fft = 0;
+        if (t_track) *t_track = 0;
+        return empty_result;
+    }
     size_t n_frames = (n_samples - n_fft) / hop + 1;
     size_t n_freqs = n_fft / 2 + 1;
     

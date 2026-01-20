@@ -13,17 +13,6 @@
 extern "C" {
 #endif
 
-/* Default analysis parameters */
-#ifndef DEFAULT_N_FFT
-#define DEFAULT_N_FFT       4096
-#endif
-#ifndef DEFAULT_HOP
-#define DEFAULT_HOP         512
-#endif
-#ifndef DEFAULT_DB_THRESH
-#define DEFAULT_DB_THRESH   -60.0f
-#endif
-
 /* Parsed command-line options */
 typedef struct {
     const char*    input_path;
@@ -56,6 +45,21 @@ void spectral_cli_print_usage(void);
 /* Validate options after parsing
  * Returns 1 if valid, 0 if invalid (sets opts->error_message) */
 int spectral_cli_validate(SpectralCliOptions* opts);
+
+/* Runtime config validation (for programmatic use) */
+typedef struct SpectralConfigParams {
+    int sample_rate;
+    float stretch;
+    float pitch;
+    int timbre;
+    size_t buffer_size;
+    size_t num_segments;
+    int n_threads;
+} SpectralConfigParams;
+
+SpectralError spectral_config_validate(const SpectralConfigParams* cfg,
+                                       char* error_msg, size_t error_msg_size);
+int spectral_config_is_valid(const SpectralConfigParams* cfg);
 
 #ifdef __cplusplus
 }

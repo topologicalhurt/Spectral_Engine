@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -131,12 +132,36 @@ int spectral_cli_validate(SpectralCliOptions* opts) {
         opts->error_message = "n_fft must be power of 2 >= 64";
         return 0;
     }
+
+    if (opts->hop <= 0 || opts->hop > opts->n_fft) {
+        opts->valid = 0;
+        opts->error_message = "hop must be > 0 and <= n_fft";
+        return 0;
+    }
 #endif
     
     /* Validate timbre */
-    if (!opts->use_wavetable && (opts->timbre < TIMBRE_MIN || opts->timbre > TIMBRE_MAX)) {
+    if (opts->timbre < TIMBRE_MIN || opts->timbre > TIMBRE_MAX) {
         opts->valid = 0;
         opts->error_message = "timbre must be 0-7";
+        return 0;
+    }
+
+    if (!isfinite(opts->stretch) || opts->stretch <= 0.0f) {
+        opts->valid = 0;
+        opts->error_message = "stretch must be > 0";
+        return 0;
+    }
+
+    if (!isfinite(opts->pitch)) {
+        opts->valid = 0;
+        opts->error_message = "pitch must be finite";
+        return 0;
+    }
+
+    if (!isfinite(opts->start_sec) || !isfinite(opts->end_sec)) {
+        opts->valid = 0;
+        opts->error_message = "start/end times must be finite";
         return 0;
     }
     
@@ -209,4 +234,68 @@ void spectral_cli_print_usage(void) {
 #endif
     printf("Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm\n");
 #endif
+}
+
+ /* Runtime Config Validation (for programmatic use) */
+SpectralError spectral_config_validate(const SpectralConfigParams* cfg,
+                                       char* error_msg, size_t error_msg_size)
+{
+    if (!cfg) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "NULL config");
+        return SPECTRAL_ERR_PARAM;
+    }
+    
+    if (cfg->sample_rate < 8000 || cfg->sample_rate > 192000) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "sample_rate %d out of range", cfg->sample_rate);
+        return SPECTRAL_ERR_PARAM;
+    }
+    
+    if (!isfinite(cfg->stretch) || cfg->stretch <= 0.0f || cfg->stretch > 1000.0f) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "stretch %.2f invalid", cfg->stretch);
+        return SPECTRAL_ERR_PARAM;
+    }
+    
+    if (!isfinite(cfg->pitch) || cfg->pitch < -48.0f || cfg->pitch > 48.0f) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "pitch %.1f invalid", cfg->pitch);
+        return SPECTRAL_ERR_PARAM;
+    }
+    
+    if (cfg->timbre < TIMBRE_MIN || cfg->timbre > TIMBRE_MAX) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "timbre %d invalid", cfg->timbre);
+        return SPECTRAL_ERR_PARAM;
+    }
+    
+    if (cfg->buffer_size == 0) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "buffer_size is zero");
+        return SPECTRAL_ERR_PARAM;
+    }
+    
+#if SPECTRAL_EMBEDDED
+    if (cfg->buffer_size > 4096) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "buffer_size %zu too large", cfg->buffer_size);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+#endif
+    
+#if !SPECTRAL_EMBEDDED
+    if (cfg->n_threads < 1 || cfg->n_threads > 256) {
+        if (error_msg && error_msg_size > 0)
+            snprintf(error_msg, error_msg_size, "n_threads %d out of range", cfg->n_threads);
+        return SPECTRAL_ERR_PARAM;
+    }
+#endif
+    
+    return SPECTRAL_OK;
+}
+
+int spectral_config_is_valid(const SpectralConfigParams* cfg)
+{
+    return spectral_config_validate(cfg, NULL, 0) == SPECTRAL_OK;
 }

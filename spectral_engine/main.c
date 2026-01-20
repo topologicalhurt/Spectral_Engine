@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     
     /* Run the processing pipeline */
     SpectralTimingResults timing;
-    PipelineResult result = spectral_pipeline_run(&opts, &timing);
+    PipelineError result = spectral_pipeline_run(&opts, &timing);
     
     if (result != PIPELINE_OK) {
         printf("Error: Pipeline failed (code %d)\n", result);

@@ -13,6 +13,7 @@
 
 void spectral_window_hann(float* window, size_t length) {
     if (!window || length == 0) return;
+    if (length == 1) { window[0] = 1.0f; return; }
     
 #if SPECTRAL_USE_VDSP
     vDSP_hann_window(window, (vDSP_Length)length, vDSP_HANN_NORM);
@@ -27,6 +28,7 @@ void spectral_window_hann(float* window, size_t length) {
 
 void spectral_window_hamming(float* window, size_t length) {
     if (!window || length == 0) return;
+    if (length == 1) { window[0] = 1.0f; return; }
     
 #if SPECTRAL_USE_VDSP
     vDSP_hamm_window(window, (vDSP_Length)length, 0);
@@ -41,6 +43,7 @@ void spectral_window_hamming(float* window, size_t length) {
 
 void spectral_window_blackman(float* window, size_t length) {
     if (!window || length == 0) return;
+    if (length == 1) { window[0] = 1.0f; return; }
     
 #if SPECTRAL_USE_VDSP
     vDSP_blkman_window(window, (vDSP_Length)length, 0);

@@ -12,6 +12,7 @@
 #include "spectral_cli.h"
 #include "spectral_common.h"
 #include "spectral_wavetable.h"
+#include "spectral_error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,17 +29,6 @@ typedef struct {
     double realtime_x;
 } SpectralTimingResults;
 
-/* Pipeline result codes */
-typedef enum {
-    PIPELINE_OK = 0,
-    PIPELINE_ERR_INPUT = -1,
-    PIPELINE_ERR_ANALYSIS = -2,
-    PIPELINE_ERR_SYNTHESIS = -3,
-    PIPELINE_ERR_OUTPUT = -4,
-    PIPELINE_ERR_WAVETABLE = -5,
-    PIPELINE_ERR_MEMORY = -6
-} PipelineResult;
-
 /* Run the full processing pipeline
  * 
  * Parameters:
@@ -47,7 +37,7 @@ typedef enum {
  * 
  * Returns: PIPELINE_OK on success, negative error code on failure
  */
-PipelineResult spectral_pipeline_run(const SpectralCliOptions* opts, 
+PipelineError spectral_pipeline_run(const SpectralCliOptions* opts, 
                                      SpectralTimingResults* timing);
 
 /* Print timing results */

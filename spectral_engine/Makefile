@@ -41,6 +41,11 @@
 # SPECTRAL_NO_PERF          | 1=Disable perf tracking, 0=enabled (default)
 # SPECTRAL_MAX_SEGS         | Maximum segment count (0=unlimited)
 # SPECTRAL_DEBUG_RESTRICTED | 1=Enable debug profiling in restricted mode
+# SPECTRAL_OPT_LEVEL        | Optimization level for quality/speed tradeoffs:
+#                           |   0=Conservative (saturating math, interpolation)
+#                           |   1=Balanced (non-saturating math) [default]
+#                           |   2=Aggressive (level 1 + no LUT interpolation)
+#                           |   3=Reserved for future use
 # USE_CUDA                  | 1=Enable CUDA backend (auto-detected)
 #
 # OUTPUT DIRECTORY:
@@ -79,16 +84,16 @@ BIN_DIR := ../bin
 OBJ_DIR           := $(BIN_DIR)/obj_$(ARCH)_$(GPU_BACKEND)_desktop
 OBJ_EMU_DIR       := $(BIN_DIR)/obj_$(ARCH)_native_emulator
 OBJ_EMU_DAISY_DIR := $(BIN_DIR)/obj_$(ARCH)_native_emulator_daisy
-OBJ_EMBEDDED_ARM_DIR       := $(BIN_DIR)/obj_embedded_arm
-OBJ_EMBEDDED_ARM_FLOAT_DIR := $(BIN_DIR)/obj_embedded_arm_float
-OBJ_EMBEDDED_ARM_RES_DIR   := $(BIN_DIR)/obj_embedded_arm_restricted
+OBJ_EMBEDDED_ARM_FLOAT_DIR := $(BIN_DIR)/obj_embedded_arm32_float
+OBJ_EMBEDDED_ARM_DIR       := $(BIN_DIR)/obj_embedded_arm32
+OBJ_EMBEDDED_ARM_RES_DIR   := $(BIN_DIR)/obj_embedded_arm32_restricted
 
 TARGET_DESKTOP              := spectral_$(ARCH)_$(GPU_BACKEND)_desktop
 TARGET_EMULATOR             := spectral_$(ARCH)_native_emulator
 TARGET_EMULATOR_DAISY       := spectral_$(ARCH)_native_emulator_daisy
-TARGET_EMBEDDED_ARM         := spectral_embedded_arm
-TARGET_EMBEDDED_ARM_FLOAT   := spectral_embedded_arm_float
-TARGET_EMBEDDED_ARM_RES     := spectral_embedded_arm_restricted
+TARGET_EMBEDDED_ARM         := spectral_embedded_arm32
+TARGET_EMBEDDED_ARM_FLOAT   := spectral_embedded_arm32_float
+TARGET_EMBEDDED_ARM_RES     := spectral_embedded_arm32_restricted
 TARGET_CUDA           := spectral_$(ARCH)_cuda_standalone
 
 # 
@@ -135,7 +140,7 @@ SRCS_MONITORING := spectral_perf.c
 
 SRCS_ANALYSIS       := spectral_analysis.c
 SRCS_SYNTH_CPU      := spectral_synth_cpu.c
-SRCS_SYNTH_EMBEDDED := spectral_synth_embedded.c $(CORE_DIR)/spectral_q15.c
+SRCS_SYNTH_EMBEDDED := spectral_synth_arm32.c $(CORE_DIR)/spectral_q15.c
 SRCS_SYNTH_EMULATOR := spectral_synth_emulator.c
 
 SRCS_METAL := spectral_synth_metal.m
@@ -359,7 +364,7 @@ $(OBJ_EMU_DAISY_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMU_DAISY_DIR)
 # 
 # Cross-compile ARM Q15 synthesis with FFT analysis:
 #   - FFT analysis enabled
-#   - Q15 fixed-point synthesis (spectral_synth_embedded.c)
+#   - Q15 fixed-point synthesis (spectral_synth_arm32.c)
 #   - NO GPU backends
 #   - Binary targets ARM architecture (won't run on desktop)
 #
@@ -679,12 +684,12 @@ syntax-test:
 	@echo "[2/4] Embedded ARM configuration (with analysis)..."
 	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only main.c
 	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only spectral_analysis.c
-	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only spectral_synth_embedded.c
+	$(CC) $(EMBEDDED_ARM_CFLAGS) -fsyntax-only spectral_synth_arm32.c
 	@echo "      Embedded ARM: OK"
 	@echo ""
 	@echo "[3/4] Embedded ARM restricted configuration..."
 	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -fsyntax-only main.c
-	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -fsyntax-only spectral_synth_embedded.c
+	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -fsyntax-only spectral_synth_arm32.c
 	@echo "      Embedded ARM restricted: OK"
 	@echo ""
 	@echo "[4/4] Core modules..."
@@ -757,10 +762,12 @@ endif
 #                            OUT OF SOURCE BUILDS
 # 
 
-SUBTREES_TO_MAKE := ../subtrees/LLAC/Src/Allocator/Core/libs/
 
-build_subtrees: 
-	${foreach subtree, $(SUBTREES_TO_MAKE), $(MAKE) -C $(subtree);}
+# TODO
+# SUBTREES_TO_MAKE := ../subtrees/LLAC/Src/Allocator/Core/libs/
+
+# build_subtrees: 
+# 	${foreach subtree, $(SUBTREES_TO_MAKE), $(MAKE) -C $(subtree);}
 
 # 
 #                              PHONY TARGETS

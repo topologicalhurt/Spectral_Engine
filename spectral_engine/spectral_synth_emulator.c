@@ -5,7 +5,7 @@
 #define SPECTRAL_EMBEDDED 1
 #define SPECTRAL_EMBEDDED_EMULATION 1
 
-#include "spectral_synth_embedded.h"
+#include "spectral_synth_arm32.h"
 #include "spectral_synth_internal.h"
 #include "spectral_error.h"
 #include "spectral_common.h"
@@ -110,7 +110,7 @@ static const q15_t* get_emulation_lut(void) {
     static int initialized = 0;
     
     if (!initialized) {
-        spectral_osc_lut_init_sine(lut);
+        spectral_lut_init_sine(lut);
         initialized = 1;
     }
     return lut;
@@ -129,13 +129,13 @@ typedef struct {
     q15_t    da;
 } EmulatorActiveSegment;
 
-#define EMULATOR_MAX_ACTIVE SPECTRAL_EMBEDDED_MAX_ACTIVE
+#define EMULATOR_MAX_ACTIVE SPECTRAL_ARM32_MAX_ACTIVE
 
 /* Desktop emulation entry point */
 
-int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
-                              float stretch, float pitch, SpectralTimbre timbre,
-                              int n_threads, double* t_synth) {
+SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
+                                      float stretch, float pitch, SpectralTimbre timbre,
+                                      int n_threads, double* t_synth) {
     (void)n_threads;
     (void)timbre;  /* TODO: support non-sine timbres in emulator */
     
@@ -145,8 +145,7 @@ int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
 
     double start_time = spectral_get_time_sec();
     
-    /* Compute pitch factor: 2^(semitones/12) */
-    float pitch_factor = powf(2.0f, pitch / 12.0f);
+    float pitch_factor = SPECTRAL_PITCH_FACTOR(pitch);
     float inv_stretch = 1.0f / stretch;
     
     /* Find maximum amplitude for scaling all segments to fit in Q15 */
@@ -195,8 +194,9 @@ int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
         for (size_t i = 0; i < sa.count; i++) {
             sum_amp += sa.segs[i].amp;
         }
-        SPECTRAL_DBG("Segment amp stats: max=%.6f avg=%.6f total=%.3f", 
-               max_amp, sum_amp / sa.count, sum_amp);
+        float avg_amp = (sa.count > 0) ? (sum_amp / sa.count) : 0.0f;
+        SPECTRAL_DBG("Segment amp stats: max=%.6f avg=%.6f total=%.3f",
+               max_amp, avg_amp, sum_amp);
     }
 #endif
     
@@ -315,7 +315,7 @@ int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
             
             for (uint32_t j = blk_start; j < blk_end; j++) {
                 uq16_t lut_idx = (uq16_t)(phase >> 16);
-                q15_t sample = spectral_osc_lut_lookup(lut_idx, osc_lut);
+                q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
                 accum[j] += (int64_t)sample * amp;
                 phase += freq_inc;
 #if SPECTRAL_HAS_CHIRP
@@ -384,20 +384,20 @@ int synth_embedded_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
     return SPECTRAL_OK;
 }
 
-/* synth_cpu is provided via macro in spectral_synth_embedded.h
- * when SPECTRAL_USE_EMBEDDED_SYNTH is defined, redirecting to synth_embedded_emulation */
+/* synth_cpu is provided via macro in spectral_synth_arm32.h
+ * when SPECTRAL_USE_EMBEDDED_SYNTH is defined, redirecting to synth_arm32_emulation */
 
 /* Wavetable version - falls back to emulation (wavetables not yet supported) */
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
-int synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
-                        float stretch, float pitch,
-                        const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                        int n_threads, double* t_synth) {
+SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
+                                  float stretch, float pitch,
+                                  const SpectralWavetableBank* bank, SpectralTimbre timbre,
+                                  int n_threads, double* t_synth) {
     (void)bank;
     if (bank != NULL) {
         SPECTRAL_WARN_ONCE(TIMBRE_COUNT + 1, "Wavetable not supported in embedded emulation, using default sine");
     }
-    return synth_embedded_emulation(sa, out_buffer, out_len, stretch, pitch,
+    return synth_arm32_emulation(sa, out_buffer, out_len, stretch, pitch,
                                     timbre, n_threads, t_synth);
 }
 #endif

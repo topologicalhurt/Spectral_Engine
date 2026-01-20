@@ -33,19 +33,19 @@ DaisyResult daisy_spectral_init(DaisySpectralCtx* ctx, uint32_t sample_rate) {
     
     /* Initialize oscillator LUT once */
     if (!s_lut_initialized) {
-        spectral_osc_lut_init_sine(s_osc_lut);
+        spectral_lut_init_sine(s_osc_lut);
         s_lut_initialized = 1;
     }
     
     /* Initialize embedded synthesis context */
-    spectral_embedded_init(&ctx->synth,
+    spectral_arm32_init(&ctx->synth,
                            s_segment_pool,
                            DAISY_MAX_SEGMENTS_SAFE,
                            s_osc_lut,
                            sample_rate);
     
     /* Set Daisy defaults */
-    spectral_embedded_set_amplitude(&ctx->synth, DAISY_DEFAULT_AMPLITUDE);
+    spectral_arm32_set_amplitude(&ctx->synth, DAISY_DEFAULT_AMPLITUDE);
     
     /* Track memory usage */
     s_memory_used = sizeof(DaisySpectralCtx) + sizeof(s_osc_lut);
@@ -101,6 +101,11 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
         f_close(&file);
         return DAISY_ERR_FORMAT;
     }
+
+    if (header.version != SPQ_FILE_VERSION) {
+        f_close(&file);
+        return DAISY_ERR_FORMAT;
+    }
     
     if (header.num_segments > ctx->synth.segments_capacity) {
         f_close(&file);
@@ -124,7 +129,7 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
     ctx->total_memory_used = s_memory_used + seg_bytes;
     
     /* Reset playback position */
-    spectral_embedded_reset(&ctx->synth);
+    spectral_arm32_reset(&ctx->synth);
     
     return DAISY_OK;
 }
@@ -150,9 +155,12 @@ DaisyResult daisy_spectral_load_buffer(DaisySpectralCtx* ctx,
     if (!ctx || !data) return DAISY_ERR_PARAM;
     
     /* Delegate to embedded loader */
-    int result = spectral_embedded_load(&ctx->synth, data, num_segments, output_len);
-    if (result < 0) {
-        return (result == -2) ? DAISY_ERR_MEMORY : DAISY_ERR_PARAM;
+    SpectralError result = spectral_arm32_load(&ctx->synth, data, num_segments, output_len);
+    if (result != SPECTRAL_OK) {
+        if (result == SPECTRAL_ERR_OVERFLOW || result == SPECTRAL_ERR_MEMORY) {
+            return DAISY_ERR_MEMORY;
+        }
+        return DAISY_ERR_PARAM;
     }
     
     /* Update memory tracking */
@@ -184,13 +192,13 @@ void daisy_spectral_get_memory(const DaisySpectralCtx* ctx,
 void daisy_spectral_set_stretch(DaisySpectralCtx* ctx, float stretch) {
     if (!ctx) return;
     stretch = CLAMP(stretch, DAISY_STRETCH_MIN, DAISY_STRETCH_MAX);
-    spectral_embedded_set_stretch(&ctx->synth, stretch);
+    spectral_arm32_set_stretch(&ctx->synth, stretch);
 }
 
 void daisy_spectral_set_amplitude(DaisySpectralCtx* ctx, float amplitude) {
     if (!ctx) return;
     amplitude = CLAMP(amplitude, 0.0f, 1.0f);
-    spectral_embedded_set_amplitude(&ctx->synth, amplitude);
+    spectral_arm32_set_amplitude(&ctx->synth, amplitude);
 }
 
 void daisy_spectral_set_params_adc(DaisySpectralCtx* ctx,
@@ -201,35 +209,35 @@ void daisy_spectral_set_params_adc(DaisySpectralCtx* ctx,
     /* Convert 12-bit ADC to stretch (0.25 - 4.0) */
     float stretch = DAISY_STRETCH_MIN + 
         ((float)stretch_adc / DAISY_ADC_MAX) * (DAISY_STRETCH_MAX - DAISY_STRETCH_MIN);
-    spectral_embedded_set_stretch(&ctx->synth, stretch);
+    spectral_arm32_set_stretch(&ctx->synth, stretch);
     
     /* Convert 12-bit ADC to amplitude (0.0 - 1.0) */
     float amplitude = (float)amplitude_adc / DAISY_ADC_MAX;
-    spectral_embedded_set_amplitude(&ctx->synth, amplitude);
+    spectral_arm32_set_amplitude(&ctx->synth, amplitude);
 }
 
 /* Playback Control */
 
 void daisy_spectral_reset(DaisySpectralCtx* ctx) {
     if (!ctx) return;
-    spectral_embedded_reset(&ctx->synth);
+    spectral_arm32_reset(&ctx->synth);
 }
 
 void daisy_spectral_seek(DaisySpectralCtx* ctx, uint32_t sample_pos) {
     if (!ctx) return;
-    spectral_embedded_seek(&ctx->synth, sample_pos);
+    spectral_arm32_seek(&ctx->synth, sample_pos);
 }
 
 int daisy_spectral_is_complete(const DaisySpectralCtx* ctx) {
-    return spectral_embedded_is_complete(&ctx->synth);
+    return spectral_arm32_is_complete(&ctx->synth);
 }
 
 uint32_t daisy_spectral_get_position(const DaisySpectralCtx* ctx) {
-    return spectral_embedded_get_position(&ctx->synth);
+    return spectral_arm32_get_position(&ctx->synth);
 }
 
 uint32_t daisy_spectral_get_duration(const DaisySpectralCtx* ctx) {
-    return spectral_embedded_get_duration(&ctx->synth);
+    return spectral_arm32_get_duration(&ctx->synth);
 }
 
 /* Audio Processing */
@@ -240,7 +248,7 @@ uint32_t daisy_spectral_process_q15(DaisySpectralCtx* ctx,
                                     q15_t* out_right,
                                     uint32_t num_samples) {
     if (!ctx) return 0;
-    return spectral_embedded_process(&ctx->synth, out_left, out_right, num_samples);
+    return spectral_arm32_process(&ctx->synth, out_left, out_right, num_samples);
 }
 
 DAISY_HOT
@@ -248,7 +256,7 @@ uint32_t daisy_spectral_process_interleaved(DaisySpectralCtx* ctx,
                                             q15_t* out_interleaved,
                                             uint32_t num_samples) {
     if (!ctx) return 0;
-    return spectral_embedded_process_interleaved(&ctx->synth, out_interleaved, num_samples);
+    return spectral_arm32_process_interleaved(&ctx->synth, out_interleaved, num_samples);
 }
 
 /*

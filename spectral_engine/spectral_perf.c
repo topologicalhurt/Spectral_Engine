@@ -59,7 +59,7 @@ int perf_get_num_cores(void) {
     int cores = 0;
     size_t len = sizeof(cores);
     sysctlbyname("hw.ncpu", &cores, &len, NULL, 0);
-    return cores;
+    return (cores > 0) ? cores : 1;
 }
 
 #else /* Linux */
@@ -89,7 +89,8 @@ void perf_get_cpu_time(double* user_ms, double* sys_ms) {
 }
 
 int perf_get_num_cores(void) {
-    return (int)sysconf(_SC_NPROCESSORS_ONLN);
+    int cores = (int)sysconf(_SC_NPROCESSORS_ONLN);
+    return (cores > 0) ? cores : 1;
 }
 
 #endif /* __APPLE__ */
@@ -135,6 +136,7 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
     double wall_delta = end->wall_time_ms - start->wall_time_ms;
     double total_cpu = user_delta + sys_delta;
     double utilization = (wall_delta > 0) ? 100.0 * total_cpu / (wall_delta * n_threads) : 0;
+    double parallelism = (wall_delta > 0) ? (total_cpu / wall_delta) : 0.0;
     
     printf("\n--- Performance Metrics ---\n");
     printf("Memory:  RSS %zu MB, Peak tracked %.1f MB\n", 
@@ -142,7 +144,7 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
     printf("CPU:     User %.1f ms, Sys %.1f ms, Total %.1f ms\n", 
            user_delta, sys_delta, total_cpu);
     printf("Threads: %d / %d cores, Util %.1f%%, Parallelism %.2fx\n",
-           n_threads, end->num_cores, utilization, total_cpu / wall_delta);
+        n_threads, end->num_cores, utilization, parallelism);
 }
 
 /*
@@ -167,8 +169,8 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
  */
 #define ACTIVE_SEG_Q15_SIZE sizeof(SpectralActiveSegQ15)
 
-/* SpectralEmbeddedCtx base size for 32-bit ARM (excludes active[] array) */
-#define EMBEDDED_CTX_BASE_SIZE  (                           \
+/* SpectralArm32Ctx base size for 32-bit ARM (excludes active[] array) */
+#define ARM32_CTX_BASE_SIZE  (                              \
     ARM32_PTR_SIZE +        /* segments */                  \
     ARM32_U32_SIZE * 5 +    /* num_segments..next_seg_idx */\
     ARM32_U16_SIZE * 2 +    /* num_active, peak_active */   \
@@ -198,7 +200,7 @@ EmbeddedMemoryUsage embedded_memory_usage(
     size_t osc_lut_entries = (1 << osc_lut_bits) + 1;  /* +1 for interpolation wraparound */
     mem.osc_lut_bytes = osc_lut_entries * ARM32_Q15_SIZE;
     mem.active_array_bytes = max_active * ACTIVE_SEG_Q15_SIZE;
-    mem.ctx_bytes = EMBEDDED_CTX_BASE_SIZE + mem.active_array_bytes;
+    mem.ctx_bytes = ARM32_CTX_BASE_SIZE + mem.active_array_bytes;
     mem.static_total = mem.ctx_bytes + mem.osc_lut_bytes;
     
     /* Dynamic allocations (per audio file) */
@@ -216,8 +218,13 @@ EmbeddedMemoryUsage embedded_memory_usage(
     
     /* Constraint check */
     size_t target_bytes = target_kb * 1024;
-    mem.usage_percent = 100.0 * (double)mem.total_bytes / target_bytes;
-    mem.fits_in_target = (mem.total_bytes <= target_bytes) ? 1 : 0;
+    if (target_bytes == 0) {
+        mem.usage_percent = 0.0;
+        mem.fits_in_target = 0;
+    } else {
+        mem.usage_percent = 100.0 * (double)mem.total_bytes / target_bytes;
+        mem.fits_in_target = (mem.total_bytes <= target_bytes) ? 1 : 0;
+    }
     
     return mem;
 }

@@ -5,7 +5,7 @@
 #
 # Requires the DaisySP library and ARM GCC toolchain.
 #
-# NOTE: spectral_synth_embedded.c is compiled here for ARM target.
+# NOTE: spectral_synth_arm32.c is compiled here for ARM target.
 #       The same code can be compiled on desktop for testing (see spectral_engine/Makefile)
 #       but is optimized for ARM Cortex-M7 (SMLAD, cache prefetch, Q15 fixed-point).
 #
@@ -29,7 +29,7 @@ BUILD_DIR = $(BIN_DIR)/obj
 # Sources (API only - no examples)
 C_SOURCES = \
 	daisy_seed_spectral.c \
-	../../spectral_engine/spectral_synth_embedded.c \
+	../../spectral_engine/spectral_synth_arm32.c \
 	../../spectral_engine/spectral_q15.c \
 	../../spectral_engine/spectral_wavetable.c \
 	../../spectral_engine/spectral_debug_embedded_arm.c
@@ -45,7 +45,7 @@ HEADERS = \
 	../../spectral_engine/spectral_q15.h \
 	../../spectral_engine/oscillator.h \
 	../../spectral_engine/spectral_wavetable.h \
-	../../spectral_engine/spectral_synth_embedded.h \
+	../../spectral_engine/spectral_synth_arm32.h \
 	../../spectral_engine/spectral_debug_embedded_arm.h
 
 # 
@@ -297,7 +297,7 @@ info:
 	@echo "============================================"
 	@echo ""
 	@echo "Embedded Synthesis:"
-	@echo "  spectral_synth_embedded.c - ARM M7 optimized Q15"
+	@echo "  spectral_synth_arm32.c - ARM M7 optimized Q15"
 	@echo "  spectral_debug_embedded_arm.c - ARM debug monitoring (JTAG/ITM)"
 	@echo "============================================"
 

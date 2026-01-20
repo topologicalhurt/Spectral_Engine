@@ -151,8 +151,13 @@ int main(int argc, char** argv) {
     printf("  Segments: %u  Length: %u samples (%.2fs)  Size: %.2f MB\n",
            output_count, output_length, output_length / (float)header.sr, 
            out_size / (1024.0 * 1024.0));
-    printf("  Pool: %.2f / %zu MB (%.1f%%)\n", 
-           seg_mem / (1024.0 * 1024.0), pool_mb, 100.0 * seg_mem / pool_size);
+    if (pool_size > 0) {
+        printf("  Pool: %.2f / %zu MB (%.1f%%)\n", 
+               seg_mem / (1024.0 * 1024.0), pool_mb, 100.0 * seg_mem / pool_size);
+    } else {
+        printf("  Pool: %.2f / %zu MB (n/a)\n",
+               seg_mem / (1024.0 * 1024.0), pool_mb);
+    }
     
     if (seg_mem > pool_size) printf("*** ERROR: Exceeds target memory! ***\n");
     
