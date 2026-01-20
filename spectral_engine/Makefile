@@ -61,7 +61,6 @@ UNAME_S := $(shell uname -s)
 ARCH    := $(shell uname -m)
 NVCC    := $(shell command -v nvcc 2>/dev/null)
 
-# Parallel compilation (use all available cores)
 NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 MAKEFLAGS += -j$(NPROCS)
 
@@ -79,6 +78,11 @@ else
     GPU_BACKEND := native
 endif
 
+USE_CUDA ?= $(HAS_CUDA)
+ifeq ($(HAS_CUDA),0)
+    override USE_CUDA := 0
+endif
+
 BIN_DIR := ../bin
 
 OBJ_DIR           := $(BIN_DIR)/obj_$(ARCH)_$(GPU_BACKEND)_desktop
@@ -94,7 +98,7 @@ TARGET_EMULATOR_DAISY       := spectral_$(ARCH)_native_emulator_daisy
 TARGET_EMBEDDED_ARM         := spectral_embedded_arm32
 TARGET_EMBEDDED_ARM_FLOAT   := spectral_embedded_arm32_float
 TARGET_EMBEDDED_ARM_RES     := spectral_embedded_arm32_restricted
-TARGET_CUDA           := spectral_$(ARCH)_cuda_standalone
+TARGET_CUDA           		:= spectral_$(ARCH)_cuda_standalone
 
 # 
 #                      COMPILER VERSION CHECK
@@ -207,14 +211,14 @@ else
     LDFLAGS_CPU  := $(LDFLAGS_BASE)
     
     # CUDA support on Linux
-    ifeq ($(HAS_CUDA),1)
-        CFLAGS_BASE  += -DUSE_CUDA
+	ifeq ($(USE_CUDA),1)
+        CFLAGS_BASE  += -D USE_CUDA
         # CUDA optimization: use fast math, enable FMA, tune for architecture
         NVCC_FLAGS   := -O3 -use_fast_math --fmad=true \
                         -Xcompiler -fPIC -Xcompiler -ffast-math -Xcompiler -funroll-loops
         CUDA_LDFLAGS := -L/usr/local/cuda/lib64 -lcudart
         LDFLAGS_GPU  += $(CUDA_LDFLAGS)
-    endif
+	endif
 endif
 
 # 
@@ -245,7 +249,7 @@ ifeq ($(HAS_METAL),1)
     DESKTOP_LDFLAGS := $(LDFLAGS_GPU)
 else
     DESKTOP_OBJS := $(call src_to_obj,$(OBJ_DIR),$(DESKTOP_SRCS_C))
-    ifeq ($(HAS_CUDA),1)
+    ifeq ($(USE_CUDA),1)
         DESKTOP_OBJS += $(OBJ_DIR)/spectral_synth_cuda.o
     endif
     DESKTOP_LDFLAGS := $(LDFLAGS_GPU)
@@ -265,7 +269,7 @@ desktop: $(BIN_DIR)/$(TARGET_DESKTOP)
 ifeq ($(HAS_METAL),1)
 	@echo "  - Metal GPU backend"
 endif
-ifeq ($(HAS_CUDA),1)
+ifeq ($(USE_CUDA),1)
 	@echo "  - CUDA GPU backend"
 endif
 	@echo ""
@@ -480,8 +484,12 @@ $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES): $(EMBEDDED_ARM_RES_OBJS) | $(BIN_DIR)
 # 
 # Standalone CUDA build (Linux only)
 
+ifeq ($(filter 01,$(HAS_CUDA)$(USE_CUDA)),01)
+    CUDA_ERROR := 1
+endif
+
 cuda: $(BIN_DIR)
-ifeq ($(HAS_CUDA),0)
+ifeq ($(CUDA_ERROR),1)
 	@echo "Error: nvcc not found. Please install CUDA toolkit:"
 	@echo "  Ubuntu/Debian: sudo apt install nvidia-cuda-toolkit"
 	@echo "  Or download from: https://developer.nvidia.com/cuda-downloads"
@@ -547,7 +555,7 @@ $(OBJ_DIR)/%.o: %.m $(HEADERS) | $(OBJ_DIR)
 	$(CC) $(OBJCFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/spectral_synth_cuda.o: spectral_synth_cuda.cu $(HEADERS) | $(OBJ_DIR)
-ifeq ($(HAS_CUDA),1)
+ifeq ($(USE_CUDA),1)
 	$(NVCC) $(NVCC_FLAGS) -c $< -o $@
 endif
 
