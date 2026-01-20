@@ -169,8 +169,8 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
  */
 #define ACTIVE_SEG_Q15_SIZE sizeof(SpectralActiveSegQ15)
 
-/* SpectralEmbeddedCtx base size for 32-bit ARM (excludes active[] array) */
-#define EMBEDDED_CTX_BASE_SIZE  (                           \
+/* SpectralArm32Ctx base size for 32-bit ARM (excludes active[] array) */
+#define ARM32_CTX_BASE_SIZE  (                              \
     ARM32_PTR_SIZE +        /* segments */                  \
     ARM32_U32_SIZE * 5 +    /* num_segments..next_seg_idx */\
     ARM32_U16_SIZE * 2 +    /* num_active, peak_active */   \
@@ -200,7 +200,7 @@ EmbeddedMemoryUsage embedded_memory_usage(
     size_t osc_lut_entries = (1 << osc_lut_bits) + 1;  /* +1 for interpolation wraparound */
     mem.osc_lut_bytes = osc_lut_entries * ARM32_Q15_SIZE;
     mem.active_array_bytes = max_active * ACTIVE_SEG_Q15_SIZE;
-    mem.ctx_bytes = EMBEDDED_CTX_BASE_SIZE + mem.active_array_bytes;
+    mem.ctx_bytes = ARM32_CTX_BASE_SIZE + mem.active_array_bytes;
     mem.static_total = mem.ctx_bytes + mem.osc_lut_bytes;
     
     /* Dynamic allocations (per audio file) */

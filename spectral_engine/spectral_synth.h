@@ -7,7 +7,7 @@
 #include "spectral_wavetable.h"
 
 #if defined(SPECTRAL_USE_EMBEDDED_SYNTH)
-#include "spectral_synth_embedded.h"
+#include "spectral_synth_arm32.h"
 #endif
 
 typedef enum {

@@ -399,7 +399,7 @@ static inline void synth_segment_m7(
     
     /* Remainder loop (0-3 samples) - no unrolling needed */
     for (; j < blk_end; j++) {
-        q15_t sample = spectral_osc_lut_lookup((uq16_t)(phase >> 16), osc_lut);
+        q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
         accum[j] = spectral_mac_q15(accum[j], sample, amp);
         phase += freq_inc;
         amp = spectral_qadd16(amp, amp_delta);
@@ -574,10 +574,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             SPECTRAL_AMPS_4(amp, d_amp, a0, a1, a2, a3);
             
             q15_t samples[4];
-            samples[0] = spectral_osc_lut_lookup((uq16_t)(p0 >> 16), osc_lut);
-            samples[1] = spectral_osc_lut_lookup((uq16_t)(p1 >> 16), osc_lut);
-            samples[2] = spectral_osc_lut_lookup((uq16_t)(p2 >> 16), osc_lut);
-            samples[3] = spectral_osc_lut_lookup((uq16_t)(p3 >> 16), osc_lut);
+            samples[0] = spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut);
+            samples[1] = spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut);
+            samples[2] = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
+            samples[3] = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
             
             SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
             
@@ -588,7 +588,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         
         /* Process remaining 0-3 samples */
         for (; j < blk_end; j++) {
-            q15_t sample = spectral_osc_lut_lookup((uq16_t)(phase >> 16), osc_lut);
+            q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
             accum[j] = spectral_mac_q15(accum[j], sample, amp);
             phase += freq_inc;
             amp = spectral_qadd16(amp, d_amp);

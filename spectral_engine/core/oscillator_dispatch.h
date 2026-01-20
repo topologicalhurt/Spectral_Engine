@@ -1,8 +1,38 @@
 #ifndef OSCILLATOR_DISPATCH_H
 #define OSCILLATOR_DISPATCH_H
 
-#include "spectral_config.h"
 #include <stdint.h>
+
+/*
+ * SIMD Backend Detection
+ * 
+ * Selects the appropriate SIMD instruction set based on platform.
+ * Only one OSC_SIMD_* macro will be defined.
+ */
+#if defined(__APPLE__)
+    #define OSC_SIMD_VDSP 1
+    #include <Accelerate/Accelerate.h>
+#elif defined(ARM_MATH_CM4) || defined(ARM_MATH_CM7) || defined(ARM_MATH_ARMV8MML)
+    #define OSC_SIMD_CMSIS 1
+    #include "arm_math.h"
+#elif defined(__AVX2__) || defined(__AVX__)
+    #define OSC_SIMD_AVX 1
+    #include <immintrin.h>
+#elif defined(__SSE4_1__) || defined(__SSE2__)
+    #define OSC_SIMD_SSE 1
+    #include <emmintrin.h>
+    #ifdef __SSE4_1__
+        #include <smmintrin.h>
+    #endif
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    #define OSC_SIMD_NEON 1
+    #include <arm_neon.h>
+#else
+    #define OSC_SIMD_NONE 1
+#endif
+
+/* Forward declaration - full definition in spectral_config.h */
+typedef enum SpectralTimbre SpectralTimbre;
 
 /* Dispatch mode: 2 bits per timbre */
 typedef enum {

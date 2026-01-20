@@ -66,14 +66,6 @@ typedef struct SpectralStreamCtx {
 
 typedef SpectralError SpectralResult;
 
-/* API legacy aliases */
-#ifndef SPECTRAL_ERR_FORMAT
-#define SPECTRAL_ERR_FORMAT   SPECTRAL_ERR_FILE_FORMAT
-#endif
-#ifndef SPECTRAL_ERR_IO
-#define SPECTRAL_ERR_IO       SPECTRAL_ERR_FILE_READ
-#endif
-
 typedef enum SpectralBackend {
     SPECTRAL_BACKEND_AUTO   = 0,
     SPECTRAL_BACKEND_CPU    = 1,

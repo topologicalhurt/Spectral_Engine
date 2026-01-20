@@ -23,7 +23,7 @@ typedef enum {
 } DaisyResult;
 
 typedef struct {
-    SpectralEmbeddedCtx synth;
+    SpectralArm32Ctx synth;
     uint32_t total_memory_used;
 } DaisySpectralCtx;
 
@@ -186,7 +186,7 @@ public:
     
     /* Access underlying contexts */
     DaisySpectralCtx* GetContext() { return &ctx_; }
-    SpectralEmbeddedCtx* GetSynthContext() { return &ctx_.synth; }
+    SpectralArm32Ctx* GetSynthContext() { return &ctx_.synth; }
 
 private:
     DaisySpectralCtx ctx_;

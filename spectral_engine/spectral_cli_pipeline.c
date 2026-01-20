@@ -35,15 +35,13 @@ static void omp_set_num_threads_wrapper(int n) { (void)n; }
 #define HAS_PERF 0
 #endif
 
-#define NORMALIZE_HEADROOM 0.95f
-
 /* Load wavetable from file */
-static PipelineResult load_wavetable(const char* path, SpectralWavetableBank* bank, 
+static PipelineError load_wavetable(const char* path, SpectralWavetableBank* bank, 
                                      SpectralTimbre timbre) {
     spectral_wavetable_init(bank);
     
     size_t len = strlen(path);
-    WavetableResult wt_result;
+    WavetableError wt_result;
     
     if (len > 5 && strcmp(path + len - 5, ".spwt") == 0) {
         printf("Loading wavetable from %s (.spwt format)...\n", path);
@@ -156,7 +154,7 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
     return err;
 }
 
-PipelineResult spectral_pipeline_run(const SpectralCliOptions* opts, 
+PipelineError spectral_pipeline_run(const SpectralCliOptions* opts, 
                                      SpectralTimingResults* timing) {
     if (!opts || !opts->valid) return PIPELINE_ERR_INPUT;
     
@@ -259,7 +257,7 @@ PipelineResult spectral_pipeline_run(const SpectralCliOptions* opts,
     SpectralWavetableBank wt_bank;
     SpectralWavetableBank* wt_bank_ptr = NULL;
     if (opts->use_wavetable && opts->wavetable_path) {
-        PipelineResult wt_result = load_wavetable(opts->wavetable_path, &wt_bank, opts->timbre);
+        PipelineError wt_result = load_wavetable(opts->wavetable_path, &wt_bank, opts->timbre);
         if (wt_result != PIPELINE_OK) {
             free(sa.segs);
             if (mono) free(mono);
@@ -305,7 +303,7 @@ PipelineResult spectral_pipeline_run(const SpectralCliOptions* opts,
     
     /* Normalize */
     double norm_start = spectral_get_time_sec();
-    spectral_normalize_float(out_buf, out_len, NORMALIZE_HEADROOM);
+    spectral_normalize_float(out_buf, out_len, SPECTRAL_NORMALIZE_HEADROOM);
     t.t_norm = spectral_get_time_sec() - norm_start;
     
     /* Write output */

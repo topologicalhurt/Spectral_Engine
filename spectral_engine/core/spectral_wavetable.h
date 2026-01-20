@@ -19,6 +19,7 @@
 #define SPECTRAL_WAVETABLE_H
 
 #include "spectral_config.h"
+#include "spectral_error.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -66,42 +67,30 @@ typedef struct {
     uint8_t default_timbre;
 } SpectralWavetableBank;
 
-typedef enum {
-    WAVETABLE_OK            =  0,
-    WAVETABLE_ERR_PARAM     = -1,
-    WAVETABLE_ERR_FILE      = -2,
-    WAVETABLE_ERR_FORMAT    = -3,
-    WAVETABLE_ERR_SIZE      = -4,
-    WAVETABLE_ERR_FULL      = -5,
-    WAVETABLE_ERR_NOT_FOUND = -6,
-    WAVETABLE_ERR_VERSION   = -7,
-    WAVETABLE_ERR_MEMORY    = -8
-} WavetableResult;
-
 /* Initialization and builtin generation */
 void spectral_wavetable_init(SpectralWavetableBank* bank);
 void spectral_wavetable_generate_builtins(SpectralWavetableBank* bank);
 
 /* Primary file loading - .spwt format with automatic conversion at load time */
-WavetableResult spectral_wavetable_load(SpectralWavetableBank* bank,
+WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id);
 
 /* Save wavetable to .spwt file in current runtime format */
-WavetableResult spectral_wavetable_save(const SpectralWavetableBank* bank,
+WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id);
 
 /* Legacy file loading (deprecated - prefer .spwt format) */
-WavetableResult spectral_wavetable_load_raw(SpectralWavetableBank* bank,
+WavetableError spectral_wavetable_load_raw(SpectralWavetableBank* bank,
                                             const char* filename,
                                             uint8_t timbre_id);
-WavetableResult spectral_wavetable_load_hex(SpectralWavetableBank* bank,
+WavetableError spectral_wavetable_load_hex(SpectralWavetableBank* bank,
                                             const char* filename,
                                             uint8_t timbre_id);
 
 /* Buffer loading - accepts spectral_sample_t array */
-WavetableResult spectral_wavetable_load_buffer(SpectralWavetableBank* bank,
+WavetableError spectral_wavetable_load_buffer(SpectralWavetableBank* bank,
                                                const spectral_sample_t* data,
                                                size_t size,
                                                uint8_t timbre_id);

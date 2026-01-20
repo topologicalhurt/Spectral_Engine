@@ -108,8 +108,6 @@ static const char* metalKernelCode =
 "    }\n"
 "}\n";
 
-#define TILE_SIZE 256
-
 static id<MTLDevice> metalDevice = nil;
 static id<MTLCommandQueue> metalQueue = nil;
 static id<MTLComputePipelineState> metalSynthPipeline = nil;
@@ -186,7 +184,7 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         }
         
         double synth_start = omp_get_wtime();
-        uint32_t num_tiles = ((uint32_t)out_len + TILE_SIZE - 1) / TILE_SIZE;
+        uint32_t num_tiles = ((uint32_t)out_len + SPECTRAL_GPU_TILE_SIZE - 1) / SPECTRAL_GPU_TILE_SIZE;
         int n_threads = omp_get_max_threads();
         
         uint32_t** thread_counts = malloc(n_threads * sizeof(uint32_t*));
@@ -216,8 +214,8 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
                 float start = sa.segs[i].start * stretch;
                 float end = start + sa.segs[i].length * stretch;
                 
-                int start_tile = (int)(start / TILE_SIZE);
-                int end_tile = (int)(end / TILE_SIZE);
+                int start_tile = (int)(start / SPECTRAL_GPU_TILE_SIZE);
+                int end_tile = (int)(end / SPECTRAL_GPU_TILE_SIZE);
                 if (start_tile < 0) start_tile = 0;
                 if (start_tile >= (int)num_tiles) continue;
                 if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
@@ -275,8 +273,8 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             float start = sa.segs[i].start * stretch;
             float end = start + sa.segs[i].length * stretch;
             
-            int start_tile = (int)(start / TILE_SIZE);
-            int end_tile = (int)(end / TILE_SIZE);
+            int start_tile = (int)(start / SPECTRAL_GPU_TILE_SIZE);
+            int end_tile = (int)(end / SPECTRAL_GPU_TILE_SIZE);
             if (start_tile < 0) start_tile = 0;
             if (start_tile >= (int)num_tiles) continue;
             if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
@@ -309,10 +307,10 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             .stretch = stretch,
             .inv_stretch = 1.0f / stretch,
             .inv_stretch_sq = 1.0f / (stretch * stretch),
-            .pitch_factor = powf(2.0f, pitch / 12.0f),
+            .pitch_factor = SPECTRAL_PITCH_FACTOR(pitch),
             .out_len = (uint32_t)out_len,
             .num_segments = sa.count,
-            .tile_size = TILE_SIZE,
+            .tile_size = SPECTRAL_GPU_TILE_SIZE,
             .timbre = (uint32_t)timbre
         };
         

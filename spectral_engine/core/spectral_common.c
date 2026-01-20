@@ -47,20 +47,9 @@ float fast_atan2(float y, float x) {
  * GPU shaders must match the algorithm used here.
  */
 #if SPECTRAL_HAS_FMA && defined(SPECTRAL_USE_FMA)
-/* FMA sine: divide-free polynomial approximation
- * TODO: Replace with submodule implementation
- * Expected interface: x in [-pi, pi], returns sin(x) */
+/* FMA sine: divide-free polynomial approximation */
 float fast_sin(float x) {
-    /* Wrap to [-pi, pi] */
-    x = x - TWO_PI * floorf(x * INV_TWO_PI + 0.5f);
-    float x2 = x * x;
-    /* Placeholder: replace with FMA polynomial from submodule */
-    /* Example 7th-order Taylor (not optimal, just placeholder): */
-    /* sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040 */
-    float x3 = x * x2;
-    float x5 = x3 * x2;
-    float x7 = x5 * x2;
-    return x - x3 * 0.16666667f + x5 * 0.00833333f - x7 * 0.0001984127f;
+    return 0.0; /* TODO FMA implementation */
 }
 #else
 /* Padé [5/4] approximation - single divide, max error ~1e-5 */
@@ -83,7 +72,7 @@ SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t
         .stretch = stretch,
         .inv_stretch = 1.0f / stretch,
         .inv_stretch_sq = 1.0f / (stretch * stretch),
-        .pitch_factor = powf(2.0f, pitch / 12.0f),  /* 2^(semitones/12) */
+        .pitch_factor = SPECTRAL_PITCH_FACTOR(pitch),
         .out_len = (uint32_t)out_len,
         .num_segments = (uint32_t)num_segs
     };

@@ -48,7 +48,31 @@ typedef enum {
 
 } SpectralError;
 
+typedef enum WavetableError {
+    WAVETABLE_OK            =  0,
+    WAVETABLE_ERR_PARAM     = -1,
+    WAVETABLE_ERR_FILE      = -2,
+    WAVETABLE_ERR_FORMAT    = -3,
+    WAVETABLE_ERR_SIZE      = -4,
+    WAVETABLE_ERR_FULL      = -5,
+    WAVETABLE_ERR_NOT_FOUND = -6,
+    WAVETABLE_ERR_VERSION   = -7,
+    WAVETABLE_ERR_MEMORY    = -8
+} WavetableError;
+
+typedef enum PipelineError {
+    PIPELINE_OK             =  0,
+    PIPELINE_ERR_INPUT      = -1,
+    PIPELINE_ERR_ANALYSIS   = -2,
+    PIPELINE_ERR_SYNTHESIS  = -3,
+    PIPELINE_ERR_OUTPUT     = -4,
+    PIPELINE_ERR_WAVETABLE  = -5,
+    PIPELINE_ERR_MEMORY     = -6
+} PipelineError;
+
 const char* spectral_strerror(SpectralError err);
+const char* wavetable_strerror(WavetableError err);
+const char* pipeline_strerror(PipelineError err);
 
 static inline int spectral_is_ok(SpectralError err) { return err == SPECTRAL_OK; }
 static inline int spectral_is_error(SpectralError err) { return err != SPECTRAL_OK; }

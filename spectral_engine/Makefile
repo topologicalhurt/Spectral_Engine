@@ -84,16 +84,16 @@ BIN_DIR := ../bin
 OBJ_DIR           := $(BIN_DIR)/obj_$(ARCH)_$(GPU_BACKEND)_desktop
 OBJ_EMU_DIR       := $(BIN_DIR)/obj_$(ARCH)_native_emulator
 OBJ_EMU_DAISY_DIR := $(BIN_DIR)/obj_$(ARCH)_native_emulator_daisy
-OBJ_EMBEDDED_ARM_DIR       := $(BIN_DIR)/obj_embedded_arm
-OBJ_EMBEDDED_ARM_FLOAT_DIR := $(BIN_DIR)/obj_embedded_arm_float
-OBJ_EMBEDDED_ARM_RES_DIR   := $(BIN_DIR)/obj_embedded_arm_restricted
+OBJ_EMBEDDED_ARM_FLOAT_DIR := $(BIN_DIR)/obj_embedded_arm32_float
+OBJ_EMBEDDED_ARM_DIR       := $(BIN_DIR)/obj_embedded_arm32
+OBJ_EMBEDDED_ARM_RES_DIR   := $(BIN_DIR)/obj_embedded_arm32_restricted
 
 TARGET_DESKTOP              := spectral_$(ARCH)_$(GPU_BACKEND)_desktop
 TARGET_EMULATOR             := spectral_$(ARCH)_native_emulator
 TARGET_EMULATOR_DAISY       := spectral_$(ARCH)_native_emulator_daisy
-TARGET_EMBEDDED_ARM         := spectral_embedded_arm
-TARGET_EMBEDDED_ARM_FLOAT   := spectral_embedded_arm_float
-TARGET_EMBEDDED_ARM_RES     := spectral_embedded_arm_restricted
+TARGET_EMBEDDED_ARM         := spectral_embedded_arm32
+TARGET_EMBEDDED_ARM_FLOAT   := spectral_embedded_arm32_float
+TARGET_EMBEDDED_ARM_RES     := spectral_embedded_arm32_restricted
 TARGET_CUDA           := spectral_$(ARCH)_cuda_standalone
 
 # 
@@ -762,10 +762,12 @@ endif
 #                            OUT OF SOURCE BUILDS
 # 
 
-SUBTREES_TO_MAKE := ../subtrees/LLAC/Src/Allocator/Core/libs/
 
-build_subtrees: 
-	${foreach subtree, $(SUBTREES_TO_MAKE), $(MAKE) -C $(subtree);}
+# TODO
+# SUBTREES_TO_MAKE := ../subtrees/LLAC/Src/Allocator/Core/libs/
+
+# build_subtrees: 
+# 	${foreach subtree, $(SUBTREES_TO_MAKE), $(MAKE) -C $(subtree);}
 
 # 
 #                              PHONY TARGETS

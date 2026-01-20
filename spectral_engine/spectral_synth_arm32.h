@@ -57,9 +57,6 @@ typedef struct SpectralArm32Ctx {
     q15_t stretch_q214;
 } SpectralArm32Ctx;
 
-/* Backwards compatibility typedef */
-typedef SpectralArm32Ctx SpectralEmbeddedCtx;
-
 void spectral_arm32_init(SpectralArm32Ctx* ctx,
                          SpectralSegmentQ15* segments,
                          uint32_t capacity,
@@ -102,21 +99,6 @@ static inline uint16_t spectral_arm32_get_peak_active(const SpectralArm32Ctx* ct
 void spectral_arm32_set_amplitude(SpectralArm32Ctx* ctx, float amplitude);
 void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch);
 
-/* Backwards compatibility macros */
-#define spectral_embedded_init              spectral_arm32_init
-#define spectral_embedded_reset             spectral_arm32_reset
-#define spectral_embedded_seek              spectral_arm32_seek
-#define spectral_embedded_load              spectral_arm32_load
-#define spectral_embedded_process           spectral_arm32_process
-#define spectral_embedded_process_interleaved spectral_arm32_process_interleaved
-#define spectral_embedded_is_complete       spectral_arm32_is_complete
-#define spectral_embedded_get_position      spectral_arm32_get_position
-#define spectral_embedded_get_duration      spectral_arm32_get_duration
-#define spectral_embedded_get_peak_active   spectral_arm32_get_peak_active
-#define spectral_embedded_set_amplitude     spectral_arm32_set_amplitude
-#define spectral_embedded_set_stretch       spectral_arm32_set_stretch
-#define SPECTRAL_EMBEDDED_MAX_ACTIVE        SPECTRAL_ARM32_MAX_ACTIVE
-
 #if defined(SPECTRAL_RESTRICTED_MODE) && defined(SPECTRAL_DEBUG_RESTRICTED)
 void arm32_synth_profile_start(void);
 uint32_t arm32_synth_profile_end(void);
@@ -129,18 +111,6 @@ uint32_t arm32_synth_get_avg_cycles(void);
 uint32_t arm32_synth_get_min_cycles(void);
 uint32_t arm32_synth_get_max_cycles(void);
 uint32_t arm32_synth_get_samples_processed(void);
-
-/* Backwards compatibility */
-#define restricted_synth_profile_start      arm32_synth_profile_start
-#define restricted_synth_profile_end        arm32_synth_profile_end
-#define restricted_synth_get_peak_cycles    arm32_synth_get_peak_cycles
-#define restricted_synth_reset_profile      arm32_synth_reset_profile
-#define restricted_synth_get_total_cycles   arm32_synth_get_total_cycles
-#define restricted_synth_get_call_count     arm32_synth_get_call_count
-#define restricted_synth_get_avg_cycles     arm32_synth_get_avg_cycles
-#define restricted_synth_get_min_cycles     arm32_synth_get_min_cycles
-#define restricted_synth_get_max_cycles     arm32_synth_get_max_cycles
-#define restricted_synth_get_samples_processed arm32_synth_get_samples_processed
 #endif
 
 #endif /* SPECTRAL_EMBEDDED */
@@ -157,8 +127,6 @@ void emulator_set_verbose(int verbose);
 SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
                                     float stretch, float pitch, SpectralTimbre timbre,
                                     int n_threads, double* t_synth);
-
-#define synth_embedded_emulation synth_arm32_emulation
 
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
 #define synth_cpu synth_arm32_emulation

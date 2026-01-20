@@ -1,5 +1,6 @@
 /* spectral_error.c - Error code string conversion */
 #include "spectral_error.h"
+#include "spectral_wavetable.h"
 
 const char* spectral_strerror(SpectralError err)
 {
@@ -30,6 +31,39 @@ const char* spectral_strerror(SpectralError err)
         case SPECTRAL_ERR_PROTO_CMD:       return "invalid command";
         case SPECTRAL_ERR_PROTO_OVERFLOW:  return "protocol overflow";
         case SPECTRAL_ERR_PROTO_TIMEOUT:   return "protocol timeout";
+        case SPECTRAL_ERR_EMU_UNAVAIL:     return "emulator unavailable";
+        case SPECTRAL_ERR_EMU_SEG_FAIL:    return "emulator segment failed";
+        case SPECTRAL_ERR_EMU_ACCUM_FAIL:  return "emulator accumulator failed";
         default:                           return "unknown error";
+    }
+}
+
+const char* wavetable_strerror(WavetableError err)
+{
+    switch (err) {
+        case WAVETABLE_OK:            return "OK";
+        case WAVETABLE_ERR_PARAM:     return "invalid parameter";
+        case WAVETABLE_ERR_FILE:      return "file open failed";
+        case WAVETABLE_ERR_FORMAT:    return "invalid format";
+        case WAVETABLE_ERR_SIZE:      return "size mismatch";
+        case WAVETABLE_ERR_FULL:      return "wavetable bank full";
+        case WAVETABLE_ERR_NOT_FOUND: return "wavetable not found";
+        case WAVETABLE_ERR_VERSION:   return "unsupported version";
+        case WAVETABLE_ERR_MEMORY:    return "memory allocation failed";
+        default:                      return "unknown wavetable error";
+    }
+}
+
+const char* pipeline_strerror(PipelineError err)
+{
+    switch (err) {
+        case PIPELINE_OK:            return "OK";
+        case PIPELINE_ERR_INPUT:     return "input error";
+        case PIPELINE_ERR_ANALYSIS:  return "analysis failed";
+        case PIPELINE_ERR_SYNTHESIS: return "synthesis failed";
+        case PIPELINE_ERR_OUTPUT:    return "output error";
+        case PIPELINE_ERR_WAVETABLE: return "wavetable error";
+        case PIPELINE_ERR_MEMORY:    return "memory allocation failed";
+        default:                     return "unknown pipeline error";
     }
 }
