@@ -7,6 +7,9 @@
 
 #include "spectral_common.h"
 
+/* Segment pool is desktop/analysis-only (uses malloc) */
+#if !SPECTRAL_EMBEDDED
+
 #define SEGMENT_POOL_BLOCK_SIZE 4096
 
 typedef struct SegmentPool {
@@ -17,10 +20,12 @@ typedef struct SegmentPool {
     uint32_t block_size;
 } SegmentPool;
 
-int segment_pool_init(SegmentPool* pool, uint32_t expected_count);
-int segment_pool_push(SegmentPool* pool, const Segment* seg);
+SpectralError segment_pool_init(SegmentPool* pool, uint32_t expected_count);
+SpectralError segment_pool_push(SegmentPool* pool, const Segment* seg);
 SegmentArray segment_pool_to_array(SegmentPool* pool);
 void segment_pool_destroy(SegmentPool* pool);
 void segment_pool_reset(SegmentPool* pool);
+
+#endif /* !SPECTRAL_EMBEDDED */
 
 #endif

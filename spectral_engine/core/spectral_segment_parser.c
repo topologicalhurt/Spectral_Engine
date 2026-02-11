@@ -1,12 +1,17 @@
 /* spectral_segment_parser.c - Segment File I/O Implementation
- * 
+ *
  * Binary segment file operations for saving and loading analyzed audio.
  * See spectral_segment_parser.h for file format documentation.
- * 
+ *
  * Endianness: Files are always stored in little-endian format.
  * On big-endian hosts, byte-swapping is performed during load/save.
+ *
+ * Desktop/emulator only — bare-metal embedded loads segments from flash/SDRAM.
  */
 #include "spectral_segment_parser.h"
+
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,7 +114,6 @@ SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, fl
         .reserved = 0
     };
     
-    /* Convert header to little-endian for file storage */
     header_to_le(&hdr);
     
     if (fwrite(&hdr, sizeof(hdr), 1, f) != 1) { fclose(f); return SPECTRAL_ERR_FILE_WRITE; }
@@ -209,3 +213,5 @@ SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, flo
     fclose(f);
     return SPECTRAL_OK;
 }
+
+#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR */

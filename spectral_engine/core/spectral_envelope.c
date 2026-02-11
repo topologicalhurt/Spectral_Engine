@@ -1,13 +1,19 @@
 #include "spectral_envelope.h"
 #include "spectral_common.h"
 #include "oscillator.h"
+#include <assert.h>
 
 FadeParams fade_params_init(size_t segment_len, size_t max_fade) {
     FadeParams fp;
     
+    if (segment_len < 2) {
+        fp.fade_len = 1;
+        fp.fade_out_start = 0;
+        fp.inv_fade = 1.0f;
+        return fp;
+    }
+    
     size_t fade_len = (segment_len >> 2) < max_fade ? (segment_len >> 2) : max_fade;
-    if (fade_len < 1) fade_len = 1;
-    if (fade_len > segment_len / 2) fade_len = segment_len / 2;
     if (fade_len < 1) fade_len = 1;
     
     fp.fade_len = fade_len;
@@ -22,6 +28,7 @@ float fade_envelope_in(size_t j, float inv_fade) {
 }
 
 float fade_envelope_out(size_t j, size_t len, float inv_fade) {
+    assert(j < len);
     return 0.5f * (1.0f - fast_sin(((float)(len - 1 - j) * inv_fade - 0.5f) * SPECTRAL_PI));
 }
 

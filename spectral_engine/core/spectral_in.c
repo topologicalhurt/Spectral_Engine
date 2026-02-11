@@ -48,20 +48,21 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         return SPECTRAL_ERR_FILE_READ;
     }
     
-    /* Convert to mono by taking first channel */
     float* mono = malloc((size_t)sfinfo.frames * sizeof(float));
     if (!mono) {
         free(audio);
         return SPECTRAL_ERR_MEMORY;
     }
-    
+
     if (sfinfo.channels == 1) {
-        /* Already mono - just copy */
         memcpy(mono, audio, (size_t)sfinfo.frames * sizeof(float));
     } else {
-        /* Extract first channel from interleaved data */
+        float inv_ch = 1.0f / (float)sfinfo.channels;
         for (sf_count_t i = 0; i < sfinfo.frames; i++) {
-            mono[i] = audio[i * sfinfo.channels];
+            float sum = 0.0f;
+            for (int ch = 0; ch < sfinfo.channels; ch++)
+                sum += audio[i * sfinfo.channels + ch];
+            mono[i] = sum * inv_ch;
         }
     }
     

@@ -428,23 +428,16 @@ int spectral_wavetable_has_timbre(const SpectralWavetableBank* bank,
     return bank->tables[timbre_id].valid;
 }
 
-/* Wavetable lookup - hot path, force inlined */
-
-SPECTRAL_FORCEINLINE
 spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
                                               float phase_norm) {
     phase_norm = phase_norm - (float)(int)phase_norm;
     if (phase_norm < 0.0f) phase_norm += 1.0f;
-    
     float idx_f = phase_norm * (float)SPECTRAL_WAVETABLE_SIZE;
     uint32_t idx = (uint32_t)idx_f;
     float frac = idx_f - (float)idx;
-    
     if (idx >= SPECTRAL_WAVETABLE_SIZE) idx = 0;
-    
     spectral_sample_t s0 = table->samples[idx];
     spectral_sample_t s1 = table->samples[idx + 1];
-    
 #if SPECTRAL_EMBEDDED
     int32_t frac_q8 = (int32_t)(frac * 256.0f);
     return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * frac_q8) >> 8));
@@ -453,17 +446,14 @@ spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
 #endif
 }
 
-SPECTRAL_FORCEINLINE
 spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
                                               uint16_t phase_u16) {
     uint32_t idx = phase_u16 >> (16 - SPECTRAL_WAVETABLE_BITS);
     uint32_t frac_bits = 16 - SPECTRAL_WAVETABLE_BITS;
     uint32_t frac = (phase_u16 & ((1u << frac_bits) - 1)) >> (frac_bits > 8 ? frac_bits - 8 : 0);
     if (frac_bits < 8) frac <<= (8 - frac_bits);
-    
     spectral_sample_t s0 = table->samples[idx];
     spectral_sample_t s1 = table->samples[idx + 1];
-    
 #if SPECTRAL_EMBEDDED
     return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * (int32_t)frac) >> 8));
 #else
@@ -472,24 +462,23 @@ spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
 #endif
 }
 
-SPECTRAL_FORCEINLINE
 spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      float phase_norm) {
-    const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES && 
+    const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES &&
                                       bank->tables[timbre_id].valid)
         ? &bank->tables[timbre_id]
         : &bank->tables[bank->default_timbre];
     return spectral_wavetable_lookup_f(table, phase_norm);
 }
 
-SPECTRAL_FORCEINLINE
 spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      uint16_t phase_u16) {
-    const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES && 
+    const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES &&
                                       bank->tables[timbre_id].valid)
         ? &bank->tables[timbre_id]
         : &bank->tables[bank->default_timbre];
     return spectral_wavetable_lookup_q(table, phase_u16);
 }
+
