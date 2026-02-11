@@ -11,6 +11,28 @@
 #define SPECTRAL_PI_SQ          9.8696044f
 #define SPECTRAL_INV_PI_SQ      0.10132118364233778f
 
+/* IEEE-754 exact float values for atan2/trig fast paths */
+#define SPECTRAL_HALF_PI        1.57079637f
+#define SPECTRAL_PI_F           3.14159274f
+
+/* Pade [5/4] sine coefficients -- GPU shaders MUST use these same values */
+#define SPECTRAL_PADE_SIN_C1    0.16605f
+#define SPECTRAL_PADE_SIN_C2    0.00761f
+#define SPECTRAL_PADE_SIN_C3    0.00766f
+
+/* Polynomial atan2 coefficients */
+#define SPECTRAL_ATAN2_A0       (-0.0464964749f)
+#define SPECTRAL_ATAN2_A1       0.15931422f
+#define SPECTRAL_ATAN2_A2       (-0.327622764f)
+#define SPECTRAL_ATAN2_EPS      1e-10f
+
+/* Q30 scale (2^30) for Q15*Q15 accumulator conversion */
+#define SPECTRAL_Q30_SCALE      1073741824.0
+#define SPECTRAL_INV_Q30_SCALE  (1.0 / SPECTRAL_Q30_SCALE)
+
+/* LUT amplitude scale */
+#define SPECTRAL_LUT_AMP_SCALE  32700.0f
+
 /* Q15/Q31 conversion constants */
 #define SPECTRAL_Q15_SCALE      32768.0f
 #define SPECTRAL_INV_Q15_SCALE  3.0517578125e-5f

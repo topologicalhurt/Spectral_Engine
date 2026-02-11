@@ -16,13 +16,10 @@
 #include <stdio.h>
 #include "spectral_cli.h"
 #include "spectral_cli_pipeline.h"
+#include "spectral_synth.h"
 
 /* Emulator mode detection */
-#if defined(SPECTRAL_EMBEDDED_EMULATION) || defined(SPECTRAL_USE_EMBEDDED_SYNTH)
-#define IS_EMULATOR 1
-#else
-#define IS_EMULATOR 0
-#endif
+#define IS_EMULATOR SPECTRAL_IS_EMULATOR
 
 int main(int argc, char** argv) {
 #if IS_EMULATOR
@@ -50,11 +47,20 @@ int main(int argc, char** argv) {
     SpectralTimingResults timing;
     PipelineError result = spectral_pipeline_run(&opts, &timing);
     
+    /* Release cached resources */
+    synth_cpu_cleanup();
+#if HAS_METAL
+    metal_cleanup();
+#endif
+#if HAS_CUDA
+    cuda_cleanup();
+#endif
+
     if (result != PIPELINE_OK) {
         printf("Error: Pipeline failed (code %d)\n", result);
         return (int)result;
     }
-    
+
     printf("\nDone.\n");
     return 0;
 }

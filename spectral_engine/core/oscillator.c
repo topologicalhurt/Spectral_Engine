@@ -15,7 +15,7 @@ OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 
 static inline float osc_sine(float rads, float width) {
     (void)width;
-    return fast_sin(rads + PI);
+    return fast_sin(rads);
 }
 
 static inline float osc_saw(float rads, float width) {
@@ -30,7 +30,7 @@ static inline float osc_square(float rads, float width) {
 
 static inline float osc_triangle(float rads, float width) {
     (void)width;
-    return (1.0f - fabsf(rads) * SPECTRAL_TWO_INV_PI) * 2.0f - 1.0f;
+    return (1.0f - fabsf(rads) * SPECTRAL_INV_PI) * 2.0f - 1.0f;
 }
 
 static inline float osc_asin(float rads, float width) {
@@ -81,20 +81,37 @@ float timbre_oscillator(float p, float a, SpectralTimbre timbre, float width) {
     return a * timbre_table[idx](rads, width);
 }
 
-static inline float compute_phase(float phase0, float alpha, float beta, size_t j) {
-    float jf = (float)j;
-    return phase0 + jf * (alpha + beta * jf);
-}
-
 static void synth_segment_scalar(
     float* dst, size_t len, float phase0, float alpha, float beta,
     float amp0, float d_amp, float width, const FadeParams* fp, TimbreFunc osc_fn
 ) {
-    for (size_t j = 0; j < len; j++) {
+    size_t fade_in_end = fp->fade_len;
+    size_t fade_out_start = fp->fade_out_start;
+
+    /* Fade-in region */
+    for (size_t j = 0; j < fade_in_end && j < len; j++) {
         float p = compute_phase(phase0, alpha, beta, j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, fp, len);
+        float amp = (amp0 + d_amp * (float)j) * fade_envelope_in(j, fp->inv_fade);
+        dst[j] += amp * wave;
+    }
+
+    /* Sustain region (envelope = 1.0, no branching) */
+    for (size_t j = fade_in_end; j < fade_out_start && j < len; j++) {
+        float p = compute_phase(phase0, alpha, beta, j);
+        float rads = phase_to_rads(p);
+        float wave = osc_fn(rads, width);
+        float amp = amp0 + d_amp * (float)j;
+        dst[j] += amp * wave;
+    }
+
+    /* Fade-out region */
+    for (size_t j = (fade_out_start > fade_in_end ? fade_out_start : fade_in_end); j < len; j++) {
+        float p = compute_phase(phase0, alpha, beta, j);
+        float rads = phase_to_rads(p);
+        float wave = osc_fn(rads, width);
+        float amp = (amp0 + d_amp * (float)j) * fade_envelope_out(j, len, fp->inv_fade);
         dst[j] += amp * wave;
     }
 }
@@ -116,11 +133,13 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
     
     if (mode == OSC_MODE_CPU_SIMD && osc_simd_available(timbre)) {
         switch (timbre) {
-        case TIMBRE_SINE:     osc_simd_segment_sine(dst, lp);     return;
-        case TIMBRE_SAW:      osc_simd_segment_saw(dst, lp);      return;
-        case TIMBRE_SQUARE:   osc_simd_segment_square(dst, lp);   return;
-        case TIMBRE_TRIANGLE: osc_simd_segment_triangle(dst, lp); return;
-        case TIMBRE_PARABOLA: osc_simd_segment_parabola(dst, lp); return;
+        case TIMBRE_SINE:      osc_simd_segment_sine(dst, lp);      return;
+        case TIMBRE_SAW:       osc_simd_segment_saw(dst, lp);       return;
+        case TIMBRE_SQUARE:    osc_simd_segment_square(dst, lp);    return;
+        case TIMBRE_TRIANGLE:  osc_simd_segment_triangle(dst, lp);  return;
+        case TIMBRE_PARABOLA:  osc_simd_segment_parabola(dst, lp);  return;
+        case TIMBRE_QUANTIZED: osc_simd_segment_quantized(dst, lp); return;
+        case TIMBRE_PWM:       osc_simd_segment_pwm(dst, lp);       return;
         default: break;
         }
     }
@@ -152,8 +171,8 @@ const char* oscillator_metal_source =
 "inline float oscillator_fast_sin(float x) {\n"
 "    x = x - TWO_PI * floor(x * INV_TWO_PI + 0.5f);\n"
 "    float x2 = x * x;\n"
-"    float num = x * (1.0f - x2 * (0.16605f - x2 * 0.00761f));\n"
-"    float den = 1.0f + x2 * 0.00766f;\n"
+"    float num = x * (1.0f - x2 * (" SPECTRAL_STR(SPECTRAL_PADE_SIN_C1) " - x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C2) "));\n"
+"    float den = 1.0f + x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C3) ";\n"
 "    return num / den;\n"
 "}\n"
 "\n"
@@ -165,12 +184,12 @@ const char* oscillator_metal_source =
 "inline float oscillator(float phase, uint timbre) {\n"
 "    float rads = oscillator_normalize_phase(phase);\n"
 "    switch (timbre) {\n"
-"        case TIMBRE_SINE:     return oscillator_fast_sin(phase);\n"
+"        case TIMBRE_SINE:     return oscillator_fast_sin(rads);\n"
 "        case TIMBRE_SAW:      return rads * -INV_PI;\n"
 "        case TIMBRE_SQUARE:   return (rads > 0.0f) ? 1.0f : -1.0f;\n"
-"        case TIMBRE_TRIANGLE: return (1.0f - abs(rads) * TWO_INV_PI) * 2.0f - 1.0f;\n"
+"        case TIMBRE_TRIANGLE: return (1.0f - abs(rads) * INV_PI) * 2.0f - 1.0f;\n"
 "        case TIMBRE_PARABOLA: return 1.0f - rads * rads * INV_PI_SQ;\n"
-"        default:              return oscillator_fast_sin(phase);\n"
+"        default:              return oscillator_fast_sin(rads);\n"
 "    }\n"
 "}\n";
 

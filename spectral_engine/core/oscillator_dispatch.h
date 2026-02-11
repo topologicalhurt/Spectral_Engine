@@ -3,32 +3,17 @@
 
 #include <stdint.h>
 
-/*
- * SIMD Backend Detection
- * 
- * Selects the appropriate SIMD instruction set based on platform.
- * Only one OSC_SIMD_* macro will be defined.
- */
-#if defined(__APPLE__)
-    #define OSC_SIMD_VDSP 1
-    #include <Accelerate/Accelerate.h>
-#elif defined(ARM_MATH_CM4) || defined(ARM_MATH_CM7) || defined(ARM_MATH_ARMV8MML)
+/* SIMD backend: CMSIS on ARM embedded, SIMDe SSE on desktop (maps to NEON/SSE/scalar) */
+#if defined(ARM_MATH_CM4) || defined(ARM_MATH_CM7) || defined(ARM_MATH_ARMV8MML)
     #define OSC_SIMD_CMSIS 1
     #include "arm_math.h"
-#elif defined(__AVX2__) || defined(__AVX__)
-    #define OSC_SIMD_AVX 1
-    #include <immintrin.h>
-#elif defined(__SSE4_1__) || defined(__SSE2__)
-    #define OSC_SIMD_SSE 1
-    #include <emmintrin.h>
-    #ifdef __SSE4_1__
-        #include <smmintrin.h>
-    #endif
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-    #define OSC_SIMD_NEON 1
-    #include <arm_neon.h>
 #else
-    #define OSC_SIMD_NONE 1
+    #define OSC_SIMD_GENERIC 1
+    /* SIMDe: write SSE2 intrinsics, compiles to native NEON/SSE/scalar */
+    #include "simde/x86/sse2.h"
+    #ifdef __AVX2__
+        #include "simde/x86/avx2.h"
+    #endif
 #endif
 
 /* Forward declaration - full definition in spectral_config.h */
@@ -71,14 +56,12 @@ typedef union {
 #define OSC_DISPATCH_ALL_FALLBACK ((OscDispatchWord){ .word = 0xFFFF })
 
 /* SIMD vector width (floats per vector register) */
-#if defined(OSC_SIMD_AVX)
-    #define OSC_SIMD_WIDTH 8
-#elif defined(OSC_SIMD_SSE) || defined(OSC_SIMD_NEON) || defined(OSC_SIMD_VDSP)
-    #define OSC_SIMD_WIDTH 4
-#elif defined(OSC_SIMD_CMSIS)
+#if defined(OSC_SIMD_CMSIS)
     #define OSC_SIMD_WIDTH 4  /* Cortex-M4/M7 with FPU */
+#elif defined(__AVX2__) || defined(__AVX__)
+    #define OSC_SIMD_WIDTH 8
 #else
-    #define OSC_SIMD_WIDTH 1
+    #define OSC_SIMD_WIDTH 4  /* SSE2/NEON via SIMDe */
 #endif
 
 /* Forward declarations */
@@ -90,11 +73,14 @@ void osc_simd_segment_saw(float* dst, const struct SegmentLoopParams* lp);
 void osc_simd_segment_square(float* dst, const struct SegmentLoopParams* lp);
 void osc_simd_segment_triangle(float* dst, const struct SegmentLoopParams* lp);
 void osc_simd_segment_parabola(float* dst, const struct SegmentLoopParams* lp);
+void osc_simd_segment_quantized(float* dst, const struct SegmentLoopParams* lp);
+void osc_simd_segment_pwm(float* dst, const struct SegmentLoopParams* lp);
 
 /* Query if SIMD is available for a timbre (some timbres may not have SIMD paths) */
 int osc_simd_available(SpectralTimbre timbre);
 
-/* Query if native backend is available */
+/* Native backend availability */
 int osc_native_available(void);
+void osc_set_native_available(int available);
 
 #endif /* OSCILLATOR_DISPATCH_H */

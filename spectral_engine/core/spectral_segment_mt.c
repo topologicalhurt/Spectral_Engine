@@ -1,5 +1,7 @@
 /* spectral_segment_mt.c - Thread-safe segment array */
 #include "spectral_segment_mt.h"
+#include <stdlib.h>
+#include <string.h>
 
 #if !SPECTRAL_EMBEDDED
 

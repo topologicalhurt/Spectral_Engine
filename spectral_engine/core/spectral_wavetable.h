@@ -102,17 +102,6 @@ int spectral_wavetable_has_timbre(const SpectralWavetableBank* bank,
                                   uint8_t timbre_id);
 
 /* Wavetable lookup - float phase (0.0-1.0) or fixed phase (0-65535) */
-
-#ifndef SPECTRAL_FORCEINLINE
-  #if defined(__GNUC__) || defined(__clang__)
-    #define SPECTRAL_FORCEINLINE __attribute__((always_inline)) inline
-  #elif defined(_MSC_VER)
-    #define SPECTRAL_FORCEINLINE __forceinline
-  #else
-    #define SPECTRAL_FORCEINLINE inline
-  #endif
-#endif
-
 spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
                                               float phase_norm);
 spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
@@ -120,7 +109,6 @@ spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
 spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      float phase_norm);
-
 spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      uint16_t phase_u16);

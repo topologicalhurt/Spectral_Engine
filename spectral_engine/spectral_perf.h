@@ -80,10 +80,14 @@ typedef struct {
     double   cycles_per_sample;
     double   cycles_available;
     double   cpu_load_percent;
+    double   cpu_load_best;        /* optimistic: good cache + compiler opts */
+    double   cpu_load_worst;       /* pessimistic: peak block or +30% overhead */
     double   realtime_ratio;
     size_t   segment_count;
     uint32_t peak_active;
     size_t   output_samples;
+    uint64_t peak_block_cycles;    /* cycles for worst-case block */
+    uint32_t peak_block_active;    /* active count in worst-case block */
 } EmbeddedPerfEstimate;
 
 /*
@@ -133,6 +137,14 @@ typedef struct {
 #define EMBEDDED_CYCLES_AMP_UPDATE      1   /* 16-bit ADD */
 #define EMBEDDED_CYCLES_LOOP_OVERHEAD   4   /* Branch, counter update, pipeline */
 
+/* SDRAM latency and cache miss modeling
+ * SDRAM access is 6-10 cycles depending on row hit/miss.
+ * L1 cache miss to SDRAM adds ~4 cycles when working set exceeds cache. */
+#define EMBEDDED_CYCLES_SDRAM_ACCESS       10  /* per segment activation */
+#define EMBEDDED_CYCLES_CACHE_MISS         4   /* per active seg when > 32 active */
+#define EMBEDDED_CACHE_MISS_THRESHOLD      32
+#define EMBEDDED_CYCLES_SEG_SCAN           5   /* per segment checked during scan */
+
 /* Per-sample cost for one active segment */
 #define EMBEDDED_CYCLES_PER_SAMPLE  (EMBEDDED_CYCLES_PHASE_UPDATE + \
                                      EMBEDDED_CYCLES_LUT_LOOKUP +   \
@@ -148,6 +160,11 @@ typedef struct {
     uint64_t mac_operations;
     uint64_t phase_updates;
     uint64_t loop_iterations;
+    uint64_t sdram_accesses;       /* segment activations requiring SDRAM read */
+    uint64_t cache_misses_est;     /* estimated L1 cache misses */
+    uint64_t seg_scan_checks;      /* total segment scan iterations */
+    uint32_t peak_block_active;    /* worst-case active count in any block */
+    uint64_t peak_block_cycles;    /* cycles for worst-case block */
 } EmbeddedOpCounts;
 
 /* Embedded memory usage (exact calculation from data structures) */

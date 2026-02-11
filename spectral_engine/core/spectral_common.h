@@ -2,9 +2,8 @@
 #ifndef SPECTRAL_COMMON_H
 #define SPECTRAL_COMMON_H
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <math.h>
 #include <string.h>
 
@@ -13,24 +12,7 @@
 /* Convert semitones to pitch multiplier: 2^(semitones/12) */
 #define SPECTRAL_PITCH_FACTOR(semitones) powf(2.0f, (semitones) / 12.0f)
 
-/* Synthesis output cleanup on error */
-static inline void synth_fail_cleanup(float* buf, size_t len, double* t_synth) {
-    if (buf) memset(buf, 0, len * sizeof(float));
-    if (t_synth) *t_synth = 0.0;
-}
-
-/* 64-byte segment (desktop) - cache-line aligned
- * 
- * Fields:
- *   start  - Start sample index (pre-stretch)
- *   length - Duration in samples (pre-stretch)
- *   phase  - Initial phase in radians
- *   omega  - Angular frequency (radians per sample, pre-pitch/stretch)
- *   df     - Frequency delta per sample (chirp rate)
- *   amp    - Amplitude [0, 1]
- *   da     - Amplitude delta per sample
- *   width  - Timbre-specific parameter (PWM duty, quantization level)
- */
+/* 64-byte segment (desktop) - cache-line aligned */
 typedef struct __attribute__((aligned(64))) {
     float start, length, phase, omega, df, amp, da;
     union {
@@ -78,10 +60,9 @@ typedef struct {
 
 #ifndef __CUDACC__
 void* spectral_aligned_alloc(size_t size);
-float fast_atan2(float y, float x);
-float phase_to_rads(float p);
-SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs);
 #endif
+
+#include "spectral_fast_math.h"
 
 #if !SPECTRAL_NO_PERF
 #include "spectral_perf.h"

@@ -1,5 +1,9 @@
 /* spectral_segment_pool.c - Block-allocated segment storage */
 #include "spectral_segment_pool.h"
+
+/* Segment pool is desktop/analysis-only */
+#if !SPECTRAL_EMBEDDED
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -82,3 +86,5 @@ void segment_pool_destroy(SegmentPool* pool) {
 void segment_pool_reset(SegmentPool* pool) {
     if (pool) pool->count = 0;
 }
+
+#endif /* !SPECTRAL_EMBEDDED */

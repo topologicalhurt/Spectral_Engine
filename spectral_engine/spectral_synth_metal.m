@@ -19,6 +19,7 @@ static const char* metalKernelStructs =
 "#include <metal_stdlib>\n"
 "using namespace metal;\n"
 "\n"
+/* NOTE: Must match Segment layout in spectral_common.h (no compile-time check possible) */
 "struct Segment {\n"
 "    float start;\n"
 "    float length;\n"
@@ -49,8 +50,8 @@ static const char* metalKernelStructs =
 "\n";
 
 static const char* metalKernelCode = 
-"#define THREADS_PER_TILE 512\n"
-"#define SEGMENT_CACHE_SIZE 128\n"
+"#define THREADS_PER_TILE " SPECTRAL_STR(SPECTRAL_GPU_TILE_SIZE) "\n"
+"#define SEGMENT_CACHE_SIZE " SPECTRAL_STR(SPECTRAL_METAL_SEG_CACHE_SIZE) "\n"
 "\n"
 "kernel void synthesize_tile_parallel(\n"
 "    device const Segment* segments [[buffer(0)]],\n"
@@ -62,7 +63,6 @@ static const char* metalKernelCode =
 "    uint tid [[thread_index_in_threadgroup]]\n"
 ") {\n"
 "    threadgroup Segment seg_cache[SEGMENT_CACHE_SIZE];\n"
-"    threadgroup float tile_output[THREADS_PER_TILE];\n"
 "    \n"
 "    TileRange range = tile_ranges[tile_idx];\n"
 "    uint sample_idx = tile_idx * params.tile_size + tid;\n"
@@ -114,10 +114,12 @@ static id<MTLComputePipelineState> metalSynthPipeline = nil;
 static bool metalInitialized = false;
 static bool metalIsAvailable = false;
 
-typedef struct {
-    uint32_t start;
-    uint32_t count;
-} TileRange;
+/* Persistent buffer cache — avoids per-call VM page allocation */
+static id<MTLBuffer> s_segmentBuffer = nil;
+static id<MTLBuffer> s_tileIdsBuffer = nil;
+static id<MTLBuffer> s_tileRangesBuffer = nil;
+static id<MTLBuffer> s_outputBuffer = nil;
+static size_t s_segBufCap = 0, s_tileIdsCap = 0, s_tileRangesCap = 0, s_outputCap = 0;
 
 void metal_init(void) {
     if (metalInitialized) return;
@@ -143,6 +145,7 @@ void metal_init(void) {
         NSError* error = nil;
         MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
         options.fastMathEnabled = YES;
+        options.languageVersion = MTLLanguageVersion2_4;
         
         /* Combine shader sources: structs + oscillator (from oscillator.c) + kernel */
         NSString* source = [NSString stringWithFormat:@"%s%s%s", 
@@ -170,130 +173,38 @@ int metal_available(void) {
     return metalIsAvailable ? 1 : 0;
 }
 
-void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
-                 float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
+SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
+                          float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
     @autoreleasepool {
         /* Shared input validation */
         if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
-            return;
+            return SPECTRAL_OK;
         }
-        
+
         /* Check timbre support - fall back to CPU for unsupported timbres */
         if (!gpu_check_timbre_or_fallback("Metal", sa, out_buffer, out_len, stretch, pitch, timbre, t_synth)) {
-            return;
+            return SPECTRAL_OK;
         }
         
         double synth_start = omp_get_wtime();
-        uint32_t num_tiles = ((uint32_t)out_len + SPECTRAL_GPU_TILE_SIZE - 1) / SPECTRAL_GPU_TILE_SIZE;
-        int n_threads = omp_get_max_threads();
-        
-        uint32_t** thread_counts = malloc(n_threads * sizeof(uint32_t*));
-        if (!thread_counts) {
+
+        TileRange* tile_ranges = NULL;
+        uint32_t* tile_segment_ids = NULL;
+        uint32_t num_tiles = 0, total_refs = 0;
+        SpectralError tile_err = gpu_tile_preprocess(
+            sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len,
+            &tile_ranges, &tile_segment_ids, &num_tiles, &total_refs);
+        if (tile_err != SPECTRAL_OK) {
             memset(out_buffer, 0, out_len * sizeof(float));
             *t_synth = 0;
-            return;
+            return tile_err;
         }
-        for (int t = 0; t < n_threads; t++) {
-            thread_counts[t] = calloc(num_tiles, sizeof(uint32_t));
-            if (!thread_counts[t]) {
-                for (int i = 0; i < t; i++) free(thread_counts[i]);
-                free(thread_counts);
-                memset(out_buffer, 0, out_len * sizeof(float));
-                *t_synth = 0;
-                return;
-            }
-        }
-        
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            uint32_t* my_counts = thread_counts[tid];
-            
-            #pragma omp for schedule(static)
-            for (size_t i = 0; i < sa.count; i++) {
-                float start = sa.segs[i].start * stretch;
-                float end = start + sa.segs[i].length * stretch;
-                
-                int start_tile = (int)(start / SPECTRAL_GPU_TILE_SIZE);
-                int end_tile = (int)(end / SPECTRAL_GPU_TILE_SIZE);
-                if (start_tile < 0) start_tile = 0;
-                if (start_tile >= (int)num_tiles) continue;
-                if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
-                
-                for (int t = start_tile; t <= end_tile; t++) {
-                    my_counts[t]++;
-                }
-            }
-        }
-        
-        uint32_t* tile_counts = calloc(num_tiles, sizeof(uint32_t));
-        if (!tile_counts) {
-            for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
-            free(thread_counts);
-            memset(out_buffer, 0, out_len * sizeof(float));
-            *t_synth = 0;
-            return;
-        }
-        for (int t = 0; t < n_threads; t++) {
-            for (uint32_t i = 0; i < num_tiles; i++) {
-                tile_counts[i] += thread_counts[t][i];
-            }
-            free(thread_counts[t]);
-        }
-        free(thread_counts);
-        
-        TileRange* tile_ranges = malloc(num_tiles * sizeof(TileRange));
-        if (!tile_ranges) {
-            free(tile_counts);
-            memset(out_buffer, 0, out_len * sizeof(float));
-            *t_synth = 0;
-            return;
-        }
-        uint32_t total_refs = 0;
-        for (uint32_t t = 0; t < num_tiles; t++) {
-            tile_ranges[t].start = total_refs;
-            tile_ranges[t].count = tile_counts[t];
-            total_refs += tile_counts[t];
-        }
-        
-        uint32_t* tile_segment_ids = malloc(total_refs * sizeof(uint32_t));
-        uint32_t* tile_cursors = calloc(num_tiles, sizeof(uint32_t));
-        if (!tile_segment_ids || !tile_cursors) {
-            free(tile_counts);
-            free(tile_ranges);
-            free(tile_segment_ids);
-            free(tile_cursors);
-            memset(out_buffer, 0, out_len * sizeof(float));
-            *t_synth = 0;
-            return;
-        }
-        
-        #pragma omp parallel for schedule(static)
-        for (size_t i = 0; i < sa.count; i++) {
-            float start = sa.segs[i].start * stretch;
-            float end = start + sa.segs[i].length * stretch;
-            
-            int start_tile = (int)(start / SPECTRAL_GPU_TILE_SIZE);
-            int end_tile = (int)(end / SPECTRAL_GPU_TILE_SIZE);
-            if (start_tile < 0) start_tile = 0;
-            if (start_tile >= (int)num_tiles) continue;
-            if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
-            
-            for (int t = start_tile; t <= end_tile; t++) {
-                uint32_t pos;
-                #pragma omp atomic capture
-                pos = tile_cursors[t]++;
-                tile_segment_ids[tile_ranges[t].start + pos] = (uint32_t)i;
-            }
-        }
-        
-        free(tile_counts);
-        free(tile_cursors);
         
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
         float avg_segs = (float)total_refs / num_tiles;
 #endif
         
+        SynthParams sp = make_synth_params(stretch, pitch, out_len, sa.count);
         struct {
             float stretch;
             float inv_stretch;
@@ -304,12 +215,12 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             uint32_t tile_size;
             uint32_t timbre;
         } params = {
-            .stretch = stretch,
-            .inv_stretch = 1.0f / stretch,
-            .inv_stretch_sq = 1.0f / (stretch * stretch),
-            .pitch_factor = SPECTRAL_PITCH_FACTOR(pitch),
-            .out_len = (uint32_t)out_len,
-            .num_segments = sa.count,
+            .stretch = sp.stretch,
+            .inv_stretch = sp.inv_stretch,
+            .inv_stretch_sq = sp.inv_stretch_sq,
+            .pitch_factor = sp.pitch_factor,
+            .out_len = (uint32_t)sp.out_len,
+            .num_segments = sp.num_segments,
             .tile_size = SPECTRAL_GPU_TILE_SIZE,
             .timbre = (uint32_t)timbre
         };
@@ -318,54 +229,82 @@ void synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         size_t tile_ids_size = total_refs * sizeof(uint32_t);
         size_t tile_ranges_size = num_tiles * sizeof(TileRange);
         size_t output_size = out_len * sizeof(float);
-        
-        SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile", 
+
+        SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile",
                 sa.count, num_tiles, avg_segs);
-        
-        id<MTLBuffer> segmentBuffer = [metalDevice newBufferWithBytes:sa.segs
-                                                               length:segment_buf_size
-                                                              options:MTLResourceStorageModeShared];
-        id<MTLBuffer> tileIdsBuffer = [metalDevice newBufferWithBytes:tile_segment_ids
-                                                               length:tile_ids_size
-                                                              options:MTLResourceStorageModeShared];
-        id<MTLBuffer> tileRangesBuffer = [metalDevice newBufferWithBytes:tile_ranges
-                                                                  length:tile_ranges_size
-                                                                 options:MTLResourceStorageModeShared];
-        id<MTLBuffer> outputBuffer = [metalDevice newBufferWithLength:output_size
-                                                              options:MTLResourceStorageModeShared];
+
+        /* Reuse cached buffers when capacity suffices; grow with 1.5x headroom */
+        if (s_segBufCap < segment_buf_size) {
+            s_segmentBuffer = nil;
+            s_segBufCap = segment_buf_size + segment_buf_size / 2;
+            s_segmentBuffer = [metalDevice newBufferWithLength:s_segBufCap
+                                                      options:MTLResourceStorageModeShared];
+        }
+        if (s_tileIdsCap < tile_ids_size) {
+            s_tileIdsBuffer = nil;
+            s_tileIdsCap = tile_ids_size + tile_ids_size / 2;
+            s_tileIdsBuffer = [metalDevice newBufferWithLength:s_tileIdsCap
+                                                      options:MTLResourceStorageModeShared];
+        }
+        if (s_tileRangesCap < tile_ranges_size) {
+            s_tileRangesBuffer = nil;
+            s_tileRangesCap = tile_ranges_size + tile_ranges_size / 2;
+            s_tileRangesBuffer = [metalDevice newBufferWithLength:s_tileRangesCap
+                                                         options:MTLResourceStorageModeShared];
+        }
+        if (s_outputCap < output_size) {
+            s_outputBuffer = nil;
+            s_outputCap = output_size + output_size / 2;
+            s_outputBuffer = [metalDevice newBufferWithLength:s_outputCap
+                                                     options:MTLResourceStorageModeShared];
+        }
+
+        if (!s_segmentBuffer || !s_tileIdsBuffer || !s_tileRangesBuffer || !s_outputBuffer) {
+            gpu_tile_preprocess_free(tile_ranges, tile_segment_ids);
+            memset(out_buffer, 0, out_len * sizeof(float));
+            *t_synth = 0;
+            return SPECTRAL_ERR_MEMORY;
+        }
+
+        /* Copy data into cached buffers */
+        memcpy([s_segmentBuffer contents], sa.segs, segment_buf_size);
+        memcpy([s_tileIdsBuffer contents], tile_segment_ids, tile_ids_size);
+        memcpy([s_tileRangesBuffer contents], tile_ranges, tile_ranges_size);
+
+        /* Params buffer: small (36 bytes), allocated per-call */
         id<MTLBuffer> paramsBuffer = [metalDevice newBufferWithBytes:&params
                                                               length:sizeof(params)
                                                              options:MTLResourceStorageModeShared];
-
-        if (!segmentBuffer || !tileIdsBuffer || !tileRangesBuffer || !outputBuffer || !paramsBuffer) {
-            free(tile_ranges);
-            free(tile_segment_ids);
-            memset(out_buffer, 0, out_len * sizeof(float));
-            *t_synth = 0;
-            return;
-        }
         
         id<MTLCommandBuffer> cmdBuffer = [metalQueue commandBuffer];
         id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
         
         [encoder setComputePipelineState:metalSynthPipeline];
-        [encoder setBuffer:segmentBuffer offset:0 atIndex:0];
-        [encoder setBuffer:tileIdsBuffer offset:0 atIndex:1];
-        [encoder setBuffer:tileRangesBuffer offset:0 atIndex:2];
-        [encoder setBuffer:outputBuffer offset:0 atIndex:3];
+        [encoder setBuffer:s_segmentBuffer offset:0 atIndex:0];
+        [encoder setBuffer:s_tileIdsBuffer offset:0 atIndex:1];
+        [encoder setBuffer:s_tileRangesBuffer offset:0 atIndex:2];
+        [encoder setBuffer:s_outputBuffer offset:0 atIndex:3];
         [encoder setBuffer:paramsBuffer offset:0 atIndex:4];
         
-        [encoder dispatchThreadgroups:MTLSizeMake(num_tiles, 1, 1) 
-                threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [encoder dispatchThreadgroups:MTLSizeMake(num_tiles, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(SPECTRAL_GPU_TILE_SIZE, 1, 1)];
         [encoder endEncoding];
         
         [cmdBuffer commit];
         [cmdBuffer waitUntilCompleted];
         
-        memcpy(out_buffer, [outputBuffer contents], output_size);
+        memcpy(out_buffer, [s_outputBuffer contents], output_size);
         *t_synth = omp_get_wtime() - synth_start;
-        
-        free(tile_ranges);
-        free(tile_segment_ids);
+
+        gpu_tile_preprocess_free(tile_ranges, tile_segment_ids);
     }
+    return SPECTRAL_OK;
+}
+
+void metal_cleanup(void) {
+    s_segmentBuffer = nil;
+    s_tileIdsBuffer = nil;
+    s_tileRangesBuffer = nil;
+    s_outputBuffer = nil;
+    s_segBufCap = s_tileIdsCap = s_tileRangesCap = s_outputCap = 0;
 }

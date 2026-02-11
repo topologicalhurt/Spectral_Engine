@@ -151,7 +151,6 @@ typedef struct {
 } BoxChars;
 
 extern const BoxChars BOX_ASCII;
-extern const BoxChars BOX_UNICODE;
 
 #ifdef __cplusplus
 }

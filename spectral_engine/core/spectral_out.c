@@ -6,15 +6,12 @@
 
 #include "spectral_io.h"
 #include "spectral_q15.h"
+#include "spectral_vector_ops.h"
 #include <math.h>
 
 #if SPECTRAL_HAS_FILE_IO
 #include <sndfile.h>
 #include <stdlib.h>
-#endif
-
-#if SPECTRAL_USE_VDSP
-#include <Accelerate/Accelerate.h>
 #endif
 
 #if defined(ARM_MATH_CM7) || defined(ARM_MATH_CM4)
@@ -30,14 +27,14 @@
 
 float spectral_normalize_float(float* buffer, size_t len, float headroom) {
     if (!buffer || len == 0) return 0.0f;
-    
+
     float max_amp = 0.0f;
-    
-#if SPECTRAL_USE_VDSP
-    vDSP_maxmgv(buffer, 1, &max_amp, len);
+
+#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
+    spectral_vmaxmgv(buffer, &max_amp, len);
     if (max_amp > 0.0f) {
         float scale = headroom / max_amp;
-        vDSP_vsmul(buffer, 1, &scale, buffer, 1, len);
+        spectral_vsmul(buffer, scale, buffer, len);
     }
 #else
     for (size_t i = 0; i < len; i++) {
@@ -52,7 +49,7 @@ float spectral_normalize_float(float* buffer, size_t len, float headroom) {
         }
     }
 #endif
-    
+
     return max_amp;
 }
 
@@ -110,18 +107,12 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
 
 void spectral_mono_to_stereo_float(const float* mono, float* stereo, size_t num_frames) {
     if (!mono || !stereo || num_frames == 0) return;
-    
-#if SPECTRAL_USE_VDSP
-    vDSP_vclr(stereo, 1, num_frames * 2);
-    vDSP_vsadd(mono, 1, (float[]){0.0f}, stereo, 2, num_frames);
-    vDSP_vsadd(mono, 1, (float[]){0.0f}, stereo + 1, 2, num_frames);
-#else
+
     SPECTRAL_UNROLL_4
     for (size_t i = 0; i < num_frames; i++) {
         stereo[i * 2]     = mono[i];
         stereo[i * 2 + 1] = mono[i];
     }
-#endif
 }
 
 void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_frames) {
@@ -155,7 +146,7 @@ void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_fr
 
 #if SPECTRAL_HAS_FILE_IO
 
-SpectralError spectral_audio_write(const char* path, const float* buffer, 
+SpectralError spectral_audio_write(const char* path, const float* buffer,
                          size_t num_frames, int sample_rate, int channels) {
     if (!path || !buffer || num_frames == 0 || sample_rate <= 0 || channels <= 0) {
         return SPECTRAL_ERR_PARAM;
@@ -186,14 +177,11 @@ SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
         return SPECTRAL_ERR_OVERFLOW;
     }
     
-    /* Allocate stereo buffer */
     float* stereo = malloc(num_frames * 2 * sizeof(float));
     if (!stereo) return SPECTRAL_ERR_MEMORY;
-    
-    /* Convert mono to stereo */
+
     spectral_mono_to_stereo_float(mono, stereo, num_frames);
-    
-    /* Write stereo file */
+
     SpectralError result = spectral_audio_write(path, stereo, num_frames, sample_rate, 2);
     
     free(stereo);

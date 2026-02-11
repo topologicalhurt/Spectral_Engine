@@ -20,13 +20,6 @@ const BoxChars BOX_ASCII = {
     .t_left = '+', .t_right = '+'
 };
 
-const BoxChars BOX_UNICODE = {
-    .top_left = '+', .top_right = '+',
-    .bottom_left = '+', .bottom_right = '+',
-    .horizontal = '=', .vertical = '|',
-    .cross = '+', .t_down = '+', .t_up = '+',
-    .t_left = '+', .t_right = '+'
-};
 
 /* 
  * String Formatting
