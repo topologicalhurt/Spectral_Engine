@@ -18,9 +18,6 @@ extern "C" {
 #define OSC_HOT
 #endif
 
-/* CPU oscillator - fast_sin() is canonical, GPU shaders must match */
-OSC_HOT float fast_sin(float x);
-
 /* SegmentLoopParams defined in spectral_synth_internal.h */
 struct SegmentLoopParams;
 
@@ -44,21 +41,21 @@ __device__ __forceinline__ float oscillator_normalize_phase_cuda(float p) {
 __device__ __forceinline__ float oscillator_fast_sin_cuda(float x) {
     x = x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
     float x2 = x * x;
-    float num = x * (1.0f - x2 * (0.16605f - x2 * 0.00761f));
-    float den = 1.0f + x2 * 0.00766f;
+    float num = x * (1.0f - x2 * (SPECTRAL_PADE_SIN_C1 - x2 * SPECTRAL_PADE_SIN_C2));
+    float den = 1.0f + x2 * SPECTRAL_PADE_SIN_C3;
     return num / den;
 }
 
 __device__ __forceinline__ float oscillator_cuda(float phase, int timbre) {
     float rads = oscillator_normalize_phase_cuda(phase);
     switch (timbre) {
-        case TIMBRE_SINE:     return oscillator_fast_sin_cuda(phase);
+        case TIMBRE_SINE:     return oscillator_fast_sin_cuda(rads);
         case TIMBRE_SAW:      return rads * -SPECTRAL_INV_PI;
         case TIMBRE_SQUARE:   return (rads > 0.0f) ? 1.0f : -1.0f;
-        case TIMBRE_TRIANGLE: return (1.0f - fabsf(rads) * SPECTRAL_TWO_INV_PI) * 2.0f - 1.0f;
+        case TIMBRE_TRIANGLE: return (1.0f - fabsf(rads) * SPECTRAL_INV_PI) * 2.0f - 1.0f;
         case TIMBRE_ASIN:     return asinf(rads * SPECTRAL_INV_PI);
         case TIMBRE_PARABOLA: return 1.0f - rads * rads * SPECTRAL_INV_PI_SQ;
-        default:              return oscillator_fast_sin_cuda(phase);
+        default:              return oscillator_fast_sin_cuda(rads);
     }
 }
 

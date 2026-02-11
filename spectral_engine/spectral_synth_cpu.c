@@ -1,158 +1,22 @@
-/* spectral_synth_cpu.c - CPU Synthesis Backend
- * 
- * Multi-threaded additive synthesis using OpenMP.
- * Each thread accumulates into a private buffer, then all buffers
- * are reduced (summed) into the final output.
- * 
- * Optimization Strategies:
- *   - Thread-local buffers avoid synchronization in inner loop
- *   - Cache-aligned allocation for buffer access
- *   - SIMD hints (#pragma omp simd) for sine synthesis
- *   - Segment prefetching to hide memory latency
- *   - vDSP vector add for final buffer reduction (macOS)
- * 
- * Timbre Support:
- *   - Timbre 0 (sine): uses fast_sin() with SIMD
- *   - Timbres 1-7: scalar timbre_oscillator() function
- *   - Wavetable: LUT-based lookup with interpolation
- */
+/* spectral_synth_cpu.c - Multi-threaded CPU synthesis with OpenMP */
 
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
-#include <omp.h>
+#include "spectral_vector_ops.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 
-#if SPECTRAL_USE_VDSP
-#include <Accelerate/Accelerate.h>
+#ifdef _OPENMP
+#include <omp.h>
+#else
+static inline int omp_get_max_threads(void) { return 1; }
+static inline int omp_get_thread_num(void) { return 0; }
+static inline double omp_get_wtime(void) { return spectral_get_time_sec(); }
+static inline void omp_set_num_threads(int n) { (void)n; }
 #endif
 
-/* Backend queries */
-
-int spectral_backend_supports_timbre(SynthBackend backend, int timbre_id) {
-    switch (backend) {
-        case BACKEND_CPU:   return (timbre_id >= TIMBRE_MIN && timbre_id <= BACKEND_CPU_TIMBRE_MAX);
-        case BACKEND_METAL: return (timbre_id >= TIMBRE_MIN && timbre_id <= BACKEND_METAL_TIMBRE_MAX);
-        case BACKEND_CUDA:  return (timbre_id >= TIMBRE_MIN && timbre_id <= BACKEND_CUDA_TIMBRE_MAX);
-        default:            return 1;
-    }
-}
-
-int spectral_backend_max_timbre(SynthBackend backend) {
-    switch (backend) {
-        case BACKEND_CPU:   return BACKEND_CPU_TIMBRE_MAX;
-        case BACKEND_METAL: return BACKEND_METAL_TIMBRE_MAX;
-        case BACKEND_CUDA:  return BACKEND_CUDA_TIMBRE_MAX;
-        default:            return TIMBRE_MAX;
-    }
-}
-
-const char* spectral_backend_name(SynthBackend backend) {
-    static const char* names[] = {"Auto", "CPU", "Metal", "CUDA", "Export"};
-    return (backend <= BACKEND_EXPORT) ? names[backend] : "Unknown";
-}
-
-int spectral_backend_supports_wavetable(SynthBackend backend) {
-    switch (backend) {
-        case BACKEND_CPU:   return BACKEND_CPU_WAVETABLE_SUPPORT;
-        case BACKEND_METAL: return BACKEND_METAL_WAVETABLE_SUPPORT;
-        case BACKEND_CUDA:  return BACKEND_CUDA_WAVETABLE_SUPPORT;
-        default:            return 0;
-    }
-}
-
-int spectral_backend_available(SynthBackend backend) {
-    switch (backend) {
-        case BACKEND_CPU:
-            return 1;  /* Always available */
-        case BACKEND_METAL:
-            #if HAS_METAL
-            return metal_available();
-            #else
-            return 0;
-            #endif
-        case BACKEND_CUDA:
-            #if HAS_CUDA
-            return cuda_available();
-            #else
-            return 0;
-            #endif
-        case BACKEND_EXPORT:
-            return 1;
-        case BACKEND_AUTO:
-            return 1;
-        default:
-            return 0;
-    }
-}
-
-SpectralBackendCaps spectral_backend_get_caps(SynthBackend backend) {
-    SpectralBackendCaps caps = {0};
-    caps.id = backend;
-    caps.name = spectral_backend_name(backend);
-    caps.available = spectral_backend_available(backend);
-    caps.max_timbre = spectral_backend_max_timbre(backend);
-    caps.has_wavetable = spectral_backend_supports_wavetable(backend);
-    
-    switch (backend) {
-        case BACKEND_CPU:
-            caps.is_gpu = 0;
-            caps.is_parallel = 1;
-            caps.max_segments = 0;     /* Limited only by system memory */
-            caps.max_output_len = 0;   /* Unlimited */
-            break;
-        case BACKEND_METAL:
-            caps.is_gpu = 1;
-            caps.is_parallel = 1;
-            caps.max_segments = 0;
-            caps.max_output_len = 0;
-            break;
-        case BACKEND_CUDA:
-            caps.is_gpu = 1;
-            caps.is_parallel = 1;
-            caps.max_segments = 0;      /* Limited only by VRAM */
-            caps.max_output_len = 0;
-            break;
-        case BACKEND_EXPORT:
-            caps.is_gpu = 0;
-            caps.is_parallel = 0;
-            caps.max_segments = 0;
-            caps.max_output_len = 0;
-            break;
-        default:
-            break;
-    }
-    return caps;
-}
-
-SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu) {
-    if (prefer_gpu) {
-        /* Try Metal first (more timbre support than CUDA) */
-        #if HAS_METAL
-        if (metal_available() && spectral_backend_supports_timbre(BACKEND_METAL, timbre_id)) {
-            return BACKEND_METAL;
-        }
-        #endif
-        #if HAS_CUDA
-        if (cuda_available() && spectral_backend_supports_timbre(BACKEND_CUDA, timbre_id)) {
-            return BACKEND_CUDA;
-        }
-        #endif
-    }
-    /* Fall back to CPU which supports all timbres */
-    return BACKEND_CPU;
-}
-
-/* Thread buffer management
- * 
- * Uses a single contiguous arena allocation for all thread buffers.
- * Benefits:
- *   - Single syscall instead of n_threads allocations
- *   - Better cache locality (contiguous memory)
- *   - Simpler cleanup on failure
- *   - Each buffer is cache-line aligned within the arena
- */
+/* Thread-local buffer arena — single contiguous allocation, cache-line aligned */
 
 typedef struct {
     void*  arena;       /* Single contiguous allocation */
@@ -161,6 +25,12 @@ typedef struct {
     size_t buf_stride;  /* Distance between thread buffers (aligned) */
     size_t buf_size;    /* Actual used size per buffer */
 } ThreadBuffers;
+
+/* Persistent cache: reuse arena across calls if dimensions match */
+static ThreadBuffers s_cached_tb = {0};
+static int           s_cached_n_threads = 0;
+static size_t        s_cached_out_len = 0;
+static size_t        s_cached_elem_size = 0;
 
 static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t element_size) {
     ThreadBuffers tb = {0};
@@ -171,19 +41,40 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
     if (out_len > SIZE_MAX / element_size) {
         return tb;
     }
-    
+
+    /* Check if cached allocation matches */
+    if (s_cached_tb.arena &&
+        s_cached_n_threads == n_threads &&
+        s_cached_out_len == out_len &&
+        s_cached_elem_size == element_size) {
+        tb = s_cached_tb;
+        /* Zero the buffers for reuse */
+        size_t arena_size = tb.buf_stride * (size_t)n_threads + CACHE_ALIGN;
+        memset(tb.arena, 0, arena_size);
+        /* Clear cache (ownership transferred to caller) */
+        s_cached_tb = (ThreadBuffers){0};
+        return tb;
+    }
+
+    /* Dimensions changed — free stale cache */
+    if (s_cached_tb.arena) {
+        free(s_cached_tb.arena);
+        free(s_cached_tb.bufs);
+        s_cached_tb = (ThreadBuffers){0};
+    }
+
     /* Calculate buffer size and aligned stride */
     tb.buf_size = out_len * element_size;
     tb.buf_stride = (tb.buf_size + CACHE_ALIGN - 1) & ~(CACHE_ALIGN - 1);
     tb.n_threads = n_threads;
-    
+
     /* Allocate pointer array */
     tb.bufs = malloc(n_threads * sizeof(void*));
     if (!tb.bufs) {
         tb.n_threads = 0;
         return tb;
     }
-    
+
     /* Single arena allocation for all thread buffers */
     if (tb.buf_stride > SIZE_MAX / (size_t)n_threads) {
         free(tb.bufs);
@@ -199,42 +90,35 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
         tb.n_threads = 0;
         return tb;
     }
-    
-    /* Zero the entire arena at once */
+
     memset(tb.arena, 0, arena_size);
-    
-    /* Align arena start and set up per-thread buffer pointers */
+
+    /* Set up per-thread buffer pointers */
     char* aligned_base = (char*)(((uintptr_t)tb.arena + CACHE_ALIGN - 1) & ~(CACHE_ALIGN - 1));
     for (int t = 0; t < n_threads; t++) {
         tb.bufs[t] = aligned_base + (t * tb.buf_stride);
     }
-    
+
     return tb;
 }
 
-static void thread_buffers_free(ThreadBuffers* tb) {
-    if (!tb) return;
-    free(tb->arena);   /* Single deallocation */
-    free(tb->bufs);
+static void thread_buffers_return(ThreadBuffers* tb, int n_threads, size_t out_len, size_t elem_size) {
+    if (!tb || !tb->arena) return;
+    /* Store into cache for next call */
+    s_cached_tb = *tb;
+    s_cached_n_threads = n_threads;
+    s_cached_out_len = out_len;
+    s_cached_elem_size = elem_size;
     tb->arena = NULL;
     tb->bufs = NULL;
     tb->n_threads = 0;
 }
 
 static void thread_buffers_reduce_float(const ThreadBuffers* tb, float* out_buffer, size_t out_len) {
-#if SPECTRAL_USE_VDSP
     memcpy(out_buffer, tb->bufs[0], out_len * sizeof(float));
     for (int t = 1; t < tb->n_threads; t++) {
-        vDSP_vadd(out_buffer, 1, (float*)tb->bufs[t], 1, out_buffer, 1, out_len);
+        spectral_vadd(out_buffer, (float*)tb->bufs[t], out_buffer, out_len);
     }
-#else
-    #pragma omp parallel for schedule(static)
-    for (size_t j = 0; j < out_len; j++) {
-        float sum = ((float*)tb->bufs[0])[j];
-        for (int t = 1; t < tb->n_threads; t++) sum += ((float*)tb->bufs[t])[j];
-        out_buffer[j] = sum;
-    }
-#endif
 }
 
 static void thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sample_t* out_buffer, size_t out_len) {
@@ -248,222 +132,185 @@ static void thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sampl
     }
 }
 
-/* Float output synthesis */
+/* All CPU synth variants: validate -> alloc ThreadBuffers -> parallel loop -> reduce -> free */
 
-SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
-                        float stretch, float pitch, SpectralTimbre timbre, int n_threads,
-                        double* t_synth) {
+typedef void (*SegmentSynthFn)(void* dst, const SegmentLoopParams* lp, const void* ctx);
+typedef void (*ReduceFn)(const ThreadBuffers* tb, void* out_buffer, size_t out_len);
 
-    if (n_threads < 1) n_threads = 1;
-    
-    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
-        return SPECTRAL_OK;  /* Early exit is not an error */
-    }
-    
+static SpectralError synth_cpu_driver(
+    SegmentArray sa, void* out_buffer, size_t out_len, size_t elem_size,
+    float stretch, float pitch, int n_threads, double* t_synth,
+    SegmentSynthFn segment_fn, const void* fn_ctx,
+    ReduceFn reduce_fn
+) {
     SynthParams params = make_synth_params(stretch, pitch, out_len, sa.count);
     double synth_start = omp_get_wtime();
-    ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, sizeof(float));
+    ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, elem_size);
     if (!tb.bufs) {
-        memset(out_buffer, 0, out_len * sizeof(float));
+        memset(out_buffer, 0, out_len * elem_size);
         *t_synth = 0;
         return SPECTRAL_ERR_MEMORY;
     }
-    
+
     #pragma omp parallel num_threads(n_threads)
     {
         int tid = omp_get_thread_num();
-        float* __restrict__ dst_base = (float*)tb.bufs[tid];
-        
+        char* dst_base = (char*)tb.bufs[tid];
+
         #pragma omp for schedule(static)
         for (size_t i = 0; i < sa.count; i++) {
             if (i + 4 < sa.count) PREFETCH_READ(&sa.segs[i + 4]);
-            
+
             SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
             if (!lp.valid) continue;
-            
-            float* __restrict__ dst = dst_base + lp.start_idx;
-            
-            /* NOTE: For SIMD functions, we are basically guaranteed to oversaturate the vector units
-            when thread count > core count since SIMD is per core on most CPUS */
-            timbre_synth_segment(dst, &lp, timbre);
+
+            void* dst = dst_base + lp.start_idx * elem_size;
+            segment_fn(dst, &lp, fn_ctx);
         }
     }
-    
-    thread_buffers_reduce_float(&tb, out_buffer, out_len);
-    thread_buffers_free(&tb);
+
+    reduce_fn(&tb, out_buffer, out_len);
+    thread_buffers_return(&tb, n_threads, out_len, elem_size);
     *t_synth = omp_get_wtime() - synth_start;
     return SPECTRAL_OK;
 }
 
-/* Wavetable synthesis */
+static void reduce_float_wrapper(const ThreadBuffers* tb, void* out, size_t len) {
+    thread_buffers_reduce_float(tb, (float*)out, len);
+}
 
+static void reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len) {
+    thread_buffers_reduce_native(tb, (spectral_sample_t*)out, len);
+}
+
+/* Per-segment callbacks */
+
+typedef struct { SpectralTimbre timbre; } TimbreCtx;
+typedef struct { const SpectralWavetable* table; } WavetableCtx;
+typedef struct { const SpectralWavetable* table; } NativeWavetableCtx;
+
+static void segment_fn_timbre(void* dst, const SegmentLoopParams* lp, const void* ctx) {
+    const TimbreCtx* tc = (const TimbreCtx*)ctx;
+    timbre_synth_segment((float*)dst, lp, tc->timbre);
+}
+
+static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, const void* ctx) {
+    const WavetableCtx* wc = (const WavetableCtx*)ctx;
+    float* out = (float*)dst;
+    for (size_t j = 0; j < lp->length; j++) {
+        float p = lp->phase + j * (lp->alpha + lp->beta * j);
+        float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
+        spectral_sample_t sample = spectral_wavetable_lookup_f(wc->table, phase_norm);
+        out[j] += (lp->amp + lp->d_amp * j) * SPECTRAL_SAMPLE_TO_FLOAT(sample);
+    }
+}
+
+static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, const void* ctx) {
+    const TimbreCtx* tc = (const TimbreCtx*)ctx;
+    spectral_sample_t* out = (spectral_sample_t*)dst;
+    for (size_t j = 0; j < lp->length; j++) {
+        float p = lp->phase + j * (lp->alpha + lp->beta * j);
+        float sample_f = timbre_oscillator(p, lp->amp + lp->d_amp * j, tc->timbre, lp->width);
+        out[j] = SPECTRAL_SAMPLE_ADD(out[j], FLOAT_TO_SPECTRAL_SAMPLE(sample_f));
+    }
+}
+
+static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, const void* ctx) {
+    const NativeWavetableCtx* nwc = (const NativeWavetableCtx*)ctx;
+    spectral_sample_t* out = (spectral_sample_t*)dst;
+    for (size_t j = 0; j < lp->length; j++) {
+        float p = lp->phase + j * (lp->alpha + lp->beta * j);
+        float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
+        spectral_sample_t sample = spectral_wavetable_lookup_f(nwc->table, phase_norm);
+        spectral_sample_t amp_native = FLOAT_TO_SPECTRAL_SAMPLE(lp->amp + lp->d_amp * j);
+        spectral_sample_t scaled = SPECTRAL_SAMPLE_MUL(sample, amp_native);
+        out[j] = SPECTRAL_SAMPLE_ADD(out[j], scaled);
+    }
+}
+
+/* Public synthesis functions */
+
+/* When SPECTRAL_USE_EMBEDDED_SYNTH is defined, synth_cpu is macro-redirected
+ * to synth_arm32_emulation (defined in spectral_synth_emulator.c) */
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
+SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
+                        float stretch, float pitch, SpectralTimbre timbre, int n_threads,
+                        double* t_synth) {
+    if (n_threads < 1) n_threads = 1;
+    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
+        return SPECTRAL_OK;
+    }
+    TimbreCtx ctx = { .timbre = timbre };
+    return synth_cpu_driver(sa, out_buffer, out_len, sizeof(float),
+                            stretch, pitch, n_threads, t_synth,
+                            segment_fn_timbre, &ctx, reduce_float_wrapper);
+}
+#endif
+
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
                                   float stretch, float pitch,
                                   const SpectralWavetableBank* bank, SpectralTimbre timbre,
                                   int n_threads, double* t_synth) {
-
     if (n_threads < 1) n_threads = 1;
-    
-    /* No wavetable bank - fall back to regular synthesis */
     if (!bank) {
         return synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
-    
     if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
         return SPECTRAL_OK;
     }
-    
     const SpectralWavetable* table = spectral_wavetable_get(bank, (uint8_t)timbre);
     if (!table || !table->valid) {
         return synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
-    
-    SynthParams params = make_synth_params(stretch, pitch, out_len, sa.count);
-    double synth_start = omp_get_wtime();
-    ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, sizeof(float));
-    if (!tb.bufs) {
-        memset(out_buffer, 0, out_len * sizeof(float));
-        *t_synth = 0;
-        return SPECTRAL_ERR_MEMORY;
-    }
-    
-    #pragma omp parallel num_threads(n_threads)
-    {
-        int tid = omp_get_thread_num();
-        float* __restrict__ dst_base = (float*)tb.bufs[tid];
-        
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < sa.count; i++) {
-            if (i + 4 < sa.count) PREFETCH_READ(&sa.segs[i + 4]);
-            
-            SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
-            if (!lp.valid) continue;
-            
-            float* __restrict__ dst = dst_base + lp.start_idx;
-            
-            for (size_t j = 0; j < lp.length; j++) {
-                float p = lp.phase + j * (lp.alpha + lp.beta * j);
-                float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
-                spectral_sample_t sample = spectral_wavetable_lookup_f(table, phase_norm);
-                dst[j] += (lp.amp + lp.d_amp * j) * SPECTRAL_SAMPLE_TO_FLOAT(sample);
-            }
-        }
-    }
-    
-    thread_buffers_reduce_float(&tb, out_buffer, out_len);
-    thread_buffers_free(&tb);
-    *t_synth = omp_get_wtime() - synth_start;
-    return SPECTRAL_OK;
+    WavetableCtx ctx = { .table = table };
+    return synth_cpu_driver(sa, out_buffer, out_len, sizeof(float),
+                            stretch, pitch, n_threads, t_synth,
+                            segment_fn_wavetable_float, &ctx, reduce_float_wrapper);
 }
+#endif
 
-/* Native sample type synthesis */
-
-void synth_cpu_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
-                      float stretch, float pitch, SpectralTimbre timbre, int n_threads,
-                      double* t_synth) {
-
+SpectralError synth_cpu_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
+                               float stretch, float pitch, SpectralTimbre timbre, int n_threads,
+                               double* t_synth) {
     if (n_threads < 1) n_threads = 1;
-    
     if (!SYNTH_VALIDATE_NATIVE(out_buffer, out_len, sa, &t_synth)) {
-        return;
+        return SPECTRAL_OK;
     }
-    
-    SynthParams params = make_synth_params(stretch, pitch, out_len, sa.count);
-    double synth_start = omp_get_wtime();
-    ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, sizeof(spectral_sample_t));
-    if (!tb.bufs) {
-        memset(out_buffer, 0, out_len * sizeof(spectral_sample_t));
-        *t_synth = 0;
-        return;
-    }
-    
-    #pragma omp parallel num_threads(n_threads)
-    {
-        int tid = omp_get_thread_num();
-        spectral_sample_t* __restrict__ dst_base = (spectral_sample_t*)tb.bufs[tid];
-        
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < sa.count; i++) {
-            if (i + 4 < sa.count) PREFETCH_READ(&sa.segs[i + 4]);
-            
-            SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
-            if (!lp.valid) continue;
-            
-            spectral_sample_t* __restrict__ dst = dst_base + lp.start_idx;
-            
-            for (size_t j = 0; j < lp.length; j++) {
-                float p = lp.phase + j * (lp.alpha + lp.beta * j);
-                float sample_f = timbre_oscillator(p, lp.amp + lp.d_amp * j, timbre, lp.width);
-                dst[j] = SPECTRAL_SAMPLE_ADD(dst[j], FLOAT_TO_SPECTRAL_SAMPLE(sample_f));
-            }
-        }
-    }
-    
-    thread_buffers_reduce_native(&tb, out_buffer, out_len);
-    thread_buffers_free(&tb);
-    *t_synth = omp_get_wtime() - synth_start;
+    TimbreCtx ctx = { .timbre = timbre };
+    return synth_cpu_driver(sa, out_buffer, out_len, sizeof(spectral_sample_t),
+                            stretch, pitch, n_threads, t_synth,
+                            segment_fn_native_timbre, &ctx, reduce_native_wrapper);
 }
 
-void synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
-                                float stretch, float pitch,
-                                const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                                int n_threads, double* t_synth) {
-
+SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
+                                         float stretch, float pitch,
+                                         const SpectralWavetableBank* bank, SpectralTimbre timbre,
+                                         int n_threads, double* t_synth) {
     if (n_threads < 1) n_threads = 1;
-    
-    /* No wavetable bank - fall back to regular synthesis */
     if (!bank) {
-        synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
-        return;
+        return synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
-    
     if (!SYNTH_VALIDATE_NATIVE(out_buffer, out_len, sa, &t_synth)) {
-        return;
+        return SPECTRAL_OK;
     }
-    
     const SpectralWavetable* table = spectral_wavetable_get(bank, (uint8_t)timbre);
     if (!table || !table->valid) {
-        synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
-        return;
+        return synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
-    
-    SynthParams params = make_synth_params(stretch, pitch, out_len, sa.count);
-    double synth_start = omp_get_wtime();
-    ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, sizeof(spectral_sample_t));
-    if (!tb.bufs) {
-        memset(out_buffer, 0, out_len * sizeof(spectral_sample_t));
-        *t_synth = 0;
-        return;
+    NativeWavetableCtx ctx = { .table = table };
+    return synth_cpu_driver(sa, out_buffer, out_len, sizeof(spectral_sample_t),
+                            stretch, pitch, n_threads, t_synth,
+                            segment_fn_native_wavetable, &ctx, reduce_native_wrapper);
+}
+
+void synth_cpu_cleanup(void) {
+    if (s_cached_tb.arena) {
+        free(s_cached_tb.arena);
+        free(s_cached_tb.bufs);
+        s_cached_tb = (ThreadBuffers){0};
+        s_cached_n_threads = 0;
+        s_cached_out_len = 0;
+        s_cached_elem_size = 0;
     }
-    
-    #pragma omp parallel num_threads(n_threads)
-    {
-        int tid = omp_get_thread_num();
-        spectral_sample_t* __restrict__ dst_base = (spectral_sample_t*)tb.bufs[tid];
-        
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < sa.count; i++) {
-            if (i + 4 < sa.count) PREFETCH_READ(&sa.segs[i + 4]);
-            
-            SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
-            if (!lp.valid) continue;
-            
-            spectral_sample_t* __restrict__ dst = dst_base + lp.start_idx;
-            
-            for (size_t j = 0; j < lp.length; j++) {
-                float p = lp.phase + j * (lp.alpha + lp.beta * j);
-                float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
-                
-                spectral_sample_t sample = spectral_wavetable_lookup_f(table, phase_norm);
-                spectral_sample_t amp_native = FLOAT_TO_SPECTRAL_SAMPLE(lp.amp + lp.d_amp * j);
-                spectral_sample_t scaled = SPECTRAL_SAMPLE_MUL(sample, amp_native);
-                
-                dst[j] = SPECTRAL_SAMPLE_ADD(dst[j], scaled);
-            }
-        }
-    }
-    
-    thread_buffers_reduce_native(&tb, out_buffer, out_len);
-    thread_buffers_free(&tb);
-    *t_synth = omp_get_wtime() - synth_start;
 }

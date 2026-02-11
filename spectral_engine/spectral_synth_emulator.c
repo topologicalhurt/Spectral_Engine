@@ -131,13 +131,25 @@ typedef struct {
 
 #define EMULATOR_MAX_ACTIVE SPECTRAL_ARM32_MAX_ACTIVE
 
+/* Binary search: find first segment whose end > pos (for future seek support) */
+__attribute__((unused))
+static uint32_t find_first_segment_at(const EmulatorSegment* segs, uint32_t count, uint32_t pos) {
+    uint32_t lo = 0, hi = count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (segs[mid].start + segs[mid].length <= pos) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
 /* Desktop emulation entry point */
 
 SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
                                       float stretch, float pitch, SpectralTimbre timbre,
                                       int n_threads, double* t_synth) {
     (void)n_threads;
-    (void)timbre;  /* TODO: support non-sine timbres in emulator */
+    (void)timbre;  /* TODO: non-sine timbres not yet supported in emulator */
     
     if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
         return SPECTRAL_OK;
@@ -154,7 +166,7 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
         if (sa.segs[i].amp > max_amp) max_amp = sa.segs[i].amp;
     }
     /* amp_scale brings max_amp to 1.0, with a bit of headroom */
-    float amp_scale = (max_amp > 0.0f) ? (0.99f / max_amp) : 1.0f;
+    float amp_scale = (max_amp > 0.0f) ? (SPECTRAL_EMULATOR_HEADROOM / max_amp) : 1.0f;
     
     /* Convert segments to emulator format */
     EmulatorSegment* emu_segs = (EmulatorSegment*)malloc(sa.count * sizeof(EmulatorSegment));
@@ -210,7 +222,7 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
 #endif
     
     /* Allocate 64-bit accumulator buffer (prevents overflow with many segments) */
-    const uint32_t block_size = 256;
+    const uint32_t block_size = cfg->block_size;
     int64_t* accum = (int64_t*)calloc(block_size, sizeof(int64_t));
     if (!accum) {
         SPECTRAL_WARN("Emulator: accumulator buffer allocation failed (%u samples)", block_size);
@@ -238,10 +250,12 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
         uint32_t block_end = (uint32_t)out_pos + block_len;
         
         /* Activate new segments that start in this block */
+        uint32_t block_activations = 0;
+        uint32_t scan_start_idx = next_seg_idx;
         while (next_seg_idx < sa.count && num_active < EMULATOR_MAX_ACTIVE) {
             EmulatorSegment* seg = &emu_segs[next_seg_idx];
             if (seg->start >= block_end) break;
-            
+
             uint32_t seg_end = seg->start + seg->length;
             if (seg_end > out_pos) {
                 /* Activate this segment */
@@ -253,10 +267,10 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
 #endif
                 act->amp = seg->amp_q15;
                 act->da = seg->da_q15;
-                
+
                 /* Initialize phase from stored Q15 value */
                 act->phase_acc = ((q31_t)seg->phase_q15 + 32768) << 16;
-                
+
                 /* Advance phase if segment started before this block */
                 if (seg->start < out_pos) {
                     uint32_t samples_in = (uint32_t)out_pos - seg->start;
@@ -272,38 +286,56 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
                     q31_t amp_advance = (q31_t)act->da * (q31_t)samples_in;
                     act->amp = spectral_ssat16((q31_t)act->amp + amp_advance);
                 }
-                
+
                 num_active++;
+                block_activations++;
             }
             next_seg_idx++;
         }
-        
+
+        /* Track SDRAM accesses (each activation reads segment data from SDRAM) */
+        ops.sdram_accesses += block_activations;
+        /* Track segment scan iterations */
+        ops.seg_scan_checks += (next_seg_idx - scan_start_idx);
+
         if (num_active > peak_active) peak_active = num_active;
-        
+
+        /* Estimate cache misses when active set exceeds L1 capacity */
+        if (num_active > EMBEDDED_CACHE_MISS_THRESHOLD) {
+            ops.cache_misses_est += (uint64_t)(num_active - EMBEDDED_CACHE_MISS_THRESHOLD) * block_len;
+        }
+
+        /* Per-block cycle estimate for worst-case tracking */
+        uint64_t block_cycles = 0;
+
         /* Process all active segments */
         uint32_t i = 0;
         while (i < num_active) {
             EmulatorActiveSegment* act = &active[i];
             EmulatorSegment* seg = &emu_segs[act->seg_idx];
             uint32_t seg_end = seg->start + seg->length;
-            
+
             /* Remove expired segments */
             if (out_pos >= seg_end) {
                 active[i] = active[--num_active];
                 continue;
             }
-            
+
             /* Compute block range for this segment */
             uint32_t blk_start = (seg->start > out_pos) ? (seg->start - (uint32_t)out_pos) : 0;
             uint32_t blk_end = (seg_end < block_end) ? (seg_end - (uint32_t)out_pos) : block_len;
             uint32_t len = blk_end - blk_start;
-            
+
             /* Count operations for performance estimation
              * This models what spectral_synth_embedded.c does on real hardware */
             ops.lut_lookups += len;           /* 1 LUT lookup per sample */
             ops.mac_operations += len;        /* 1 MAC per sample */
             ops.phase_updates += len;         /* 1 phase update per sample */
             ops.loop_iterations += (len + 3) >> 2;
+
+            /* Accumulate per-block cycles */
+            block_cycles += (uint64_t)len * EMBEDDED_CYCLES_PER_SAMPLE +
+                            ((len + 3) >> 2) * EMBEDDED_CYCLES_LOOP_PER_4;
             
             q31_t phase = act->phase_acc;
             q31_t freq_inc = act->freq_inc;
@@ -330,9 +362,23 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
             i++;
         }
         
+        /* Add block overhead to per-block estimate */
+        block_cycles += 50 + block_len * 5 + num_active * 15 +
+                        block_activations * EMBEDDED_CYCLES_SDRAM_ACCESS;
+        if (num_active > EMBEDDED_CACHE_MISS_THRESHOLD) {
+            block_cycles += (uint64_t)(num_active - EMBEDDED_CACHE_MISS_THRESHOLD) *
+                            block_len * EMBEDDED_CYCLES_CACHE_MISS;
+        }
+
+        /* Track worst-case block */
+        if (block_cycles > ops.peak_block_cycles) {
+            ops.peak_block_cycles = block_cycles;
+            ops.peak_block_active = num_active;
+        }
+
         /* Convert accumulator to float output
          * accum contains sum of (Q15 * Q15) = Q30 products */
-        const double scale = 1.0 / 1073741824.0;
+        const double scale = SPECTRAL_INV_Q30_SCALE;
         for (uint32_t j = 0; j < block_len; j++) {
             out_buffer[out_pos + j] = (float)((double)accum[j] * scale);
         }

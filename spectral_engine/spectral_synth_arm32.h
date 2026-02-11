@@ -36,16 +36,41 @@ extern "C" {
 
 typedef SpectralActiveSegQ15 SpectralActiveSegment;
 
+#if SPECTRAL_SOA_ACTIVE
+/* SoA (Structure of Arrays) layout for active segments.
+ * Each field stored in a contiguous array for better cache line utilization.
+ * Phase update loop reads contiguous phase_acc[]/freq_inc[] arrays;
+ * LDM/STM can load 4 phases at once (32 bytes = 8 phases). */
+typedef struct {
+    q31_t    phase_acc[SPECTRAL_ARM32_MAX_ACTIVE];
+    q31_t    freq_inc[SPECTRAL_ARM32_MAX_ACTIVE];
+    q15_t    amp_current[SPECTRAL_ARM32_MAX_ACTIVE];
+    q15_t    amp_delta[SPECTRAL_ARM32_MAX_ACTIVE];
+    uint32_t seg_idx[SPECTRAL_ARM32_MAX_ACTIVE];
+#if SPECTRAL_HAS_CHIRP
+    q31_t    freq_delta[SPECTRAL_ARM32_MAX_ACTIVE];
+#endif
+    uint16_t count;
+} SpectralActiveSoA;
+#endif
+
+/* Recommended placement:
+ *   SpectralArm32Ctx ctx SPECTRAL_DTCM;           -- active segments in DTCM
+ *   SpectralSegmentQ15 segs[N] SPECTRAL_SDRAM;     -- segment data in SDRAM */
 typedef struct SpectralArm32Ctx {
-    const SpectralSegmentQ15* segments;
+    const SpectralSegmentQ15* segments;  /* Points to SDRAM segment data */
     uint32_t num_segments;
     uint32_t segments_capacity;
-    
+
     uint32_t output_position;
     uint32_t output_length;
     uint32_t next_seg_idx;
-    
+
+#if SPECTRAL_SOA_ACTIVE
+    SpectralActiveSoA active_soa;
+#else
     SpectralActiveSegment active[SPECTRAL_ARM32_MAX_ACTIVE];
+#endif
     uint16_t num_active;
     uint16_t peak_active;
     
