@@ -20,9 +20,7 @@
 #include "spectral_consts.h"
 #include "spectral_macros.h"
 
-/*===========================================================================
- * Build Mode Flags
- *===========================================================================*/
+/* Build Mode Flags */
 
 #ifndef SPECTRAL_EMBEDDED
 #define SPECTRAL_EMBEDDED       0
@@ -47,9 +45,27 @@
 #define SPECTRAL_EMBEDDED_FLOAT 0
 #endif
 
-/*===========================================================================
- * Q15 Segment Configuration
- *===========================================================================*/
+/* DMA segment prefetch from SDRAM to DTCM */
+#ifndef SPECTRAL_HAS_DMA
+#define SPECTRAL_HAS_DMA        0
+#endif
+#ifndef SPECTRAL_DMA_BATCH
+#define SPECTRAL_DMA_BATCH      32  /* Segments per DMA transfer (~512 bytes) */
+#endif
+
+/* SoA active segment layout (phase_acc[], freq_inc[] as separate arrays) */
+#ifndef SPECTRAL_SOA_ACTIVE
+#define SPECTRAL_SOA_ACTIVE     0
+#endif
+
+/* Emulator mode: desktop build simulating embedded target constraints */
+#if defined(SPECTRAL_EMBEDDED_EMULATION) || defined(SPECTRAL_USE_EMBEDDED_SYNTH)
+#define SPECTRAL_IS_EMULATOR 1
+#else
+#define SPECTRAL_IS_EMULATOR 0
+#endif
+
+/* Q15 Segment Configuration */
 
 #ifndef SPECTRAL_Q15_COMPACT
 #define SPECTRAL_Q15_COMPACT    0
@@ -63,9 +79,7 @@
 #define SPECTRAL_Q15_SEG_SIZE   16
 #endif
 
-/*===========================================================================
- * Sample Type Abstraction
- *===========================================================================*/
+/* Sample Type Abstraction */
 
 #if SPECTRAL_EMBEDDED
 
@@ -79,7 +93,7 @@ typedef int32_t  spectral_acc_t;
 
 #define SPECTRAL_SAMPLE_TO_FLOAT(s) ((float)(s) * SPECTRAL_INV_Q15_SCALE)
 #define FLOAT_TO_SPECTRAL_SAMPLE(f) \
-    ((spectral_sample_t)((f) >= 1.0f ? 32767 : (f) <= -1.0f ? -32768 : (int16_t)((f) * SPECTRAL_Q15_SCALE)))
+    ((spectral_sample_t)(!((f) == (f)) ? 0 : (f) >= 1.0f ? 32767 : (f) <= -1.0f ? -32768 : (int16_t)((f) * SPECTRAL_Q15_SCALE)))
 
 #define SPECTRAL_SAMPLE_ADD(a, b) \
     ((spectral_sample_t)(((int32_t)(a) + (int32_t)(b)) > 32767 ? 32767 : \
@@ -108,9 +122,7 @@ typedef double   spectral_acc_t;
 
 #endif
 
-/*===========================================================================
- * Timbre Types
- *===========================================================================*/
+/* Timbre Types */
 
 typedef enum SpectralTimbre {
     TIMBRE_SINE     = 0,
@@ -132,9 +144,7 @@ typedef enum SpectralTimbre {
 #define SPECTRAL_BACKEND_TIMBRE_MAX     TIMBRE_MAX
 #endif
 
-/*===========================================================================
- * Wavetable Configuration
- *===========================================================================*/
+/* Wavetable Configuration */
 
 #ifndef SPECTRAL_USE_WAVETABLE_LUT
 #define SPECTRAL_USE_WAVETABLE_LUT      0
@@ -148,13 +158,11 @@ typedef enum SpectralTimbre {
 #define SPECTRAL_MAX_WAVETABLES         8
 #endif
 
-/*===========================================================================
- * Synthesis Defaults
- *===========================================================================*/
+/* Synthesis Defaults */
 
 /* GPU/compute block size for Metal/CUDA backends */
 #ifndef SPECTRAL_GPU_TILE_SIZE
-#define SPECTRAL_GPU_TILE_SIZE          256
+#define SPECTRAL_GPU_TILE_SIZE          512
 #endif
 
 /* Headroom factor for normalization (0.95 = -0.45dB) */
@@ -162,9 +170,16 @@ typedef enum SpectralTimbre {
 #define SPECTRAL_NORMALIZE_HEADROOM     0.95f
 #endif
 
-/*===========================================================================
- * Platform Detection
- *===========================================================================*/
+/* Emulator headroom for Q15 amplitude scaling */
+#define SPECTRAL_EMULATOR_HEADROOM      0.99f
+
+/* Metal segment cache size (threadgroup shared memory) */
+#define SPECTRAL_METAL_SEG_CACHE_SIZE   128
+
+/* Max stack-allocated samples for SIMD oscillator temp buffers */
+#define SPECTRAL_OSC_SIMD_STACK_MAX     8192
+
+/* Platform Detection */
 
 #if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
 #define SPECTRAL_ARM_M7         1
@@ -191,9 +206,7 @@ typedef enum SpectralTimbre {
 #define SPECTRAL_USE_FMA        0
 #endif
 
-/*===========================================================================
- * ARM32 Embedded Configuration
- *===========================================================================*/
+/* ARM32 Embedded Configuration */
 
 #if SPECTRAL_ARM_M7
 
@@ -215,6 +228,21 @@ typedef enum SpectralTimbre {
 
 #endif /* SPECTRAL_ARM_M7 */
 
+/* Linker Section Annotations
+ * SPECTRAL_DTCM  — Zero wait-state data memory (128KB on STM32H7)
+ * SPECTRAL_ITCM  — Zero wait-state instruction memory (64KB)
+ * SPECTRAL_SDRAM — External SDRAM (large, higher latency, prefetchable)
+ * On non-embedded targets these expand to nothing. */
+#if SPECTRAL_ARM_M7 && SPECTRAL_EMBEDDED
+#define SPECTRAL_DTCM   __attribute__((section(".dtcm_data")))
+#define SPECTRAL_ITCM   __attribute__((section(".itcm_text")))
+#define SPECTRAL_SDRAM  __attribute__((section(".sdram_data")))
+#else
+#define SPECTRAL_DTCM
+#define SPECTRAL_ITCM
+#define SPECTRAL_SDRAM
+#endif
+
 /* Fallback defaults for non-ARM platforms */
 #ifndef SPECTRAL_CACHE_LINE
 #define SPECTRAL_CACHE_LINE     64
@@ -223,9 +251,7 @@ typedef enum SpectralTimbre {
 #define SPECTRAL_ARM32_MAX_ACTIVE    512
 #endif
 
-/*===========================================================================
- * Analysis Defaults
- *===========================================================================*/
+/* Analysis Defaults */
 
 #if SPECTRAL_EMBEDDED
 #define DEFAULT_N_FFT           1024

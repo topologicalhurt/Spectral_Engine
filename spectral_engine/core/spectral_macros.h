@@ -3,6 +3,12 @@
 #define SPECTRAL_MACROS_H
 
 /*
+ * Stringify Macros (for embedding defines into shader source strings)
+ */
+#define SPECTRAL_XSTR(x) #x
+#define SPECTRAL_STR(x)  SPECTRAL_XSTR(x)
+
+/*
  * Loop Unrolling Hints
  */
 #if defined(__GNUC__) && !defined(__clang__)
@@ -49,6 +55,19 @@
 #else
 #define PREFETCH_READ(addr)     ((void)0)
 #define PREFETCH_WRITE(addr)    ((void)0)
+#endif
+
+/*
+ * Force Inline Hint
+ */
+#ifndef SPECTRAL_FORCEINLINE
+  #if defined(__GNUC__) || defined(__clang__)
+    #define SPECTRAL_FORCEINLINE __attribute__((always_inline)) inline
+  #elif defined(_MSC_VER)
+    #define SPECTRAL_FORCEINLINE __forceinline
+  #else
+    #define SPECTRAL_FORCEINLINE inline
+  #endif
 #endif
 
 #endif /* SPECTRAL_MACROS_H */
