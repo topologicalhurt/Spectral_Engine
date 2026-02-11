@@ -15,12 +15,7 @@
 static int omp_get_max_threads(void) { return 1; }
 #endif
 
-/* Build mode detection */
-#if defined(SPECTRAL_EMBEDDED_EMULATION) || defined(SPECTRAL_USE_EMBEDDED_SYNTH)
-#define IS_EMULATOR 1
-#else
-#define IS_EMULATOR 0
-#endif
+#define IS_EMULATOR SPECTRAL_IS_EMULATOR
 
 void spectral_cli_init(SpectralCliOptions* opts) {
     if (!opts) return;
@@ -59,23 +54,34 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
     spectral_cli_init(opts);
     opts->input_path = argv[1];
     
-    /* Check for -w wavetable option first */
-    int arg_offset = 0;
+    /* Check for -w wavetable option first (track consumed indices, don't mutate argv) */
+    int wt_idx = -1;
     for (int i = 2; i < argc - 1; i++) {
         if (strcmp(argv[i], "-w") == 0 || strcmp(argv[i], "--wavetable") == 0) {
             opts->wavetable_path = argv[i + 1];
             opts->use_wavetable = 1;
-            /* Mark these args as consumed by shifting effective positions */
-            arg_offset = 2;
-            /* Shift remaining args in a copy (don't modify original) */
-            for (int j = i; j < argc - 2; j++) {
-                argv[j] = argv[j + 2];
-            }
-            argc -= 2;
+            wt_idx = i;
             break;
         }
     }
-    (void)arg_offset;
+
+    /* Build effective argc/argv skipping consumed -w <path> args */
+    int eff_argc = argc;
+    char* eff_argv_buf[64];
+    char** eff_argv = argv;
+    if (wt_idx >= 0 && argc <= 64) {
+        eff_argc = 0;
+        for (int i = 0; i < argc; i++) {
+            if (i == wt_idx || i == wt_idx + 1) continue;
+            eff_argv_buf[eff_argc++] = argv[i];
+        }
+        eff_argv = eff_argv_buf;
+    } else if (wt_idx >= 0) {
+        /* Extremely long argv - just skip the two indices manually below */
+        eff_argc = argc - 2;
+    }
+    argc = eff_argc;
+    argv = eff_argv;
     
 #if SPECTRAL_RESTRICTED_MODE
     /* Restricted mode: timbre stretch pitch threads start end */

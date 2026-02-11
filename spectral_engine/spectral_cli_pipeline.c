@@ -1,7 +1,4 @@
-/* spectral_pipeline.c - Main Processing Pipeline Implementation
- * 
- * Orchestrates analysis, synthesis, and output operations.
- */
+/* spectral_cli_pipeline.c - Pipeline orchestration */
 #include "spectral_cli_pipeline.h"
 #include "spectral_synth.h"
 #include "spectral_segment_parser.h"
@@ -63,95 +60,19 @@ static PipelineError load_wavetable(const char* path, SpectralWavetableBank* ban
     return PIPELINE_OK;
 }
 
-/* Run synthesis with appropriate backend */
+/* Run synthesis with appropriate backend via engine dispatch */
 static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray sa,
                                    float* out_buf, size_t out_len,
                                    SpectralWavetableBank* wt_bank, double* t_synth) {
-    SpectralError err = SPECTRAL_OK;
-    
-#if SPECTRAL_RESTRICTED_MODE
-    printf("Rendering with %d CPU threads%s (restricted mode)...\n", 
+    const char* backend_name = spectral_backend_name(opts->backend);
+    printf("Rendering with %s (%u segs, timbre=%s, threads=%d)%s...\n",
+           backend_name, sa.count, timbre_name(opts->timbre),
            opts->n_threads, wt_bank ? " (wavetable)" : "");
-    if (wt_bank) {
-        err = synth_cpu_wavetable(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                  wt_bank, opts->timbre, opts->n_threads, t_synth);
-    } else {
-        err = synth_cpu(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                        opts->timbre, opts->n_threads, t_synth);
-    }
-    
-#elif HAS_METAL
-    if (opts->backend != BACKEND_CPU && opts->backend != BACKEND_CUDA) metal_init();
-    int metal_supports_timbre = (opts->timbre <= BACKEND_METAL_TIMBRE_MAX);
-    int use_metal = (opts->backend == BACKEND_METAL) || 
-                    (opts->backend == BACKEND_AUTO && metal_available() && metal_supports_timbre);
-    
-    if (use_metal && metal_available()) {
-        printf("Rendering with Metal GPU (%u segs, timbre=%s)...\n", sa.count, timbre_name(opts->timbre));
-        synth_metal(sa, out_buf, out_len, opts->stretch, opts->pitch, opts->timbre, t_synth);
-        if (*t_synth < 0) {
-            printf("Metal fallback to CPU...\n");
-            if (wt_bank) {
-                err = synth_cpu_wavetable(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                          wt_bank, opts->timbre, opts->n_threads, t_synth);
-            } else {
-                err = synth_cpu(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                opts->timbre, opts->n_threads, t_synth);
-            }
-        }
-    } else {
-        if (opts->backend == BACKEND_METAL && !metal_available()) 
-            printf("Warning: Metal unavailable\n");
-        else if (opts->backend == BACKEND_METAL && !metal_supports_timbre)
-            printf("Warning: Metal doesn't support timbre %s, using CPU\n", timbre_name(opts->timbre));
-        printf("Rendering with %d CPU threads%s...\n", opts->n_threads, wt_bank ? " (wavetable)" : "");
-        if (wt_bank) {
-            err = synth_cpu_wavetable(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                      wt_bank, opts->timbre, opts->n_threads, t_synth);
-        } else {
-            err = synth_cpu(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                            opts->timbre, opts->n_threads, t_synth);
-        }
-    }
-    
-#elif HAS_CUDA
-    if (opts->backend == BACKEND_CUDA || opts->backend == BACKEND_AUTO) {
-        cuda_init();
-        if (cuda_available() && opts->timbre == TIMBRE_SINE && !wt_bank) {
-            printf("Rendering with CUDA GPU (%u segs)...\n", sa.count);
-            synth_cuda(sa, out_buf, out_len, opts->stretch, opts->pitch, t_synth);
-        } else {
-            printf("Rendering with %d CPU threads%s...\n", opts->n_threads, wt_bank ? " (wavetable)" : "");
-            if (wt_bank) {
-                err = synth_cpu_wavetable(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                          wt_bank, opts->timbre, opts->n_threads, t_synth);
-            } else {
-                err = synth_cpu(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                opts->timbre, opts->n_threads, t_synth);
-            }
-        }
-    } else {
-        printf("Rendering with %d CPU threads%s...\n", opts->n_threads, wt_bank ? " (wavetable)" : "");
-        if (wt_bank) {
-            err = synth_cpu_wavetable(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                      wt_bank, opts->timbre, opts->n_threads, t_synth);
-        } else {
-            err = synth_cpu(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                            opts->timbre, opts->n_threads, t_synth);
-        }
-    }
-    
-#else
-    printf("Rendering with %d threads%s...\n", opts->n_threads, wt_bank ? " (wavetable)" : "");
-    if (wt_bank) {
-        err = synth_cpu_wavetable(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                                  wt_bank, opts->timbre, opts->n_threads, t_synth);
-    } else {
-        err = synth_cpu(sa, out_buf, out_len, opts->stretch, opts->pitch,
-                        opts->timbre, opts->n_threads, t_synth);
-    }
-#endif
-    return err;
+
+    return spectral_synth_dispatch(sa, out_buf, out_len,
+                                   opts->stretch, opts->pitch, opts->timbre,
+                                   opts->backend, wt_bank,
+                                   opts->n_threads, t_synth);
 }
 
 PipelineError spectral_pipeline_run(const SpectralCliOptions* opts, 

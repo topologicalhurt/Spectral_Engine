@@ -1,1 +1,2 @@
 https://github.com/topologicalhurt/thesis, subtrees/LLAC, research
+https://github.com/simd-everywhere/simde, third_party/simde, master

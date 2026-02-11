@@ -182,7 +182,8 @@ ifeq ($(UNAME_S),Darwin)
     CFLAGS_BASE := -O3 -march=native -mtune=native $(AUDIO_OPT_FLAGS) \
                    -flto=thin -fvectorize -fslp-vectorize \
                    -Wall -Wextra -Wno-unknown-pragmas \
-                   -I. -I$(CORE_DIR) -I$(OMP_PREFIX)/include -I$(SNDFILE_PREFIX)/include \
+                   -I. -I$(CORE_DIR) -I../third_party/simde \
+                   -I$(OMP_PREFIX)/include -I$(SNDFILE_PREFIX)/include \
                    -Xpreprocessor -fopenmp
     
     OBJCFLAGS := $(CFLAGS_BASE) -fobjc-arc
@@ -203,7 +204,8 @@ else
     # -fipa-pta: Interprocedural pointer analysis for better aliasing
     CFLAGS_BASE  := -std=c11 -O3 -march=native -mtune=native $(AUDIO_OPT_FLAGS) \
                     -flto=auto -floop-nest-optimize -fgraphite-identity -fipa-pta \
-                    -Wall -Wextra -Wno-unknown-pragmas -I. -I$(CORE_DIR) -fopenmp
+                    -Wall -Wextra -Wno-unknown-pragmas \
+                    -I. -I$(CORE_DIR) -I../third_party/simde -fopenmp
     
     # LTO requires passing flags to linker
     LDFLAGS_BASE := -flto=auto -lm -lsndfile -lfftw3f -fopenmp
@@ -297,7 +299,7 @@ $(BIN_DIR)/$(TARGET_DESKTOP): $(DESKTOP_OBJS) | $(BIN_DIR)
 
 EMULATOR_CFLAGS := $(CFLAGS_BASE) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
                    -DSPECTRAL_EMBEDDED_EMULATION=1
-EMULATOR_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) \
+EMULATOR_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_CPU) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) \
                    $(SRCS_CORE) $(SRCS_MONITORING)
 EMULATOR_OBJS   := $(call src_to_obj,$(OBJ_EMU_DIR),$(EMULATOR_SRCS_C))
 
@@ -356,12 +358,12 @@ $(BIN_DIR)/$(TARGET_EMULATOR_DAISY): $(EMULATOR_DAISY_OBJS) | $(BIN_DIR)
 	$(CC) $(EMULATOR_DAISY_OBJS) -o $@ $(LDFLAGS_CPU)
 
 # Emulator object files (generic)
-$(OBJ_EMU_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMU_DIR)
-	$(CC) $(EMULATOR_CFLAGS) -c $< -o $@
+$(OBJ_EMU_DIR)/%.o: %.c | $(OBJ_EMU_DIR)
+	$(CC) $(EMULATOR_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Emulator object files (Daisy)
-$(OBJ_EMU_DAISY_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMU_DAISY_DIR)
-	$(CC) $(EMULATOR_DAISY_CFLAGS) -c $< -o $@
+$(OBJ_EMU_DAISY_DIR)/%.o: %.c | $(OBJ_EMU_DAISY_DIR)
+	$(CC) $(EMULATOR_DAISY_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # 
 #                          TARGET: embedded arm
@@ -375,10 +377,12 @@ $(OBJ_EMU_DAISY_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMU_DAISY_DIR)
 # NOTE: This is for CROSS-COMPILATION. Use 'make emulator' to test
 # the Q15 path on desktop.
 
-# ARM flags - embedded Q15 with analysis (for testing)
-ARM_EMBEDDED_FLAGS := -ffast-math -funsafe-math-optimizations \
-                      -fdata-sections -ffunction-sections \
-                      -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1
+# Common flags shared by all embedded targets
+EMBEDDED_COMMON_FLAGS := -ffast-math -funsafe-math-optimizations \
+                         -fdata-sections -ffunction-sections \
+                         -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1
+
+ARM_EMBEDDED_FLAGS     := $(EMBEDDED_COMMON_FLAGS)
 
 EMBEDDED_ARM_CFLAGS := $(CFLAGS_BASE) $(ARM_EMBEDDED_FLAGS)
 EMBEDDED_ARM_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
@@ -396,13 +400,10 @@ EMBEDDED_ARM_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_DIR),$(EMBEDDED_ARM_
 # NOTE: This is for CROSS-COMPILATION. Use 'make emulator' to test
 # the Q15 path on desktop.
 
-# Aggressive optimization flags for embedded ARM targets
+# Aggressive optimization flags for restricted embedded ARM targets
 # These mirror the flags used in api/daisy_seed/Makefile for Cortex-M7
-EMBEDDED_OPT_FLAGS := -ffast-math -funsafe-math-optimizations \
-                      -fdata-sections -ffunction-sections \
-                      -fno-exceptions -fno-threadsafe-statics \
-                      -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_RESTRICTED_MODE=1 \
-                      -DSPECTRAL_USE_EMBEDDED_SYNTH=1 -DSPECTRAL_NO_PERF=1
+EMBEDDED_OPT_FLAGS := $(EMBEDDED_COMMON_FLAGS) -fno-exceptions -fno-threadsafe-statics \
+                      -DSPECTRAL_RESTRICTED_MODE=1 -DSPECTRAL_NO_PERF=1
 
 EMBEDDED_ARM_RES_CFLAGS := $(CFLAGS_BASE) $(EMBEDDED_OPT_FLAGS)
 EMBEDDED_ARM_RES_SRCS_C := main.c $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE)
@@ -427,10 +428,7 @@ $(BIN_DIR)/$(TARGET_EMBEDDED_ARM): $(EMBEDDED_ARM_OBJS) | $(BIN_DIR)
 	$(CC) $(EMBEDDED_ARM_OBJS) -o $@ $(LDFLAGS_CPU)
 
 # ARM float target (FPU synthesis, with analysis)
-ARM_FLOAT_FLAGS := -ffast-math -funsafe-math-optimizations \
-                   -fdata-sections -ffunction-sections \
-                   -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_EMBEDDED_FLOAT=1 \
-                   -DSPECTRAL_USE_EMBEDDED_SYNTH=1
+ARM_FLOAT_FLAGS := $(EMBEDDED_COMMON_FLAGS) -DSPECTRAL_EMBEDDED_FLOAT=1
 
 EMBEDDED_ARM_FLOAT_CFLAGS := $(CFLAGS_BASE) $(ARM_FLOAT_FLAGS)
 EMBEDDED_ARM_FLOAT_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
@@ -439,8 +437,8 @@ EMBEDDED_ARM_FLOAT_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_FLOAT_DIR),$(E
 $(OBJ_EMBEDDED_ARM_FLOAT_DIR):
 	mkdir -p $@
 
-$(OBJ_EMBEDDED_ARM_FLOAT_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMBEDDED_ARM_FLOAT_DIR)
-	$(CC) $(EMBEDDED_ARM_FLOAT_CFLAGS) -c $< -o $@
+$(OBJ_EMBEDDED_ARM_FLOAT_DIR)/%.o: %.c | $(OBJ_EMBEDDED_ARM_FLOAT_DIR)
+	$(CC) $(EMBEDDED_ARM_FLOAT_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 .PHONY: embedded_arm_float
 embedded_arm_float: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_FLOAT)
@@ -543,16 +541,19 @@ daisy-clean:
 #                           OBJECT FILE RULES
 # 
 
+# Automatic dependency generation — rebuilds only what changed
+DEPFLAGS = -MMD -MP -MF $(@:.o=.d)
+
 # Create directories
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_EMBEDDED_ARM_DIR) $(OBJ_EMBEDDED_ARM_RES_DIR) $(OBJ_EMU_DIR) $(OBJ_EMU_DAISY_DIR):
 	@mkdir -p $@
 
 # Desktop object files
-$(OBJ_DIR)/%.o: %.c $(HEADERS) | $(OBJ_DIR)
-	$(CC) $(DESKTOP_CFLAGS) -c $< -o $@
+$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
+	$(CC) $(DESKTOP_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: %.m $(HEADERS) | $(OBJ_DIR)
-	$(CC) $(OBJCFLAGS) -c $< -o $@
+$(OBJ_DIR)/%.o: %.m | $(OBJ_DIR)
+	$(CC) $(OBJCFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/spectral_synth_cuda.o: spectral_synth_cuda.cu $(HEADERS) | $(OBJ_DIR)
 ifeq ($(USE_CUDA),1)
@@ -560,12 +561,12 @@ ifeq ($(USE_CUDA),1)
 endif
 
 # Embedded ARM object files (with analysis)
-$(OBJ_EMBEDDED_ARM_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMBEDDED_ARM_DIR)
-	$(CC) $(EMBEDDED_ARM_CFLAGS) -c $< -o $@
+$(OBJ_EMBEDDED_ARM_DIR)/%.o: %.c | $(OBJ_EMBEDDED_ARM_DIR)
+	$(CC) $(EMBEDDED_ARM_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Embedded ARM restricted object files (no analysis)
-$(OBJ_EMBEDDED_ARM_RES_DIR)/%.o: %.c $(HEADERS) | $(OBJ_EMBEDDED_ARM_RES_DIR)
-	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) -c $< -o $@
+$(OBJ_EMBEDDED_ARM_RES_DIR)/%.o: %.c | $(OBJ_EMBEDDED_ARM_RES_DIR)
+	$(CC) $(EMBEDDED_ARM_RES_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # 
 #                              UTILITIES
@@ -783,3 +784,17 @@ endif
 
 .PHONY: all desktop embedded_arm embedded_arm_float embedded_arm_restricted cuda daisy daisy-flash daisy-clean \
         debug clean info deps help syntax-test convert_segments update_submodules build_subtrees
+
+#
+#                         AUTO-DEPENDENCY INCLUDES
+#
+# Generated .d files track header dependencies per object file.
+# On first build (no .d files), the pattern rules handle everything.
+# On incremental builds, only changed headers trigger recompilation.
+
+-include $(wildcard $(OBJ_DIR)/*.d)
+-include $(wildcard $(OBJ_EMU_DIR)/*.d)
+-include $(wildcard $(OBJ_EMU_DAISY_DIR)/*.d)
+-include $(wildcard $(OBJ_EMBEDDED_ARM_DIR)/*.d)
+-include $(wildcard $(OBJ_EMBEDDED_ARM_FLOAT_DIR)/*.d)
+-include $(wildcard $(OBJ_EMBEDDED_ARM_RES_DIR)/*.d)
