@@ -3,41 +3,56 @@
 # Subtree management script
 #
 # Usage:
-#   ./update.sh pull                    Pull all subtrees from libs.txt
-#   ./update.sh pull <path>...          Pull only matching subtrees
-#   ./update.sh push                    Push all subtrees to upstream
-#   ./update.sh push <path>...          Push only matching subtrees
-#   ./update.sh remove <path>...        Remove directory (no libs.txt needed)
-#   ./update.sh list                    List configured subtrees
+#   ./update.sh pull [--dry-run] [<path>...]   Pull all (or matching) subtrees
+#   ./update.sh push [--dry-run] [<path>...]   Push all (or matching) subtrees
+#   ./update.sh remove <path>...               Remove directory and commit
+#   ./update.sh list|status                    List configured subtrees
+#   ./update.sh help                           Show this help
 #
 # libs.txt format (one entry per line):
-#   <repo_url>,<local_path>,<branch>
+#   <repo_url>, <local_path>, <branch>
 #
-# Example:
-#   https://github.com/user/repo,subtrees/mylib,main
+# Blank lines and lines starting with # are ignored.
+# Branch defaults to 'main' if omitted.
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIBS_FILE="$SCRIPT_DIR/libs.txt"
 
-STASH_MSG=""
-STASHED=0
+# --- Color output ----------------------------------------------------------
 
-die()  { echo "Error: $*" >&2; exit 1; }
-warn() { echo "Warning: $*" >&2; }
-info() { echo "$*"; }
+USE_COLOR=0
+[[ -t 1 ]] && USE_COLOR=1
+
+_green()  { [[ $USE_COLOR -eq 1 ]] && printf '\033[32m%s\033[0m' "$1" || printf '%s' "$1"; }
+_red()    { [[ $USE_COLOR -eq 1 ]] && printf '\033[31m%s\033[0m' "$1" || printf '%s' "$1"; }
+_yellow() { [[ $USE_COLOR -eq 1 ]] && printf '\033[33m%s\033[0m' "$1" || printf '%s' "$1"; }
+_bold()   { [[ $USE_COLOR -eq 1 ]] && printf '\033[1m%s\033[0m' "$1" || printf '%s' "$1"; }
+
+die()  { printf 'Error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'Warning: %s\n' "$*" >&2; }
+
+# --- Utilities --------------------------------------------------------------
+
+# Trim leading/trailing whitespace via parameter expansion (no subshells)
+trim() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    printf '%s' "$v"
+}
 
 # Normalize path: strip ./ prefix and trailing /
 normalize() {
     local p="$1"
     p="${p#./}"
     p="${p%/}"
-    echo "$p"
+    printf '%s' "$p"
 }
 
-# Check for any uncommitted changes
+# Check for any uncommitted changes (staged, unstaged, or untracked)
 has_changes() {
     ! git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null && return 0
     ! git -C "$REPO_ROOT" diff --quiet 2>/dev/null && return 0
@@ -45,206 +60,346 @@ has_changes() {
     return 1
 }
 
-# Stash uncommitted changes
-stash_if_needed() {
+require_clean_tree() {
     if has_changes; then
-        STASH_MSG="update.sh-$$-$(date +%s)"
-        info "Stashing local changes..."
-        if ! git -C "$REPO_ROOT" stash push --include-untracked -m "$STASH_MSG" -q; then
-            die "Failed to stash. Commit or stash manually first."
-        fi
-        STASHED=1
+        die "Working tree is not clean. Commit or stash your changes first.
+  git stash push --include-untracked"
     fi
 }
 
-# Restore stash (called on exit)
-restore_stash() {
-    if [[ $STASHED -eq 1 && -n "$STASH_MSG" ]]; then
-        local ref
-        ref="$(git -C "$REPO_ROOT" stash list | grep -F "$STASH_MSG" | head -1 | cut -d: -f1)"
-        if [[ -n "$ref" ]]; then
-            info "Restoring stashed changes..."
-            git -C "$REPO_ROOT" stash pop "$ref" -q 2>/dev/null || \
-                warn "Could not restore stash. Run 'git stash pop' manually."
-        fi
-        STASHED=0
-    fi
+# --- libs.txt parsing -------------------------------------------------------
+
+# Globals set by parse_lib_entry
+REPO=""
+LOCAL_PATH=""
+BRANCH=""
+
+parse_lib_entry() {
+    local line="$1"
+    local rest
+
+    REPO="${line%%,*}";   rest="${line#*,}"
+    LOCAL_PATH="${rest%%,*}"; BRANCH="${rest#*,}"
+
+    # If there was no second comma, BRANCH == LOCAL_PATH — clear it
+    [[ "$BRANCH" == "$LOCAL_PATH" ]] && BRANCH=""
+
+    REPO="$(trim "$REPO")"
+    LOCAL_PATH="$(trim "$LOCAL_PATH")"
+    BRANCH="$(trim "$BRANCH")"
+    BRANCH="${BRANCH:-main}"
 }
 
-trap restore_stash EXIT
-
-# Validate git repo
-git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null || die "Not a git repository: $REPO_ROOT"
-
-# Read libs.txt into LIB_ENTRIES array (repo,path,branch per line)
-# Must be called before stashing since file might be untracked
+# Populate LIB_ENTRIES array from libs.txt
 read_libs_file() {
     LIB_ENTRIES=()
     [[ ! -f "$LIBS_FILE" ]] && return 1
-    
+
     while IFS= read -r line || [[ -n "$line" ]]; do
+        # Trim the line
+        line="$(trim "$line")"
         # Skip empty lines and comments
-        line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         [[ -z "$line" || "$line" == \#* ]] && continue
-        
         LIB_ENTRIES+=("$line")
     done < "$LIBS_FILE"
     return 0
 }
 
-# Parse a libs.txt line into REPO, LOCAL_PATH, BRANCH globals
-parse_lib_entry() {
-    local line="$1"
-    IFS=',' read -r REPO LOCAL_PATH BRANCH <<< "$line"
-    REPO="$(echo "$REPO" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    LOCAL_PATH="$(echo "$LOCAL_PATH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    BRANCH="$(echo "$BRANCH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    BRANCH="${BRANCH:-main}"
+# Validate all entries upfront. Dies on fatal errors, warns on suspicious ones.
+validate_entries() {
+    local -a seen_paths=()
+    local entry errors=0
+
+    for entry in "${LIB_ENTRIES[@]}"; do
+        parse_lib_entry "$entry"
+
+        if [[ -z "$REPO" ]]; then
+            printf '  %s: missing repo URL\n' "$entry" >&2
+            errors=$((errors + 1))
+            continue
+        fi
+        if [[ -z "$LOCAL_PATH" ]]; then
+            printf '  %s: missing local path\n' "$entry" >&2
+            errors=$((errors + 1))
+            continue
+        fi
+
+        # Warn on repo URL that doesn't look like a URL
+        if [[ "$REPO" != *"://"* && "$REPO" != *"@"* ]]; then
+            warn "'$REPO' doesn't look like a URL (no :// or @)"
+        fi
+
+        # Check for duplicate paths
+        local sp
+        for sp in "${seen_paths[@]+"${seen_paths[@]}"}"; do
+            if [[ "$sp" == "$LOCAL_PATH" ]]; then
+                warn "duplicate path '$LOCAL_PATH' in libs.txt"
+            fi
+        done
+        seen_paths+=("$LOCAL_PATH")
+    done
+
+    [[ $errors -gt 0 ]] && die "$errors invalid entries in libs.txt"
+    return 0
 }
 
-# Check if path matches filter list. Empty list = match all.
+# --- Filter matching --------------------------------------------------------
+
 match_filter() {
     local target="$1"
     shift
-    
+
     # No filters = match everything
     [[ $# -eq 0 ]] && return 0
-    
+
     target="$(normalize "$target")"
-    
+
     local filter
     for filter in "$@"; do
         filter="$(normalize "$filter")"
         [[ -z "$filter" ]] && continue
-        
-        # Exact match
         [[ "$target" == "$filter" ]] && return 0
-        # Target is under filter (filter is parent)
         [[ "$target" == "$filter"/* ]] && return 0
     done
     return 1
 }
 
+# --- Summary tracking -------------------------------------------------------
+
+_ok_count=0
+_fail_count=0
+_skip_count=0
+
+# Arrays to track per-entry results for the summary table
+declare -a _summary_paths=()
+declare -a _summary_results=()
+
+record_ok()   { _ok_count=$((_ok_count + 1));   _summary_paths+=("$1"); _summary_results+=("ok"); }
+record_fail() { _fail_count=$((_fail_count + 1)); _summary_paths+=("$1"); _summary_results+=("FAILED"); }
+record_skip() { _skip_count=$((_skip_count + 1)); _summary_paths+=("$1"); _summary_results+=("skipped"); }
+
+print_summary() {
+    printf '\n'
+    local i
+    for i in "${!_summary_paths[@]}"; do
+        local result="${_summary_results[$i]}"
+        local path="${_summary_paths[$i]}"
+        case "$result" in
+            ok)      printf '  %-40s %s\n' "$path" "$(_green "$result")" ;;
+            FAILED)  printf '  %-40s %s\n' "$path" "$(_red "$result")" ;;
+            skipped) printf '  %-40s %s\n' "$path" "$(_yellow "$result")" ;;
+        esac
+    done
+    printf '\n%s succeeded, %s failed, %s skipped\n' \
+        "$(_green "$_ok_count")" \
+        "$(_red "$_fail_count")" \
+        "$(_yellow "$_skip_count")"
+}
+
+# --- Commands ---------------------------------------------------------------
+
 do_pull() {
+    local dry_run=0
+    local -a filters=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run|-n) dry_run=1; shift ;;
+            *)            filters+=("$1"); shift ;;
+        esac
+    done
+
     read_libs_file || die "libs.txt not found at $LIBS_FILE"
-    [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { info "No entries in libs.txt"; return 0; }
-    
-    stash_if_needed
-    
-    local failed=0
+    [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { printf 'No entries in libs.txt\n'; return 0; }
+    validate_entries
+
+    [[ $dry_run -eq 0 ]] && require_clean_tree
+
     for entry in "${LIB_ENTRIES[@]}"; do
         parse_lib_entry "$entry"
-        
         [[ -z "$REPO" || -z "$LOCAL_PATH" ]] && continue
-        match_filter "$LOCAL_PATH" "$@" || continue
-        
+        match_filter "$LOCAL_PATH" "${filters[@]+"${filters[@]}"}" || continue
+
+        if [[ $dry_run -eq 1 ]]; then
+            if [[ -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
+                printf '  %s would pull %s from %s (%s)\n' \
+                    "$(_yellow "[dry-run]")" "$(_bold "$LOCAL_PATH")" "$REPO" "$BRANCH"
+            else
+                printf '  %s would add %s from %s (%s)\n' \
+                    "$(_yellow "[dry-run]")" "$(_bold "$LOCAL_PATH")" "$REPO" "$BRANCH"
+            fi
+            continue
+        fi
+
         if [[ -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
-            info "Pulling $LOCAL_PATH from $BRANCH..."
-            if ! git -C "$REPO_ROOT" subtree pull --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" --squash -m "Update subtree $LOCAL_PATH"; then
-                warn "Failed to pull $LOCAL_PATH"
-                ((failed++))
+            printf '  pull  %s ← %s ... ' "$(_bold "$LOCAL_PATH")" "$BRANCH"
+            if git -C "$REPO_ROOT" subtree pull --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
+                    --squash -m "Update subtree $LOCAL_PATH" >/dev/null 2>&1; then
+                printf '%s\n' "$(_green "ok")"
+                record_ok "$LOCAL_PATH"
+            else
+                printf '%s\n' "$(_red "FAILED")"
+                record_fail "$LOCAL_PATH"
             fi
         else
-            info "Adding $LOCAL_PATH from $REPO ($BRANCH)..."
-            if ! git -C "$REPO_ROOT" subtree add --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" --squash; then
-                warn "Failed to add $LOCAL_PATH"
-                ((failed++))
+            printf '  add   %s ← %s ... ' "$(_bold "$LOCAL_PATH")" "$BRANCH"
+            if git -C "$REPO_ROOT" subtree add --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
+                    --squash >/dev/null 2>&1; then
+                printf '%s\n' "$(_green "ok")"
+                record_ok "$LOCAL_PATH"
+            else
+                printf '%s\n' "$(_red "FAILED")"
+                record_fail "$LOCAL_PATH"
             fi
         fi
     done
-    
-    [[ $failed -gt 0 ]] && return 1
-    info "Done."
+
+    [[ $dry_run -eq 1 ]] || print_summary
+    [[ $_fail_count -gt 0 ]] && return 1
+    return 0
 }
 
 do_push() {
+    local dry_run=0
+    local -a filters=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run|-n) dry_run=1; shift ;;
+            *)            filters+=("$1"); shift ;;
+        esac
+    done
+
     read_libs_file || die "libs.txt not found at $LIBS_FILE"
-    [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { info "No entries in libs.txt"; return 0; }
-    
-    stash_if_needed
-    
-    local failed=0
+    [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { printf 'No entries in libs.txt\n'; return 0; }
+    validate_entries
+
+    [[ $dry_run -eq 0 ]] && require_clean_tree
+
     for entry in "${LIB_ENTRIES[@]}"; do
         parse_lib_entry "$entry"
-        
         [[ -z "$REPO" || -z "$LOCAL_PATH" ]] && continue
-        match_filter "$LOCAL_PATH" "$@" || continue
-        
-        if [[ ! -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
-            warn "$LOCAL_PATH does not exist, skipping"
+        match_filter "$LOCAL_PATH" "${filters[@]+"${filters[@]}"}" || continue
+
+        if [[ $dry_run -eq 1 ]]; then
+            if [[ -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
+                printf '  %s would push %s to %s (%s)\n' \
+                    "$(_yellow "[dry-run]")" "$(_bold "$LOCAL_PATH")" "$REPO" "$BRANCH"
+            else
+                printf '  %s %s does not exist, would skip\n' \
+                    "$(_yellow "[dry-run]")" "$LOCAL_PATH"
+            fi
             continue
         fi
-        
-        info "Pushing $LOCAL_PATH to $REPO ($BRANCH)..."
-        if ! git -C "$REPO_ROOT" subtree push --prefix="$LOCAL_PATH" "$REPO" "$BRANCH"; then
-            warn "Failed to push $LOCAL_PATH"
-            ((failed++))
+
+        if [[ ! -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
+            printf '  push  %s ... %s (not present)\n' "$LOCAL_PATH" "$(_yellow "skipped")"
+            record_skip "$LOCAL_PATH"
+            continue
+        fi
+
+        printf '  push  %s → %s ... ' "$(_bold "$LOCAL_PATH")" "$BRANCH"
+        if git -C "$REPO_ROOT" subtree push --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
+                >/dev/null 2>&1; then
+            printf '%s\n' "$(_green "ok")"
+            record_ok "$LOCAL_PATH"
+        else
+            printf '%s\n' "$(_red "FAILED")"
+            record_fail "$LOCAL_PATH"
         fi
     done
-    
-    [[ $failed -gt 0 ]] && return 1
-    info "Done."
+
+    [[ $dry_run -eq 1 ]] || print_summary
+    [[ $_fail_count -gt 0 ]] && return 1
+    return 0
 }
 
 do_remove() {
     local -a paths=("$@")
-    
     [[ ${#paths[@]} -eq 0 ]] && die "remove requires at least one path"
-    
-    stash_if_needed
-    
-    local failed=0
+
+    require_clean_tree
+
     for path in "${paths[@]}"; do
         path="$(normalize "$path")"
         local full="$REPO_ROOT/$path"
-        
+
         if [[ ! -d "$full" ]]; then
-            warn "$path does not exist"
-            ((failed++))
+            printf '  remove  %s ... %s (not found)\n' "$path" "$(_yellow "skipped")"
+            record_skip "$path"
             continue
         fi
-        
-        info "Removing $path..."
+
+        printf '  remove  %s ... ' "$(_bold "$path")"
         rm -rf "$full"
         git -C "$REPO_ROOT" add -A "$path" 2>/dev/null || true
-        
+
         if git -C "$REPO_ROOT" diff --cached --quiet; then
-            info "  (already removed)"
+            printf '%s (already clean)\n' "$(_yellow "skipped")"
+            record_skip "$path"
+        elif git -C "$REPO_ROOT" commit -m "Remove subtree $path" >/dev/null 2>&1; then
+            printf '%s\n' "$(_green "ok")"
+            record_ok "$path"
         else
-            git -C "$REPO_ROOT" commit -m "Remove subtree $path" && info "  Committed."
+            printf '%s\n' "$(_red "FAILED")"
+            record_fail "$path"
         fi
     done
-    
-    [[ $failed -gt 0 ]] && return 1
-    info "Done."
+
+    print_summary
+    [[ $_fail_count -gt 0 ]] && return 1
+    return 0
 }
 
 do_list() {
     if [[ ! -f "$LIBS_FILE" ]]; then
-        info "No libs.txt at $LIBS_FILE"
+        printf 'No libs.txt at %s\n' "$LIBS_FILE"
         return 0
     fi
-    
+
     read_libs_file
-    [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { info "No entries in libs.txt"; return 0; }
-    
-    info "Subtrees configured in libs.txt:"
+    [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { printf 'No entries in libs.txt\n'; return 0; }
+
     for entry in "${LIB_ENTRIES[@]}"; do
         parse_lib_entry "$entry"
-        local status="[missing]"
-        [[ -d "$REPO_ROOT/$LOCAL_PATH" ]] && status="[present]"
-        printf "  %-40s %-10s %s (%s)\n" "$LOCAL_PATH" "$status" "$REPO" "$BRANCH"
+        local status
+        if [[ -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
+            status="$(_green "[present]")"
+        else
+            status="$(_red "[missing]")"
+        fi
+        printf '  %-40s %s  %s (%s)\n' "$LOCAL_PATH" "$status" "$REPO" "$BRANCH"
     done
 }
+
+show_help() {
+    printf '%s\n' "$(_bold "Subtree management")"
+    printf '\n'
+    printf 'Usage:\n'
+    printf '  %s pull [--dry-run|-n] [<path>...]   Pull (or add) subtrees\n' "$(basename "$0")"
+    printf '  %s push [--dry-run|-n] [<path>...]   Push subtrees upstream\n' "$(basename "$0")"
+    printf '  %s remove <path>...                  Remove and commit\n' "$(basename "$0")"
+    printf '  %s list|status                       Show configured subtrees\n' "$(basename "$0")"
+    printf '  %s help                              Show this help\n' "$(basename "$0")"
+    printf '\n'
+    printf 'libs.txt format:  repo_url, local_path, branch\n'
+    printf 'Branch defaults to main if omitted.\n'
+}
+
+# --- Validate git repo ------------------------------------------------------
+
+git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null || die "Not a git repository: $REPO_ROOT"
+
+# --- Main dispatch -----------------------------------------------------------
 
 ACTION="${1:-pull}"
 shift || true
 
 case "$ACTION" in
-    pull)           do_pull "$@" ;;
-    push)           do_push "$@" ;;
-    remove|rm)      do_remove "$@" ;;
-    list|ls)        do_list ;;
-    help|-h|--help) head -20 "$0" | tail -n +3 | sed 's/^# *//' ;;
-    *)              die "Unknown action: $ACTION (use: pull, push, remove, list, help)" ;;
+    pull)                do_pull "$@" ;;
+    push)                do_push "$@" ;;
+    remove|rm)           do_remove "$@" ;;
+    list|ls|status)      do_list ;;
+    help|-h|--help)      show_help ;;
+    *)                   die "Unknown action: $ACTION (use: pull, push, remove, list, help)" ;;
 esac
