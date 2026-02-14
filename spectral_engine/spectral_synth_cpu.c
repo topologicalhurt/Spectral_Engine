@@ -7,14 +7,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#else
-static inline int omp_get_max_threads(void) { return 1; }
-static inline int omp_get_thread_num(void) { return 0; }
-static inline double omp_get_wtime(void) { return spectral_get_time_sec(); }
-static inline void omp_set_num_threads(int n) { (void)n; }
-#endif
+#include "spectral_omp.h"
 
 /* Thread-local buffer arena — single contiguous allocation, cache-line aligned */
 
@@ -26,12 +19,6 @@ typedef struct {
     size_t buf_size;    /* Actual used size per buffer */
 } ThreadBuffers;
 
-/* Persistent cache: reuse arena across calls if dimensions match */
-static ThreadBuffers s_cached_tb = {0};
-static int           s_cached_n_threads = 0;
-static size_t        s_cached_out_len = 0;
-static size_t        s_cached_elem_size = 0;
-
 static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t element_size) {
     ThreadBuffers tb = {0};
 
@@ -40,27 +27,6 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
     }
     if (out_len > SIZE_MAX / element_size) {
         return tb;
-    }
-
-    /* Check if cached allocation matches */
-    if (s_cached_tb.arena &&
-        s_cached_n_threads == n_threads &&
-        s_cached_out_len == out_len &&
-        s_cached_elem_size == element_size) {
-        tb = s_cached_tb;
-        /* Zero the buffers for reuse */
-        size_t arena_size = tb.buf_stride * (size_t)n_threads + CACHE_ALIGN;
-        memset(tb.arena, 0, arena_size);
-        /* Clear cache (ownership transferred to caller) */
-        s_cached_tb = (ThreadBuffers){0};
-        return tb;
-    }
-
-    /* Dimensions changed — free stale cache */
-    if (s_cached_tb.arena) {
-        free(s_cached_tb.arena);
-        free(s_cached_tb.bufs);
-        s_cached_tb = (ThreadBuffers){0};
     }
 
     /* Calculate buffer size and aligned stride */
@@ -102,13 +68,10 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
     return tb;
 }
 
-static void thread_buffers_return(ThreadBuffers* tb, int n_threads, size_t out_len, size_t elem_size) {
-    if (!tb || !tb->arena) return;
-    /* Store into cache for next call */
-    s_cached_tb = *tb;
-    s_cached_n_threads = n_threads;
-    s_cached_out_len = out_len;
-    s_cached_elem_size = elem_size;
+static void thread_buffers_free(ThreadBuffers* tb) {
+    if (!tb) return;
+    free(tb->arena);
+    free(tb->bufs);
     tb->arena = NULL;
     tb->bufs = NULL;
     tb->n_threads = 0;
@@ -170,7 +133,7 @@ static SpectralError synth_cpu_driver(
     }
 
     reduce_fn(&tb, out_buffer, out_len);
-    thread_buffers_return(&tb, n_threads, out_len, elem_size);
+    thread_buffers_free(&tb);
     *t_synth = omp_get_wtime() - synth_start;
     return SPECTRAL_OK;
 }
@@ -304,13 +267,3 @@ SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out
                             segment_fn_native_wavetable, &ctx, reduce_native_wrapper);
 }
 
-void synth_cpu_cleanup(void) {
-    if (s_cached_tb.arena) {
-        free(s_cached_tb.arena);
-        free(s_cached_tb.bufs);
-        s_cached_tb = (ThreadBuffers){0};
-        s_cached_n_threads = 0;
-        s_cached_out_len = 0;
-        s_cached_elem_size = 0;
-    }
-}

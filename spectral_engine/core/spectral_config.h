@@ -5,7 +5,7 @@
  *   - Sample type abstraction (Q15 vs float)
  *   - Timbre enumeration
  *   - Platform-specific memory/cache configuration
- *   - Feature detection (FMA, vDSP)
+ *   - Feature detection (vDSP)
  *
  * For math constants, see spectral_consts.h
  * For compiler hints/macros, see spectral_macros.h
@@ -146,13 +146,14 @@ typedef enum SpectralTimbre {
 
 /* Wavetable Configuration */
 
-#ifndef SPECTRAL_USE_WAVETABLE_LUT
-#define SPECTRAL_USE_WAVETABLE_LUT      0
-#endif
 #ifndef SPECTRAL_WAVETABLE_SIZE
 #define SPECTRAL_WAVETABLE_SIZE         (1<<11)
 #endif
 #define SPECTRAL_WAVETABLE_BITS         11
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
+               "SPECTRAL_WAVETABLE_BITS must match SPECTRAL_WAVETABLE_SIZE");
+#endif
 #define SPECTRAL_WAVETABLE_MASK         (SPECTRAL_WAVETABLE_SIZE - 1)
 #ifndef SPECTRAL_MAX_WAVETABLES
 #define SPECTRAL_MAX_WAVETABLES         8
@@ -176,9 +177,6 @@ typedef enum SpectralTimbre {
 /* Metal segment cache size (threadgroup shared memory) */
 #define SPECTRAL_METAL_SEG_CACHE_SIZE   128
 
-/* Max stack-allocated samples for SIMD oscillator temp buffers */
-#define SPECTRAL_OSC_SIMD_STACK_MAX     8192
-
 /* Platform Detection */
 
 #if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
@@ -191,19 +189,6 @@ typedef enum SpectralTimbre {
 #define SPECTRAL_USE_VDSP       1
 #else
 #define SPECTRAL_USE_VDSP       0
-#endif
-
-/* FMA (fused multiply-add) detection */
-#ifndef SPECTRAL_HAS_FMA
-#if defined(__FMA__) || defined(__ARM_FEATURE_FMA) || defined(__ARM_ARCH_7EM__)
-#define SPECTRAL_HAS_FMA        1
-#else
-#define SPECTRAL_HAS_FMA        0
-#endif
-#endif
-
-#ifndef SPECTRAL_USE_FMA
-#define SPECTRAL_USE_FMA        0
 #endif
 
 /* ARM32 Embedded Configuration */

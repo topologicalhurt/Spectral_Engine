@@ -24,18 +24,10 @@ extern "C" {
 #endif
 
 /* Portable high-resolution timing
- * Uses OpenMP when available, falls back to clock_gettime. */
-#ifdef _OPENMP
-#include <omp.h>
+ * Uses OpenMP when available, falls back to clock_gettime.
+ * See spectral_omp.h for the non-OMP fallback of omp_get_wtime. */
+#include "spectral_omp.h"
 #define spectral_get_time_sec() omp_get_wtime()
-#else
-#include <time.h>
-static inline double spectral_get_time_sec(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec * 1e-9;
-}
-#endif
 
 typedef struct {
     size_t peak_resident_mb;
@@ -144,6 +136,13 @@ typedef struct {
 #define EMBEDDED_CYCLES_CACHE_MISS         4   /* per active seg when > 32 active */
 #define EMBEDDED_CACHE_MISS_THRESHOLD      32
 #define EMBEDDED_CYCLES_SEG_SCAN           5   /* per segment checked during scan */
+
+/* Block-level overhead (per block or per segment activation) */
+#define EMBEDDED_CYCLES_CALLBACK_OVERHEAD  50   /* Audio callback entry/exit */
+#define EMBEDDED_CYCLES_MEMSET_PER_SAMPLE  2    /* Clear accumulator buffer */
+#define EMBEDDED_CYCLES_OUTPUT_PER_SAMPLE  3    /* Final Q31->Q15 output scaling */
+#define EMBEDDED_CYCLES_SEG_BOUNDS_CHECK   15   /* Per-segment activation/deactivation check */
+#define EMBEDDED_CYCLES_SEG_ACTIVATION     30   /* Phase/freq init, amplitude setup (once per seg) */
 
 /* Per-sample cost for one active segment */
 #define EMBEDDED_CYCLES_PER_SAMPLE  (EMBEDDED_CYCLES_PHASE_UPDATE + \

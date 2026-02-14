@@ -27,11 +27,11 @@ const BoxChars BOX_ASCII = {
 
 const char* format_bytes(size_t bytes, char* buf, size_t buf_size) {
     if (bytes >= 1024 * 1024 * 1024) {
-        snprintf(buf, buf_size, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+        snprintf(buf, buf_size, "%.1f GB", BYTES_TO_GB(bytes));
     } else if (bytes >= 1024 * 1024) {
-        snprintf(buf, buf_size, "%.1f MB", bytes / (1024.0 * 1024.0));
+        snprintf(buf, buf_size, "%.1f MB", BYTES_TO_MB(bytes));
     } else if (bytes >= 1024) {
-        snprintf(buf, buf_size, "%.1f KB", bytes / 1024.0);
+        snprintf(buf, buf_size, "%.1f KB", BYTES_TO_KB(bytes));
     } else {
         snprintf(buf, buf_size, "%zu B", bytes);
     }

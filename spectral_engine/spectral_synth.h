@@ -54,7 +54,4 @@ SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out
                                          const SpectralWavetableBank* bank, SpectralTimbre timbre,
                                          int n_threads, double* t_synth);
 
-/* Release cached thread buffer arena */
-void synth_cpu_cleanup(void);
-
 #endif
