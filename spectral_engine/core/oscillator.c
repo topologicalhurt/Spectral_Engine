@@ -3,6 +3,7 @@
 #include "oscillator_dispatch.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
+#include "spectral_osc_formulas.h"
 #include "spectral_utils.h"
 #include <math.h>
 
@@ -11,47 +12,16 @@ static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SCALAR;
 void osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
 OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 
-/* Canonical waveform generators - GPU backends must match these formulas */
+/* Waveform generators — thin wrappers around canonical formulas in spectral_osc_formulas.h */
 
-static inline float osc_sine(float rads, float width) {
-    (void)width;
-    return fast_sin(rads);
-}
-
-static inline float osc_saw(float rads, float width) {
-    (void)width;
-    return rads * -SPECTRAL_INV_PI;
-}
-
-static inline float osc_square(float rads, float width) {
-    (void)width;
-    return (rads > 0.0f) ? 1.0f : -1.0f;
-}
-
-static inline float osc_triangle(float rads, float width) {
-    (void)width;
-    return (1.0f - fabsf(rads) * SPECTRAL_INV_PI) * 2.0f - 1.0f;
-}
-
-static inline float osc_asin(float rads, float width) {
-    (void)width;
-    return asinf(rads * SPECTRAL_INV_PI);
-}
-
-static inline float osc_parabola(float rads, float width) {
-    (void)width;
-    return 1.0f - (rads * rads * SPECTRAL_INV_PI_SQ);
-}
-
-static inline float osc_quantized(float rads, float width) {
-    if (width <= 0.0f) return 0.0f;
-    float inv_w = 1.0f / width;  /* Caller should precompute if in hot loop */
-    return (float)(int)(rads * width) * inv_w;
-}
-
-static inline float osc_pwm(float rads, float width) {
-    return (width > 0.0f) ? (((rads + PI) * INV_TWO_PI < width) ? 1.0f : -1.0f) : 1.0f;
-}
+static inline float osc_sine(float rads, float width)     { return spectral_osc_sine(rads, width); }
+static inline float osc_saw(float rads, float width)      { return spectral_osc_saw(rads, width); }
+static inline float osc_square(float rads, float width)   { return spectral_osc_square(rads, width); }
+static inline float osc_triangle(float rads, float width) { return spectral_osc_triangle(rads, width); }
+static inline float osc_asin(float rads, float width)     { return spectral_osc_asin(rads, width); }
+static inline float osc_parabola(float rads, float width) { return spectral_osc_parabola(rads, width); }
+static inline float osc_quantized(float rads, float width){ return spectral_osc_quantized(rads, width); }
+static inline float osc_pwm(float rads, float width)      { return spectral_osc_pwm(rads, width); }
 
 typedef float (*TimbreFunc)(float rads, float width);
 
@@ -67,17 +37,14 @@ static const TimbreFunc timbre_table[TIMBRE_COUNT] = {
 };
 
 float timbre_oscillator(float p, float a, SpectralTimbre timbre, float width) {
-    /* Bounds check - clamp invalid values to sine (safest default) */
     unsigned int idx = (unsigned int)timbre;
     if (idx >= TIMBRE_COUNT) {
         idx = TIMBRE_SINE;
     }
-    
-    /* Normalize phase to [-0.5, 0.5) then scale to [-pi, pi) */
-    float norm = p * INV_TWO_PI;
-    float rads = TWO_PI * (norm - (int)norm + (norm < 0.0f) - 0.5f);
-    
-    /* Branch-free dispatch through function pointer table */
+
+    /* Canonical phase normalization — must match spectral_normalize_phase() */
+    float rads = spectral_normalize_phase(p);
+
     return a * timbre_table[idx](rads, width);
 }
 
@@ -154,7 +121,10 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
 /* Metal shader source */
 #if defined(__APPLE__) && !defined(__CUDACC__)
 
-const char* oscillator_metal_source = 
+/* All constants injected from spectral_consts.h via METAL_CONST_* macros
+ * defined in spectral_osc_formulas.h. Formulas must match the canonical
+ * C implementations in spectral_osc_formulas.h exactly. */
+const char* oscillator_metal_source =
 "#define TIMBRE_SINE     0\n"
 "#define TIMBRE_SAW      1\n"
 "#define TIMBRE_SQUARE   2\n"
@@ -162,29 +132,30 @@ const char* oscillator_metal_source =
 "#define TIMBRE_ASIN     4\n"
 "#define TIMBRE_PARABOLA 5\n"
 "\n"
-"#define TWO_PI 6.283185307179586f\n"
-"#define INV_TWO_PI 0.159154943091895f\n"
-"#define INV_PI 0.318309886183791f\n"
-"#define TWO_INV_PI 0.636619772367581f\n"
-"#define INV_PI_SQ 0.101321183642338f\n"
+"#define TWO_PI " METAL_CONST_TWO_PI "\n"
+"#define INV_TWO_PI " METAL_CONST_INV_TWO_PI "\n"
+"#define INV_PI " METAL_CONST_INV_PI "\n"
+"#define INV_PI_SQ " METAL_CONST_INV_PI_SQ "\n"
+"#define PI " METAL_CONST_PI "\n"
 "\n"
+"/* Must match spectral_fast_sin_inline() in spectral_osc_formulas.h */\n"
 "inline float oscillator_fast_sin(float x) {\n"
 "    x = x - TWO_PI * floor(x * INV_TWO_PI + 0.5f);\n"
 "    float x2 = x * x;\n"
-"    float num = x * (1.0f - x2 * (" SPECTRAL_STR(SPECTRAL_PADE_SIN_C1) " - x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C2) "));\n"
-"    float den = 1.0f + x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C3) ";\n"
+"    float num = x * (1.0f - x2 * (" METAL_CONST_PADE_C1 " - x2 * " METAL_CONST_PADE_C2 "));\n"
+"    float den = 1.0f + x2 * " METAL_CONST_PADE_C3 ";\n"
 "    return num / den;\n"
 "}\n"
 "\n"
+"/* Must match spectral_normalize_phase() in spectral_osc_formulas.h */\n"
 "inline float oscillator_normalize_phase(float p) {\n"
 "    float norm = p * INV_TWO_PI;\n"
 "    return TWO_PI * (norm - floor(norm) - 0.5f);\n"
 "}\n"
 "\n"
 "#define FADE_SAMPLES 64\n"
-"#define PI 3.141592653589793f\n"
 "\n"
-"/* Segment fade envelope — matches CPU fade_envelope_in/out (Hann-window ramp) */\n"
+"/* Must match spectral_fade_envelope_gpu() in spectral_osc_formulas.h */\n"
 "inline float fade_envelope(float j, float seg_len) {\n"
 "    float fade_len = min(seg_len * 0.25f, (float)FADE_SAMPLES);\n"
 "    if (fade_len < 1.0f) fade_len = 1.0f;\n"
@@ -199,6 +170,7 @@ const char* oscillator_metal_source =
 "    return 1.0f;\n"
 "}\n"
 "\n"
+"/* Must match spectral_osc_* waveforms in spectral_osc_formulas.h */\n"
 "inline float oscillator(float phase, uint timbre) {\n"
 "    float rads = oscillator_normalize_phase(phase);\n"
 "    switch (timbre) {\n"

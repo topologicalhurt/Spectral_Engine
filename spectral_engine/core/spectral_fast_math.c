@@ -1,5 +1,6 @@
 /* spectral_fast_math.c - Fast Math Approximations */
 #include "spectral_fast_math.h"
+#include "spectral_osc_formulas.h"
 
 /* fast_atan2: Polynomial atan2 approximation (~0.07 max error, ~10x faster than libm) */
 float fast_atan2(float y, float x) {
@@ -14,16 +15,13 @@ float fast_atan2(float y, float x) {
 }
 
 /* fast_sin: Canonical sine for all oscillators. GPU shaders must match.
- * Pade [5/4] approximation (~1e-5 max error) */
+ * Pade [5/4] approximation (~1e-5 max error) — delegates to spectral_osc_formulas.h */
 float fast_sin(float x) {
-    x = x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
-    float x2 = x * x;
-    float num = x * (1.0f - x2 * (SPECTRAL_PADE_SIN_C1 - x2 * SPECTRAL_PADE_SIN_C2));
-    float den = 1.0f + x2 * SPECTRAL_PADE_SIN_C3;
-    return num / den;
+    return spectral_fast_sin_inline(x);
 }
 
+/* Phase normalization — delegates to canonical formula in spectral_osc_formulas.h.
+ * Maps arbitrary phase to [-pi, pi): 2*pi * (p/(2*pi) - floor(p/(2*pi)) - 0.5) */
 float phase_to_rads(float p) {
-    float norm = p * SPECTRAL_INV_TWO_PI;
-    return SPECTRAL_TWO_PI * (norm - floorf(norm + 0.5f));
+    return spectral_normalize_phase(p);
 }

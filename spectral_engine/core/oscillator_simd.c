@@ -357,14 +357,15 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
             simde__m128 ab = simde_mm_add_ps(v_alpha, bj);
             simde__m128 raw = simde_mm_add_ps(v_phase0, simde_mm_mul_ps(v_j, ab));
 
-            /* phase_to_rads */
+            /* spectral_normalize_phase: rads = 2pi * (norm - floor(norm) - 0.5)
+             * Must match spectral_osc_formulas.h */
             simde__m128 norm = simde_mm_mul_ps(raw, v_inv_2pi);
-            simde__m128 shifted = simde_mm_add_ps(norm, v_half);
-            simde__m128 floored = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(shifted));
+            simde__m128 floored = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(norm));
             simde__m128 corr = simde_mm_and_ps(
-                simde_mm_cmpgt_ps(floored, shifted), v_one);
+                simde_mm_cmpgt_ps(floored, norm), v_one);
             floored = simde_mm_sub_ps(floored, corr);
-            simde__m128 rads = simde_mm_mul_ps(v_2pi, simde_mm_sub_ps(norm, floored));
+            simde__m128 rads = simde_mm_mul_ps(v_2pi,
+                simde_mm_sub_ps(simde_mm_sub_ps(norm, floored), v_half));
 
             /* Waveform + amplitude + accumulate */
             simde__m128 wave = wave_fn4(rads, ctx);

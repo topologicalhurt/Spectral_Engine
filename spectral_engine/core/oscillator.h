@@ -29,33 +29,24 @@ OSC_HOT void timbre_synth_segment(float* __restrict__ dst, const struct SegmentL
 void osc_set_dispatch(OscDispatchWord dispatch);
 OscDispatchWord osc_get_dispatch(void);
 
-/* CUDA oscillator - must be in header for __device__ visibility */
+/* CUDA oscillator — delegates to canonical formulas in spectral_osc_formulas.h */
 #ifdef __CUDACC__
 
-__device__ __forceinline__ float oscillator_normalize_phase_cuda(float p) {
-    float norm = p * SPECTRAL_INV_TWO_PI;
-    return SPECTRAL_TWO_PI * (norm - floorf(norm) - 0.5f);
-}
+#include "spectral_osc_formulas.h"
 
-/* Padé [5/4] sine approximation - single divide, max error ~1e-5 */
-__device__ __forceinline__ float oscillator_fast_sin_cuda(float x) {
-    x = x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
-    float x2 = x * x;
-    float num = x * (1.0f - x2 * (SPECTRAL_PADE_SIN_C1 - x2 * SPECTRAL_PADE_SIN_C2));
-    float den = 1.0f + x2 * SPECTRAL_PADE_SIN_C3;
-    return num / den;
-}
+#define oscillator_normalize_phase_cuda spectral_normalize_phase
+#define oscillator_fast_sin_cuda        spectral_fast_sin_inline
 
 __device__ __forceinline__ float oscillator_cuda(float phase, int timbre) {
-    float rads = oscillator_normalize_phase_cuda(phase);
+    float rads = spectral_normalize_phase(phase);
     switch (timbre) {
-        case TIMBRE_SINE:     return oscillator_fast_sin_cuda(rads);
-        case TIMBRE_SAW:      return rads * -SPECTRAL_INV_PI;
-        case TIMBRE_SQUARE:   return (rads > 0.0f) ? 1.0f : -1.0f;
-        case TIMBRE_TRIANGLE: return (1.0f - fabsf(rads) * SPECTRAL_INV_PI) * 2.0f - 1.0f;
-        case TIMBRE_ASIN:     return asinf(rads * SPECTRAL_INV_PI);
-        case TIMBRE_PARABOLA: return 1.0f - rads * rads * SPECTRAL_INV_PI_SQ;
-        default:              return oscillator_fast_sin_cuda(rads);
+        case TIMBRE_SINE:     return spectral_osc_sine(rads, 0);
+        case TIMBRE_SAW:      return spectral_osc_saw(rads, 0);
+        case TIMBRE_SQUARE:   return spectral_osc_square(rads, 0);
+        case TIMBRE_TRIANGLE: return spectral_osc_triangle(rads, 0);
+        case TIMBRE_ASIN:     return spectral_osc_asin(rads, 0);
+        case TIMBRE_PARABOLA: return spectral_osc_parabola(rads, 0);
+        default:              return spectral_osc_sine(rads, 0);
     }
 }
 

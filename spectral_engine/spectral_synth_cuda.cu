@@ -4,7 +4,6 @@
  * Uses shared memory segment caching and tile-parallel dispatch,
  * matching the Metal backend architecture. No atomicAdd needed.
  *
- * Legacy segment-parallel kernel preserved in legacy_spectral_synth_cuda.cu.
  */
 
 #include <cuda_runtime.h>
@@ -14,24 +13,18 @@
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
 #include "oscillator.h"
+#include "spectral_osc_formulas.h"
 
 #define TILE_SIZE           SPECTRAL_GPU_TILE_SIZE
 #define SEGMENT_CACHE_SIZE  SPECTRAL_METAL_SEG_CACHE_SIZE
 #define FADE_SAMPLES        64
 
-/* Segment fade envelope — matches CPU/Metal Hann-window ramp */
+/* Segment fade envelope — delegates to canonical formula in spectral_osc_formulas.h */
 __device__ __forceinline__ float fade_envelope(float j, float seg_len) {
     float fade_len = fminf(seg_len * 0.25f, (float)FADE_SAMPLES);
     if (fade_len < 1.0f) fade_len = 1.0f;
     float inv_fade = 1.0f / fade_len;
-    if (j < fade_len) {
-        return 0.5f * (1.0f - oscillator_fast_sin_cuda((j * inv_fade - 0.5f) * SPECTRAL_PI));
-    }
-    float from_end = seg_len - 1.0f - j;
-    if (from_end < fade_len) {
-        return 0.5f * (1.0f - oscillator_fast_sin_cuda((from_end * inv_fade - 0.5f) * SPECTRAL_PI));
-    }
-    return 1.0f;
+    return spectral_fade_envelope_gpu(j, seg_len, fade_len, inv_fade);
 }
 
 /* Persistent device buffer cache — avoids per-call cudaMalloc/cudaFree */
