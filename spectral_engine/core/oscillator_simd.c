@@ -12,104 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void build_phase_array(float* phases, const SegmentLoopParams* lp) {
-    const size_t len = lp->length;
-    const float phase0 = lp->phase;
-    const float alpha = lp->alpha;
-    const float beta = lp->beta;
-
-#if defined(OSC_SIMD_GENERIC)
-    /* Vectorized: compute 4 raw phases via quadratic polynomial, then vectorized phase_to_rads */
-    const simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-    const simde__m128 v_2pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
-    const simde__m128 v_half = simde_mm_set1_ps(0.5f);
-    const simde__m128 v_alpha = simde_mm_set1_ps(alpha);
-    const simde__m128 v_beta = simde_mm_set1_ps(beta);
-    const simde__m128 v_phase0 = simde_mm_set1_ps(phase0);
-    const simde__m128 v_offsets = simde_mm_set_ps(3.0f, 2.0f, 1.0f, 0.0f);
-    const simde__m128 v_four = simde_mm_set1_ps(4.0f);
-
-    simde__m128 v_j = v_offsets;
-    size_t j = 0;
-    for (; j + 4 <= len; j += 4) {
-        /* p = phase0 + j*(alpha + beta*j) */
-        simde__m128 bj = simde_mm_mul_ps(v_beta, v_j);
-        simde__m128 ab = simde_mm_add_ps(v_alpha, bj);
-        simde__m128 raw = simde_mm_add_ps(v_phase0, simde_mm_mul_ps(v_j, ab));
-
-        /* phase_to_rads: norm = raw * inv_2pi; rads = 2pi * (norm - floor(norm + 0.5)) */
-        simde__m128 norm = simde_mm_mul_ps(raw, v_inv_2pi);
-        simde__m128 shifted = simde_mm_add_ps(norm, v_half);
-        simde__m128 floored = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(shifted));
-        /* Correct for negative: if floored > shifted, subtract 1 */
-        simde__m128 corr = simde_mm_and_ps(
-            simde_mm_cmpgt_ps(floored, shifted),
-            simde_mm_set1_ps(1.0f));
-        floored = simde_mm_sub_ps(floored, corr);
-        simde__m128 rads = simde_mm_mul_ps(v_2pi, simde_mm_sub_ps(norm, floored));
-
-        simde_mm_storeu_ps(&phases[j], rads);
-        v_j = simde_mm_add_ps(v_j, v_four);
-    }
-    for (; j < len; j++) {
-        phases[j] = phase_to_rads(compute_phase(phase0, alpha, beta, j));
-    }
-#else
-    for (size_t j = 0; j < len; j++) {
-        phases[j] = phase_to_rads(compute_phase(phase0, alpha, beta, j));
-    }
-#endif
-}
-
-static void build_amp_envelope(float* amps, const SegmentLoopParams* lp, const FadeParams* fp) {
-    const size_t len = lp->length;
-    const float amp0 = lp->amp;
-    const float d_amp = lp->d_amp;
-
-    for (size_t j = 0; j < len; j++) {
-        amps[j] = (amp0 + d_amp * (float)j) * fade_envelope(j, fp, len);
-    }
-}
-
-static void apply_envelope_accumulate(float* dst, const float* wave, const float* amps, size_t len) {
-    for (size_t j = 0; j < len; j++) {
-        dst[j] += wave[j] * amps[j];
-    }
-}
-
-/* Stack-allocate temp buffers when segment length fits; fall back to malloc for large segments. */
-
-typedef struct { float* a; float* b; float* c; size_t len; int on_heap; } TempBuffers;
-
-static TempBuffers alloc_temp_stack(float* stack_a, float* stack_b, float* stack_c,
-                                     size_t len, int count) {
-    TempBuffers t = {0};
-    t.len = len;
-    t.on_heap = 0;
-    if (len <= SPECTRAL_OSC_SIMD_STACK_MAX) {
-        t.a = stack_a;
-        if (count >= 2) t.b = stack_b;
-        if (count >= 3) t.c = stack_c;
-    } else {
-        t.on_heap = 1;
-        t.a = (float*)malloc(len * sizeof(float));
-        if (count >= 2) t.b = (float*)malloc(len * sizeof(float));
-        if (count >= 3) t.c = (float*)malloc(len * sizeof(float));
-    }
-    return t;
-}
-
-static int temp_valid(const TempBuffers* t, int count) {
-    if (!t->a) return 0;
-    if (count >= 2 && !t->b) return 0;
-    if (count >= 3 && !t->c) return 0;
-    return 1;
-}
-
-static void free_temp(TempBuffers* t) {
-    if (t->on_heap) { free(t->a); free(t->b); free(t->c); }
-}
-
 #if defined(OSC_SIMD_CMSIS)
 
 /* CMSIS path: ARM Cortex-M embedded (DSP intrinsics, integer fixed-point) */
@@ -275,7 +177,7 @@ int osc_simd_available(SpectralTimbre timbre) {
 
 #elif defined(OSC_SIMD_GENERIC)
 
-/* SIMDe SSE path: macOS ARM → NEON, Linux x86 → native SSE */
+/* SIMDe SSE path: macOS ARM -> NEON, Linux x86 -> native SSE */
 
 /* Vectorized Padé [5/4] sine approximation — matches fast_sin() but 4-wide */
 static inline simde__m128 simde_fast_sin_ps(simde__m128 x) {
@@ -310,17 +212,49 @@ static inline simde__m128 simde_fast_sin_ps(simde__m128 x) {
     return simde_mm_div_ps(num, den);
 }
 
-/* Fused sustain synthesis for simple waveforms (saw, square, triangle, parabola).
- * Eliminates 3 temp buffers and 4 data passes for the sustain region (90%+ of samples).
- * Keep multi-pass for sine (Pade benefits from tight vectorized loop) and fade regions. */
+/* Scalar waveform functions for fade regions (avoids wasteful SIMD broadcast) */
 
-typedef simde__m128 (*WaveformFn4)(simde__m128 phase);
+typedef float (*WaveformFn1)(float rads, const void* ctx);
+typedef simde__m128 (*WaveformFn4)(simde__m128 phase, const void* ctx);
 
-static inline simde__m128 wave_saw_4(simde__m128 rads) {
+static inline float wave_saw_1(float rads, const void* ctx) {
+    (void)ctx;
+    return rads * -SPECTRAL_INV_PI;
+}
+static inline float wave_square_1(float rads, const void* ctx) {
+    (void)ctx;
+    return rads > 0.0f ? 1.0f : -1.0f;
+}
+static inline float wave_triangle_1(float rads, const void* ctx) {
+    (void)ctx;
+    return 1.0f - fabsf(rads * SPECTRAL_INV_PI) * 2.0f;
+}
+static inline float wave_parabola_1(float rads, const void* ctx) {
+    (void)ctx;
+    return 1.0f - rads * rads * SPECTRAL_INV_PI_SQ;
+}
+static inline float wave_sine_1(float rads, const void* ctx) {
+    (void)ctx;
+    return fast_sin(rads);
+}
+static inline float wave_quantized_1(float rads, const void* ctx) {
+    float width = *(const float*)ctx;
+    if (width <= 0.0f) return 0.0f;
+    return (float)(int)(rads * width) * (1.0f / width);
+}
+static inline float wave_pwm_1(float rads, const void* ctx) {
+    float width = *(const float*)ctx;
+    if (width <= 0.0f) return 1.0f;
+    return ((rads + SPECTRAL_PI) * SPECTRAL_INV_TWO_PI < width) ? 1.0f : -1.0f;
+}
+
+static inline simde__m128 wave_saw_4(simde__m128 rads, const void* ctx) {
+    (void)ctx;
     return simde_mm_mul_ps(rads, simde_mm_set1_ps(-SPECTRAL_INV_PI));
 }
 
-static inline simde__m128 wave_square_4(simde__m128 rads) {
+static inline simde__m128 wave_square_4(simde__m128 rads, const void* ctx) {
+    (void)ctx;
     simde__m128 zero = simde_mm_setzero_ps();
     simde__m128 mask = simde_mm_cmpgt_ps(rads, zero);
     return simde_mm_or_ps(
@@ -328,20 +262,58 @@ static inline simde__m128 wave_square_4(simde__m128 rads) {
         simde_mm_andnot_ps(mask, simde_mm_set1_ps(-1.0f)));
 }
 
-static inline simde__m128 wave_triangle_4(simde__m128 rads) {
+static inline simde__m128 wave_triangle_4(simde__m128 rads, const void* ctx) {
+    (void)ctx;
     simde__m128 scaled = simde_mm_mul_ps(rads, simde_mm_set1_ps(SPECTRAL_INV_PI));
     simde__m128 abs_scaled = simde_mm_andnot_ps(simde_mm_set1_ps(-0.0f), scaled);
     return simde_mm_add_ps(simde_mm_set1_ps(1.0f),
                            simde_mm_mul_ps(simde_mm_set1_ps(-2.0f), abs_scaled));
 }
 
-static inline simde__m128 wave_parabola_4(simde__m128 rads) {
+static inline simde__m128 wave_parabola_4(simde__m128 rads, const void* ctx) {
+    (void)ctx;
     simde__m128 sq = simde_mm_mul_ps(rads, rads);
     return simde_mm_add_ps(simde_mm_set1_ps(1.0f),
                            simde_mm_mul_ps(sq, simde_mm_set1_ps(-SPECTRAL_INV_PI_SQ)));
 }
 
-static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp, WaveformFn4 wave_fn) {
+static inline simde__m128 wave_sine_4(simde__m128 rads, const void* ctx) {
+    (void)ctx;
+    return simde_fast_sin_ps(rads);
+}
+
+static inline simde__m128 wave_quantized_4(simde__m128 rads, const void* ctx) {
+    float width = *(const float*)ctx;
+    if (width <= 0.0f) return simde_mm_setzero_ps();
+    simde__m128 v_width = simde_mm_set1_ps(width);
+    simde__m128 v_inv_w = simde_mm_set1_ps(1.0f / width);
+    simde__m128 scaled = simde_mm_mul_ps(rads, v_width);
+    simde__m128 truncated = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(scaled));
+    return simde_mm_mul_ps(truncated, v_inv_w);
+}
+
+static inline simde__m128 wave_pwm_4(simde__m128 rads, const void* ctx) {
+    float width = *(const float*)ctx;
+    if (width <= 0.0f) return simde_mm_set1_ps(1.0f);
+    simde__m128 v_pi = simde_mm_set1_ps(SPECTRAL_PI);
+    simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
+    simde__m128 v_width = simde_mm_set1_ps(width);
+    simde__m128 v_one = simde_mm_set1_ps(1.0f);
+    simde__m128 v_neg_one = simde_mm_set1_ps(-1.0f);
+    simde__m128 norm = simde_mm_mul_ps(simde_mm_add_ps(rads, v_pi), v_inv_2pi);
+    simde__m128 cmp = simde_mm_cmplt_ps(norm, v_width);
+    return simde_mm_or_ps(
+        simde_mm_and_ps(cmp, v_one),
+        simde_mm_andnot_ps(cmp, v_neg_one));
+}
+
+/* Fused single-pass synthesis: inline phase computation, waveform, envelope,
+ * and accumulation with zero temp buffers. Handles fade-in, sustain, and
+ * fade-out regions. */
+
+static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
+                                    WaveformFn4 wave_fn4, WaveformFn1 wave_fn1,
+                                    const void* ctx) {
     const size_t len = lp->length;
     if (len == 0) return;
 
@@ -355,15 +327,11 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp, Wave
     const size_t fade_in_end = fp.fade_len;
     const size_t fade_out_start = fp.fade_out_start;
 
-    /* Fade-in region: scalar (small, not worth vectorizing) */
+    /* Fade-in region: scalar */
     for (size_t j = 0; j < fade_in_end && j < len; j++) {
         float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
-        simde__m128 v_rads = simde_mm_set1_ps(rads);
-        simde__m128 v_wave = wave_fn(v_rads);
-        float tmp[4];
-        simde_mm_storeu_ps(tmp, v_wave);
         float amp = (amp0 + d_amp * (float)j) * fade_envelope_in(j, fp.inv_fade);
-        dst[j] += amp * tmp[0];
+        dst[j] += amp * wave_fn1(rads, ctx);
     }
 
     /* Sustain region: fused vectorized path (no temp buffers) */
@@ -389,17 +357,18 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp, Wave
             simde__m128 ab = simde_mm_add_ps(v_alpha, bj);
             simde__m128 raw = simde_mm_add_ps(v_phase0, simde_mm_mul_ps(v_j, ab));
 
-            /* phase_to_rads */
+            /* spectral_normalize_phase: rads = 2pi * (norm - floor(norm) - 0.5)
+             * Must match spectral_osc_formulas.h */
             simde__m128 norm = simde_mm_mul_ps(raw, v_inv_2pi);
-            simde__m128 shifted = simde_mm_add_ps(norm, v_half);
-            simde__m128 floored = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(shifted));
+            simde__m128 floored = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(norm));
             simde__m128 corr = simde_mm_and_ps(
-                simde_mm_cmpgt_ps(floored, shifted), v_one);
+                simde_mm_cmpgt_ps(floored, norm), v_one);
             floored = simde_mm_sub_ps(floored, corr);
-            simde__m128 rads = simde_mm_mul_ps(v_2pi, simde_mm_sub_ps(norm, floored));
+            simde__m128 rads = simde_mm_mul_ps(v_2pi,
+                simde_mm_sub_ps(simde_mm_sub_ps(norm, floored), v_half));
 
             /* Waveform + amplitude + accumulate */
-            simde__m128 wave = wave_fn(rads);
+            simde__m128 wave = wave_fn4(rads, ctx);
             simde__m128 amp = simde_mm_add_ps(v_amp0, simde_mm_mul_ps(v_d_amp, v_j));
             simde__m128 existing = simde_mm_loadu_ps(&dst[j]);
             simde_mm_storeu_ps(&dst[j],
@@ -410,11 +379,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp, Wave
         /* Scalar tail for sustain */
         for (; j < sustain_end; j++) {
             float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
-            simde__m128 v_rads = simde_mm_set1_ps(rads);
-            simde__m128 v_wave = wave_fn(v_rads);
-            float tmp[4];
-            simde_mm_storeu_ps(tmp, v_wave);
-            dst[j] += (amp0 + d_amp * (float)j) * tmp[0];
+            dst[j] += (amp0 + d_amp * (float)j) * wave_fn1(rads, ctx);
         }
     }
 
@@ -422,137 +387,39 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp, Wave
     size_t fo_start = (fade_out_start > fade_in_end) ? fade_out_start : fade_in_end;
     for (size_t j = fo_start; j < len; j++) {
         float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
-        simde__m128 v_rads = simde_mm_set1_ps(rads);
-        simde__m128 v_wave = wave_fn(v_rads);
-        float tmp[4];
-        simde_mm_storeu_ps(tmp, v_wave);
         float amp = (amp0 + d_amp * (float)j) * fade_envelope_out(j, len, fp.inv_fade);
-        dst[j] += amp * tmp[0];
+        dst[j] += amp * wave_fn1(rads, ctx);
     }
 }
 
 void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
-    const size_t len = lp->length;
-    if (len == 0) return;
-
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
-    float sa[SPECTRAL_OSC_SIMD_STACK_MAX], sb[SPECTRAL_OSC_SIMD_STACK_MAX], sc[SPECTRAL_OSC_SIMD_STACK_MAX];
-    TempBuffers t = alloc_temp_stack(sa, sb, sc, len, 3);
-    if (!temp_valid(&t, 3)) { free_temp(&t); return; }
-
-    build_phase_array(t.a, lp);
-
-    /* Vectorized sine via SIMDe SSE */
-    size_t j = 0;
-    for (; j + 4 <= len; j += 4) {
-        simde__m128 phase_vec = simde_mm_loadu_ps(&t.a[j]);
-        simde__m128 sin_vec = simde_fast_sin_ps(phase_vec);
-        simde_mm_storeu_ps(&t.b[j], sin_vec);
-    }
-    for (; j < len; j++) {
-        t.b[j] = fast_sin(t.a[j]);
-    }
-
-    build_amp_envelope(t.c, lp, &fp);
-    apply_envelope_accumulate(dst, t.b, t.c, len);
-
-    free_temp(&t);
+    osc_simd_fused_sustain(dst, lp, wave_sine_4, wave_sine_1, NULL);
 }
 
 void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_saw_4);
+    osc_simd_fused_sustain(dst, lp, wave_saw_4, wave_saw_1, NULL);
 }
 
 void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_square_4);
+    osc_simd_fused_sustain(dst, lp, wave_square_4, wave_square_1, NULL);
 }
 
 void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_triangle_4);
+    osc_simd_fused_sustain(dst, lp, wave_triangle_4, wave_triangle_1, NULL);
 }
 
 void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_parabola_4);
+    osc_simd_fused_sustain(dst, lp, wave_parabola_4, wave_parabola_1, NULL);
 }
 
-/* Quantized: wave = trunc(rads * width) / width */
 void osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) {
-    const size_t len = lp->length;
-    if (len == 0) return;
-
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
-    float sa[SPECTRAL_OSC_SIMD_STACK_MAX], sb[SPECTRAL_OSC_SIMD_STACK_MAX], sc[SPECTRAL_OSC_SIMD_STACK_MAX];
-    TempBuffers t = alloc_temp_stack(sa, sb, sc, len, 3);
-    if (!temp_valid(&t, 3)) { free_temp(&t); return; }
-
-    build_phase_array(t.a, lp);
-
     float width = lp->width;
-    if (width <= 0.0f) {
-        memset(t.b, 0, len * sizeof(float));
-    } else {
-        simde__m128 v_width = simde_mm_set1_ps(width);
-        simde__m128 v_inv_w = simde_mm_set1_ps(1.0f / width);
-        size_t j = 0;
-        for (; j + 4 <= len; j += 4) {
-            simde__m128 rads = simde_mm_loadu_ps(&t.a[j]);
-            /* trunc(rads * width) / width */
-            simde__m128 scaled = simde_mm_mul_ps(rads, v_width);
-            simde__m128 truncated = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(scaled));
-            simde__m128 wave = simde_mm_mul_ps(truncated, v_inv_w);
-            simde_mm_storeu_ps(&t.b[j], wave);
-        }
-        for (; j < len; j++) {
-            float inv_w = 1.0f / width;
-            t.b[j] = (float)(int)(t.a[j] * width) * inv_w;
-        }
-    }
-
-    build_amp_envelope(t.c, lp, &fp);
-    apply_envelope_accumulate(dst, t.b, t.c, len);
-    free_temp(&t);
+    osc_simd_fused_sustain(dst, lp, wave_quantized_4, wave_quantized_1, &width);
 }
 
-/* PWM: wave = ((rads + PI) * INV_TWO_PI < width) ? 1 : -1 */
 void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) {
-    const size_t len = lp->length;
-    if (len == 0) return;
-
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
-    float sa[SPECTRAL_OSC_SIMD_STACK_MAX], sb[SPECTRAL_OSC_SIMD_STACK_MAX], sc[SPECTRAL_OSC_SIMD_STACK_MAX];
-    TempBuffers t = alloc_temp_stack(sa, sb, sc, len, 3);
-    if (!temp_valid(&t, 3)) { free_temp(&t); return; }
-
-    build_phase_array(t.a, lp);
-
     float width = lp->width;
-    if (width <= 0.0f) {
-        /* PWM with width=0 is DC +1 */
-        for (size_t j = 0; j < len; j++) t.b[j] = 1.0f;
-    } else {
-        simde__m128 v_pi = simde_mm_set1_ps(SPECTRAL_PI);
-        simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-        simde__m128 v_width = simde_mm_set1_ps(width);
-        simde__m128 v_one = simde_mm_set1_ps(1.0f);
-        simde__m128 v_neg_one = simde_mm_set1_ps(-1.0f);
-        size_t j = 0;
-        for (; j + 4 <= len; j += 4) {
-            simde__m128 rads = simde_mm_loadu_ps(&t.a[j]);
-            simde__m128 norm = simde_mm_mul_ps(simde_mm_add_ps(rads, v_pi), v_inv_2pi);
-            simde__m128 cmp = simde_mm_cmplt_ps(norm, v_width);
-            simde__m128 wave = simde_mm_or_ps(
-                simde_mm_and_ps(cmp, v_one),
-                simde_mm_andnot_ps(cmp, v_neg_one));
-            simde_mm_storeu_ps(&t.b[j], wave);
-        }
-        for (; j < len; j++) {
-            t.b[j] = ((t.a[j] + SPECTRAL_PI) * SPECTRAL_INV_TWO_PI < width) ? 1.0f : -1.0f;
-        }
-    }
-
-    build_amp_envelope(t.c, lp, &fp);
-    apply_envelope_accumulate(dst, t.b, t.c, len);
-    free_temp(&t);
+    osc_simd_fused_sustain(dst, lp, wave_pwm_4, wave_pwm_1, &width);
 }
 
 int osc_simd_available(SpectralTimbre timbre) {

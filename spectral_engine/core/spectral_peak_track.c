@@ -10,17 +10,12 @@
  */
 
 #include "spectral_peak_track.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#else
-static inline int omp_get_max_threads(void) { return 1; }
-static inline int omp_get_thread_num(void) { return 0; }
-static inline double omp_get_wtime(void) { return 0.0; }
-#endif
+#include "spectral_omp.h"
 
 /*
  * Block-chain segment allocator
@@ -109,6 +104,7 @@ struct SpectralTracker {
     /* Precomputed constants */
     size_t n_freqs;
     float threshsq;
+    float thresh_linear_sq;  /* db-derived factor, independent of max_magsq */
     float freq_step_omega;
     float freq_step_df;
     float inv_hop;
@@ -129,7 +125,8 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->start_time = omp_get_wtime();
 
     float thresh_linear = powf(10.0f, db_thresh / 20.0f);
-    tracker->threshsq = thresh_linear * thresh_linear * max_magsq;
+    tracker->thresh_linear_sq = thresh_linear * thresh_linear;
+    tracker->threshsq = tracker->thresh_linear_sq * max_magsq;
 
     float freq_step = (float)sr / n_fft;
     float two_pi_ts = TWO_PI / sr;
@@ -150,11 +147,20 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     return tracker;
 }
 
+void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq) {
+    if (!tracker) return;
+    tracker->threshsq = tracker->thresh_linear_sq * new_max_magsq;
+}
+
 void spectral_tracker_process(SpectralTracker* tracker,
                                const float* chunk_magsq, const float* chunk_phases,
                                size_t chunk_n_frames, size_t global_frame_offset,
                                const float* overlap_magsq_row) {
-    if (!tracker || tracker->alloc_failed || chunk_n_frames < 1) return;
+    if (!tracker || chunk_n_frames < 1) return;
+    int af;
+    #pragma omp atomic read
+    af = tracker->alloc_failed;
+    if (af) return;
 
     const size_t n_freqs = tracker->n_freqs;
     const float threshsq = tracker->threshsq;
@@ -218,10 +224,15 @@ void spectral_tracker_process(SpectralTracker* tracker,
 
                 Segment* seg = seg_chain_push(chain);
                 if (SPECTRAL_UNLIKELY(!seg)) {
+                    #pragma omp atomic write
                     tracker->alloc_failed = 1;
                     break;
                 }
 
+                /* TODO: For higher-quality partial tracking, consider McAulay-Quatieri
+                 * (1986) "Speech Analysis/Synthesis Based on a Sinusoidal Representation"
+                 * — nearest-frequency matching with birth/death cost model. Current greedy
+                 * frame-pair approach is adequate for additive resynthesis with short hops. */
                 int best_idx = (m0 >= m1) ? 0 : 1;
                 best_idx = (m2 > ((best_idx == 0) ? m0 : m1)) ? 2 : best_idx;
                 int best_next = (int)f + best_idx - 1;
@@ -232,18 +243,25 @@ void spectral_tracker_process(SpectralTracker* tracker,
                 seg->start = t_hop;
                 seg->length = hop_float;
                 seg->phase = phase_row[f];
-                seg->omega = f * freq_step_omega;
+
+                /* Parabolic interpolation for sub-bin frequency accuracy (Smith & Serra, 1987) */
+                float log_l = log10f(row[f-1] + 1e-30f);
+                float log_c = log10f(curr + 1e-30f);
+                float log_r = log10f(row[f+1] + 1e-30f);
+                float denom = log_l - 2.0f * log_c + log_r;
+                float p = (fabsf(denom) > 1e-10f) ? 0.5f * (log_l - log_r) / denom : 0.0f;
+                seg->omega = ((float)f + p) * freq_step_omega;
                 seg->df = (best_next - (int)f) * freq_step_df;
                 seg->amp = m;
                 seg->da = (max_v - m) * inv_hop;
-                seg->width = 0.5f;
+                seg->width = TRACK_DEFAULT_WIDTH;
             }
         }
     }
 }
 
 SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track) {
-    SegmentArray empty_result = {NULL, 0, 0};
+    SegmentArray empty_result = SEGMENT_ARRAY_EMPTY;
 
     if (!tracker) {
         if (t_track) *t_track = 0;
@@ -290,7 +308,7 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
     /* Pre-fault pages in parallel for large merge allocations (>64MB) */
     size_t merge_bytes = total_segs * sizeof(Segment);
     if (segs && merge_bytes > PRETOUCH_THRESHOLD) {
-        size_t page_size = 4096;
+        size_t page_size = PRETOUCH_PAGE_SIZE;
         size_t n_pages = (merge_bytes + page_size - 1) / page_size;
         #pragma omp parallel for schedule(static)
         for (size_t p = 0; p < n_pages; p++) {
@@ -324,7 +342,7 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,
                                   float db_thresh, double* t_track) {
-    SegmentArray empty_result = {NULL, 0, 0};
+    SegmentArray empty_result = SEGMENT_ARRAY_EMPTY;
 
     if (!magsq || !phases || !t_track || n_frames < 2 || n_freqs < 3) {
         if (t_track) *t_track = 0;

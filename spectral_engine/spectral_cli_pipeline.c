@@ -9,12 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-static void omp_set_num_threads_wrapper(int n) { omp_set_num_threads(n); }
-#else
-static void omp_set_num_threads_wrapper(int n) { (void)n; }
-#endif
+#include "spectral_omp.h"
 
 /* Analysis is only available when NOT in restricted mode */
 #if !defined(SPECTRAL_RESTRICTED_MODE) || !SPECTRAL_RESTRICTED_MODE
@@ -52,7 +47,7 @@ static PipelineError load_wavetable(const char* path, SpectralWavetableBank* ban
     }
     
     if (wt_result != WAVETABLE_OK) {
-        printf("Error: Failed to load wavetable (code %d)\n", wt_result);
+        printf("Error: Failed to load wavetable: %s\n", wavetable_strerror(wt_result));
         return PIPELINE_ERR_WAVETABLE;
     }
     
@@ -82,7 +77,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     SpectralTimingResults t = {0};
     double wall_start = spectral_get_time_sec();
     
-    omp_set_num_threads_wrapper(opts->n_threads);
+    omp_set_num_threads(opts->n_threads);
     
 #if HAS_PERF
     perf_reset_tracking();
@@ -136,6 +131,9 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
                                                      sample_rate, &windowed_audio, &n_samples);
     if (window_err != SPECTRAL_OK) {
         printf("Error: invalid time window\n");
+#if HAS_PERF
+        perf_track_free(audio_info.frames * sizeof(float));
+#endif
         free(mono);
         return PIPELINE_ERR_INPUT;
     }
@@ -158,14 +156,20 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
         printf("Exporting to segments.bin...\n");
         SpectralError save_err = segments_save("segments.bin", &sa, sample_rate, opts->stretch, opts->pitch);
         if (save_err == SPECTRAL_OK) {
-            printf("Saved %u segments (%.1f MB)\n", sa.count, 
-                   sa.count * sizeof(Segment) / (1024.0 * 1024.0));
+            printf("Saved %u segments (%.1f MB)\n", sa.count,
+                   BYTES_TO_MB(sa.count * sizeof(Segment)));
         } else {
             printf("Error: Failed to save segments (%s)\n", spectral_strerror(save_err));
+#if HAS_PERF
+            perf_track_free(audio_info.frames * sizeof(float));
+#endif
             free(sa.segs);
             free(mono);
             return PIPELINE_ERR_OUTPUT;
         }
+#if HAS_PERF
+        perf_track_free(audio_info.frames * sizeof(float));
+#endif
         free(sa.segs);
         free(mono);
         printf("FFT: %.3fms Track: %.3fms\n", t.t_fft*1000, t.t_track*1000);
@@ -181,6 +185,9 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
         PipelineError wt_result = load_wavetable(opts->wavetable_path, &wt_bank, opts->timbre);
         if (wt_result != PIPELINE_OK) {
             free(sa.segs);
+#if HAS_PERF && !SPECTRAL_RESTRICTED_MODE
+            perf_track_free(audio_info.frames * sizeof(float));
+#endif
             if (mono) free(mono);
             return wt_result;
         }
@@ -191,18 +198,27 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     double out_len_f = (double)n_samples * (double)opts->stretch;
     if (out_len_f <= 0.0 || out_len_f > (double)SIZE_MAX) {
         free(sa.segs);
+#if HAS_PERF && !SPECTRAL_RESTRICTED_MODE
+        perf_track_free(audio_info.frames * sizeof(float));
+#endif
         if (mono) free(mono);
         return PIPELINE_ERR_INPUT;
     }
     size_t out_len = (size_t)out_len_f;
     if (out_len == 0 || out_len > SIZE_MAX / sizeof(float)) {
         free(sa.segs);
+#if HAS_PERF && !SPECTRAL_RESTRICTED_MODE
+        perf_track_free(audio_info.frames * sizeof(float));
+#endif
         if (mono) free(mono);
         return PIPELINE_ERR_INPUT;
     }
     float* out_buf = calloc(out_len, sizeof(float));
     if (!out_buf) {
         free(sa.segs);
+#if HAS_PERF && !SPECTRAL_RESTRICTED_MODE
+        perf_track_free(audio_info.frames * sizeof(float));
+#endif
         if (mono) free(mono);
         return PIPELINE_ERR_MEMORY;
     }
@@ -216,6 +232,13 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     SpectralError synth_err = run_synthesis(opts, sa, out_buf, out_len, wt_bank_ptr, &t.t_synth);
     if (synth_err != SPECTRAL_OK) {
         printf("Error: Synthesis failed (%s)\n", spectral_strerror(synth_err));
+    #if HAS_PERF
+        perf_track_free(sa.count * sizeof(Segment));
+        perf_track_free(out_len * sizeof(float));
+    #if !SPECTRAL_RESTRICTED_MODE
+        perf_track_free(audio_info.frames * sizeof(float));
+    #endif
+    #endif
         free(sa.segs);
         free(out_buf);
         if (mono) free(mono);
@@ -231,6 +254,13 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     SpectralError write_err = spectral_audio_write("out_c.wav", out_buf, out_len, sample_rate, 1);
     if (write_err != SPECTRAL_OK) {
         printf("Error: Failed to write output file (%s)\n", spectral_strerror(write_err));
+    #if HAS_PERF
+        perf_track_free(sa.count * sizeof(Segment));
+        perf_track_free(out_len * sizeof(float));
+    #if !SPECTRAL_RESTRICTED_MODE
+        perf_track_free(audio_info.frames * sizeof(float));
+    #endif
+    #endif
         free(sa.segs);
         free(out_buf);
         if (mono) free(mono);
@@ -240,7 +270,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     /* Calculate timing results */
     t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm;
     t.audio_dur = (double)n_samples / sample_rate;
-    t.realtime_x = t.audio_dur / t.t_total;
+    t.realtime_x = (t.t_total > 0) ? (t.audio_dur / t.t_total) : 0.0;
     
     /* Print timing */
     spectral_pipeline_print_timing(&t, sa.count);
@@ -248,6 +278,11 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
 #if HAS_PERF
     PerfMetrics perf_end = perf_snapshot(wall_start);
     perf_print(&perf_start, &perf_end, opts->n_threads);
+    perf_track_free(sa.count * sizeof(Segment));
+    perf_track_free(out_len * sizeof(float));
+#if !SPECTRAL_RESTRICTED_MODE
+    perf_track_free(audio_info.frames * sizeof(float));
+#endif
 #endif
     
     /* Cleanup */
@@ -272,5 +307,6 @@ void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t seg
            t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_total*1000);
 #endif
     printf("Audio: %.2fs Realtime: %.1fx Segs/sec: %.0fK\n",
-            t->audio_dur, t->realtime_x, segment_count / t->t_total / 1000);
+            t->audio_dur, t->realtime_x,
+            (t->t_total > 0) ? (segment_count / t->t_total / 1000) : 0.0);
 }

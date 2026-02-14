@@ -20,6 +20,10 @@
 #include <stdio.h>
 #include <math.h>
 
+/* Linear fade length matching embedded path */
+#define SPECTRAL_FADE_EMBEDDED  32
+#define FADE_STEP_Q15           (Q15_ONE / SPECTRAL_FADE_EMBEDDED)
+
 /* Emulator configuration */
 
 static EmbeddedTargetConfig g_emulator_config;
@@ -344,18 +348,104 @@ SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t o
 #endif
             q15_t amp = act->amp;
             q15_t da = act->da;
-            
-            for (uint32_t j = blk_start; j < blk_end; j++) {
+
+            /* Compute fade envelope boundaries */
+            uint32_t seg_offset = ((uint32_t)out_pos + blk_start) - seg->start;
+            uint32_t seg_len = seg->length;
+            uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
+            if (fade_len > seg_len / 2) fade_len = seg_len / 2;
+            if (fade_len == 0) fade_len = 1;
+            uint32_t seg_fo_start = seg_len - fade_len;
+
+            /* Map fade regions to block offsets */
+            uint32_t fi_end = blk_start;
+            if (seg_offset < fade_len) {
+                fi_end = blk_start + (fade_len - seg_offset);
+                if (fi_end > blk_end) fi_end = blk_end;
+            }
+            uint32_t fo_start = blk_end;
+            if (seg_offset + len > seg_fo_start) {
+                fo_start = (seg_fo_start > seg_offset)
+                    ? blk_start + (seg_fo_start - seg_offset) : blk_start;
+                if (fo_start < fi_end) fo_start = fi_end;
+            }
+
+            /* Fade-in region */
+            q15_t fade_val = (q15_t)((int32_t)seg_offset * FADE_STEP_Q15);
+            for (uint32_t j = blk_start; j < fi_end; j++) {
                 uq16_t lut_idx = (uq16_t)(phase >> 16);
                 q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
+                sample = spectral_mul_q15(sample, fade_val);
                 accum[j] += (int64_t)sample * amp;
                 phase += freq_inc;
 #if SPECTRAL_HAS_CHIRP
                 freq_inc += df_inc;
 #endif
                 amp = spectral_qadd16(amp, da);
+                fade_val = spectral_qadd16(fade_val, FADE_STEP_Q15);
             }
-            
+
+            /* Sustain region (no fade) — 4-sample unrolled to match M7 hot path */
+            {
+                uint32_t j = fi_end;
+                uint32_t sustain_len = fo_start - fi_end;
+                uint32_t sustain_end4 = fi_end + (sustain_len & ~3U);
+
+                for (; j < sustain_end4; j += 4) {
+                    q31_t p0 = phase;
+                    q31_t p1 = phase + freq_inc;
+                    q31_t p2 = phase + (freq_inc << 1);
+                    q31_t p3 = phase + freq_inc + (freq_inc << 1);
+
+                    q15_t a0 = amp;
+                    q15_t a1 = spectral_qadd16(amp, da);
+                    q15_t a2 = spectral_qadd16(a1, da);
+                    q15_t a3 = spectral_qadd16(a2, da);
+
+                    accum[j]     += (int64_t)spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut) * a0;
+                    accum[j + 1] += (int64_t)spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut) * a1;
+                    accum[j + 2] += (int64_t)spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut) * a2;
+                    accum[j + 3] += (int64_t)spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut) * a3;
+
+                    phase = p3 + freq_inc;
+                    amp = spectral_qadd16(a3, da);
+#if SPECTRAL_HAS_CHIRP
+                    freq_inc += df_inc * 4;
+#endif
+                }
+
+                /* Remainder */
+                for (; j < fo_start; j++) {
+                    uq16_t lut_idx = (uq16_t)(phase >> 16);
+                    q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
+                    accum[j] += (int64_t)sample * amp;
+                    phase += freq_inc;
+#if SPECTRAL_HAS_CHIRP
+                    freq_inc += df_inc;
+#endif
+                    amp = spectral_qadd16(amp, da);
+                }
+            }
+
+            /* Fade-out region */
+            if (fo_start < blk_end) {
+                uint32_t fo_seg_pos = seg_offset + (fo_start - blk_start);
+                uint32_t into_fade = fo_seg_pos - seg_fo_start;
+                fade_val = Q15_ONE - (q15_t)((int32_t)into_fade * FADE_STEP_Q15);
+                for (uint32_t j = fo_start; j < blk_end; j++) {
+                    uq16_t lut_idx = (uq16_t)(phase >> 16);
+                    q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
+                    sample = spectral_mul_q15(sample, fade_val);
+                    accum[j] += (int64_t)sample * amp;
+                    phase += freq_inc;
+#if SPECTRAL_HAS_CHIRP
+                    freq_inc += df_inc;
+#endif
+                    amp = spectral_qadd16(amp, da);
+                    fade_val = spectral_qadd16(fade_val, -FADE_STEP_Q15);
+                }
+            }
+
             act->phase_acc = phase;
             act->freq_inc = freq_inc;
             act->amp = amp;

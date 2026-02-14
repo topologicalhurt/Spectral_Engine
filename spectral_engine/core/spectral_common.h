@@ -4,8 +4,6 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <math.h>
-#include <string.h>
 
 #include "spectral_config.h"
 
@@ -52,6 +50,8 @@ typedef struct SegmentArray {
     uint32_t capacity;
 } SegmentArray;
 
+#define SEGMENT_ARRAY_EMPTY  {NULL, 0, 0}
+
 typedef struct {
     float stretch, inv_stretch, inv_stretch_sq, pitch_factor;
     size_t out_len;
@@ -63,9 +63,5 @@ void* spectral_aligned_alloc(size_t size);
 #endif
 
 #include "spectral_fast_math.h"
-
-#if !SPECTRAL_NO_PERF
-#include "spectral_perf.h"
-#endif
 
 #endif

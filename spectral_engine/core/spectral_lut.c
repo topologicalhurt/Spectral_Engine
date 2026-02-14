@@ -33,18 +33,4 @@ void spectral_lut_init_sine(q15_t* lut) {
 
 #endif /* !SPECTRAL_LUT_IN_FLASH */
 
-q15_t spectral_lut_sin(uq16_t phase_u16, const q15_t* lut) {
-    uint32_t idx = phase_u16 >> (16 - SPECTRAL_OSC_LUT_BITS);
-    uint32_t frac_raw = phase_u16 & SPECTRAL_OSC_FRAC_MASK;
-    uint32_t frac = (SPECTRAL_OSC_FRAC_BITS >= 8)
-        ? (frac_raw >> (SPECTRAL_OSC_FRAC_BITS - 8))
-        : (frac_raw << (8 - SPECTRAL_OSC_FRAC_BITS));
-
-    q15_t s0 = lut[idx];
-    q15_t s1 = lut[idx + 1];
-    return (q15_t)(s0 + ((((q31_t)s1 - (q31_t)s0) * (int32_t)frac) >> 8));
-}
-
-q15_t spectral_lut_cos(uq16_t phase_u16, const q15_t* lut) {
-    return spectral_lut_sin(phase_u16 + 16384, lut);
-}
+/* spectral_lut_sin() and spectral_lut_cos() are now inline in spectral_lut.h */

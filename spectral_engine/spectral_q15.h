@@ -51,20 +51,86 @@ typedef uint16_t uq16_t;
 #define Q15_HOT
 #endif
 
-/* Saturating arithmetic */
-Q15_HOT q15_t spectral_qadd16(q15_t a, q15_t b);
-Q15_HOT q15_t spectral_qsub16(q15_t a, q15_t b);
-Q15_HOT q31_t spectral_qadd32(q31_t a, q31_t b);
-Q15_HOT q31_t spectral_qsub32(q31_t a, q31_t b);
-Q15_HOT q15_t spectral_ssat16(q31_t val);
-Q15_HOT q15_t spectral_q31_to_q15_sat(q31_t q);
-Q15_HOT q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1);
-Q15_HOT q31_t spectral_smulbb(q15_t a, q15_t b);
+/* Inline Q15 primitives — eliminates function-call overhead in hot loops.
+ * ARM DSP intrinsic path compiles to single-cycle instructions. */
 
-/* Q15 operations */
-Q15_HOT q15_t spectral_mul_q15(q15_t a, q15_t b);
-Q15_HOT q31_t spectral_mac_q15(q31_t acc, q15_t a, q15_t b);
-Q15_HOT q15_t spectral_scale_q15(q15_t sample, q15_t amplitude);
+#define SPECTRAL_Q15_INLINE_DEFINED 1
+
+#if defined(__ARM_FEATURE_DSP) && __ARM_FEATURE_DSP
+#include <arm_acle.h>
+
+static inline q15_t spectral_qadd16(q15_t a, q15_t b) {
+    return (q15_t)__qadd16((int32_t)a, (int32_t)b);
+}
+static inline q15_t spectral_qsub16(q15_t a, q15_t b) {
+    return (q15_t)__qsub16((int32_t)a, (int32_t)b);
+}
+static inline q31_t spectral_qadd32(q31_t a, q31_t b) {
+    return __qadd(a, b);
+}
+static inline q31_t spectral_qsub32(q31_t a, q31_t b) {
+    return __qsub(a, b);
+}
+static inline q15_t spectral_ssat16(q31_t val) {
+    return (q15_t)__ssat(val, 16);
+}
+static inline q15_t spectral_q31_to_q15_sat(q31_t q) {
+    return (q15_t)__ssat(q >> 16, 16);
+}
+static inline q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1) {
+    uint32_t packed_a = ((uint32_t)(uint16_t)a1 << 16) | (uint16_t)a0;
+    uint32_t packed_b = ((uint32_t)(uint16_t)b1 << 16) | (uint16_t)b0;
+    return __smlad(packed_a, packed_b, acc);
+}
+static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
+    return __smulbb(a, b);
+}
+
+#else
+/* Portable C fallback */
+
+static inline q15_t spectral_qadd16(q15_t a, q15_t b) {
+    int32_t sum = (int32_t)a + (int32_t)b;
+    return (sum > Q15_MAX) ? Q15_MAX : (sum < Q15_MIN) ? Q15_MIN : (q15_t)sum;
+}
+static inline q15_t spectral_qsub16(q15_t a, q15_t b) {
+    int32_t diff = (int32_t)a - (int32_t)b;
+    return (diff > Q15_MAX) ? Q15_MAX : (diff < Q15_MIN) ? Q15_MIN : (q15_t)diff;
+}
+static inline q31_t spectral_qadd32(q31_t a, q31_t b) {
+    int64_t sum = (int64_t)a + (int64_t)b;
+    return (sum > Q31_MAX) ? Q31_MAX : (sum < Q31_MIN) ? Q31_MIN : (q31_t)sum;
+}
+static inline q31_t spectral_qsub32(q31_t a, q31_t b) {
+    int64_t diff = (int64_t)a - (int64_t)b;
+    return (diff > Q31_MAX) ? Q31_MAX : (diff < Q31_MIN) ? Q31_MIN : (q31_t)diff;
+}
+static inline q15_t spectral_ssat16(q31_t val) {
+    return (val > Q15_MAX) ? Q15_MAX : (val < Q15_MIN) ? Q15_MIN : (q15_t)val;
+}
+static inline q15_t spectral_q31_to_q15_sat(q31_t q) {
+    q31_t shifted = q >> 16;
+    return (shifted > Q15_MAX) ? Q15_MAX : (shifted < Q15_MIN) ? Q15_MIN : (q15_t)shifted;
+}
+static inline q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1) {
+    return acc + ((q31_t)a0 * b0) + ((q31_t)a1 * b1);
+}
+static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
+    return (q31_t)a * (q31_t)b;
+}
+
+#endif /* __ARM_FEATURE_DSP */
+
+/* Higher-level Q15 operations (always portable, call inline primitives above) */
+static inline q15_t spectral_mul_q15(q15_t a, q15_t b) {
+    return spectral_ssat16(spectral_smulbb(a, b) >> 15);
+}
+static inline q31_t spectral_mac_q15(q31_t acc, q15_t a, q15_t b) {
+    return spectral_qadd32(acc, spectral_smulbb(a, b));
+}
+static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
+    return spectral_mul_q15(sample, amplitude);
+}
 
 /* Bulk conversion (NEON-optimized on ARM) */
 void spectral_q31_to_q15_bulk(const q31_t* src, q15_t* dst, uint32_t count);

@@ -50,7 +50,7 @@ SpectralError segment_pool_push(SegmentPool* pool, const Segment* seg) {
 }
 
 SegmentArray segment_pool_to_array(SegmentPool* pool) {
-    SegmentArray sa = {NULL, 0, 0};
+    SegmentArray sa = SEGMENT_ARRAY_EMPTY;
     if (!pool || pool->count == 0) return sa;
     
     sa.segs = (Segment*)malloc(pool->count * sizeof(Segment));

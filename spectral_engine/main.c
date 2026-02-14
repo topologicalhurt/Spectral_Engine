@@ -18,11 +18,8 @@
 #include "spectral_cli_pipeline.h"
 #include "spectral_synth.h"
 
-/* Emulator mode detection */
-#define IS_EMULATOR SPECTRAL_IS_EMULATOR
-
 int main(int argc, char** argv) {
-#if IS_EMULATOR
+#if SPECTRAL_IS_EMULATOR
     printf("+------------------------------------------------------------+\n");
     printf("|            EMBEDDED TARGET EMULATOR MODE                   |\n");
     printf("|  Single-threaded Q15 synthesis (simulating Cortex-M7)      |\n");
@@ -34,12 +31,16 @@ int main(int argc, char** argv) {
     spectral_cli_init(&opts);
     
     if (!spectral_cli_parse(&opts, argc, argv)) {
+        if (opts.error_message)
+            fprintf(stderr, "Error: %s\n\n", opts.error_message);
         spectral_cli_print_usage();
         return 1;
     }
-    
+
     /* Validate options */
     if (!spectral_cli_validate(&opts)) {
+        if (opts.error_message)
+            fprintf(stderr, "Error: %s\n", opts.error_message);
         return 1;
     }
     
@@ -48,7 +49,6 @@ int main(int argc, char** argv) {
     PipelineError result = spectral_pipeline_run(&opts, &timing);
     
     /* Release cached resources */
-    synth_cpu_cleanup();
 #if HAS_METAL
     metal_cleanup();
 #endif
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
 #endif
 
     if (result != PIPELINE_OK) {
-        printf("Error: Pipeline failed (code %d)\n", result);
+        printf("Error: Pipeline failed: %s\n", pipeline_strerror(result));
         return (int)result;
     }
 

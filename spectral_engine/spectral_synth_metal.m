@@ -11,7 +11,7 @@
 #include "spectral_synth_internal.h"
 #include "spectral_utils.h"
 #include "oscillator.h"
-#include <omp.h>
+#include "spectral_omp.h"
 
 /* Metal kernel source - struct definitions and synthesis kernel.
  * Oscillator functions come from oscillator_metal_source (defined in oscillator.c) */
@@ -95,8 +95,9 @@ static const char* metalKernelCode =
 "                float beta = seg.df * params.pitch_factor * params.inv_stretch_sq;\n"
 "                float d_a = seg.da * params.inv_stretch;\n"
 "                \n"
+"                float seg_len = seg.length * params.stretch;\n"
 "                float p = seg.phase + j * (alpha + beta * j);\n"
-"                sum += (seg.amp + d_a * j) * oscillator(p, timbre);\n"
+"                sum += (seg.amp + d_a * j) * fade_envelope(j, seg_len) * oscillator(p, timbre);\n"
 "            }\n"
 "        }\n"
 "        \n"

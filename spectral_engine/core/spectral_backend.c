@@ -31,7 +31,8 @@ int spectral_backend_max_timbre(SynthBackend backend) {
 
 const char* spectral_backend_name(SynthBackend backend) {
     static const char* names[] = {"Auto", "CPU", "Metal", "CUDA", "Export"};
-    return (backend <= BACKEND_EXPORT) ? names[backend] : "Unknown";
+    unsigned idx = (unsigned)backend;
+    return (idx <= BACKEND_EXPORT) ? names[idx] : "Unknown";
 }
 
 int spectral_backend_supports_wavetable(SynthBackend backend) {

@@ -144,7 +144,7 @@ void embedded_memory_print(const EmbeddedMemoryUsage* mem) {
 
     /* Totals */
     snprintf(buf1, sizeof(buf1), "%zu bytes", mem->total_bytes);
-    snprintf(buf2, sizeof(buf2), "(%.1f MB)", mem->total_bytes / (1024.0 * 1024.0));
+    snprintf(buf2, sizeof(buf2), "(%.1f MB)", BYTES_TO_MB(mem->total_bytes));
     table_print_row(&cfg, "TOTAL", buf1, buf2);
 
     snprintf(buf1, sizeof(buf1), "%.1f MB", mem->target_max_kb / 1024.0);
@@ -161,20 +161,20 @@ void embedded_memory_print(const EmbeddedMemoryUsage* mem) {
 
     if (!mem->fits_in_target) {
         size_t overage = mem->total_bytes - (mem->target_max_kb * 1024);
-        status_print(STATUS_WARN, "Memory exceeds target by %.1f MB", overage / (1024.0 * 1024.0));
+        status_print(STATUS_WARN, "Memory exceeds target by %.1f MB", BYTES_TO_MB(overage));
         printf("   Reduce segments (%zu) or audio duration.\n", mem->num_segments);
     } else if (mem->usage_percent > 80.0) {
         size_t headroom = (mem->target_max_kb * 1024) - mem->total_bytes;
         status_print(STATUS_WARN, "Memory usage high (%.1f%%). Headroom: %.1f MB",
-                    mem->usage_percent, headroom / (1024.0 * 1024.0));
+                    mem->usage_percent, BYTES_TO_MB(headroom));
     } else {
         size_t headroom = (mem->target_max_kb * 1024) - mem->total_bytes;
-        status_print(STATUS_OK, "Memory fits. Headroom: %.1f MB", headroom / (1024.0 * 1024.0));
+        status_print(STATUS_OK, "Memory fits. Headroom: %.1f MB", BYTES_TO_MB(headroom));
     }
 
     /* Memory placement guidance */
-    printf("   Hot path (SRAM): ctx+LUT+accum = %.1f KB\n", static_hot_bytes / 1024.0);
-    printf("   Cold data (SDRAM): segments = %.1f MB\n", mem->segment_data_bytes / (1024.0 * 1024.0));
+    printf("   Hot path (SRAM): ctx+LUT+accum = %.1f KB\n", BYTES_TO_KB(static_hot_bytes));
+    printf("   Cold data (SDRAM): segments = %.1f MB\n", BYTES_TO_MB(mem->segment_data_bytes));
     printf("\n");
 }
 
@@ -235,14 +235,14 @@ EmbeddedPerfEstimate embedded_perf_estimate(
     /* Block processing overhead: segment activation/deactivation checks,
      * memset of accumulator, output scaling, and callback overhead */
     uint64_t num_blocks = (output_samples + config->block_size - 1) / config->block_size;
-    uint64_t block_overhead = 50 +                                /* callback entry/exit */
-                              config->block_size * 2 +            /* memset accum buffer */
-                              config->block_size * 3 +            /* final output scaling */
-                              peak_active * 15;                   /* segment bounds checks */
+    uint64_t block_overhead = EMBEDDED_CYCLES_CALLBACK_OVERHEAD +
+                              config->block_size * EMBEDDED_CYCLES_MEMSET_PER_SAMPLE +
+                              config->block_size * EMBEDDED_CYCLES_OUTPUT_PER_SAMPLE +
+                              peak_active * EMBEDDED_CYCLES_SEG_BOUNDS_CHECK;
     cycles += num_blocks * block_overhead;
 
     /* Segment activation overhead (once per segment) */
-    cycles += segment_count * 30;  /* Phase/freq init, amplitude setup */
+    cycles += segment_count * EMBEDDED_CYCLES_SEG_ACTIVATION;
 
     est.estimated_cycles = cycles;
 

@@ -4,7 +4,6 @@
  * Uses shared memory segment caching and tile-parallel dispatch,
  * matching the Metal backend architecture. No atomicAdd needed.
  *
- * Legacy segment-parallel kernel preserved in legacy_spectral_synth_cuda.cu.
  */
 
 #include <cuda_runtime.h>
@@ -14,9 +13,19 @@
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
 #include "oscillator.h"
+#include "spectral_osc_formulas.h"
 
 #define TILE_SIZE           SPECTRAL_GPU_TILE_SIZE
 #define SEGMENT_CACHE_SIZE  SPECTRAL_METAL_SEG_CACHE_SIZE
+#define FADE_SAMPLES        64
+
+/* Segment fade envelope — delegates to canonical formula in spectral_osc_formulas.h */
+__device__ __forceinline__ float fade_envelope(float j, float seg_len) {
+    float fade_len = fminf(seg_len * 0.25f, (float)FADE_SAMPLES);
+    if (fade_len < 1.0f) fade_len = 1.0f;
+    float inv_fade = 1.0f / fade_len;
+    return spectral_fade_envelope_gpu(j, seg_len, fade_len, inv_fade);
+}
 
 /* Persistent device buffer cache — avoids per-call cudaMalloc/cudaFree */
 static Segment*  d_segments   = NULL;
@@ -78,11 +87,12 @@ __global__ void synthesize_tile_kernel(
                 if (sample_pos < seg_start || sample_pos >= seg_end) continue;
 
                 float j = sample_pos - seg_start;
+                float seg_len = seg.length * stretch;
                 float alpha = seg.omega * pitch_factor * inv_stretch;
                 float beta = seg.df * pitch_factor * inv_stretch_sq;
                 float d_a = seg.da * inv_stretch;
                 float p = seg.phase + j * (alpha + beta * j);
-                sum += (seg.amp + d_a * j) * oscillator_cuda(p, timbre);
+                sum += (seg.amp + d_a * j) * fade_envelope(j, seg_len) * oscillator_cuda(p, timbre);
             }
         }
         __syncthreads();

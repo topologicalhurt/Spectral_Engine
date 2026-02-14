@@ -62,7 +62,15 @@ typedef enum {
 
 void status_print(StatusLevel level, const char* fmt, ...);
 
-/* 
+/*
+ * Byte-size conversion macros
+ */
+
+#define BYTES_TO_KB(b)  ((double)(b) / 1024.0)
+#define BYTES_TO_MB(b)  ((double)(b) / (1024.0 * 1024.0))
+#define BYTES_TO_GB(b)  ((double)(b) / (1024.0 * 1024.0 * 1024.0))
+
+/*
  * String Formatting
  */
 

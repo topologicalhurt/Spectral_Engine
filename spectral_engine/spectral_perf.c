@@ -15,11 +15,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#else
-static inline double omp_get_wtime(void) { return 0.0; }
-#endif
+#include "spectral_omp.h"
 
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -142,7 +138,7 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
 
     printf("\n--- Performance Metrics ---\n");
     printf("Memory:  RSS %zu MB, Peak tracked %.1f MB\n",
-           end->current_resident_mb, g_peak_alloc / (1024.0 * 1024.0));
+           end->current_resident_mb, BYTES_TO_MB(g_peak_alloc));
     printf("CPU:     User %.1f ms, Sys %.1f ms, Total %.1f ms\n",
            user_delta, sys_delta, total_cpu);
     printf("Threads: %d / %d cores, Util %.1f%%, Parallelism %.2fx\n",
