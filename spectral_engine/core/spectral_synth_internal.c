@@ -4,10 +4,9 @@
 #include "spectral_synth.h"
 #include "spectral_utils.h"
 #include <stdlib.h>
+#include <string.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include "spectral_omp.h"
 
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs) {
     return (SynthParams){
@@ -60,15 +59,28 @@ int gpu_check_timbre_or_fallback(const char* backend_name,
 
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
     SegmentLoopParams lp;
-    
-    lp.start_idx = (size_t)(s->start * p->stretch);
-    lp.length = (size_t)(s->length * p->stretch);
-    
+
+    /* Overflow-safe: clamp negative/huge float products before casting to size_t */
+    double start_d = (double)s->start * (double)p->stretch;
+    double length_d = (double)s->length * (double)p->stretch;
+    if (start_d < 0.0 || start_d >= (double)out_len || !isfinite(start_d)) {
+        lp.valid = 0;
+        return lp;
+    }
+    if (length_d < 0.0 || !isfinite(length_d)) {
+        lp.valid = 0;
+        return lp;
+    }
+
+    lp.start_idx = (size_t)start_d;
+    lp.length = (size_t)length_d;
+
     if (lp.start_idx >= out_len) {
         lp.valid = 0;
         return lp;
     }
-    if (lp.start_idx + lp.length > out_len) {
+    /* Overflow-safe comparison: rearranged to avoid size_t addition overflow */
+    if (lp.length > out_len - lp.start_idx) {
         lp.length = out_len - lp.start_idx;
     }
     
@@ -91,6 +103,7 @@ SpectralError gpu_tile_preprocess(
     TileRange** out_ranges, uint32_t** out_segment_ids,
     uint32_t* out_num_tiles, uint32_t* out_total_refs
 ) {
+    if (out_len > UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;
     uint32_t num_tiles = ((uint32_t)out_len + tile_size - 1) / tile_size;
 
 #ifdef _OPENMP
@@ -142,13 +155,24 @@ SpectralError gpu_tile_preprocess(
         free(thread_counts);
         return SPECTRAL_ERR_MEMORY;
     }
+    int tile_overflow = 0;
     for (int t = 0; t < n_threads; t++) {
         for (uint32_t i = 0; i < num_tiles; i++) {
-            tile_counts[i] += thread_counts[t][i];
+            uint32_t sum = tile_counts[i] + thread_counts[t][i];
+            if (sum < tile_counts[i]) { tile_overflow = 1; break; }
+            tile_counts[i] = sum;
         }
         free(thread_counts[t]);
+        if (tile_overflow) {
+            for (int j = t + 1; j < n_threads; j++) free(thread_counts[j]);
+            break;
+        }
     }
     free(thread_counts);
+    if (tile_overflow) {
+        free(tile_counts);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
 
     TileRange* tile_ranges = malloc(num_tiles * sizeof(TileRange));
     if (!tile_ranges) {
@@ -159,6 +183,11 @@ SpectralError gpu_tile_preprocess(
     for (uint32_t t = 0; t < num_tiles; t++) {
         tile_ranges[t].start = total_refs;
         tile_ranges[t].count = tile_counts[t];
+        if (total_refs > UINT32_MAX - tile_counts[t]) {
+            free(tile_counts);
+            free(tile_ranges);
+            return SPECTRAL_ERR_OVERFLOW;
+        }
         total_refs += tile_counts[t];
     }
 

@@ -9,13 +9,9 @@
 #include <string.h>
 #include <math.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#else
-static int omp_get_max_threads(void) { return 1; }
-#endif
+#include "spectral_omp.h"
 
-#define IS_EMULATOR SPECTRAL_IS_EMULATOR
+#define CLI_MAX_ARGV  64  /* Max argv entries for stack-allocated effective argv */
 
 void spectral_cli_init(SpectralCliOptions* opts) {
     if (!opts) return;
@@ -36,7 +32,7 @@ void spectral_cli_init(SpectralCliOptions* opts) {
     opts->valid = 0;
     opts->error_message = NULL;
     
-#if IS_EMULATOR || SPECTRAL_RESTRICTED_MODE
+#if SPECTRAL_IS_EMULATOR || SPECTRAL_RESTRICTED_MODE
     opts->n_threads = 1;  /* Force single-threaded for embedded modes */
     opts->backend = BACKEND_CPU;
 #endif
@@ -67,18 +63,29 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
 
     /* Build effective argc/argv skipping consumed -w <path> args */
     int eff_argc = argc;
-    char* eff_argv_buf[64];
+    char* eff_argv_buf[CLI_MAX_ARGV];
+    char** eff_argv_heap = NULL;
     char** eff_argv = argv;
-    if (wt_idx >= 0 && argc <= 64) {
+    if (wt_idx >= 0) {
+        /* Use stack buffer if it fits, else heap-allocate */
+        char** dst;
+        if (argc <= CLI_MAX_ARGV) {
+            dst = eff_argv_buf;
+        } else {
+            eff_argv_heap = (char**)malloc(argc * sizeof(char*));
+            if (!eff_argv_heap) {
+                opts->valid = 0;
+                opts->error_message = "Out of memory filtering argv";
+                return 0;
+            }
+            dst = eff_argv_heap;
+        }
         eff_argc = 0;
         for (int i = 0; i < argc; i++) {
             if (i == wt_idx || i == wt_idx + 1) continue;
-            eff_argv_buf[eff_argc++] = argv[i];
+            dst[eff_argc++] = argv[i];
         }
-        eff_argv = eff_argv_buf;
-    } else if (wt_idx >= 0) {
-        /* Extremely long argv - just skip the two indices manually below */
-        eff_argc = argc - 2;
+        eff_argv = dst;
     }
     argc = eff_argc;
     argv = eff_argv;
@@ -93,7 +100,7 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
     opts->n_threads = 1;
     opts->backend = BACKEND_CPU;
     
-#elif IS_EMULATOR
+#elif SPECTRAL_IS_EMULATOR
     /* Emulator mode: timbre stretch pitch n_fft hop db_thresh start end */
     int timbre_arg = (argc > 2) ? atoi(argv[2]) : 0;
     opts->timbre = (timbre_arg >= TIMBRE_MIN && timbre_arg <= TIMBRE_MAX) 
@@ -124,6 +131,7 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
     opts->end_sec = (argc > 11) ? (float)atof(argv[11]) : -1.0f;
 #endif
     
+    free(eff_argv_heap);  /* NULL-safe */
     opts->valid = 1;
     return spectral_cli_validate(opts);
 }
@@ -171,6 +179,13 @@ int spectral_cli_validate(SpectralCliOptions* opts) {
         return 0;
     }
     
+    /* Validate backend enum */
+    if ((int)opts->backend < BACKEND_AUTO || (int)opts->backend > BACKEND_EXPORT) {
+        opts->valid = 0;
+        opts->error_message = "backend must be 0-4 (auto/cpu/metal/cuda/export)";
+        return 0;
+    }
+
 #if SPECTRAL_RESTRICTED_MODE
     /* Restricted mode: force CPU backend */
     if (opts->backend != BACKEND_CPU && opts->backend != BACKEND_EXPORT) {
@@ -194,6 +209,8 @@ int spectral_cli_validate(SpectralCliOptions* opts) {
     
     /* Validate thread count */
     if (opts->n_threads < 1) opts->n_threads = 1;
+    int hw_threads = omp_get_max_threads();
+    if (opts->n_threads > hw_threads) opts->n_threads = hw_threads;
     
     opts->valid = 1;
     return 1;
@@ -212,7 +229,7 @@ void spectral_cli_print_usage(void) {
     printf("Defaults: timbre=0 stretch=1.0 pitch=0\n");
     printf("Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm\n");
     
-#elif IS_EMULATOR
+#elif SPECTRAL_IS_EMULATOR
     printf("Usage: ./spectral_emulator input.wav [options]\n\n");
     printf("Embedded Target Emulator Build\n");
     printf("  - Q15 fixed-point synthesis (same as ARM Cortex-M)\n");

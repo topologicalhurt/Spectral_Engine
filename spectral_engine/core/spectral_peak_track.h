@@ -14,12 +14,14 @@
 
 #include "spectral_common.h"
 
-#define TRACK_BLOCK_SEGS  16384  /* 16384 * 64 bytes = 1MB per block */
+#define TRACK_BLOCK_SEGS      16384   /* 16384 * 64 bytes = 1MB per block */
+#define TRACK_DEFAULT_WIDTH   0.5f    /* Default segment width (PWM duty cycle) */
 
 /* Chunked STFT pipeline constants */
 #define STFT_CHUNK_FRAMES     4096                      /* Frames per chunk (~64MB STFT at n_freqs=2049) */
 #define STFT_CHUNK_THRESHOLD  (32UL * 1024 * 1024)      /* 32M bins = 256MB STFT triggers chunked mode */
 #define PRETOUCH_THRESHOLD    (64UL * 1024 * 1024)       /* Pre-fault pages for merges > 64MB */
+#define PRETOUCH_PAGE_SIZE    4096                       /* Page size for pre-fault touch */
 
 /* Single-shot API: processes entire STFT matrices at once */
 SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
@@ -34,6 +36,10 @@ typedef struct SpectralTracker SpectralTracker;
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,
                                           float db_thresh, float max_magsq);
+
+/* Update threshold when a new global max is discovered across chunks.
+ * Call before spectral_tracker_process() for each chunk with an updated max. */
+void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq);
 
 /* Process one chunk of STFT data.
  * overlap_magsq_row: pointer to the first magsq row of the NEXT chunk
