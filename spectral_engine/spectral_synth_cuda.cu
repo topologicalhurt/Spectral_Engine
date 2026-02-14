@@ -17,6 +17,22 @@
 
 #define TILE_SIZE           SPECTRAL_GPU_TILE_SIZE
 #define SEGMENT_CACHE_SIZE  SPECTRAL_METAL_SEG_CACHE_SIZE
+#define FADE_SAMPLES        64
+
+/* Segment fade envelope — matches CPU/Metal Hann-window ramp */
+__device__ __forceinline__ float fade_envelope(float j, float seg_len) {
+    float fade_len = fminf(seg_len * 0.25f, (float)FADE_SAMPLES);
+    if (fade_len < 1.0f) fade_len = 1.0f;
+    float inv_fade = 1.0f / fade_len;
+    if (j < fade_len) {
+        return 0.5f * (1.0f - oscillator_fast_sin_cuda((j * inv_fade - 0.5f) * SPECTRAL_PI));
+    }
+    float from_end = seg_len - 1.0f - j;
+    if (from_end < fade_len) {
+        return 0.5f * (1.0f - oscillator_fast_sin_cuda((from_end * inv_fade - 0.5f) * SPECTRAL_PI));
+    }
+    return 1.0f;
+}
 
 /* Persistent device buffer cache — avoids per-call cudaMalloc/cudaFree */
 static Segment*  d_segments   = NULL;
@@ -78,11 +94,12 @@ __global__ void synthesize_tile_kernel(
                 if (sample_pos < seg_start || sample_pos >= seg_end) continue;
 
                 float j = sample_pos - seg_start;
+                float seg_len = seg.length * stretch;
                 float alpha = seg.omega * pitch_factor * inv_stretch;
                 float beta = seg.df * pitch_factor * inv_stretch_sq;
                 float d_a = seg.da * inv_stretch;
                 float p = seg.phase + j * (alpha + beta * j);
-                sum += (seg.amp + d_a * j) * oscillator_cuda(p, timbre);
+                sum += (seg.amp + d_a * j) * fade_envelope(j, seg_len) * oscillator_cuda(p, timbre);
             }
         }
         __syncthreads();

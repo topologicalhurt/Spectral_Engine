@@ -262,10 +262,8 @@ static inline void osc_lut_lookup_2(
     uint32_t t0 = idx0 >> OSC_FRAC_BITS;
     uint32_t t1 = idx1 >> OSC_FRAC_BITS;
     
-    /* Prefetch next cache line if indices are far apart */
-    if ((t1 - t0) > 16) {
-        PREFETCH_READ(&lut[t1]);
-    }
+    /* Always prefetch — redundant prefetches are free (ignored by HW) */
+    PREFETCH_READ(&lut[t1]);
     
     /* Extract fractional part and scale to 0-255 for 8-bit interpolation */
     uint32_t f0 = ((idx0 & OSC_FRAC_MASK) * 256) >> OSC_FRAC_BITS;
@@ -308,6 +306,10 @@ static inline void osc_lut_lookup_4(
 }
 
 #endif /* SPECTRAL_ARM_M7 */
+
+/* Linear fade length for embedded paths (shorter than desktop's 64-sample Hann) */
+#define SPECTRAL_FADE_EMBEDDED  32
+#define FADE_STEP_Q15           (Q15_ONE / SPECTRAL_FADE_EMBEDDED)
 
 #define Q214_UNITY  16384
 
@@ -397,6 +399,83 @@ void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
 
 #if SPECTRAL_ARM_M7
 
+/* Core unrolled synthesis: accumulates samples from blk_start to blk_end.
+ * No fade applied — used for sustain region and as building block for fade regions. */
+SPECTRAL_ITCM
+static inline void synth_core_m7(
+    q31_t* RESTRICT accum,
+    const q15_t* RESTRICT osc_lut,
+    uint32_t blk_start,
+    uint32_t blk_end,
+    q31_t* RESTRICT phase,
+    q15_t* RESTRICT amp,
+    q31_t freq_inc,
+    q15_t amp_delta
+) {
+    uint32_t j = blk_start;
+    uint32_t len = blk_end - blk_start;
+    uint32_t len4 = len & ~3U;
+    uint32_t end4 = blk_start + len4;
+
+    SPECTRAL_UNROLL_4
+    for (; j < end4; j += 4) {
+        PREFETCH_WRITE(&accum[j + 8]);
+
+        q31_t p0, p1, p2, p3;
+        SPECTRAL_PHASES_4(*phase, freq_inc, p0, p1, p2, p3);
+
+        q15_t a0, a1, a2, a3;
+        SPECTRAL_AMPS_4(*amp, amp_delta, a0, a1, a2, a3);
+
+        uq16_t idx[4] = {
+            (uq16_t)(p0 >> 16), (uq16_t)(p1 >> 16),
+            (uq16_t)(p2 >> 16), (uq16_t)(p3 >> 16)
+        };
+        q15_t samples[4];
+        osc_lut_lookup_4(osc_lut, idx, samples);
+
+        SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
+
+        *phase = p3 + freq_inc;
+        *amp = spectral_qadd16(a3, amp_delta);
+    }
+
+    for (; j < blk_end; j++) {
+        q15_t sample = spectral_lut_sin((uq16_t)(*phase >> 16), osc_lut);
+        accum[j] = spectral_mac_q15(accum[j], sample, *amp);
+        *phase += freq_inc;
+        *amp = spectral_qadd16(*amp, amp_delta);
+    }
+}
+
+/* Fade region synthesis: applies linear Q15 fade ramp to each sample.
+ * fade_val/fade_step are Q15 ramp state (0→Q15_ONE for fade-in, Q15_ONE→0 for fade-out). */
+SPECTRAL_ITCM
+static inline void synth_fade_m7(
+    q31_t* RESTRICT accum,
+    const q15_t* RESTRICT osc_lut,
+    uint32_t blk_start,
+    uint32_t blk_end,
+    q31_t* RESTRICT phase,
+    q15_t* RESTRICT amp,
+    q31_t freq_inc,
+    q15_t amp_delta,
+    q15_t fade_val,
+    q15_t fade_step
+) {
+    for (uint32_t j = blk_start; j < blk_end; j++) {
+        q15_t sample = spectral_lut_sin((uq16_t)(*phase >> 16), osc_lut);
+        q15_t faded = spectral_mul_q15(sample, fade_val);
+        accum[j] = spectral_mac_q15(accum[j], faded, *amp);
+        *phase += freq_inc;
+        *amp = spectral_qadd16(*amp, amp_delta);
+        fade_val = spectral_qadd16(fade_val, fade_step);
+    }
+}
+
+/* Full segment synthesis with linear fade envelope.
+ * seg_offset: position within segment at blk_start
+ * seg_length: total segment length in samples */
 SPECTRAL_ITCM
 static inline void synth_segment_m7(
     q31_t* RESTRICT accum,
@@ -408,51 +487,69 @@ static inline void synth_segment_m7(
     q15_t amp_start,
     q15_t amp_delta,
     q31_t* phase_out,
-    q15_t* amp_out
+    q15_t* amp_out,
+    uint32_t seg_offset,
+    uint32_t seg_length
 ) {
     q31_t phase = phase_start;
     q15_t amp = amp_start;
-    
-    uint32_t j = blk_start;
-    uint32_t len = blk_end - blk_start;
-    
-    /* Process groups of 4 samples */
-    uint32_t len4 = len & ~3U;
-    uint32_t end4 = blk_start + len4;
-    
-    SPECTRAL_UNROLL_4
-    for (; j < end4; j += 4) {
-        PREFETCH_WRITE(&accum[j + 8]);
-        
-        q31_t p0, p1, p2, p3;
-        SPECTRAL_PHASES_4(phase, freq_inc, p0, p1, p2, p3);
-        
-        q15_t a0, a1, a2, a3;
-        SPECTRAL_AMPS_4(amp, amp_delta, a0, a1, a2, a3);
-        
-        /* Batch LUT lookup */
-        uq16_t idx[4] = {
-            (uq16_t)(p0 >> 16), (uq16_t)(p1 >> 16),
-            (uq16_t)(p2 >> 16), (uq16_t)(p3 >> 16)
-        };
-        q15_t samples[4];
-        osc_lut_lookup_4(osc_lut, idx, samples);
-        
-        SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
-        
-        /* Advance state by 4 */
-        phase = p3 + freq_inc;
-        amp = spectral_qadd16(a3, amp_delta);
+
+    /* Compute fade boundaries within the segment */
+    uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
+    if (fade_len > seg_length / 2) fade_len = seg_length / 2;
+    if (fade_len == 0) fade_len = 1;
+
+    uint32_t seg_fade_out_start = seg_length - fade_len;
+    uint32_t blk_len = blk_end - blk_start;
+    uint32_t seg_end_in_blk = seg_offset + blk_len;
+
+    /* Compute 3 block-local boundaries: [blk_start, fi_end) [fi_end, fo_start) [fo_start, blk_end)
+     * All offsets are relative to accumulator index space */
+    uint32_t orig_blk_start = blk_start;
+
+    /* Fade-in: segment positions [0, fade_len) mapped to block */
+    uint32_t fi_end = blk_start;  /* no fade-in by default */
+    if (seg_offset < fade_len) {
+        fi_end = orig_blk_start + (fade_len - seg_offset);
+        if (fi_end > blk_end) fi_end = blk_end;
     }
-    
-    /* Remainder loop (0-3 samples) - no unrolling needed */
-    for (; j < blk_end; j++) {
-        q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
-        accum[j] = spectral_mac_q15(accum[j], sample, amp);
-        phase += freq_inc;
-        amp = spectral_qadd16(amp, amp_delta);
+
+    /* Fade-out: segment positions [seg_fade_out_start, seg_length) mapped to block */
+    uint32_t fo_start = blk_end;  /* no fade-out by default */
+    if (seg_end_in_blk > seg_fade_out_start) {
+        if (seg_offset < seg_fade_out_start) {
+            fo_start = orig_blk_start + (seg_fade_out_start - seg_offset);
+        } else {
+            fo_start = orig_blk_start;  /* already in fade-out region */
+        }
+        if (fo_start < fi_end) fo_start = fi_end;
+        if (fo_start > blk_end) fo_start = blk_end;
     }
-    
+
+    /* Fade-in region */
+    if (fi_end > orig_blk_start) {
+        q15_t fade_val = (q15_t)((int32_t)seg_offset * FADE_STEP_Q15);
+        synth_fade_m7(accum, osc_lut, orig_blk_start, fi_end,
+                      &phase, &amp, freq_inc, amp_delta,
+                      fade_val, FADE_STEP_Q15);
+    }
+
+    /* Sustain region: no fade, full unrolled path */
+    if (fi_end < fo_start) {
+        synth_core_m7(accum, osc_lut, fi_end, fo_start,
+                      &phase, &amp, freq_inc, amp_delta);
+    }
+
+    /* Fade-out region */
+    if (fo_start < blk_end) {
+        uint32_t fo_seg_pos = seg_offset + (fo_start - orig_blk_start);
+        uint32_t samples_into_fade = fo_seg_pos - seg_fade_out_start;
+        q15_t fade_val = Q15_ONE - (q15_t)((int32_t)samples_into_fade * FADE_STEP_Q15);
+        synth_fade_m7(accum, osc_lut, fo_start, blk_end,
+                      &phase, &amp, freq_inc, amp_delta,
+                      fade_val, -FADE_STEP_Q15);
+    }
+
     *phase_out = phase;
     *amp_out = amp;
 }
@@ -626,41 +723,94 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
 #if SPECTRAL_ARM_M7
         /* Use ARM M7 optimized inner loop */
-        synth_segment_m7(accum, osc_lut, blk_start, blk_end,
-                         phase, freq_inc, amp, d_amp,
-                         &phase, &amp);
-#else
-        /* Generic inner loop - 4 samples at a time */
-        uint32_t j = blk_start;
-        uint32_t len = blk_end - blk_start;
-        uint32_t len4 = len & ~3U;
-        uint32_t end4 = blk_start + len4;
-
-        SPECTRAL_UNROLL_4
-        for (; j < end4; j += 4) {
-            q31_t p0, p1, p2, p3;
-            SPECTRAL_PHASES_4(phase, freq_inc, p0, p1, p2, p3);
-
-            q15_t a0, a1, a2, a3;
-            SPECTRAL_AMPS_4(amp, d_amp, a0, a1, a2, a3);
-
-            q15_t samples[4];
-            samples[0] = spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut);
-            samples[1] = spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut);
-            samples[2] = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
-            samples[3] = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
-
-            SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
-
-            phase = p3 + freq_inc;
-            amp = spectral_qadd16(a3, d_amp);
+        {
+            uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg->start;
+            synth_segment_m7(accum, osc_lut, blk_start, blk_end,
+                             phase, freq_inc, amp, d_amp,
+                             &phase, &amp, seg_offset, seg->length);
         }
+#else
+        /* Generic inner loop with linear fade envelope */
+        {
+            uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg->start;
+            uint32_t seg_len = seg->length;
+            uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
+            if (fade_len > seg_len / 2) fade_len = seg_len / 2;
+            if (fade_len == 0) fade_len = 1;
 
-        for (; j < blk_end; j++) {
-            q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
-            accum[j] = spectral_mac_q15(accum[j], sample, amp);
-            phase += freq_inc;
-            amp = spectral_qadd16(amp, d_amp);
+            uint32_t seg_fo_start = seg_len - fade_len;
+            uint32_t blk_len = blk_end - blk_start;
+
+            /* Map fade regions to block offsets */
+            uint32_t fi_end = blk_start;
+            if (seg_offset < fade_len) {
+                fi_end = blk_start + (fade_len - seg_offset);
+                if (fi_end > blk_end) fi_end = blk_end;
+            }
+            uint32_t fo_start = blk_end;
+            if (seg_offset + blk_len > seg_fo_start) {
+                fo_start = (seg_fo_start > seg_offset)
+                    ? blk_start + (seg_fo_start - seg_offset) : blk_start;
+                if (fo_start < fi_end) fo_start = fi_end;
+            }
+
+            /* Fade-in */
+            q15_t fade_val = (q15_t)((int32_t)seg_offset * FADE_STEP_Q15);
+            for (uint32_t j = blk_start; j < fi_end; j++) {
+                q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
+                sample = spectral_mul_q15(sample, fade_val);
+                accum[j] = spectral_mac_q15(accum[j], sample, amp);
+                phase += freq_inc;
+                amp = spectral_qadd16(amp, d_amp);
+                fade_val = spectral_qadd16(fade_val, FADE_STEP_Q15);
+            }
+
+            /* Sustain - 4 samples at a time */
+            uint32_t j = fi_end;
+            uint32_t sustain_len = fo_start - fi_end;
+            uint32_t sustain_len4 = sustain_len & ~3U;
+            uint32_t end4 = fi_end + sustain_len4;
+
+            SPECTRAL_UNROLL_4
+            for (; j < end4; j += 4) {
+                q31_t p0, p1, p2, p3;
+                SPECTRAL_PHASES_4(phase, freq_inc, p0, p1, p2, p3);
+
+                q15_t a0, a1, a2, a3;
+                SPECTRAL_AMPS_4(amp, d_amp, a0, a1, a2, a3);
+
+                q15_t samples[4];
+                samples[0] = spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut);
+                samples[1] = spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut);
+                samples[2] = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
+                samples[3] = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
+
+                SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
+
+                phase = p3 + freq_inc;
+                amp = spectral_qadd16(a3, d_amp);
+            }
+            for (; j < fo_start; j++) {
+                q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
+                accum[j] = spectral_mac_q15(accum[j], sample, amp);
+                phase += freq_inc;
+                amp = spectral_qadd16(amp, d_amp);
+            }
+
+            /* Fade-out */
+            if (fo_start < blk_end) {
+                uint32_t fo_seg_pos = seg_offset + (fo_start - blk_start);
+                uint32_t into_fade = fo_seg_pos - seg_fo_start;
+                fade_val = Q15_ONE - (q15_t)((int32_t)into_fade * FADE_STEP_Q15);
+                for (; j < blk_end; j++) {
+                    q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
+                    sample = spectral_mul_q15(sample, fade_val);
+                    accum[j] = spectral_mac_q15(accum[j], sample, amp);
+                    phase += freq_inc;
+                    amp = spectral_qadd16(amp, d_amp);
+                    fade_val = spectral_qadd16(fade_val, -FADE_STEP_Q15);
+                }
+            }
         }
 #endif
 
@@ -682,16 +832,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
      * Convert Q31 accumulator to Q15 output with master gain
      */
     uint32_t _amp_start = get_cycles();
-#if SPECTRAL_USE_CMSIS
-    arm_q31_to_q15(accum, out_left, num_samples);
-    arm_scale_q15(out_left, master_amp, 0, out_left, num_samples);
-#else
-    UNROLL_HINT
-    for (uint32_t j = 0; j < num_samples; j++) {
-        q15_t sample = spectral_q31_to_q15_sat(accum[j]);
-        out_left[j] = spectral_scale_q15(sample, master_amp);
-    }
-#endif
+    spectral_q31_to_q15_scaled(accum, out_left, num_samples, master_amp);
     
     if (out_right && out_right != out_left) {
 #if SPECTRAL_USE_CMSIS
