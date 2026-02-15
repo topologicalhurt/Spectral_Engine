@@ -1,5 +1,7 @@
 # TODO's:
 
+## Immediate:
+
 1. Complete testsuite covering spectral_engine
 2. Pass testsuite once completed (achieve first stable minor version)
 3. Implement realtime file streaming to avoid loading into memory at once & enable realtime capability
@@ -11,7 +13,22 @@
 9. Achieve or exceed performance targets & ensure operation within memory / performance budget
 10. Ensure complete correctness of program up to that point (achieve third stable minor version)
 
-Ongoing:
+11. Implement literature-backed optional processing stages (full algorithms, not stubs)
+    - Serra & Smith (1990) — deterministic + stochastic decomposition stage
+        - [ ] Add residual model path and deterministic/residual split policy
+        - [ ] Add validation metrics (segment reduction, spectral error, perceptual checks)
+        - [ ] Add CPU/embedded-friendly fallback mode and profile impact
+    - Johnston (1988) — psychoacoustic masking stage
+        - [ ] Implement masking threshold model and configurable margin
+        - [ ] Prune / down-weight inaudible components with hard safety bounds
+        - [ ] Add quality guardrails for transients / speech intelligibility
+    - Adaptive track-density policy (informed by McAulay & Quatieri, 1986)
+        - [ ] Implement segment budget / keep-ratio policy with deterministic ordering
+        - [ ] Add mode presets (transparent / balanced / embedded_turbo)
+        - [ ] Ensure baseline harmonic-bin tracking logic remains unchanged (always-on base layer)
+
+## Ongoing:
+
 - Improving throughput / memory constraints:
     - Double buffer CPU & GPU
     - Fix memory thrashing / page faulting for very low hop size in particular (or more generally, very large segment count)
