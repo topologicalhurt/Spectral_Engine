@@ -721,8 +721,8 @@ syntax-test:
 	@echo "[4/4] Core modules..."
 	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_common.c
 	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_wavetable.c
-	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_q15.c
-	$(CC) $(CFLAGS_BASE) -fsyntax-only $(CORE_DIR)/spectral_perf.c
+	$(CC) $(CFLAGS_BASE) -fsyntax-only spectral_q15.c
+	$(CC) $(CFLAGS_BASE) -fsyntax-only spectral_perf.c
 	@echo "      Core: OK"
 	@echo ""
 	@echo "All syntax tests passed!"
