@@ -182,7 +182,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
         int tid = omp_get_thread_num();
         SegBlockChain* chain = &tracker->chains[tid];
 
-        #pragma omp for schedule(static) nowait
+        #pragma omp for schedule(guided, 256) nowait
         for (size_t t = 0; t < n_pairs; t++) {
             const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
