@@ -42,6 +42,18 @@ SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size
     return SYNTH_VALIDATE_OK;
 }
 
+SynthPreflight synth_preflight_float(
+    float* out_buffer, size_t out_len, SegmentArray sa,
+    float stretch, float pitch, double** t_synth)
+{
+    SynthPreflight pf = {0};
+    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, t_synth)) return pf;
+    pf.params = make_synth_params(stretch, pitch, out_len, sa.count);
+    pf.start_time = omp_get_wtime();
+    pf.ok = 1;
+    return pf;
+}
+
 int gpu_check_timbre_or_fallback(const char* backend_name,
                                   SegmentArray sa, float* out_buffer, size_t out_len,
                                   float stretch, float pitch, SpectralTimbre timbre, 
@@ -100,8 +112,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
 SpectralError gpu_tile_preprocess(
     SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
-    TileRange** out_ranges, uint32_t** out_segment_ids,
-    uint32_t* out_num_tiles, uint32_t* out_total_refs
+    GpuTileData* out
 ) {
     if (out_len > UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;
     uint32_t num_tiles = ((uint32_t)out_len + tile_size - 1) / tile_size;
@@ -223,16 +234,11 @@ SpectralError gpu_tile_preprocess(
     free(tile_counts);
     free(tile_cursors);
 
-    *out_ranges = tile_ranges;
-    *out_segment_ids = tile_segment_ids;
-    *out_num_tiles = num_tiles;
-    *out_total_refs = total_refs;
+    out->ranges = tile_ranges;
+    out->segment_ids = tile_segment_ids;
+    out->num_tiles = num_tiles;
+    out->total_refs = total_refs;
     return SPECTRAL_OK;
-}
-
-void gpu_tile_preprocess_free(TileRange* ranges, uint32_t* segment_ids) {
-    free(ranges);
-    free(segment_ids);
 }
 
 #endif /* !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE */

@@ -6,6 +6,7 @@
 #include "spectral_config.h"
 #include "spectral_error.h"
 #include "oscillator.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* Precomputed segment parameters for inner synthesis loop */
@@ -46,6 +47,18 @@ SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size
 #define SYNTH_VALIDATE_NATIVE(buf, len, sa, t_ptr) \
     synth_validate_inputs((buf), (len), sizeof(spectral_sample_t), (sa), (t_ptr))
 
+/* Shared preflight: validate + params + timing in one call.
+ * ok==0 means early exit was already handled (zero-filled or dummy timing). */
+typedef struct {
+    SynthParams params;
+    double      start_time;   /* omp_get_wtime() captured after validation */
+    int         ok;           /* 0 = early exit, 1 = proceed */
+} SynthPreflight;
+
+SynthPreflight synth_preflight_float(
+    float* out_buffer, size_t out_len, SegmentArray sa,
+    float stretch, float pitch, double** t_synth);
+
 /* GPU timbre support: timbres 0-5 only (6-7 need width param, CPU only) */
 
 int gpu_check_timbre_or_fallback(const char* backend_name,
@@ -60,11 +73,35 @@ static inline int gpu_timbre_supported(SpectralTimbre timbre) {
 /* GPU tile preprocessing - shared between Metal and CUDA backends */
 typedef struct { uint32_t start; uint32_t count; } TileRange;
 
+typedef struct {
+    TileRange* ranges;
+    uint32_t*  segment_ids;
+    uint32_t   num_tiles;
+    uint32_t   total_refs;
+} GpuTileData;
+
+static inline void gpu_tile_data_free(GpuTileData* td) {
+    free(td->ranges);
+    free(td->segment_ids);
+    *td = (GpuTileData){0};
+}
+
 SpectralError gpu_tile_preprocess(
     SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
-    TileRange** out_ranges, uint32_t** out_segment_ids,
-    uint32_t* out_num_tiles, uint32_t* out_total_refs
-);
-void gpu_tile_preprocess_free(TileRange* ranges, uint32_t* segment_ids);
+    GpuTileData* out);
+
+/* GPU synthesis params — layout must match Metal shader SynthParams struct */
+typedef struct {
+    float    stretch, inv_stretch, inv_stretch_sq, pitch_factor;
+    uint32_t out_len, num_segments, tile_size, timbre;
+} GpuSynthParams;
+
+static inline GpuSynthParams gpu_synth_params_pack(
+    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre) {
+    return (GpuSynthParams){
+        sp->stretch, sp->inv_stretch, sp->inv_stretch_sq, sp->pitch_factor,
+        (uint32_t)sp->out_len, sp->num_segments, tile_size, (uint32_t)timbre
+    };
+}
 
 #endif /* SPECTRAL_SYNTH_INTERNAL_H */

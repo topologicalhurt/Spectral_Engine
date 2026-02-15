@@ -116,11 +116,12 @@ static bool metalInitialized = false;
 static bool metalIsAvailable = false;
 
 /* Persistent buffer cache — avoids per-call VM page allocation */
-static id<MTLBuffer> s_segmentBuffer = nil;
-static id<MTLBuffer> s_tileIdsBuffer = nil;
-static id<MTLBuffer> s_tileRangesBuffer = nil;
-static id<MTLBuffer> s_outputBuffer = nil;
-static size_t s_segBufCap = 0, s_tileIdsCap = 0, s_tileRangesCap = 0, s_outputCap = 0;
+typedef struct {
+    id<MTLBuffer> segBuf, tileIdsBuf, tileRangesBuf, outputBuf;
+    size_t segCap, tileIdsCap, tileRangesCap, outputCap;
+} MetalBufferCache;
+
+static MetalBufferCache g_mtl;
 
 void metal_init(void) {
     if (metalInitialized) return;
@@ -177,100 +178,75 @@ int metal_available(void) {
 SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
                           float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
     @autoreleasepool {
-        /* Shared input validation */
-        if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
-            return SPECTRAL_OK;
-        }
+        /* Shared preflight: validate + params + timing */
+        SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
+        if (!pf.ok) return SPECTRAL_OK;
 
         /* Check timbre support - fall back to CPU for unsupported timbres */
         if (!gpu_check_timbre_or_fallback("Metal", sa, out_buffer, out_len, stretch, pitch, timbre, t_synth)) {
             return SPECTRAL_OK;
         }
-        
-        double synth_start = omp_get_wtime();
 
-        TileRange* tile_ranges = NULL;
-        uint32_t* tile_segment_ids = NULL;
-        uint32_t num_tiles = 0, total_refs = 0;
+        GpuTileData td = {0};
         SpectralError tile_err = gpu_tile_preprocess(
-            sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len,
-            &tile_ranges, &tile_segment_ids, &num_tiles, &total_refs);
+            sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len, &td);
         if (tile_err != SPECTRAL_OK) {
             memset(out_buffer, 0, out_len * sizeof(float));
             *t_synth = 0;
             return tile_err;
         }
-        
+
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
-        float avg_segs = (float)total_refs / num_tiles;
+        float avg_segs = (float)td.total_refs / td.num_tiles;
 #endif
         
-        SynthParams sp = make_synth_params(stretch, pitch, out_len, sa.count);
-        struct {
-            float stretch;
-            float inv_stretch;
-            float inv_stretch_sq;
-            float pitch_factor;
-            uint32_t out_len;
-            uint32_t num_segments;
-            uint32_t tile_size;
-            uint32_t timbre;
-        } params = {
-            .stretch = sp.stretch,
-            .inv_stretch = sp.inv_stretch,
-            .inv_stretch_sq = sp.inv_stretch_sq,
-            .pitch_factor = sp.pitch_factor,
-            .out_len = (uint32_t)sp.out_len,
-            .num_segments = sp.num_segments,
-            .tile_size = SPECTRAL_GPU_TILE_SIZE,
-            .timbre = (uint32_t)timbre
-        };
+        GpuSynthParams params = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
         
         size_t segment_buf_size = sa.count * sizeof(Segment);
-        size_t tile_ids_size = total_refs * sizeof(uint32_t);
-        size_t tile_ranges_size = num_tiles * sizeof(TileRange);
+        size_t tile_ids_size = td.total_refs * sizeof(uint32_t);
+        size_t tile_ranges_size = td.num_tiles * sizeof(TileRange);
         size_t output_size = out_len * sizeof(float);
 
         SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile",
-                sa.count, num_tiles, avg_segs);
+                sa.count, td.num_tiles, avg_segs);
 
         /* Reuse cached buffers when capacity suffices; grow with 1.5x headroom */
-        if (s_segBufCap < segment_buf_size) {
-            s_segmentBuffer = nil;
-            s_segBufCap = segment_buf_size + segment_buf_size / 2;
-            s_segmentBuffer = [metalDevice newBufferWithLength:s_segBufCap
+        if (g_mtl.segCap < segment_buf_size) {
+            g_mtl.segBuf = nil;
+            g_mtl.segCap = segment_buf_size + segment_buf_size / 2;
+            g_mtl.segBuf = [metalDevice newBufferWithLength:g_mtl.segCap
+                                                   options:MTLResourceStorageModeShared];
+        }
+        if (g_mtl.tileIdsCap < tile_ids_size) {
+            g_mtl.tileIdsBuf = nil;
+            g_mtl.tileIdsCap = tile_ids_size + tile_ids_size / 2;
+            g_mtl.tileIdsBuf = [metalDevice newBufferWithLength:g_mtl.tileIdsCap
+                                                       options:MTLResourceStorageModeShared];
+        }
+        if (g_mtl.tileRangesCap < tile_ranges_size) {
+            g_mtl.tileRangesBuf = nil;
+            g_mtl.tileRangesCap = tile_ranges_size + tile_ranges_size / 2;
+            g_mtl.tileRangesBuf = [metalDevice newBufferWithLength:g_mtl.tileRangesCap
+                                                           options:MTLResourceStorageModeShared];
+        }
+        if (g_mtl.outputCap < output_size) {
+            g_mtl.outputBuf = nil;
+            g_mtl.outputCap = output_size + output_size / 2;
+            g_mtl.outputBuf = [metalDevice newBufferWithLength:g_mtl.outputCap
                                                       options:MTLResourceStorageModeShared];
-        }
-        if (s_tileIdsCap < tile_ids_size) {
-            s_tileIdsBuffer = nil;
-            s_tileIdsCap = tile_ids_size + tile_ids_size / 2;
-            s_tileIdsBuffer = [metalDevice newBufferWithLength:s_tileIdsCap
-                                                      options:MTLResourceStorageModeShared];
-        }
-        if (s_tileRangesCap < tile_ranges_size) {
-            s_tileRangesBuffer = nil;
-            s_tileRangesCap = tile_ranges_size + tile_ranges_size / 2;
-            s_tileRangesBuffer = [metalDevice newBufferWithLength:s_tileRangesCap
-                                                         options:MTLResourceStorageModeShared];
-        }
-        if (s_outputCap < output_size) {
-            s_outputBuffer = nil;
-            s_outputCap = output_size + output_size / 2;
-            s_outputBuffer = [metalDevice newBufferWithLength:s_outputCap
-                                                     options:MTLResourceStorageModeShared];
         }
 
-        if (!s_segmentBuffer || !s_tileIdsBuffer || !s_tileRangesBuffer || !s_outputBuffer) {
-            gpu_tile_preprocess_free(tile_ranges, tile_segment_ids);
+        if (!g_mtl.segBuf || !g_mtl.tileIdsBuf || !g_mtl.tileRangesBuf || !g_mtl.outputBuf) {
+            gpu_tile_data_free(&td);
             memset(out_buffer, 0, out_len * sizeof(float));
             *t_synth = 0;
             return SPECTRAL_ERR_MEMORY;
         }
 
         /* Copy data into cached buffers */
-        memcpy([s_segmentBuffer contents], sa.segs, segment_buf_size);
-        memcpy([s_tileIdsBuffer contents], tile_segment_ids, tile_ids_size);
-        memcpy([s_tileRangesBuffer contents], tile_ranges, tile_ranges_size);
+        memcpy([g_mtl.segBuf contents], sa.segs, segment_buf_size);
+        memcpy([g_mtl.tileIdsBuf contents], td.segment_ids, tile_ids_size);
+        memcpy([g_mtl.tileRangesBuf contents], td.ranges, tile_ranges_size);
 
         /* Params buffer: small (36 bytes), allocated per-call */
         id<MTLBuffer> paramsBuffer = [metalDevice newBufferWithBytes:&params
@@ -281,31 +257,27 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
         
         [encoder setComputePipelineState:metalSynthPipeline];
-        [encoder setBuffer:s_segmentBuffer offset:0 atIndex:0];
-        [encoder setBuffer:s_tileIdsBuffer offset:0 atIndex:1];
-        [encoder setBuffer:s_tileRangesBuffer offset:0 atIndex:2];
-        [encoder setBuffer:s_outputBuffer offset:0 atIndex:3];
+        [encoder setBuffer:g_mtl.segBuf offset:0 atIndex:0];
+        [encoder setBuffer:g_mtl.tileIdsBuf offset:0 atIndex:1];
+        [encoder setBuffer:g_mtl.tileRangesBuf offset:0 atIndex:2];
+        [encoder setBuffer:g_mtl.outputBuf offset:0 atIndex:3];
         [encoder setBuffer:paramsBuffer offset:0 atIndex:4];
-        
-        [encoder dispatchThreadgroups:MTLSizeMake(num_tiles, 1, 1)
+
+        [encoder dispatchThreadgroups:MTLSizeMake(td.num_tiles, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(SPECTRAL_GPU_TILE_SIZE, 1, 1)];
         [encoder endEncoding];
         
         [cmdBuffer commit];
         [cmdBuffer waitUntilCompleted];
         
-        memcpy(out_buffer, [s_outputBuffer contents], output_size);
-        *t_synth = omp_get_wtime() - synth_start;
+        memcpy(out_buffer, [g_mtl.outputBuf contents], output_size);
+        *t_synth = omp_get_wtime() - pf.start_time;
 
-        gpu_tile_preprocess_free(tile_ranges, tile_segment_ids);
+        gpu_tile_data_free(&td);
     }
     return SPECTRAL_OK;
 }
 
 void metal_cleanup(void) {
-    s_segmentBuffer = nil;
-    s_tileIdsBuffer = nil;
-    s_tileRangesBuffer = nil;
-    s_outputBuffer = nil;
-    s_segBufCap = s_tileIdsCap = s_tileRangesCap = s_outputCap = 0;
+    g_mtl = (MetalBufferCache){0};
 }

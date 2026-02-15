@@ -1,7 +1,7 @@
 /* spectral_backend.c - Backend Query Functions and Synthesis Dispatch
  *
  * Provides backend capability queries and unified dispatch across
- * CPU, Metal, and CUDA synthesis backends.
+ * CPU, Metal, and CUDA synthesis backends via a vtable.
  */
 
 /* Include spectral_synth.h for HAS_METAL/HAS_CUDA definitions and
@@ -9,24 +9,64 @@
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
 
-/* Backend queries */
+static SpectralError cpu_synth_vtable(SegmentArray sa, float* buf, size_t len,
+                                       float stretch, float pitch,
+                                       SpectralTimbre timbre, double* t_synth) {
+    return synth_cpu(sa, buf, len, stretch, pitch, timbre, 1, t_synth);
+}
 
-int spectral_backend_supports_timbre(SynthBackend backend, int timbre_id) {
+static void noop_init(void) {}
+static int  always_available(void) { return 1; }
+static void noop_cleanup(void) {}
+
+/* Static vtable entries */
+
+static const SpectralBackendVTable vtable_cpu = {
+    BACKEND_CPU, "CPU", BACKEND_CPU_TIMBRE_MAX, 1, 0,
+    noop_init, always_available, cpu_synth_vtable, noop_cleanup
+};
+
+#if HAS_METAL
+static const SpectralBackendVTable vtable_metal = {
+    BACKEND_METAL, "Metal", BACKEND_METAL_TIMBRE_MAX, 0, 1,
+    metal_init, metal_available, synth_metal, metal_cleanup
+};
+#endif
+
+#if HAS_CUDA
+static const SpectralBackendVTable vtable_cuda = {
+    BACKEND_CUDA, "CUDA", BACKEND_CUDA_TIMBRE_MAX, 0, 1,
+    cuda_init, cuda_available, synth_cuda, cuda_cleanup
+};
+#endif
+
+/* Fallback vtable for unknown/virtual backends (Auto, Export) */
+static const SpectralBackendVTable vtable_fallback = {
+    BACKEND_AUTO, "Auto", TIMBRE_MAX, 0, 0,
+    noop_init, always_available, cpu_synth_vtable, noop_cleanup
+};
+
+const SpectralBackendVTable* spectral_backend_vtable(SynthBackend backend) {
     switch (backend) {
-        case BACKEND_CPU:   return (timbre_id >= TIMBRE_MIN && timbre_id <= BACKEND_CPU_TIMBRE_MAX);
-        case BACKEND_METAL: return (timbre_id >= TIMBRE_MIN && timbre_id <= BACKEND_METAL_TIMBRE_MAX);
-        case BACKEND_CUDA:  return (timbre_id >= TIMBRE_MIN && timbre_id <= BACKEND_CUDA_TIMBRE_MAX);
-        default:            return 1;
+        case BACKEND_CPU:   return &vtable_cpu;
+#if HAS_METAL
+        case BACKEND_METAL: return &vtable_metal;
+#endif
+#if HAS_CUDA
+        case BACKEND_CUDA:  return &vtable_cuda;
+#endif
+        default:            return &vtable_fallback;
     }
 }
 
+/* Backend queries — collapsed to vtable lookups */
+
+int spectral_backend_supports_timbre(SynthBackend backend, int timbre_id) {
+    return timbre_id >= TIMBRE_MIN && timbre_id <= spectral_backend_vtable(backend)->max_timbre;
+}
+
 int spectral_backend_max_timbre(SynthBackend backend) {
-    switch (backend) {
-        case BACKEND_CPU:   return BACKEND_CPU_TIMBRE_MAX;
-        case BACKEND_METAL: return BACKEND_METAL_TIMBRE_MAX;
-        case BACKEND_CUDA:  return BACKEND_CUDA_TIMBRE_MAX;
-        default:            return TIMBRE_MAX;
-    }
+    return spectral_backend_vtable(backend)->max_timbre;
 }
 
 const char* spectral_backend_name(SynthBackend backend) {
@@ -36,124 +76,74 @@ const char* spectral_backend_name(SynthBackend backend) {
 }
 
 int spectral_backend_supports_wavetable(SynthBackend backend) {
-    switch (backend) {
-        case BACKEND_CPU:   return BACKEND_CPU_WAVETABLE_SUPPORT;
-        case BACKEND_METAL: return BACKEND_METAL_WAVETABLE_SUPPORT;
-        case BACKEND_CUDA:  return BACKEND_CUDA_WAVETABLE_SUPPORT;
-        default:            return 0;
-    }
+    return spectral_backend_vtable(backend)->has_wavetable;
 }
 
 int spectral_backend_available(SynthBackend backend) {
-    switch (backend) {
-        case BACKEND_CPU:
-            return 1;
-        case BACKEND_METAL:
-            #if HAS_METAL
-            return metal_available();
-            #else
-            return 0;
-            #endif
-        case BACKEND_CUDA:
-            #if HAS_CUDA
-            return cuda_available();
-            #else
-            return 0;
-            #endif
-        case BACKEND_EXPORT:
-            return 1;
-        case BACKEND_AUTO:
-            return 1;
-        default:
-            return 0;
-    }
+    if (backend == BACKEND_AUTO || backend == BACKEND_EXPORT) return 1;
+    return spectral_backend_vtable(backend)->available();
 }
 
 SpectralBackendCaps spectral_backend_get_caps(SynthBackend backend) {
+    const SpectralBackendVTable* vt = spectral_backend_vtable(backend);
     SpectralBackendCaps caps = {0};
     caps.id = backend;
     caps.name = spectral_backend_name(backend);
     caps.available = spectral_backend_available(backend);
-    caps.max_timbre = spectral_backend_max_timbre(backend);
-    caps.has_wavetable = spectral_backend_supports_wavetable(backend);
-
-    switch (backend) {
-        case BACKEND_CPU:
-            caps.is_parallel = 1;
-            break;
-        case BACKEND_METAL:
-            caps.is_gpu = 1;
-            caps.is_parallel = 1;
-            break;
-        case BACKEND_CUDA:
-            caps.is_gpu = 1;
-            caps.is_parallel = 1;
-            break;
-        default:
-            break;
-    }
+    caps.max_timbre = vt->max_timbre;
+    caps.has_wavetable = vt->has_wavetable;
+    caps.is_gpu = vt->is_gpu;
+    caps.is_parallel = 1;
     return caps;
 }
 
 SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu) {
     (void)timbre_id; /* used conditionally by HAS_METAL/HAS_CUDA */
     if (prefer_gpu) {
-        /* Try Metal first (more timbre support than CUDA) */
-        #if HAS_METAL
-        if (metal_available() && spectral_backend_supports_timbre(BACKEND_METAL, timbre_id)) {
+#if HAS_METAL
+        vtable_metal.init();
+        if (vtable_metal.available() && spectral_backend_supports_timbre(BACKEND_METAL, timbre_id))
             return BACKEND_METAL;
-        }
-        #endif
-        #if HAS_CUDA
-        if (cuda_available() && spectral_backend_supports_timbre(BACKEND_CUDA, timbre_id)) {
+#endif
+#if HAS_CUDA
+        vtable_cuda.init();
+        if (vtable_cuda.available() && spectral_backend_supports_timbre(BACKEND_CUDA, timbre_id))
             return BACKEND_CUDA;
-        }
-        #endif
+#endif
     }
-    /* Fall back to CPU which supports all timbres */
     return BACKEND_CPU;
 }
 
-/* Unified synthesis dispatch - handles backend selection, timbre checks, GPU fallback */
+/* Unified synthesis dispatch — vtable-driven with CPU fallback */
 SpectralError spectral_synth_dispatch(
     SegmentArray sa, float* out_buffer, size_t out_len,
     float stretch, float pitch, SpectralTimbre timbre,
     SynthBackend backend, const SpectralWavetableBank* bank,
     int n_threads, double* t_synth)
 {
-    /* CPU wavetable helper */
-    #define CPU_SYNTH_WITH_WT() \
-        (bank ? synth_cpu_wavetable(sa, out_buffer, out_len, stretch, pitch, bank, timbre, n_threads, t_synth) \
-              : synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth))
+    if (n_threads < 1) n_threads = 1;
 
-#if HAS_METAL
-    if (backend != BACKEND_CPU && backend != BACKEND_CUDA) metal_init();
-    int metal_supports = spectral_backend_supports_timbre(BACKEND_METAL, (int)timbre);
-    int use_metal = (backend == BACKEND_METAL) ||
-                    (backend == BACKEND_AUTO && metal_available() && metal_supports);
+    if (backend == BACKEND_AUTO || backend == BACKEND_EXPORT)
+        backend = spectral_backend_select_for_timbre((int)timbre, 1);
 
-    if (use_metal && metal_available()) {
-        SpectralError err = synth_metal(sa, out_buffer, out_len, stretch, pitch, timbre, t_synth);
-        if (err != SPECTRAL_OK) {
-            return CPU_SYNTH_WITH_WT();
-        }
-        return SPECTRAL_OK;
+    if (backend == BACKEND_CPU) {
+        return bank
+            ? synth_cpu_wavetable(sa, out_buffer, out_len, stretch, pitch, bank, timbre, n_threads, t_synth)
+            : synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
-    return CPU_SYNTH_WITH_WT();
 
-#elif HAS_CUDA
-    if (backend == BACKEND_CUDA || backend == BACKEND_AUTO) {
-        cuda_init();
-        if (cuda_available() && spectral_backend_supports_timbre(BACKEND_CUDA, (int)timbre) && !bank) {
-            return synth_cuda(sa, out_buffer, out_len, stretch, pitch, timbre, t_synth);
+    const SpectralBackendVTable* vt = spectral_backend_vtable(backend);
+    vt->init();
+
+    if (vt->available() && spectral_backend_supports_timbre(backend, (int)timbre)) {
+        /* GPU backends don't support wavetable — skip if bank provided */
+        if (!vt->is_gpu || !bank) {
+            SpectralError err = vt->synth(sa, out_buffer, out_len, stretch, pitch, timbre, t_synth);
+            if (err == SPECTRAL_OK) return SPECTRAL_OK;
         }
     }
-    return CPU_SYNTH_WITH_WT();
-
-#else
-    (void)backend;
-    return CPU_SYNTH_WITH_WT();
-#endif
-
-    #undef CPU_SYNTH_WITH_WT
+    /* Fallback to CPU */
+    return bank
+        ? synth_cpu_wavetable(sa, out_buffer, out_len, stretch, pitch, bank, timbre, n_threads, t_synth)
+        : synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
 }
