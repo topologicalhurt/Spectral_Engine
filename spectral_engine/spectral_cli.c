@@ -27,6 +27,7 @@ void spectral_cli_init(SpectralCliOptions* opts) {
     opts->n_threads = omp_get_max_threads();
     opts->backend = BACKEND_AUTO;
     opts->processing_mask = SPECTRAL_PROC_DEFAULT;
+    opts->enable_cache = 0;
     opts->start_sec = 0.0f;
     opts->end_sec = -1.0f;
     opts->use_wavetable = 0;
@@ -95,6 +96,11 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
             skip[i] = 1;
             skip[i + 1] = 1;
             i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--cache") == 0) {
+            opts->enable_cache = 1;
+            skip[i] = 1;
             continue;
         }
     }
@@ -290,6 +296,7 @@ void spectral_cli_print_usage(void) {
     printf("      Names: serra_smith_1990, johnston_1988, adaptive_track_density, reassigned,\n");
     printf("             hybrid_render, event_bucket, higher_order_interp, qnoise_shaping\n\n");
     printf("      Special: none, default, all\n\n");
+    printf("  --cache                   Prewarm backend and cache analyzed segments for this input\n\n");
     printf("Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=%d hop=%d thresh=%.1f\n",
            DEFAULT_N_FFT, DEFAULT_HOP, DEFAULT_DB_THRESH);
 #if HAS_METAL
