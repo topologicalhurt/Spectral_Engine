@@ -233,7 +233,8 @@ endif
 #   - CUDA GPU backend (Linux, if available)
 #   - Performance tracking
 
-# CLI sources (desktop/emulator only, not cross-compiled)
+# CLI and utility sources used by host-linked binary targets.
+# Embedded hardware firmware builds are delegated to api/daisy_seed.
 SRCS_CLI := spectral_cli.c spectral_cli_pipeline.c spectral_utils.c
 
 DESKTOP_CFLAGS := $(CFLAGS_BASE)
@@ -378,7 +379,8 @@ $(OBJ_EMU_DAISY_DIR)/%.o: %.c | $(OBJ_EMU_DAISY_DIR)
 # the Q15 path on desktop.
 
 # Common flags shared by all embedded targets
-EMBEDDED_COMMON_FLAGS := -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1
+EMBEDDED_COMMON_FLAGS := -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
+                         -DSPECTRAL_EMBEDDED_EMULATION=1
 
 ARM_EMBEDDED_FLAGS     := $(EMBEDDED_COMMON_FLAGS)
 
@@ -387,8 +389,12 @@ EMBEDDED_BASE_CFLAGS := -std=c11 -O3 -Wall -Wextra -Wno-unknown-pragmas \
 						-fdata-sections -ffunction-sections -fomit-frame-pointer \
 						-I. -I$(CORE_DIR) -I../third_party/simde
 
+ifeq ($(UNAME_S),Darwin)
+EMBEDDED_BASE_CFLAGS += -I$(SNDFILE_PREFIX)/include
+endif
+
 EMBEDDED_ARM_CFLAGS := $(EMBEDDED_BASE_CFLAGS) $(ARM_EMBEDDED_FLAGS)
-EMBEDDED_ARM_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
+EMBEDDED_ARM_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
 EMBEDDED_ARM_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_DIR),$(EMBEDDED_ARM_SRCS_C))
 
 # 
@@ -409,7 +415,7 @@ EMBEDDED_OPT_FLAGS := $(EMBEDDED_COMMON_FLAGS) -fno-exceptions -fno-threadsafe-s
                       -DSPECTRAL_RESTRICTED_MODE=1 -DSPECTRAL_NO_PERF=1
 
 EMBEDDED_ARM_RES_CFLAGS := $(EMBEDDED_BASE_CFLAGS) $(EMBEDDED_OPT_FLAGS)
-EMBEDDED_ARM_RES_SRCS_C := main.c $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE)
+EMBEDDED_ARM_RES_SRCS_C := main.c $(SRCS_CLI) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE)
 EMBEDDED_ARM_RES_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_RES_DIR),$(EMBEDDED_ARM_RES_SRCS_C))
 
 .PHONY: embedded_arm
@@ -434,7 +440,7 @@ $(BIN_DIR)/$(TARGET_EMBEDDED_ARM): $(EMBEDDED_ARM_OBJS) | $(BIN_DIR)
 ARM_FLOAT_FLAGS := $(EMBEDDED_COMMON_FLAGS) -DSPECTRAL_EMBEDDED_FLOAT=1
 
 EMBEDDED_ARM_FLOAT_CFLAGS := $(EMBEDDED_BASE_CFLAGS) $(ARM_FLOAT_FLAGS)
-EMBEDDED_ARM_FLOAT_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
+EMBEDDED_ARM_FLOAT_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
 EMBEDDED_ARM_FLOAT_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_FLOAT_DIR),$(EMBEDDED_ARM_FLOAT_SRCS_C))
 
 $(OBJ_EMBEDDED_ARM_FLOAT_DIR):
@@ -486,8 +492,8 @@ $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES): $(EMBEDDED_ARM_RES_OBJS) | $(BIN_DIR)
 # Standalone CUDA CLI tool — thin wrapper over library backend
 # Links against core library objects + spectral_synth_cuda.cu
 
-ifeq ($(filter 01,$(HAS_CUDA)$(USE_CUDA)),01)
-    CUDA_ERROR := 1
+ifeq ($(strip $(NVCC)),)
+CUDA_ERROR := 1
 endif
 
 OBJ_CUDA_DIR := $(BIN_DIR)/obj_cuda_standalone
