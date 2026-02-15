@@ -477,23 +477,37 @@ embedded_arm_restricted: $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES)
 $(BIN_DIR)/$(TARGET_EMBEDDED_ARM_RES): $(EMBEDDED_ARM_RES_OBJS) | $(BIN_DIR)
 	$(CC) $(EMBEDDED_ARM_RES_OBJS) -o $@ $(LDFLAGS_CPU)
 
-# 
+#
 #                             TARGET: cuda
-# 
-# Standalone CUDA build (Linux only)
+#
+# Standalone CUDA CLI tool — thin wrapper over library backend
+# Links against core library objects + spectral_synth_cuda.cu
 
 ifeq ($(filter 01,$(HAS_CUDA)$(USE_CUDA)),01)
     CUDA_ERROR := 1
 endif
 
-cuda: $(BIN_DIR)
+OBJ_CUDA_DIR := $(BIN_DIR)/obj_cuda_standalone
+CUDA_STANDALONE_C_SRCS := $(SRCS_CORE) spectral_synth_cpu.c $(SRCS_MONITORING)
+CUDA_STANDALONE_OBJS := $(call src_to_obj,$(OBJ_CUDA_DIR),$(CUDA_STANDALONE_C_SRCS))
+
+$(OBJ_CUDA_DIR):
+	@mkdir -p $@
+
+$(OBJ_CUDA_DIR)/%.o: %.c | $(OBJ_CUDA_DIR)
+	$(CC) $(CFLAGS_BASE) -D USE_CUDA $(DEPFLAGS) -c $< -o $@
+
 ifeq ($(CUDA_ERROR),1)
+cuda:
 	@echo "Error: nvcc not found. Please install CUDA toolkit:"
 	@echo "  Ubuntu/Debian: sudo apt install nvidia-cuda-toolkit"
 	@echo "  Or download from: https://developer.nvidia.com/cuda-downloads"
 	@exit 1
 else
-	$(NVCC) -O3 -arch=sm_70 spectral_cuda.cu -o $(BIN_DIR)/$(TARGET_CUDA) -lsndfile
+cuda: $(CUDA_STANDALONE_OBJS) | $(BIN_DIR)
+	$(NVCC) $(NVCC_FLAGS) -o $(BIN_DIR)/$(TARGET_CUDA) \
+		spectral_cuda.cu spectral_synth_cuda.cu \
+		$(CUDA_STANDALONE_OBJS) $(LDFLAGS_BASE) $(CUDA_LDFLAGS)
 	@echo "Built $(BIN_DIR)/$(TARGET_CUDA)"
 endif
 
