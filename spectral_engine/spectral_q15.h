@@ -179,7 +179,11 @@ typedef struct __attribute__((aligned(4))) {
 #if SPECTRAL_HAS_CHIRP
     q31_t    freq_delta;
 #endif
+    uint32_t seg_start;
+    uint32_t seg_end;
     uint32_t seg_idx;
+    uint16_t seg_length;
+    uint16_t fade_len;
     q15_t    amp_current;
     q15_t    amp_delta;
 } SpectralActiveSegQ15;

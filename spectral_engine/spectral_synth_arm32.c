@@ -311,8 +311,6 @@ static inline void osc_lut_lookup_4(
 #define SPECTRAL_FADE_EMBEDDED  32
 #define FADE_STEP_Q15           (Q15_ONE / SPECTRAL_FADE_EMBEDDED)
 
-#define Q214_UNITY  16384
-
 /* Initialization */
 
 void spectral_arm32_init(SpectralArm32Ctx* ctx,
@@ -331,7 +329,6 @@ void spectral_arm32_init(SpectralArm32Ctx* ctx,
         ? (uint32_t)(((1u << 24) + (sample_rate / 2u)) / sample_rate)
         : 0;
     ctx->amplitude_q15 = Q15_ONE;
-    ctx->stretch_q214 = Q214_UNITY;
     
     /* Ensure caches are coherent after init */
     DSB();
@@ -352,13 +349,19 @@ void spectral_arm32_seek(SpectralArm32Ctx* ctx, uint32_t sample_pos) {
     ctx->output_position = sample_pos;
     ctx->next_seg_idx = 0;
     
-    /* Binary search would be faster for large segment counts,
-     * but linear is fine for typical use cases */
-    while (ctx->next_seg_idx < ctx->num_segments) {
-        const SpectralSegmentQ15* seg = &ctx->segments[ctx->next_seg_idx];
-        if (seg->start + seg->length > sample_pos) break;
-        ctx->next_seg_idx++;
+    uint32_t lo = 0;
+    uint32_t hi = ctx->num_segments;
+    while (lo < hi) {
+        uint32_t mid = lo + ((hi - lo) >> 1);
+        const SpectralSegmentQ15* seg = &ctx->segments[mid];
+        uint32_t seg_end = seg->start + seg->length;
+        if (seg_end <= sample_pos) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
     }
+    ctx->next_seg_idx = lo;
 }
 
 /* Loading */
@@ -391,8 +394,7 @@ void spectral_arm32_set_amplitude(SpectralArm32Ctx* ctx, float amplitude) {
 
 void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
     if (!ctx) return;
-    stretch = CLAMP(stretch, 0.1f, 10.0f);
-    ctx->stretch_q214 = (q15_t)(stretch * Q214_UNITY);
+    (void)stretch;
 }
 
 /* Inner Synthesis Loop - ARM M7 Optimized */
@@ -427,14 +429,16 @@ static inline void synth_core_m7(
         q15_t a0, a1, a2, a3;
         SPECTRAL_AMPS_4(*amp, amp_delta, a0, a1, a2, a3);
 
-        uq16_t idx[4] = {
-            (uq16_t)(p0 >> 16), (uq16_t)(p1 >> 16),
-            (uq16_t)(p2 >> 16), (uq16_t)(p3 >> 16)
-        };
-        q15_t samples[4];
-        osc_lut_lookup_4(osc_lut, idx, samples);
+        q15_t s0, s1, s2, s3;
+        OSC_LOOKUP(osc_lut, (uq16_t)(p0 >> 16), &s0);
+        OSC_LOOKUP(osc_lut, (uq16_t)(p1 >> 16), &s1);
+        OSC_LOOKUP(osc_lut, (uq16_t)(p2 >> 16), &s2);
+        OSC_LOOKUP(osc_lut, (uq16_t)(p3 >> 16), &s3);
 
-        SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
+        accum[j]     = spectral_mac_q15(accum[j],     s0, a0);
+        accum[j + 1] = spectral_mac_q15(accum[j + 1], s1, a1);
+        accum[j + 2] = spectral_mac_q15(accum[j + 2], s2, a2);
+        accum[j + 3] = spectral_mac_q15(accum[j + 3], s3, a3);
 
         *phase = p3 + freq_inc;
         *amp = spectral_qadd16(a3, amp_delta);
@@ -489,15 +493,11 @@ static inline void synth_segment_m7(
     q31_t* phase_out,
     q15_t* amp_out,
     uint32_t seg_offset,
-    uint32_t seg_length
+    uint32_t seg_length,
+    uint32_t fade_len
 ) {
     q31_t phase = phase_start;
     q15_t amp = amp_start;
-
-    /* Compute fade boundaries within the segment */
-    uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
-    if (fade_len > seg_length / 2) fade_len = seg_length / 2;
-    if (fade_len == 0) fade_len = 1;
 
     uint32_t seg_fade_out_start = seg_length - fade_len;
     uint32_t blk_len = blk_end - blk_start;
@@ -619,7 +619,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     while (ctx->next_seg_idx < ctx->num_segments &&
            ctx->num_active < SPECTRAL_ARM32_MAX_ACTIVE) {
         const SpectralSegmentQ15* seg = get_segment(ctx, ctx->next_seg_idx);
-        if (seg->start >= out_end) break;
+        uint32_t seg_start = seg->start;
+        uint32_t seg_length = seg->length;
+        uint32_t seg_end = seg_start + seg_length;
+        if (seg_start >= out_end) break;
 
         /* Prefetch next segment while processing this one */
 #if SPECTRAL_HAS_SDRAM
@@ -628,12 +631,14 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         }
 #endif
 
-        uint32_t seg_end = seg->start + seg->length;
         if (seg_end > out_pos) {
             uint16_t slot = ctx->num_active;
 
             /* Calculate how many samples into the segment we are */
-            uint32_t sample_offset = (out_pos > seg->start) ? (out_pos - seg->start) : 0;
+            uint32_t sample_offset = (out_pos > seg_start) ? (out_pos - seg_start) : 0;
+            uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
+            if (fade_len > seg_length / 2) fade_len = seg_length / 2;
+            if (fade_len == 0) fade_len = 1;
 
             /* Convert Q8.8 frequency to phase increment */
             q31_t freq_inc = (q31_t)((uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24);
@@ -654,6 +659,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             ctx->active_soa.phase_acc[slot] = phase_acc;
             ctx->active_soa.amp_current[slot] = amp_cur;
             ctx->active_soa.amp_delta[slot] = seg->da_q15;
+            ctx->active_soa.seg_start[slot] = seg_start;
+            ctx->active_soa.seg_end[slot] = seg_end;
+            ctx->active_soa.seg_length[slot] = (uint16_t)seg_length;
+            ctx->active_soa.fade_len[slot] = (uint16_t)fade_len;
 #else
             SpectralActiveSegment* act = &ctx->active[slot];
             act->seg_idx = ctx->next_seg_idx;
@@ -661,11 +670,16 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             act->phase_acc = phase_acc;
             act->amp_current = amp_cur;
             act->amp_delta = seg->da_q15;
+            act->seg_start = seg_start;
+            act->seg_end = seg_end;
+            act->seg_length = (uint16_t)seg_length;
+            act->fade_len = (uint16_t)fade_len;
 #endif
             ctx->num_active++;
         }
         ctx->next_seg_idx++;
     }
+    (void)_seg_scan_start;
     profile_update(&s_perf_stats.segment_scan, get_cycles() - _seg_scan_start);
     
     /* Track peak polyphony */
@@ -678,12 +692,17 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     uint16_t i = 0;
     while (i < ctx->num_active) {
 #if SPECTRAL_SOA_ACTIVE
-        const SpectralSegmentQ15* seg = get_segment(ctx, ctx->active_soa.seg_idx[i]);
+        uint32_t seg_start = ctx->active_soa.seg_start[i];
+        uint32_t seg_end = ctx->active_soa.seg_end[i];
+        uint32_t seg_length = ctx->active_soa.seg_length[i];
+        uint32_t fade_len = ctx->active_soa.fade_len[i];
 #else
         SpectralActiveSegment* act = &ctx->active[i];
-        const SpectralSegmentQ15* seg = get_segment(ctx, act->seg_idx);
+        uint32_t seg_start = act->seg_start;
+        uint32_t seg_end = act->seg_end;
+        uint32_t seg_length = act->seg_length;
+        uint32_t fade_len = act->fade_len;
 #endif
-        uint32_t seg_end = seg->start + seg->length;
 
         /* Remove expired segments */
         if (UNLIKELY(out_pos >= seg_end)) {
@@ -694,6 +713,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             ctx->active_soa.freq_inc[i]    = ctx->active_soa.freq_inc[last];
             ctx->active_soa.amp_current[i] = ctx->active_soa.amp_current[last];
             ctx->active_soa.amp_delta[i]   = ctx->active_soa.amp_delta[last];
+            ctx->active_soa.seg_start[i]   = ctx->active_soa.seg_start[last];
+            ctx->active_soa.seg_end[i]     = ctx->active_soa.seg_end[last];
+            ctx->active_soa.seg_length[i]  = ctx->active_soa.seg_length[last];
+            ctx->active_soa.fade_len[i]    = ctx->active_soa.fade_len[last];
             ctx->active_soa.seg_idx[i]     = ctx->active_soa.seg_idx[last];
 #if SPECTRAL_HAS_CHIRP
             ctx->active_soa.freq_delta[i]  = ctx->active_soa.freq_delta[last];
@@ -705,7 +728,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         }
 
         /* Compute block range */
-        uint32_t blk_start = (seg->start > out_pos) ? (seg->start - out_pos) : 0;
+        uint32_t blk_start = (seg_start > out_pos) ? (seg_start - out_pos) : 0;
         uint32_t blk_end = (seg_end < out_end) ? (seg_end - out_pos) : num_samples;
 
         /* Read current state */
@@ -724,19 +747,16 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #if SPECTRAL_ARM_M7
         /* Use ARM M7 optimized inner loop */
         {
-            uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg->start;
+            uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg_start;
             synth_segment_m7(accum, osc_lut, blk_start, blk_end,
                              phase, freq_inc, amp, d_amp,
-                             &phase, &amp, seg_offset, seg->length);
+                             &phase, &amp, seg_offset, seg_length, fade_len);
         }
 #else
         /* Generic inner loop with linear fade envelope */
         {
-            uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg->start;
-            uint32_t seg_len = seg->length;
-            uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
-            if (fade_len > seg_len / 2) fade_len = seg_len / 2;
-            if (fade_len == 0) fade_len = 1;
+            uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg_start;
+            uint32_t seg_len = seg_length;
 
             uint32_t seg_fo_start = seg_len - fade_len;
             uint32_t blk_len = blk_end - blk_start;
@@ -825,6 +845,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
         i++;
     }
+    (void)_osc_start;
     profile_update(&s_perf_stats.oscillator, get_cycles() - _osc_start);
     PERF_TRACK_ACTIVE(ctx->num_active);
     
@@ -841,6 +862,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         memcpy(out_right, out_left, num_samples * sizeof(q15_t));
 #endif
     }
+        (void)_amp_start;
     profile_update(&s_perf_stats.amplitude, get_cycles() - _amp_start);
     
     ctx->output_position = out_end;

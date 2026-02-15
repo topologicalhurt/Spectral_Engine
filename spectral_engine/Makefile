@@ -378,13 +378,16 @@ $(OBJ_EMU_DAISY_DIR)/%.o: %.c | $(OBJ_EMU_DAISY_DIR)
 # the Q15 path on desktop.
 
 # Common flags shared by all embedded targets
-EMBEDDED_COMMON_FLAGS := -ffast-math -funsafe-math-optimizations \
-                         -fdata-sections -ffunction-sections \
-                         -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1
+EMBEDDED_COMMON_FLAGS := -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1
 
 ARM_EMBEDDED_FLAGS     := $(EMBEDDED_COMMON_FLAGS)
 
-EMBEDDED_ARM_CFLAGS := $(CFLAGS_BASE) $(ARM_EMBEDDED_FLAGS)
+EMBEDDED_BASE_CFLAGS := -std=c11 -O3 -Wall -Wextra -Wno-unknown-pragmas \
+						-ffast-math -funsafe-math-optimizations \
+						-fdata-sections -ffunction-sections -fomit-frame-pointer \
+						-I. -I$(CORE_DIR) -I../third_party/simde
+
+EMBEDDED_ARM_CFLAGS := $(EMBEDDED_BASE_CFLAGS) $(ARM_EMBEDDED_FLAGS)
 EMBEDDED_ARM_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
 EMBEDDED_ARM_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_DIR),$(EMBEDDED_ARM_SRCS_C))
 
@@ -405,7 +408,7 @@ EMBEDDED_ARM_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_DIR),$(EMBEDDED_ARM_
 EMBEDDED_OPT_FLAGS := $(EMBEDDED_COMMON_FLAGS) -fno-exceptions -fno-threadsafe-statics \
                       -DSPECTRAL_RESTRICTED_MODE=1 -DSPECTRAL_NO_PERF=1
 
-EMBEDDED_ARM_RES_CFLAGS := $(CFLAGS_BASE) $(EMBEDDED_OPT_FLAGS)
+EMBEDDED_ARM_RES_CFLAGS := $(EMBEDDED_BASE_CFLAGS) $(EMBEDDED_OPT_FLAGS)
 EMBEDDED_ARM_RES_SRCS_C := main.c $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE)
 EMBEDDED_ARM_RES_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_RES_DIR),$(EMBEDDED_ARM_RES_SRCS_C))
 
@@ -430,7 +433,7 @@ $(BIN_DIR)/$(TARGET_EMBEDDED_ARM): $(EMBEDDED_ARM_OBJS) | $(BIN_DIR)
 # ARM float target (FPU synthesis, with analysis)
 ARM_FLOAT_FLAGS := $(EMBEDDED_COMMON_FLAGS) -DSPECTRAL_EMBEDDED_FLOAT=1
 
-EMBEDDED_ARM_FLOAT_CFLAGS := $(CFLAGS_BASE) $(ARM_FLOAT_FLAGS)
+EMBEDDED_ARM_FLOAT_CFLAGS := $(EMBEDDED_BASE_CFLAGS) $(ARM_FLOAT_FLAGS)
 EMBEDDED_ARM_FLOAT_SRCS_C := main.c $(SRCS_ANALYSIS) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
 EMBEDDED_ARM_FLOAT_OBJS   := $(call src_to_obj,$(OBJ_EMBEDDED_ARM_FLOAT_DIR),$(EMBEDDED_ARM_FLOAT_SRCS_C))
 
@@ -594,7 +597,7 @@ debug: EMBEDDED_ARM_RES_CFLAGS += -g -O0 -DDEBUG
 debug: clean all
 
 clean:
-	rm -rf $(BIN_DIR) out_c.wav segments.bin
+	rm -rf $(BIN_DIR) out_c.wav segments.bin ../output/out_c.wav
 	@echo "Cleaned all build artifacts."
 
 #
