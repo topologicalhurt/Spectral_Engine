@@ -120,7 +120,7 @@ endif
 CC_VERSION_OK := $(shell printf '%s\n%s' "$(MIN_VERSION)" "$(CC_VERSION)" | sort -V | head -1 | grep -qF "$(MIN_VERSION)" && echo 1 || echo 0)
 
 # Skip version check for non-build targets
-NON_BUILD_TARGETS := clean help info deps update_submodules
+NON_BUILD_TARGETS := clean help info deps update_submodules pgo-clean
 IS_BUILD_TARGET := $(if $(filter-out $(NON_BUILD_TARGETS),$(MAKECMDGOALS)),1,$(if $(MAKECMDGOALS),,1))
 
 ifndef SKIP_VERSION_CHECK
@@ -186,8 +186,6 @@ ifeq ($(UNAME_S),Darwin)
                    -I$(OMP_PREFIX)/include -I$(SNDFILE_PREFIX)/include \
                    -Xpreprocessor -fopenmp
     
-    OBJCFLAGS := $(CFLAGS_BASE) -fobjc-arc
-    
     # LTO requires passing flags to linker
     LDFLAGS_BASE := -flto=thin -lm -L$(OMP_PREFIX)/lib -lomp -L$(SNDFILE_PREFIX)/lib -lsndfile
     LDFLAGS_GPU  := $(LDFLAGS_BASE) -framework Accelerate -framework Metal -framework Foundation
@@ -223,6 +221,42 @@ else
 	endif
 endif
 
+# Optional host profile-guided optimization (PGO):
+#   PGO=off  default behavior (no profile flags)
+#   PGO=gen  build instrumented binary for training runs
+#   PGO=use  build using collected profile data
+PGO ?= off
+PGO_DIR ?= ../output/pgo
+PGO_PROFILE ?= $(PGO_DIR)/spectral.profdata
+LLVM_PROFDATA ?= $(shell command -v llvm-profdata 2>/dev/null || xcrun --find llvm-profdata 2>/dev/null)
+
+ifneq ($(filter $(PGO),off gen use),$(PGO))
+$(error Invalid PGO mode '$(PGO)'. Use PGO=off, PGO=gen, or PGO=use)
+endif
+
+PGO_CFLAGS :=
+PGO_LDFLAGS :=
+ifeq ($(PGO),gen)
+    ifneq ($(CC_IS_CLANG),)
+        PGO_CFLAGS += -fprofile-instr-generate
+        PGO_LDFLAGS += -fprofile-instr-generate
+    else
+        PGO_CFLAGS += -fprofile-generate=$(PGO_DIR)
+        PGO_LDFLAGS += -fprofile-generate=$(PGO_DIR)
+    endif
+else ifeq ($(PGO),use)
+    ifneq ($(CC_IS_CLANG),)
+        PGO_CFLAGS += -fprofile-instr-use=$(PGO_PROFILE)
+        PGO_LDFLAGS += -fprofile-instr-use=$(PGO_PROFILE)
+    else
+        PGO_CFLAGS += -fprofile-use=$(PGO_DIR) -fprofile-correction
+        PGO_LDFLAGS += -fprofile-use=$(PGO_DIR) -fprofile-correction
+    endif
+endif
+
+LDFLAGS_GPU += $(PGO_LDFLAGS)
+LDFLAGS_CPU += $(PGO_LDFLAGS)
+
 # 
 #                           TARGET: desktop (default)
 # 
@@ -237,7 +271,9 @@ endif
 # Embedded hardware firmware builds are delegated to api/daisy_seed.
 SRCS_CLI := spectral_cli.c spectral_cli_pipeline.c spectral_utils.c
 
-DESKTOP_CFLAGS := $(CFLAGS_BASE)
+OBJCFLAGS := $(CFLAGS_BASE) $(PGO_CFLAGS) -fobjc-arc
+
+DESKTOP_CFLAGS := $(CFLAGS_BASE) $(PGO_CFLAGS)
 DESKTOP_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_CPU) $(SRCS_CORE) $(SRCS_MONITORING)
 
 # Convert source paths to flat object paths (core/foo.c -> foo.o)
@@ -298,7 +334,7 @@ $(BIN_DIR)/$(TARGET_DESKTOP): $(DESKTOP_OBJS) | $(BIN_DIR)
 # Use this to test/debug the embedded Q15 synthesis path on desktop
 # with full tooling support. Output is identical to ARM hardware.
 
-EMULATOR_CFLAGS := $(CFLAGS_BASE) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
+EMULATOR_CFLAGS := $(CFLAGS_BASE) $(PGO_CFLAGS) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
                    -DSPECTRAL_EMBEDDED_EMULATION=1
 EMULATOR_SRCS_C := main.c $(SRCS_CLI) $(SRCS_ANALYSIS) $(SRCS_SYNTH_CPU) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) \
                    $(SRCS_CORE) $(SRCS_MONITORING)
@@ -330,7 +366,7 @@ emulator-generic: $(BIN_DIR)/$(TARGET_EMULATOR)
 	@echo "================================================"
 
 # Daisy Seed emulator target
-EMULATOR_DAISY_CFLAGS := $(CFLAGS_BASE) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
+EMULATOR_DAISY_CFLAGS := $(CFLAGS_BASE) $(PGO_CFLAGS) -DSPECTRAL_EMBEDDED=1 -DSPECTRAL_USE_EMBEDDED_SYNTH=1 \
                          -DSPECTRAL_EMBEDDED_EMULATION=1 -DSPECTRAL_RESTRICTED_MODE=1 \
                          -DEMULATOR_TARGET_DAISY=1
 EMULATOR_DAISY_SRCS_C := main.c $(SRCS_CLI) $(SRCS_SYNTH_EMBEDDED) $(SRCS_SYNTH_EMULATOR) $(SRCS_CORE) $(SRCS_MONITORING)
@@ -504,7 +540,7 @@ $(OBJ_CUDA_DIR):
 	@mkdir -p $@
 
 $(OBJ_CUDA_DIR)/%.o: %.c | $(OBJ_CUDA_DIR)
-	$(CC) $(CFLAGS_BASE) -D USE_CUDA $(DEPFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS_BASE) $(PGO_CFLAGS) -D USE_CUDA $(DEPFLAGS) -c $< -o $@
 
 ifeq ($(CUDA_ERROR),1)
 cuda:
@@ -516,7 +552,7 @@ else
 cuda: $(CUDA_STANDALONE_OBJS) | $(BIN_DIR)
 	$(NVCC) $(NVCC_FLAGS) -o $(BIN_DIR)/$(TARGET_CUDA) \
 		spectral_cuda.cu spectral_synth_cuda.cu \
-		$(CUDA_STANDALONE_OBJS) $(LDFLAGS_BASE) $(CUDA_LDFLAGS)
+		$(CUDA_STANDALONE_OBJS) $(LDFLAGS_BASE) $(CUDA_LDFLAGS) $(PGO_LDFLAGS)
 	@echo "Built $(BIN_DIR)/$(TARGET_CUDA)"
 endif
 
@@ -595,7 +631,75 @@ $(OBJ_EMBEDDED_ARM_RES_DIR)/%.o: %.c | $(OBJ_EMBEDDED_ARM_RES_DIR)
 #                              UTILITIES
 # 
 
-.PHONY: debug clean info deps help
+.PHONY: debug clean info deps help bench bench-cache bench-all \
+        pgo-clean pgo-gen-build pgo-train pgo-merge pgo-use-build pgo
+
+BENCH_SCRIPT ?= ../tools/benchmark_spectral.sh
+BENCH_INPUT ?= ../resources/motormouth_recites_shakespeare_he_saw_the_cat.wav
+BENCH_RUNS ?= 6
+BENCH_ARGS ?= 0 1.0 0 4096 128 -90 8 1
+BENCH_CACHE_ARGS ?= $(BENCH_ARGS)
+
+PGO_TRAIN_INPUT ?= $(BENCH_INPUT)
+PGO_TRAIN_ARGS ?= $(BENCH_ARGS)
+
+bench: desktop
+	@LC_ALL=C bash $(BENCH_SCRIPT) --binary "$(BIN_DIR)/$(TARGET_DESKTOP)" --input "$(BENCH_INPUT)" --runs "$(BENCH_RUNS)" --mode normal -- $(BENCH_ARGS)
+
+bench-cache: desktop
+	@LC_ALL=C bash $(BENCH_SCRIPT) --binary "$(BIN_DIR)/$(TARGET_DESKTOP)" --input "$(BENCH_INPUT)" --runs "$(BENCH_RUNS)" --mode cache -- $(BENCH_CACHE_ARGS)
+
+bench-all: bench bench-cache
+
+pgo-clean:
+	rm -rf $(PGO_DIR)
+	@echo "Cleaned PGO profile artifacts."
+
+pgo-gen-build:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory desktop PGO=gen
+
+pgo-train: pgo-gen-build
+	@mkdir -p "$(PGO_DIR)"
+ifneq ($(CC_IS_CLANG),)
+	LLVM_PROFILE_FILE="$(PGO_DIR)/spectral-%p.profraw" "$(BIN_DIR)/$(TARGET_DESKTOP)" "$(PGO_TRAIN_INPUT)" $(PGO_TRAIN_ARGS)
+else
+	"$(BIN_DIR)/$(TARGET_DESKTOP)" "$(PGO_TRAIN_INPUT)" $(PGO_TRAIN_ARGS)
+endif
+
+pgo-merge: pgo-train
+ifneq ($(CC_IS_CLANG),)
+	@mkdir -p "$(PGO_DIR)"
+	@set -e; \
+	files="$$(ls "$(PGO_DIR)"/spectral-*.profraw 2>/dev/null || true)"; \
+	if [ -z "$$files" ]; then \
+		echo "Error: no .profraw files found in $(PGO_DIR). Run 'make pgo-train' first."; \
+		exit 1; \
+	fi; \
+	if [ -z "$(LLVM_PROFDATA)" ] || [ ! -x "$(LLVM_PROFDATA)" ]; then \
+		echo "Error: $(LLVM_PROFDATA) not found in PATH."; \
+		exit 1; \
+	fi; \
+	"$(LLVM_PROFDATA)" merge -o "$(PGO_PROFILE)" $$files
+	@echo "Merged PGO profile: $(PGO_PROFILE)"
+else
+	@echo "GCC PGO: merge step not required."
+endif
+
+pgo-use-build: pgo-merge
+ifneq ($(CC_IS_CLANG),)
+	@if [ ! -f "$(PGO_PROFILE)" ]; then \
+		echo "Error: missing profile $(PGO_PROFILE). Run 'make pgo-merge' first."; \
+		exit 1; \
+	fi
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory desktop PGO=use PGO_PROFILE="$(PGO_PROFILE)"
+else
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory desktop PGO=use PGO_DIR="$(PGO_DIR)"
+endif
+
+pgo: pgo-use-build
 
 debug: DESKTOP_CFLAGS += -g -O0 -DDEBUG
 debug: EMBEDDED_ARM_CFLAGS += -g -O0 -DDEBUG
@@ -635,6 +739,10 @@ help:
 	@printf "  %-26s %s\n" "update_submodules" "Pull specific git subtrees"
 	@printf "  %-26s %s\n" "convert_segments" "Build segment conversion tool"
 	@printf "  %-26s %s\n" "syntax-test" "Verify all configurations compile"
+	@printf "  %-26s %s\n" "bench" "Run desktop benchmark harness (normal path)"
+	@printf "  %-26s %s\n" "bench-cache" "Run benchmark harness with --cache mode"
+	@printf "  %-26s %s\n" "pgo" "Train + merge + rebuild with profile-guided optimization"
+	@printf "  %-26s %s\n" "pgo-clean" "Remove generated PGO profile artifacts"
 	@printf "  %-26s %s\n" "daisy-flash" "Flash firmware to Daisy Seed"
 	@printf "  %-26s %s\n" "info" "Show build matrix and system info"
 	@printf "  %-26s %s\n" "help" "Show this help message"
@@ -679,6 +787,7 @@ info:
 	@echo "+-----------------------------+--------------------------------------------+"
 	@echo ""
 	@echo "Current System: $(UNAME_S)"
+	@echo "PGO mode: $(PGO)"
 ifeq ($(UNAME_S),Darwin)
 	@echo "Compiler: $(CC) version $(shell clang --version 2>/dev/null | head -1 | sed 's/.*version //' | cut -d' ' -f1)"
 	@echo "Metal: Available"
