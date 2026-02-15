@@ -103,8 +103,11 @@ void perf_track_alloc(size_t bytes) {
 }
 
 void perf_track_free(size_t bytes) {
-    #pragma omp atomic
-    g_current_alloc -= bytes;
+    #pragma omp critical
+    {
+        if (bytes >= g_current_alloc) g_current_alloc = 0;
+        else g_current_alloc -= bytes;
+    }
 }
 
 void perf_reset_tracking(void) {

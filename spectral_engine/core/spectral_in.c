@@ -9,6 +9,7 @@
 #if SPECTRAL_HAS_FILE_IO
 
 #include <sndfile.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +35,10 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         return SPECTRAL_ERR_OVERFLOW;
     }
     size_t total_samples = (size_t)sfinfo.frames * (size_t)sfinfo.channels;
+    if (total_samples > SIZE_MAX / sizeof(float)) {
+        sf_close(file);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
     float* audio = malloc(total_samples * sizeof(float));
     if (!audio) {
         sf_close(file);
@@ -48,6 +53,10 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         return SPECTRAL_ERR_FILE_READ;
     }
     
+    if ((size_t)sfinfo.frames > SIZE_MAX / sizeof(float)) {
+        free(audio);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
     float* mono = malloc((size_t)sfinfo.frames * sizeof(float));
     if (!mono) {
         free(audio);
@@ -75,10 +84,18 @@ SpectralError spectral_audio_window(float* audio, size_t total_frames,
                           float start_sec, float end_sec, int sample_rate,
                           float** out_start, size_t* out_frames) {
     if (!audio || !out_start || !out_frames || sample_rate <= 0) return SPECTRAL_ERR_PARAM;
-    
-    size_t start_frame = (start_sec > 0) ? (size_t)(start_sec * sample_rate) : 0;
-    size_t end_frame = (end_sec < 0) ? total_frames : (size_t)(end_sec * sample_rate);
-    
+
+    double start_d = (start_sec > 0.0f) ? (double)start_sec * (double)sample_rate : 0.0;
+    double end_d = (end_sec < 0.0f) ? (double)total_frames : (double)end_sec * (double)sample_rate;
+    if (!isfinite(start_d) || !isfinite(end_d)) return SPECTRAL_ERR_PARAM;
+    if (start_d < 0.0) start_d = 0.0;
+    if (end_d < 0.0) end_d = 0.0;
+    if (start_d > (double)total_frames) start_d = (double)total_frames;
+    if (end_d > (double)total_frames) end_d = (double)total_frames;
+
+    size_t start_frame = (size_t)start_d;
+    size_t end_frame = (size_t)end_d;
+
     /* Clamp to valid range */
     if (start_frame > total_frames) start_frame = total_frames;
     if (end_frame > total_frames) end_frame = total_frames;

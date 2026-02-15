@@ -5,6 +5,7 @@
 #include "spectral_utils.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "spectral_omp.h"
 
@@ -24,8 +25,17 @@ static double g_synth_timing_dummy = 0;
 /* Validate synth inputs. All backends call this first. */
 SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size_t elem_size,
                                           SegmentArray sa, double** t_synth_ptr) {
+    if (!t_synth_ptr) {
+        return SYNTH_VALIDATE_EARLY_EXIT;
+    }
+
     if (!*t_synth_ptr) {
         *t_synth_ptr = &g_synth_timing_dummy;
+    }
+
+    if (elem_size == 0 || out_len > SIZE_MAX / elem_size) {
+        **t_synth_ptr = 0;
+        return SYNTH_VALIDATE_EARLY_EXIT;
     }
     
     if (!out_buffer || out_len == 0) {
@@ -70,16 +80,17 @@ int gpu_check_timbre_or_fallback(const char* backend_name,
 }
 
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
-    SegmentLoopParams lp;
+    SegmentLoopParams lp = {0};
+    if (!s || !p || out_len == 0) return lp;
 
     /* Overflow-safe: clamp negative/huge float products before casting to size_t */
     double start_d = (double)s->start * (double)p->stretch;
     double length_d = (double)s->length * (double)p->stretch;
-    if (start_d < 0.0 || start_d >= (double)out_len || !isfinite(start_d)) {
+    if (!isfinite(start_d) || start_d < 0.0 || start_d >= (double)out_len || start_d > (double)SIZE_MAX) {
         lp.valid = 0;
         return lp;
     }
-    if (length_d < 0.0 || !isfinite(length_d)) {
+    if (!isfinite(length_d) || length_d < 0.0 || length_d > (double)SIZE_MAX) {
         lp.valid = 0;
         return lp;
     }
@@ -114,6 +125,10 @@ SpectralError gpu_tile_preprocess(
     SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
     GpuTileData* out
 ) {
+    if (!out || tile_size == 0 || out_len == 0) return SPECTRAL_ERR_PARAM;
+    if (sa.count > 0 && !sa.segs) return SPECTRAL_ERR_PARAM;
+
+    *out = (GpuTileData){0};
     if (out_len > UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;
     uint32_t num_tiles = ((uint32_t)out_len + tile_size - 1) / tile_size;
 
@@ -122,6 +137,7 @@ SpectralError gpu_tile_preprocess(
 #else
     int n_threads = 1;
 #endif
+    if (n_threads < 1) n_threads = 1;
 
     uint32_t** thread_counts = malloc(n_threads * sizeof(uint32_t*));
     if (!thread_counts) return SPECTRAL_ERR_MEMORY;
@@ -147,6 +163,7 @@ SpectralError gpu_tile_preprocess(
         for (size_t i = 0; i < sa.count; i++) {
             float start = sa.segs[i].start * stretch;
             float end = start + sa.segs[i].length * stretch;
+            if (!isfinite(start) || !isfinite(end) || end <= start) continue;
 
             int start_tile = (int)(start / tile_size);
             int end_tile = (int)(end / tile_size);
@@ -216,6 +233,7 @@ SpectralError gpu_tile_preprocess(
     for (size_t i = 0; i < sa.count; i++) {
         float start = sa.segs[i].start * stretch;
         float end = start + sa.segs[i].length * stretch;
+        if (!isfinite(start) || !isfinite(end) || end <= start) continue;
 
         int start_tile = (int)(start / tile_size);
         int end_tile = (int)(end / tile_size);
