@@ -168,8 +168,6 @@ void spectral_tracker_process(SpectralTracker* tracker,
     const float freq_step_df = tracker->freq_step_df;
     const float inv_hop = tracker->inv_hop;
     const float hop_float = tracker->hop_float;
-    const int n_threads = tracker->n_threads;
-
     /* Number of frame-pairs we can process:
      * - All internal pairs within this chunk (chunk_n_frames - 1)
      * - Plus one extra pair if overlap_magsq_row is provided
@@ -184,12 +182,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
         int tid = omp_get_thread_num();
         SegBlockChain* chain = &tracker->chains[tid];
 
-        /* Adaptive scheduling */
-        int sched_chunk = (n_pairs > 4096)
-            ? (int)(n_pairs / ((size_t)n_threads * 4)) : 256;
-        if (sched_chunk < 256) sched_chunk = 256;
-
-        #pragma omp for schedule(dynamic, sched_chunk) nowait
+        #pragma omp for schedule(static) nowait
         for (size_t t = 0; t < n_pairs; t++) {
             const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
