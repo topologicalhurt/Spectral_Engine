@@ -26,6 +26,7 @@ void spectral_cli_init(SpectralCliOptions* opts) {
     opts->db_thresh = DEFAULT_DB_THRESH;
     opts->n_threads = omp_get_max_threads();
     opts->backend = BACKEND_AUTO;
+    opts->processing_mask = SPECTRAL_PROC_DEFAULT;
     opts->start_sec = 0.0f;
     opts->end_sec = -1.0f;
     opts->use_wavetable = 0;
@@ -50,43 +51,78 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
     spectral_cli_init(opts);
     opts->input_path = argv[1];
     
-    /* Check for -w wavetable option first (track consumed indices, don't mutate argv) */
-    int wt_idx = -1;
-    for (int i = 2; i < argc - 1; i++) {
-        if (strcmp(argv[i], "-w") == 0 || strcmp(argv[i], "--wavetable") == 0) {
-            opts->wavetable_path = argv[i + 1];
-            opts->use_wavetable = 1;
-            wt_idx = i;
-            break;
-        }
-    }
-
-    /* Build effective argc/argv skipping consumed -w <path> args */
+    /* Parse named options and build effective positional argv */
     int eff_argc = argc;
     char* eff_argv_buf[CLI_MAX_ARGV];
     char** eff_argv_heap = NULL;
     char** eff_argv = argv;
-    if (wt_idx >= 0) {
-        /* Use stack buffer if it fits, else heap-allocate */
-        char** dst;
-        if (argc <= CLI_MAX_ARGV) {
-            dst = eff_argv_buf;
-        } else {
-            eff_argv_heap = (char**)malloc(argc * sizeof(char*));
-            if (!eff_argv_heap) {
+    int* skip = (int*)calloc((size_t)argc, sizeof(int));
+    if (!skip) {
+        opts->valid = 0;
+        opts->error_message = "Out of memory filtering argv";
+        return 0;
+    }
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "-w") == 0 || strcmp(argv[i], "--wavetable") == 0) {
+            if (i + 1 >= argc) {
+                free(skip);
                 opts->valid = 0;
-                opts->error_message = "Out of memory filtering argv";
+                opts->error_message = "Missing wavetable path after -w/--wavetable";
                 return 0;
             }
-            dst = eff_argv_heap;
+            opts->wavetable_path = argv[i + 1];
+            opts->use_wavetable = 1;
+            skip[i] = 1;
+            skip[i + 1] = 1;
+            i++;
+            continue;
         }
-        eff_argc = 0;
-        for (int i = 0; i < argc; i++) {
-            if (i == wt_idx || i == wt_idx + 1) continue;
-            dst[eff_argc++] = argv[i];
+        if (strcmp(argv[i], "-pm") == 0 || strcmp(argv[i], "--proc-mask") == 0 ||
+            strcmp(argv[i], "--process-mask") == 0) {
+            if (i + 1 >= argc) {
+                free(skip);
+                opts->valid = 0;
+                opts->error_message = "Missing mask value after -pm/--proc-mask";
+                return 0;
+            }
+            if (!spectral_process_mask_parse(argv[i + 1], &opts->processing_mask)) {
+                free(skip);
+                opts->valid = 0;
+                opts->error_message = "Invalid processing mask. Use names (e.g. serra_smith_1990,johnston_1988), none/default/all, or numeric bitmask";
+                return 0;
+            }
+            skip[i] = 1;
+            skip[i + 1] = 1;
+            i++;
+            continue;
         }
-        eff_argv = dst;
     }
+
+    /* Use stack buffer if it fits, else heap-allocate */
+    char** dst;
+    if (argc <= CLI_MAX_ARGV) {
+        dst = eff_argv_buf;
+    } else {
+        eff_argv_heap = (char**)malloc(argc * sizeof(char*));
+        if (!eff_argv_heap) {
+            free(skip);
+            opts->valid = 0;
+            opts->error_message = "Out of memory filtering argv";
+            return 0;
+        }
+        dst = eff_argv_heap;
+    }
+
+    eff_argc = 0;
+    for (int i = 0; i < argc; i++) {
+        if (skip[i]) continue;
+        dst[eff_argc++] = argv[i];
+    }
+
+    free(skip);
+    eff_argv = dst;
+
     argc = eff_argc;
     argv = eff_argv;
     
@@ -226,6 +262,8 @@ void spectral_cli_print_usage(void) {
     printf("  timbre stretch pitch threads start end\n\n");
     printf("Wavetable option:\n");
     printf("  -w <file>  Use wavetable file\n\n");
+    printf("Processing mask option:\n");
+    printf("  -pm, --proc-mask <spec>  Optional processing chain mask\n\n");
     printf("Defaults: timbre=0 stretch=1.0 pitch=0\n");
     printf("Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm\n");
     
@@ -236,6 +274,8 @@ void spectral_cli_print_usage(void) {
     printf("  - SINGLE-THREADED (simulates embedded constraints)\n\n");
     printf("Positional args:\n");
     printf("  timbre stretch pitch n_fft hop db_thresh start end\n\n");
+    printf("Processing mask option:\n");
+    printf("  -pm, --proc-mask <spec>  Optional processing chain mask\n\n");
     printf("Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=%d hop=%d thresh=%.1f\n",
            DEFAULT_N_FFT, DEFAULT_HOP, DEFAULT_DB_THRESH);
     printf("Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm\n");
@@ -244,8 +284,12 @@ void spectral_cli_print_usage(void) {
     printf("Usage: ./spectral input.wav [options]\n\n");
     printf("Positional args (legacy):\n");
     printf("  timbre stretch pitch n_fft hop db_thresh threads backend start end\n\n");
-    printf("Wavetable option:\n");
+    printf("Named options:\n");
     printf("  -w <file>  Use wavetable file (.spwt, .hex, .bin)\n\n");
+    printf("  -pm, --proc-mask <spec>  Processing chain mask (comma-separated names or integer bitmask)\n");
+    printf("      Names: serra_smith_1990, johnston_1988, adaptive_track_density, reassigned,\n");
+    printf("             hybrid_render, event_bucket, higher_order_interp, qnoise_shaping\n\n");
+    printf("      Special: none, default, all\n\n");
     printf("Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=%d hop=%d thresh=%.1f\n",
            DEFAULT_N_FFT, DEFAULT_HOP, DEFAULT_DB_THRESH);
 #if HAS_METAL
