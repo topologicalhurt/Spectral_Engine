@@ -241,9 +241,9 @@ static PipelineError run_synthesis_from_segments(
         return PIPELINE_ERR_SYNTHESIS;
     }
 
-    double norm_start = spectral_get_time_sec();
+    double norm_start = omp_get_wtime();
     spectral_normalize_float(out_buf, out_len, SPECTRAL_NORMALIZE_HEADROOM);
-    t->t_norm = spectral_get_time_sec() - norm_start;
+    t->t_norm = omp_get_wtime() - norm_start;
 
     if (ensure_output_dir_exists() != PIPELINE_OK) {
         printf("Error: Failed to create output directory (%s)\n",
@@ -342,7 +342,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     if (!opts || !opts->valid) return PIPELINE_ERR_INPUT;
     
     SpectralTimingResults t = {0};
-    double wall_start = spectral_get_time_sec();
+    double wall_start = omp_get_wtime();
     
     omp_set_num_threads(opts->n_threads);
     prewarm_backend_if_requested(opts);
@@ -410,7 +410,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     }
 
     if (cache_enabled) {
-        double cache_mode_start = spectral_get_time_sec();
+        double cache_mode_start = omp_get_wtime();
         int cache_built_this_run = 0;
         int cache_saved_this_run = 0;
 
@@ -489,11 +489,11 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
             printf("Cache mode: using in-memory analysis result (cache artifact unavailable)\n");
         }
 
-        double cached_synth_start = spectral_get_time_sec();
+        double cached_synth_start = omp_get_wtime();
         PipelineError cached_run = run_synthesis_from_segments(opts, &sa_cached, sample_rate, &t, NULL, 0);
         if (cached_run != PIPELINE_OK) return cached_run;
-        double cached_synth_total = spectral_get_time_sec() - cached_synth_start;
-        double cache_mode_total = spectral_get_time_sec() - cache_mode_start;
+        double cached_synth_total = omp_get_wtime() - cached_synth_start;
+        double cache_mode_total = omp_get_wtime() - cache_mode_start;
 
         printf("\n--- Cache Mode ---\n");
         printf("Shader/backend prewarm: complete\n");
@@ -711,9 +711,9 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     }
     
     /* Normalize */
-    double norm_start = spectral_get_time_sec();
+    double norm_start = omp_get_wtime();
     spectral_normalize_float(out_buf, out_len, SPECTRAL_NORMALIZE_HEADROOM);
-    t.t_norm = spectral_get_time_sec() - norm_start;
+    t.t_norm = omp_get_wtime() - norm_start;
     
         /* Write output */
         if (ensure_output_dir_exists() != PIPELINE_OK) {
