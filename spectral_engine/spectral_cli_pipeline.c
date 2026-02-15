@@ -150,6 +150,33 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     sa = analyze_audio(windowed_audio, n_samples, sample_rate,
                        opts->n_fft, opts->hop, opts->db_thresh, &t.t_fft, &t.t_track);
     printf("Found %u segments\n", sa.count);
+
+    if (opts->backend == BACKEND_EXPORT) {
+        SpectralProcessReport proc_report = {0};
+        SpectralError proc_err = spectral_process_chain_apply(
+            &sa, sample_rate, opts->processing_mask, &proc_report);
+        if (proc_err != SPECTRAL_OK) {
+            printf("Error: Processing chain failed (%s)\n", spectral_strerror(proc_err));
+#if HAS_PERF
+            perf_track_free(audio_info.frames * sizeof(float));
+#endif
+            free(sa.segs);
+            free(mono);
+            return PIPELINE_ERR_ANALYSIS;
+        }
+
+        {
+            char requested_buf[192] = {0};
+            char pending_buf[192] = {0};
+            spectral_process_mask_to_string(proc_report.requested, requested_buf, sizeof(requested_buf));
+            spectral_process_mask_to_string(proc_report.pending, pending_buf, sizeof(pending_buf));
+            if (proc_report.pending) {
+                printf("Processing mask: %s (pending: %s)\n", requested_buf, pending_buf);
+            } else {
+                printf("Processing mask: %s\n", requested_buf);
+            }
+        }
+    }
     
     /* Handle export mode */
     if (opts->backend == BACKEND_EXPORT) {
@@ -192,6 +219,32 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
             return wt_result;
         }
         wt_bank_ptr = &wt_bank;
+    }
+
+    /* Optional processing chain mask (analysis/load output -> synthesis input) */
+    SpectralProcessReport proc_report = {0};
+    SpectralError proc_err = spectral_process_chain_apply(
+        &sa, sample_rate, opts->processing_mask, &proc_report);
+    if (proc_err != SPECTRAL_OK) {
+        printf("Error: Processing chain failed (%s)\n", spectral_strerror(proc_err));
+        free(sa.segs);
+#if HAS_PERF && !SPECTRAL_RESTRICTED_MODE
+        perf_track_free(audio_info.frames * sizeof(float));
+#endif
+        if (mono) free(mono);
+        return PIPELINE_ERR_ANALYSIS;
+    }
+
+    {
+        char requested_buf[192] = {0};
+        char pending_buf[192] = {0};
+        spectral_process_mask_to_string(proc_report.requested, requested_buf, sizeof(requested_buf));
+        spectral_process_mask_to_string(proc_report.pending, pending_buf, sizeof(pending_buf));
+        if (proc_report.pending) {
+            printf("Processing mask: %s (pending: %s)\n", requested_buf, pending_buf);
+        } else {
+            printf("Processing mask: %s\n", requested_buf);
+        }
     }
     
     /* Allocate output buffer */
