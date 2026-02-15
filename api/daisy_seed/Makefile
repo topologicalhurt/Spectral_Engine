@@ -156,6 +156,7 @@ CFLAGS = $(MCU) $(C_DEFS) $(C_INCLUDES)
 CFLAGS += -O$(OPTIMIZE) -Wall -Wextra -Wno-missing-field-initializers
 CFLAGS += -fdata-sections -ffunction-sections
 CFLAGS += -fno-exceptions -fno-rtti
+CFLAGS += -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables
 
 # DSP optimizations
 CFLAGS += -ffast-math -funsafe-math-optimizations

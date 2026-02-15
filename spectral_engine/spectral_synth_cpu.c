@@ -77,12 +77,14 @@ static void thread_buffers_free(ThreadBuffers* tb) {
     tb->n_threads = 0;
 }
 
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static void thread_buffers_reduce_float(const ThreadBuffers* tb, float* out_buffer, size_t out_len) {
     memcpy(out_buffer, tb->bufs[0], out_len * sizeof(float));
     for (int t = 1; t < tb->n_threads; t++) {
         spectral_vadd(out_buffer, (float*)tb->bufs[t], out_buffer, out_len);
     }
 }
+#endif
 
 static void thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sample_t* out_buffer, size_t out_len) {
     #pragma omp parallel for schedule(static)
@@ -102,12 +104,11 @@ typedef void (*ReduceFn)(const ThreadBuffers* tb, void* out_buffer, size_t out_l
 
 static SpectralError synth_cpu_driver(
     SegmentArray sa, void* out_buffer, size_t out_len, size_t elem_size,
-    float stretch, float pitch, int n_threads, double* t_synth,
+    const SynthParams* params_in, double synth_start, int n_threads, double* t_synth,
     SegmentSynthFn segment_fn, const void* fn_ctx,
     ReduceFn reduce_fn
 ) {
-    SynthParams params = make_synth_params(stretch, pitch, out_len, sa.count);
-    double synth_start = omp_get_wtime();
+    SynthParams params = *params_in;
     ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, elem_size);
     if (!tb.bufs) {
         memset(out_buffer, 0, out_len * elem_size);
@@ -138,9 +139,11 @@ static SpectralError synth_cpu_driver(
     return SPECTRAL_OK;
 }
 
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static void reduce_float_wrapper(const ThreadBuffers* tb, void* out, size_t len) {
     thread_buffers_reduce_float(tb, (float*)out, len);
 }
+#endif
 
 static void reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len) {
     thread_buffers_reduce_native(tb, (spectral_sample_t*)out, len);
@@ -149,9 +152,12 @@ static void reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len
 /* Per-segment callbacks */
 
 typedef struct { SpectralTimbre timbre; } TimbreCtx;
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 typedef struct { const SpectralWavetable* table; } WavetableCtx;
+#endif
 typedef struct { const SpectralWavetable* table; } NativeWavetableCtx;
 
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static void segment_fn_timbre(void* dst, const SegmentLoopParams* lp, const void* ctx) {
     const TimbreCtx* tc = (const TimbreCtx*)ctx;
     timbre_synth_segment((float*)dst, lp, tc->timbre);
@@ -167,6 +173,7 @@ static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, c
         out[j] += (lp->amp + lp->d_amp * j) * SPECTRAL_SAMPLE_TO_FLOAT(sample);
     }
 }
+#endif
 
 static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, const void* ctx) {
     const TimbreCtx* tc = (const TimbreCtx*)ctx;
@@ -200,12 +207,11 @@ SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
                         float stretch, float pitch, SpectralTimbre timbre, int n_threads,
                         double* t_synth) {
     if (n_threads < 1) n_threads = 1;
-    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
-        return SPECTRAL_OK;
-    }
+    SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
+    if (!pf.ok) return SPECTRAL_OK;
     TimbreCtx ctx = { .timbre = timbre };
     return synth_cpu_driver(sa, out_buffer, out_len, sizeof(float),
-                            stretch, pitch, n_threads, t_synth,
+                            &pf.params, pf.start_time, n_threads, t_synth,
                             segment_fn_timbre, &ctx, reduce_float_wrapper);
 }
 #endif
@@ -226,9 +232,11 @@ SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out
     if (!table || !table->valid) {
         return synth_cpu(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
+    SynthParams sp = make_synth_params(stretch, pitch, out_len, sa.count);
+    double start = omp_get_wtime();
     WavetableCtx ctx = { .table = table };
     return synth_cpu_driver(sa, out_buffer, out_len, sizeof(float),
-                            stretch, pitch, n_threads, t_synth,
+                            &sp, start, n_threads, t_synth,
                             segment_fn_wavetable_float, &ctx, reduce_float_wrapper);
 }
 #endif
@@ -240,9 +248,11 @@ SpectralError synth_cpu_native(SegmentArray sa, spectral_sample_t* out_buffer, s
     if (!SYNTH_VALIDATE_NATIVE(out_buffer, out_len, sa, &t_synth)) {
         return SPECTRAL_OK;
     }
+    SynthParams sp = make_synth_params(stretch, pitch, out_len, sa.count);
+    double start = omp_get_wtime();
     TimbreCtx ctx = { .timbre = timbre };
     return synth_cpu_driver(sa, out_buffer, out_len, sizeof(spectral_sample_t),
-                            stretch, pitch, n_threads, t_synth,
+                            &sp, start, n_threads, t_synth,
                             segment_fn_native_timbre, &ctx, reduce_native_wrapper);
 }
 
@@ -261,9 +271,11 @@ SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out
     if (!table || !table->valid) {
         return synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
     }
+    SynthParams sp = make_synth_params(stretch, pitch, out_len, sa.count);
+    double start = omp_get_wtime();
     NativeWavetableCtx ctx = { .table = table };
     return synth_cpu_driver(sa, out_buffer, out_len, sizeof(spectral_sample_t),
-                            stretch, pitch, n_threads, t_synth,
+                            &sp, start, n_threads, t_synth,
                             segment_fn_native_wavetable, &ctx, reduce_native_wrapper);
 }
 

@@ -46,6 +46,10 @@ typedef struct {
     q31_t    freq_inc[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_current[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_delta[SPECTRAL_ARM32_MAX_ACTIVE];
+    uint32_t seg_start[SPECTRAL_ARM32_MAX_ACTIVE];
+    uint32_t seg_end[SPECTRAL_ARM32_MAX_ACTIVE];
+    uint16_t seg_length[SPECTRAL_ARM32_MAX_ACTIVE];
+    uint16_t fade_len[SPECTRAL_ARM32_MAX_ACTIVE];
     uint32_t seg_idx[SPECTRAL_ARM32_MAX_ACTIVE];
 #if SPECTRAL_HAS_CHIRP
     q31_t    freq_delta[SPECTRAL_ARM32_MAX_ACTIVE];
@@ -79,7 +83,6 @@ typedef struct SpectralArm32Ctx {
     uint32_t sample_rate;
     uint32_t freq_inc_scale_q24;
     q15_t amplitude_q15;
-    q15_t stretch_q214;
 } SpectralArm32Ctx;
 
 void spectral_arm32_init(SpectralArm32Ctx* ctx,

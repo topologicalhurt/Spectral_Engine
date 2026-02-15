@@ -14,6 +14,7 @@ resources/*
 # Output files
 out*.wav
 *.bin
+output/*
 
 # Python
 venv/

@@ -8,6 +8,7 @@
 
 #include "spectral_config.h"
 #include "spectral_synth.h"
+#include "spectral_processing_chain.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +26,8 @@ typedef struct {
     float          db_thresh;
     int            n_threads;
     SynthBackend   backend;
+    SpectralProcessMask processing_mask;
+    int            enable_cache;
     float          start_sec;
     float          end_sec;
     int            use_wavetable;

@@ -41,7 +41,7 @@
     ARM32_U16_SIZE * 2 +    /* num_active, peak_active */   \
     ARM32_PTR_SIZE +        /* osc_lut */                   \
     ARM32_U32_SIZE +        /* sample_rate */               \
-    ARM32_Q15_SIZE * 2      /* amplitude_q15, stretch_q214 */\
+    ARM32_Q15_SIZE          /* amplitude_q15 */             \
 )
 
 EmbeddedMemoryUsage embedded_memory_usage(

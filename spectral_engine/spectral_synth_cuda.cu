@@ -28,22 +28,25 @@ __device__ __forceinline__ float fade_envelope(float j, float seg_len) {
 }
 
 /* Persistent device buffer cache — avoids per-call cudaMalloc/cudaFree */
-static Segment*  d_segments   = NULL;
-static uint32_t* d_tile_ids   = NULL;
-static TileRange* d_tile_ranges = NULL;
-static float*    d_output     = NULL;
-static size_t d_seg_cap = 0, d_tile_ids_cap = 0, d_tile_ranges_cap = 0, d_output_cap = 0;
+typedef struct {
+    Segment*   d_segments;
+    uint32_t*  d_tile_ids;
+    TileRange* d_tile_ranges;
+    float*     d_output;
+    size_t     seg_cap, tile_ids_cap, tile_ranges_cap, output_cap;
+    cudaStream_t stream;
+    int        available;   /* -1=unchecked, 0=no, 1=yes */
+} CudaDeviceCache;
 
-static cudaStream_t g_stream = NULL;
-static int g_cuda_available = -1;  /* -1 = not checked, 0 = no, 1 = yes */
+static CudaDeviceCache g_cuda = { .available = -1 };
 
 /* Grow-only device buffer allocation with 1.5x headroom */
-#define CUDA_GROW_BUFFER(ptr, cap, needed, type) do { \
-    if ((cap) < (needed)) { \
-        if (ptr) cudaFree(ptr); \
-        (cap) = (needed) + (needed) / 2; \
-        cudaError_t _err = cudaMalloc((void**)&(ptr), (cap)); \
-        if (_err != cudaSuccess) { (ptr) = NULL; (cap) = 0; goto cleanup; } \
+#define CUDA_GROW_BUFFER(field, cap_field, needed) do { \
+    if (g_cuda.cap_field < (needed)) { \
+        if (g_cuda.field) cudaFree(g_cuda.field); \
+        g_cuda.cap_field = (needed) + (needed) / 2; \
+        cudaError_t _err = cudaMalloc((void**)&g_cuda.field, g_cuda.cap_field); \
+        if (_err != cudaSuccess) { g_cuda.field = NULL; g_cuda.cap_field = 0; goto cleanup; } \
     } \
 } while (0)
 
@@ -108,33 +111,33 @@ __global__ void synthesize_tile_kernel(
  */
 
 extern "C" void cuda_init(void) {
-    if (g_cuda_available >= 0) return;
+    if (g_cuda.available >= 0) return;
 
     int device_count = 0;
     cudaError_t err = cudaGetDeviceCount(&device_count);
 
     if (err != cudaSuccess || device_count == 0) {
-        g_cuda_available = 0;
+        g_cuda.available = 0;
         return;
     }
 
     cudaDeviceProp prop;
     err = cudaGetDeviceProperties(&prop, 0);
     if (err != cudaSuccess) {
-        g_cuda_available = 0;
+        g_cuda.available = 0;
         return;
     }
 
     if (prop.major < 3) {
         fprintf(stderr, "CUDA: Device compute capability %d.%d too old (need 3.0+)\n",
                 prop.major, prop.minor);
-        g_cuda_available = 0;
+        g_cuda.available = 0;
         return;
     }
 
-    err = cudaStreamCreate(&g_stream);
+    err = cudaStreamCreate(&g_cuda.stream);
     if (err != cudaSuccess) {
-        g_cuda_available = 0;
+        g_cuda.available = 0;
         return;
     }
 
@@ -143,12 +146,12 @@ extern "C" void cuda_init(void) {
            prop.totalGlobalMem / (1024.0 * 1024.0 * 1024.0),
            prop.multiProcessorCount);
 
-    g_cuda_available = 1;
+    g_cuda.available = 1;
 }
 
 extern "C" int cuda_available(void) {
-    if (g_cuda_available < 0) cuda_init();
-    return g_cuda_available;
+    if (g_cuda.available < 0) cuda_init();
+    return g_cuda.available;
 }
 
 extern "C" SpectralError synth_cuda(
@@ -160,10 +163,9 @@ extern "C" SpectralError synth_cuda(
     SpectralTimbre timbre,
     double* t_synth
 ) {
-    /* Shared input validation */
-    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
-        return SPECTRAL_OK;
-    }
+    /* Shared preflight: validate + params + timing */
+    SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
+    if (!pf.ok) return SPECTRAL_OK;
 
     /* Check CUDA availability */
     if (!cuda_available()) {
@@ -178,63 +180,56 @@ extern "C" SpectralError synth_cuda(
     }
 
     /* Tile preprocessing on CPU */
-    TileRange* tile_ranges_host = NULL;
-    uint32_t* tile_segment_ids_host = NULL;
-    uint32_t num_tiles = 0, total_refs = 0;
+    GpuTileData td = {0};
 
     /* Start async segment upload while we preprocess tiles */
     size_t seg_size = sa.count * sizeof(Segment);
-    CUDA_GROW_BUFFER(d_segments, d_seg_cap, seg_size, Segment);
-    cudaMemcpyAsync(d_segments, sa.segs, seg_size, cudaMemcpyHostToDevice, g_stream);
+    CUDA_GROW_BUFFER(d_segments, seg_cap, seg_size);
+    cudaMemcpyAsync(g_cuda.d_segments, sa.segs, seg_size, cudaMemcpyHostToDevice, g_cuda.stream);
 
-    SpectralError tile_err = gpu_tile_preprocess(
-        sa, stretch, TILE_SIZE, out_len,
-        &tile_ranges_host, &tile_segment_ids_host, &num_tiles, &total_refs);
+    SpectralError tile_err = gpu_tile_preprocess(sa, stretch, TILE_SIZE, out_len, &td);
     if (tile_err != SPECTRAL_OK) {
-        cudaStreamSynchronize(g_stream);
+        cudaStreamSynchronize(g_cuda.stream);
         memset(out_buffer, 0, out_len * sizeof(float));
         *t_synth = 0;
         return tile_err;
     }
 
-    size_t tile_ids_size = total_refs * sizeof(uint32_t);
-    size_t tile_ranges_size = num_tiles * sizeof(TileRange);
+    size_t tile_ids_size = td.total_refs * sizeof(uint32_t);
+    size_t tile_ranges_size = td.num_tiles * sizeof(TileRange);
     size_t out_size = out_len * sizeof(float);
 
     /* Grow device buffers as needed */
-    CUDA_GROW_BUFFER(d_tile_ids, d_tile_ids_cap, tile_ids_size, uint32_t);
-    CUDA_GROW_BUFFER(d_tile_ranges, d_tile_ranges_cap, tile_ranges_size, TileRange);
-    CUDA_GROW_BUFFER(d_output, d_output_cap, out_size, float);
+    CUDA_GROW_BUFFER(d_tile_ids, tile_ids_cap, tile_ids_size);
+    CUDA_GROW_BUFFER(d_tile_ranges, tile_ranges_cap, tile_ranges_size);
+    CUDA_GROW_BUFFER(d_output, output_cap, out_size);
 
     /* Async upload tile data */
-    cudaMemcpyAsync(d_tile_ids, tile_segment_ids_host, tile_ids_size, cudaMemcpyHostToDevice, g_stream);
-    cudaMemcpyAsync(d_tile_ranges, tile_ranges_host, tile_ranges_size, cudaMemcpyHostToDevice, g_stream);
+    cudaMemcpyAsync(g_cuda.d_tile_ids, td.segment_ids, tile_ids_size, cudaMemcpyHostToDevice, g_cuda.stream);
+    cudaMemcpyAsync(g_cuda.d_tile_ranges, td.ranges, tile_ranges_size, cudaMemcpyHostToDevice, g_cuda.stream);
 
-    /* Precompute synthesis parameters */
-    float inv_stretch = 1.0f / stretch;
-    float inv_stretch_sq = inv_stretch * inv_stretch;
-    float pitch_factor = powf(2.0f, pitch / 12.0f);
+    /* Pack GPU params and launch tile-parallel kernel */
+    GpuSynthParams gp = gpu_synth_params_pack(&pf.params, TILE_SIZE, timbre);
 
-    /* Launch tile-parallel kernel */
     cudaEvent_t ev_start, ev_stop;
     cudaEventCreate(&ev_start);
     cudaEventCreate(&ev_stop);
 
-    cudaEventRecord(ev_start, g_stream);
-    synthesize_tile_kernel<<<num_tiles, TILE_SIZE, 0, g_stream>>>(
-        d_segments, d_tile_ids, d_tile_ranges, d_output,
-        (uint32_t)out_len, stretch, inv_stretch, inv_stretch_sq,
-        pitch_factor, (int)timbre);
-    cudaEventRecord(ev_stop, g_stream);
+    cudaEventRecord(ev_start, g_cuda.stream);
+    synthesize_tile_kernel<<<td.num_tiles, TILE_SIZE, 0, g_cuda.stream>>>(
+        g_cuda.d_segments, g_cuda.d_tile_ids, g_cuda.d_tile_ranges, g_cuda.d_output,
+        gp.out_len, gp.stretch, gp.inv_stretch,
+        gp.inv_stretch_sq, gp.pitch_factor, (int)timbre);
+    cudaEventRecord(ev_stop, g_cuda.stream);
 
     /* Async copy result back */
-    cudaMemcpyAsync(out_buffer, d_output, out_size, cudaMemcpyDeviceToHost, g_stream);
-    cudaStreamSynchronize(g_stream);
+    cudaMemcpyAsync(out_buffer, g_cuda.d_output, out_size, cudaMemcpyDeviceToHost, g_cuda.stream);
+    cudaStreamSynchronize(g_cuda.stream);
 
     cudaError_t kernel_err = cudaGetLastError();
     if (kernel_err != cudaSuccess) {
         fprintf(stderr, "CUDA kernel error: %s\n", cudaGetErrorString(kernel_err));
-        gpu_tile_preprocess_free(tile_ranges_host, tile_segment_ids_host);
+        gpu_tile_data_free(&td);
         memset(out_buffer, 0, out_len * sizeof(float));
         *t_synth = 0;
         return SPECTRAL_ERR_GPU_INIT;
@@ -246,22 +241,21 @@ extern "C" SpectralError synth_cuda(
 
     cudaEventDestroy(ev_start);
     cudaEventDestroy(ev_stop);
-    gpu_tile_preprocess_free(tile_ranges_host, tile_segment_ids_host);
+    gpu_tile_data_free(&td);
     return SPECTRAL_OK;
 
 cleanup:
-    gpu_tile_preprocess_free(tile_ranges_host, tile_segment_ids_host);
+    gpu_tile_data_free(&td);
     memset(out_buffer, 0, out_len * sizeof(float));
     *t_synth = 0;
     return SPECTRAL_ERR_MEMORY;
 }
 
 extern "C" void cuda_cleanup(void) {
-    if (d_segments)    { cudaFree(d_segments);    d_segments = NULL; }
-    if (d_tile_ids)    { cudaFree(d_tile_ids);    d_tile_ids = NULL; }
-    if (d_tile_ranges) { cudaFree(d_tile_ranges); d_tile_ranges = NULL; }
-    if (d_output)      { cudaFree(d_output);      d_output = NULL; }
-    d_seg_cap = d_tile_ids_cap = d_tile_ranges_cap = d_output_cap = 0;
-
-    if (g_stream) { cudaStreamDestroy(g_stream); g_stream = NULL; }
+    if (g_cuda.d_segments)    cudaFree(g_cuda.d_segments);
+    if (g_cuda.d_tile_ids)    cudaFree(g_cuda.d_tile_ids);
+    if (g_cuda.d_tile_ranges) cudaFree(g_cuda.d_tile_ranges);
+    if (g_cuda.d_output)      cudaFree(g_cuda.d_output);
+    if (g_cuda.stream)        cudaStreamDestroy(g_cuda.stream);
+    g_cuda = (CudaDeviceCache){ .available = -1 };
 }

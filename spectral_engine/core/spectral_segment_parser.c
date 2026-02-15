@@ -169,6 +169,15 @@ SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, flo
     
     sa->count = hdr.count;
     sa->capacity = hdr.count;
+    sa->segs = NULL;
+
+    if (hdr.count == 0) {
+        *out_sr = (int)hdr.sr;
+        *out_stretch = hdr.stretch;
+        *out_pitch = hdr.pitch;
+        fclose(f);
+        return SPECTRAL_OK;
+    }
 
 /* Overflow check - tautologically false on 64-bit but needed for 32-bit portability */
 #if defined(__clang__)

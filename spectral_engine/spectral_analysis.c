@@ -178,7 +178,17 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     }
     size_t n_frames = (n_samples - n_fft) / hop + 1;
     size_t n_freqs = n_fft / 2 + 1;
+    if (n_freqs == 0 || n_frames > SIZE_MAX / n_freqs) {
+        *t_fft = 0;
+        *t_track = 0;
+        return empty_result;
+    }
     size_t total_bins = n_frames * n_freqs;
+    if (total_bins > SIZE_MAX / sizeof(float)) {
+        *t_fft = 0;
+        *t_track = 0;
+        return empty_result;
+    }
 
     /* Dispatch to chunked path for large datasets */
     if (total_bins > STFT_CHUNK_THRESHOLD) {
@@ -445,8 +455,21 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
 
     size_t chunk_frames = STFT_CHUNK_FRAMES;
     size_t chunk_alloc_frames = chunk_frames + 1;
-    float* chunk_magsq = spectral_aligned_alloc(chunk_alloc_frames * n_freqs * sizeof(float));
-    float* chunk_phases = spectral_aligned_alloc(chunk_alloc_frames * n_freqs * sizeof(float));
+    if (n_freqs == 0 || chunk_alloc_frames > SIZE_MAX / n_freqs) {
+        fft_resources_free(&res);
+        free(window_func);
+        *t_fft = 0; *t_track = 0;
+        return empty_result;
+    }
+    size_t chunk_bins = chunk_alloc_frames * n_freqs;
+    if (chunk_bins > SIZE_MAX / sizeof(float)) {
+        fft_resources_free(&res);
+        free(window_func);
+        *t_fft = 0; *t_track = 0;
+        return empty_result;
+    }
+    float* chunk_magsq = spectral_aligned_alloc(chunk_bins * sizeof(float));
+    float* chunk_phases = spectral_aligned_alloc(chunk_bins * sizeof(float));
 
     if (!chunk_magsq || !chunk_phases) {
         free(chunk_magsq);

@@ -55,7 +55,11 @@
 
 /* SoA active segment layout (phase_acc[], freq_inc[] as separate arrays) */
 #ifndef SPECTRAL_SOA_ACTIVE
+#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
+#define SPECTRAL_SOA_ACTIVE     1
+#else
 #define SPECTRAL_SOA_ACTIVE     0
+#endif
 #endif
 
 /* Emulator mode: desktop build simulating embedded target constraints */

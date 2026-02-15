@@ -26,6 +26,23 @@ typedef enum {
 #define BACKEND_METAL_WAVETABLE_SUPPORT 0
 #define BACKEND_CUDA_WAVETABLE_SUPPORT  0
 
+/* Backend vtable — one static entry per backend */
+typedef struct SpectralBackendVTable {
+    SynthBackend  id;
+    const char*   name;
+    int           max_timbre;
+    int           has_wavetable;
+    int           is_gpu;
+    void          (*init)(void);
+    int           (*available)(void);
+    SpectralError (*synth)(SegmentArray sa, float* out_buffer, size_t out_len,
+                           float stretch, float pitch, SpectralTimbre timbre,
+                           double* t_synth);
+    void          (*cleanup)(void);
+} SpectralBackendVTable;
+
+const SpectralBackendVTable* spectral_backend_vtable(SynthBackend backend);
+
 /* Backend capability query */
 typedef struct {
     SynthBackend id;
