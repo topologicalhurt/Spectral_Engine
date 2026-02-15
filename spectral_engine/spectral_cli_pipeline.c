@@ -9,10 +9,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include "spectral_omp.h"
+
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
 
 /* Perf tracking (includes spectral_get_time_sec) */
 #if !SPECTRAL_NO_PERF
@@ -24,19 +30,67 @@
 #define PERF_FREE_INPUT_BYTES(bytes) ((void)(bytes))
 #endif
 
-#define OUTPUT_DIR_PATH "../output"
-#define OUTPUT_WAV_PATH "../output/out_c.wav"
-#define OUTPUT_CACHE_DIR "../output/cache"
+#define OUTPUT_DIR_PRIMARY "../output"
+#define OUTPUT_DIR_FALLBACK "output"
+#define OUTPUT_WAV_NAME "out_c.wav"
+#define OUTPUT_CACHE_SUBDIR "cache"
+
+typedef struct {
+    int resolved;
+    char output_dir[PATH_MAX];
+    char output_wav[PATH_MAX];
+    char output_cache_dir[PATH_MAX];
+} PipelineOutputPaths;
+
+static PipelineOutputPaths g_paths = {0};
 
 static PipelineError ensure_dir_exists(const char* path) {
     if (!path || !path[0]) return PIPELINE_ERR_INPUT;
     if (mkdir(path, 0775) == 0) return PIPELINE_OK;
-    if (errno == EEXIST) return PIPELINE_OK;
+    if (errno == EEXIST) {
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return PIPELINE_OK;
+    }
+    return PIPELINE_ERR_OUTPUT;
+}
+
+static int path_join(char* out, size_t out_size, const char* a, const char* b) {
+    if (!out || out_size == 0 || !a || !b) return 0;
+    int w = snprintf(out, out_size, "%s/%s", a, b);
+    return (w > 0 && (size_t)w < out_size);
+}
+
+static PipelineError resolve_output_paths(void) {
+    if (g_paths.resolved) return PIPELINE_OK;
+
+    int in_engine_dir = (access("core", F_OK) == 0 && access("spectral_cli_pipeline.c", F_OK) == 0);
+    const char* candidates[] = {
+        in_engine_dir ? OUTPUT_DIR_PRIMARY : OUTPUT_DIR_FALLBACK,
+        in_engine_dir ? OUTPUT_DIR_FALLBACK : OUTPUT_DIR_PRIMARY
+    };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        const char* base = candidates[i];
+        if (ensure_dir_exists(base) != PIPELINE_OK) continue;
+
+        if (!path_join(g_paths.output_wav, sizeof(g_paths.output_wav), base, OUTPUT_WAV_NAME)) {
+            return PIPELINE_ERR_OUTPUT;
+        }
+        if (!path_join(g_paths.output_cache_dir, sizeof(g_paths.output_cache_dir), base, OUTPUT_CACHE_SUBDIR)) {
+            return PIPELINE_ERR_OUTPUT;
+        }
+
+        size_t base_len = strlen(base);
+        if (base_len >= sizeof(g_paths.output_dir)) return PIPELINE_ERR_OUTPUT;
+        memcpy(g_paths.output_dir, base, base_len + 1);
+        g_paths.resolved = 1;
+        return PIPELINE_OK;
+    }
+
     return PIPELINE_ERR_OUTPUT;
 }
 
 static PipelineError ensure_output_dir_exists(void) {
-    return ensure_dir_exists(OUTPUT_DIR_PATH);
+    return resolve_output_paths();
 }
 
 static const char* basename_no_ext(const char* path, char* out, size_t out_size) {
@@ -53,6 +107,8 @@ static const char* basename_no_ext(const char* path, char* out, size_t out_size)
 
 static PipelineError build_cache_path(const SpectralCliOptions* opts, char* out, size_t out_size) {
     if (!opts || !out || out_size == 0) return PIPELINE_ERR_INPUT;
+    if (resolve_output_paths() != PIPELINE_OK) return PIPELINE_ERR_OUTPUT;
+
     char stem[192] = {0};
     if (!basename_no_ext(opts->input_path, stem, sizeof(stem)) || stem[0] == '\0') {
         return PIPELINE_ERR_INPUT;
@@ -62,8 +118,9 @@ static PipelineError build_cache_path(const SpectralCliOptions* opts, char* out,
     int start_ms = (int)(opts->start_sec * 1000.0f);
     int end_ms = (int)(opts->end_sec * 1000.0f);
     int w = snprintf(out, out_size,
-                     OUTPUT_CACHE_DIR "/%s_n%d_h%d_db%d_s%d_e%d.segbin",
-                     stem, opts->n_fft, opts->hop, db10, start_ms, end_ms);
+                     "%s/%s_n%d_h%d_db%d_s%d_e%d.segbin",
+                     g_paths.output_cache_dir, stem,
+                     opts->n_fft, opts->hop, db10, start_ms, end_ms);
     return (w > 0 && (size_t)w < out_size) ? PIPELINE_OK : PIPELINE_ERR_INPUT;
 }
 
@@ -71,7 +128,9 @@ static size_t segment_array_output_length(const SegmentArray* sa) {
     size_t max_end = 0;
     if (!sa || !sa->segs) return 0;
     for (size_t i = 0; i < sa->count; i++) {
-        size_t seg_end = (size_t)(sa->segs[i].start + sa->segs[i].length);
+        double seg_end_f = (double)sa->segs[i].start + (double)sa->segs[i].length;
+        if (!isfinite(seg_end_f) || seg_end_f <= 0.0 || seg_end_f > (double)SIZE_MAX) continue;
+        size_t seg_end = (size_t)seg_end_f;
         if (seg_end > max_end) max_end = seg_end;
     }
     return max_end;
@@ -187,7 +246,8 @@ static PipelineError run_synthesis_from_segments(
     t->t_norm = spectral_get_time_sec() - norm_start;
 
     if (ensure_output_dir_exists() != PIPELINE_OK) {
-        printf("Error: Failed to create output directory (%s)\n", OUTPUT_DIR_PATH);
+        printf("Error: Failed to create output directory (%s)\n",
+               g_paths.resolved ? g_paths.output_dir : OUTPUT_DIR_PRIMARY);
 #if HAS_PERF
         perf_track_free(sa->count * sizeof(Segment));
         perf_track_free(out_len * sizeof(float));
@@ -199,7 +259,7 @@ static PipelineError run_synthesis_from_segments(
         return PIPELINE_ERR_OUTPUT;
     }
 
-    SpectralError write_err = spectral_audio_write(OUTPUT_WAV_PATH, out_buf, out_len, sample_rate, 1);
+    SpectralError write_err = spectral_audio_write(g_paths.output_wav, out_buf, out_len, sample_rate, 1);
     if (write_err != SPECTRAL_OK) {
         printf("Error: Failed to write output file (%s)\n", spectral_strerror(write_err));
 #if HAS_PERF
@@ -212,7 +272,7 @@ static PipelineError run_synthesis_from_segments(
         if (mono) free(mono);
         return PIPELINE_ERR_OUTPUT;
     }
-    printf("Wrote output: %s\n", OUTPUT_WAV_PATH);
+    printf("Wrote output: %s\n", g_paths.output_wav);
 
 #if HAS_PERF
     perf_track_free(sa->count * sizeof(Segment));
@@ -315,12 +375,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     printf("Loaded %u segments (sr=%d)\n", sa.count, sample_rate);
     
     /* Calculate output length */
-    size_t max_end = 0;
-    for (size_t i = 0; i < sa.count; i++) {
-        size_t seg_end = (size_t)(sa.segs[i].start + sa.segs[i].length);
-        if (seg_end > max_end) max_end = seg_end;
-    }
-    n_samples = max_end;
+    n_samples = segment_array_output_length(&sa);
     
 #else
     /* Desktop/emulator mode: read and analyze audio */
@@ -328,8 +383,8 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     int cache_enabled = opts->enable_cache;
     int cache_loaded = 0;
     if (cache_enabled) {
-        if (ensure_output_dir_exists() != PIPELINE_OK || ensure_dir_exists(OUTPUT_CACHE_DIR) != PIPELINE_OK) {
-            printf("Warning: cache disabled (cannot create %s)\n", OUTPUT_CACHE_DIR);
+        if (ensure_output_dir_exists() != PIPELINE_OK || ensure_dir_exists(g_paths.output_cache_dir) != PIPELINE_OK) {
+            printf("Warning: cache disabled (cannot create cache directory)\n");
             cache_enabled = 0;
         } else if (build_cache_path(opts, cache_path, sizeof(cache_path)) != PIPELINE_OK) {
             printf("Warning: cache disabled (invalid cache key path)\n");
@@ -357,6 +412,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     if (cache_enabled) {
         double cache_mode_start = spectral_get_time_sec();
         int cache_built_this_run = 0;
+        int cache_saved_this_run = 0;
 
         if (!cache_loaded) {
             SpectralError read_err = spectral_audio_read(opts->input_path, &audio_info, &mono);
@@ -392,13 +448,11 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
             if (cache_save_err == SPECTRAL_OK) {
                 printf("Cache saved: %s\n", cache_path);
                 cache_built_this_run = 1;
+                cache_saved_this_run = 1;
             } else {
                 printf("Warning: cache save failed (%s)\n", spectral_strerror(cache_save_err));
             }
 
-            free(sa.segs);
-            sa.segs = NULL;
-            sa.count = 0;
 #if HAS_PERF
             PERF_FREE_INPUT_BYTES(input_alloc_bytes);
             input_alloc_bytes = 0;
@@ -408,18 +462,33 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
         }
 
         SegmentArray sa_cached = {0};
-        int sr_loaded = 0;
-        float stretch_loaded = 0.0f;
-        float pitch_loaded = 0.0f;
-        SpectralError cache_load_err = segments_load(cache_path, &sa_cached, &sr_loaded, &stretch_loaded, &pitch_loaded);
-        if (cache_load_err != SPECTRAL_OK) {
-            printf("Error: Cannot load cache segments %s (%s)\n", cache_path, spectral_strerror(cache_load_err));
-            return PIPELINE_ERR_INPUT;
+        if (cache_loaded) {
+            /* Reuse already-loaded cache segments, avoid redundant disk I/O. */
+            sa_cached = sa;
+            sa = (SegmentArray){0};
+        } else if (cache_saved_this_run) {
+            int sr_loaded = 0;
+            float stretch_loaded = 0.0f;
+            float pitch_loaded = 0.0f;
+            SpectralError cache_load_err = segments_load(cache_path, &sa_cached, &sr_loaded, &stretch_loaded, &pitch_loaded);
+            if (cache_load_err != SPECTRAL_OK) {
+                printf("Error: Cannot load cache segments %s (%s)\n", cache_path, spectral_strerror(cache_load_err));
+                free(sa.segs);
+                sa = (SegmentArray){0};
+                return PIPELINE_ERR_INPUT;
+            }
+            (void)stretch_loaded;
+            (void)pitch_loaded;
+            sample_rate = sr_loaded;
+            free(sa.segs);
+            sa = (SegmentArray){0};
+        } else {
+            /* Cache write can fail (permissions/disk full); still render from analysis. */
+            sa_cached = sa;
+            sa = (SegmentArray){0};
+            printf("Cache mode: using in-memory analysis result (cache artifact unavailable)\n");
         }
-        (void)stretch_loaded;
-        (void)pitch_loaded;
 
-        sample_rate = sr_loaded;
         double cached_synth_start = spectral_get_time_sec();
         PipelineError cached_run = run_synthesis_from_segments(opts, &sa_cached, sample_rate, &t, NULL, 0);
         if (cached_run != PIPELINE_OK) return cached_run;
@@ -431,8 +500,11 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
         if (cache_built_this_run) {
             printf("Cache build (analysis only): FFT %.1fms Track %.1fms\n",
                    t.t_fft * 1000.0, t.t_track * 1000.0);
-        } else {
+        } else if (cache_loaded) {
             printf("Cache build (analysis only): skipped (cache hit)\n");
+        } else {
+            printf("Cache build (analysis only): FFT %.1fms Track %.1fms (cache artifact unavailable)\n",
+                   t.t_fft * 1000.0, t.t_track * 1000.0);
         }
         printf("Segment-binary synth run: Synth %.1fms Norm %.1fms Total %.1fms\n",
                t.t_synth * 1000.0, t.t_norm * 1000.0, cached_synth_total * 1000.0);
@@ -645,7 +717,8 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     
         /* Write output */
         if (ensure_output_dir_exists() != PIPELINE_OK) {
-        printf("Error: Failed to create output directory (%s)\n", OUTPUT_DIR_PATH);
+        printf("Error: Failed to create output directory (%s)\n",
+               g_paths.resolved ? g_paths.output_dir : OUTPUT_DIR_PRIMARY);
     #if HAS_PERF
         perf_track_free(sa.count * sizeof(Segment));
         perf_track_free(out_len * sizeof(float));
@@ -659,7 +732,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
         return PIPELINE_ERR_OUTPUT;
         }
 
-        SpectralError write_err = spectral_audio_write(OUTPUT_WAV_PATH, out_buf, out_len, sample_rate, 1);
+        SpectralError write_err = spectral_audio_write(g_paths.output_wav, out_buf, out_len, sample_rate, 1);
     if (write_err != SPECTRAL_OK) {
         printf("Error: Failed to write output file (%s)\n", spectral_strerror(write_err));
     #if HAS_PERF
@@ -674,7 +747,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
         if (mono) free(mono);
         return PIPELINE_ERR_OUTPUT;
     }
-    printf("Wrote output: %s\n", OUTPUT_WAV_PATH);
+    printf("Wrote output: %s\n", g_paths.output_wav);
     
     /* Calculate timing results */
     t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm;
