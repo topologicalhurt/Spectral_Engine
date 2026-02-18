@@ -2,7 +2,10 @@
 
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
+#include "spectral_utils.h"
 #include "spectral_vector_ops.h"
+#include "spectral_wavetable.h"
+#include "oscillator.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -19,36 +22,54 @@ typedef struct {
     size_t buf_size;    /* Actual used size per buffer */
 } ThreadBuffers;
 
+static int synth_partition_count(size_t seg_count, int n_threads) {
+    size_t n = seg_count;
+    size_t thread_cap = (size_t)((n_threads > 0) ? n_threads : 1);
+    if (n == 0) return 1;
+    if (n > thread_cap) {
+        n = thread_cap;
+    }
+#if SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS > 0
+    if (n > (size_t)SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS) {
+        n = (size_t)SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS;
+    }
+#endif
+    return (int)n;
+}
+
 static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t element_size) {
     ThreadBuffers tb = {0};
+    size_t arena_payload_size = 0;
+    size_t arena_size = 0;
+    size_t out_bytes = 0;
 
     if (n_threads <= 0 || element_size == 0 || out_len == 0) {
         return tb;
     }
-    if (out_len > SIZE_MAX / element_size) {
+    if (!spectral_size_mul(out_len, element_size, &out_bytes)) {
         return tb;
     }
 
     /* Calculate buffer size and aligned stride */
-    tb.buf_size = out_len * element_size;
-    tb.buf_stride = (tb.buf_size + CACHE_ALIGN - 1) & ~(CACHE_ALIGN - 1);
+    tb.buf_size = out_bytes;
+    tb.buf_stride = (tb.buf_size + SPECTRAL_CACHE_ALIGN - 1) & ~(SPECTRAL_CACHE_ALIGN - 1);
     tb.n_threads = n_threads;
 
     /* Allocate pointer array */
-    tb.bufs = malloc(n_threads * sizeof(void*));
+    tb.bufs = spectral_malloc_array((size_t)n_threads, sizeof(void*));
     if (!tb.bufs) {
         tb.n_threads = 0;
         return tb;
     }
 
     /* Single arena allocation for all thread buffers */
-    if (tb.buf_stride > SIZE_MAX / (size_t)n_threads) {
+    if (!spectral_size_mul(tb.buf_stride, (size_t)n_threads, &arena_payload_size) ||
+        !spectral_size_add(arena_payload_size, SPECTRAL_CACHE_ALIGN, &arena_size)) {
         free(tb.bufs);
         tb.bufs = NULL;
         tb.n_threads = 0;
         return tb;
     }
-    size_t arena_size = tb.buf_stride * (size_t)n_threads + CACHE_ALIGN;
     tb.arena = malloc(arena_size);
     if (!tb.arena) {
         free(tb.bufs);
@@ -60,7 +81,7 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
     memset(tb.arena, 0, arena_size);
 
     /* Set up per-thread buffer pointers */
-    char* aligned_base = (char*)(((uintptr_t)tb.arena + CACHE_ALIGN - 1) & ~(CACHE_ALIGN - 1));
+    char* aligned_base = (char*)(((uintptr_t)tb.arena + SPECTRAL_CACHE_ALIGN - 1) & ~(SPECTRAL_CACHE_ALIGN - 1));
     for (int t = 0; t < n_threads; t++) {
         tb.bufs[t] = aligned_base + (t * tb.buf_stride);
     }
@@ -109,21 +130,22 @@ static SpectralError synth_cpu_driver(
     ReduceFn reduce_fn
 ) {
     SynthParams params = *params_in;
-    ThreadBuffers tb = thread_buffers_alloc(n_threads, out_len, elem_size);
+    int n_parts = synth_partition_count(sa.count, n_threads);
+    ThreadBuffers tb = thread_buffers_alloc(n_parts, out_len, elem_size);
     if (!tb.bufs) {
         memset(out_buffer, 0, out_len * elem_size);
         *t_synth = 0;
         return SPECTRAL_ERR_MEMORY;
     }
 
-    #pragma omp parallel num_threads(n_threads)
-    {
-        int tid = omp_get_thread_num();
-        char* dst_base = (char*)tb.bufs[tid];
+    #pragma omp parallel for schedule(static) num_threads(n_parts)
+    for (int p = 0; p < n_parts; p++) {
+        size_t seg_start = ((size_t)p * sa.count) / (size_t)n_parts;
+        size_t seg_end = ((size_t)(p + 1) * sa.count) / (size_t)n_parts;
+        char* dst_base = (char*)tb.bufs[p];
 
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < sa.count; i++) {
-            if (i + 4 < sa.count) PREFETCH_READ(&sa.segs[i + 4]);
+        for (size_t i = seg_start; i < seg_end; i++) {
+            if (i + 4 < seg_end) PREFETCH_READ(&sa.segs[i + 4]);
 
             SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
             if (!lp.valid) continue;
@@ -167,10 +189,10 @@ static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, c
     const WavetableCtx* wc = (const WavetableCtx*)ctx;
     float* out = (float*)dst;
     for (size_t j = 0; j < lp->length; j++) {
-        float p = lp->phase + j * (lp->alpha + lp->beta * j);
+        float p = compute_phase(lp->phase, lp->alpha, lp->beta, j);
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
         spectral_sample_t sample = spectral_wavetable_lookup_f(wc->table, phase_norm);
-        out[j] += (lp->amp + lp->d_amp * j) * SPECTRAL_SAMPLE_TO_FLOAT(sample);
+        out[j] += compute_amplitude(lp->amp, lp->d_amp, j) * SPECTRAL_SAMPLE_TO_FLOAT(sample);
     }
 }
 #endif
@@ -179,8 +201,8 @@ static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, con
     const TimbreCtx* tc = (const TimbreCtx*)ctx;
     spectral_sample_t* out = (spectral_sample_t*)dst;
     for (size_t j = 0; j < lp->length; j++) {
-        float p = lp->phase + j * (lp->alpha + lp->beta * j);
-        float sample_f = timbre_oscillator(p, lp->amp + lp->d_amp * j, tc->timbre, lp->width);
+        float p = compute_phase(lp->phase, lp->alpha, lp->beta, j);
+        float sample_f = timbre_oscillator(p, compute_amplitude(lp->amp, lp->d_amp, j), tc->timbre, lp->width);
         out[j] = SPECTRAL_SAMPLE_ADD(out[j], FLOAT_TO_SPECTRAL_SAMPLE(sample_f));
     }
 }
@@ -189,10 +211,10 @@ static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, 
     const NativeWavetableCtx* nwc = (const NativeWavetableCtx*)ctx;
     spectral_sample_t* out = (spectral_sample_t*)dst;
     for (size_t j = 0; j < lp->length; j++) {
-        float p = lp->phase + j * (lp->alpha + lp->beta * j);
+        float p = compute_phase(lp->phase, lp->alpha, lp->beta, j);
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
         spectral_sample_t sample = spectral_wavetable_lookup_f(nwc->table, phase_norm);
-        spectral_sample_t amp_native = FLOAT_TO_SPECTRAL_SAMPLE(lp->amp + lp->d_amp * j);
+        spectral_sample_t amp_native = FLOAT_TO_SPECTRAL_SAMPLE(compute_amplitude(lp->amp, lp->d_amp, j));
         spectral_sample_t scaled = SPECTRAL_SAMPLE_MUL(sample, amp_native);
         out[j] = SPECTRAL_SAMPLE_ADD(out[j], scaled);
     }
@@ -201,7 +223,7 @@ static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, 
 /* Public synthesis functions */
 
 /* When SPECTRAL_USE_EMBEDDED_SYNTH is defined, synth_cpu is macro-redirected
- * to synth_arm32_emulation (defined in spectral_synth_emulator.c) */
+ * to synth_arm32_simulation (defined in spectral_synth_simulation.c). */
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
                         float stretch, float pitch, SpectralTimbre timbre, int n_threads,
@@ -278,4 +300,3 @@ SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out
                             &sp, start, n_threads, t_synth,
                             segment_fn_native_wavetable, &ctx, reduce_native_wrapper);
 }
-

@@ -20,19 +20,18 @@
 #define SPECTRAL_SYNTH_ARM32_H
 
 #include "spectral_config.h"
+#include "spectral_error.h"
 #include "spectral_q15.h"
-#include "oscillator.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if SPECTRAL_EMBEDDED
-
-/* Polyphony limit - see spectral_config.h for SPECTRAL_ARM32_MAX_ACTIVE */
-#ifndef SPECTRAL_ARM32_MAX_ACTIVE
-#define SPECTRAL_ARM32_MAX_ACTIVE    512
+#if SPECTRAL_RESTRICTED_PROFILE
+typedef struct SpectralPerfCounters SpectralPerfCounters;
 #endif
+
+#if SPECTRAL_EMBEDDED
 
 typedef SpectralActiveSegQ15 SpectralActiveSegment;
 
@@ -127,7 +126,8 @@ static inline uint16_t spectral_arm32_get_peak_active(const SpectralArm32Ctx* ct
 void spectral_arm32_set_amplitude(SpectralArm32Ctx* ctx, float amplitude);
 void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch);
 
-#if defined(SPECTRAL_RESTRICTED_MODE) && defined(SPECTRAL_DEBUG_RESTRICTED)
+#if SPECTRAL_RESTRICTED_PROFILE
+/* Profiling API (enable with -DSPECTRAL_DEBUG_RESTRICTED=1). */
 void arm32_synth_profile_start(void);
 uint32_t arm32_synth_profile_end(void);
 uint32_t arm32_synth_get_peak_cycles(void);
@@ -139,28 +139,32 @@ uint32_t arm32_synth_get_avg_cycles(void);
 uint32_t arm32_synth_get_min_cycles(void);
 uint32_t arm32_synth_get_max_cycles(void);
 uint32_t arm32_synth_get_samples_processed(void);
+void arm32_synth_get_op_counts(SpectralPerfCounters* out);
 #endif
 
 #endif /* SPECTRAL_EMBEDDED */
 
-/* Desktop emulation for testing ARM32 synthesis path */
-#if defined(SPECTRAL_USE_EMBEDDED_SYNTH) || defined(SPECTRAL_EMBEDDED_EMULATION)
+/* Desktop simulation for testing ARM32 synthesis path */
+#if defined(SPECTRAL_USE_EMBEDDED_SYNTH) || defined(SPECTRAL_EMBEDDED_SIMULATION)
 
 #include "spectral_common.h"
 
-void emulator_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
-                         uint32_t block_size, uint32_t max_mem_kb);
-void emulator_set_verbose(int verbose);
+void embedded_sim_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
+                             uint32_t block_size, uint32_t max_mem_kb);
+void embedded_sim_set_verbose(int verbose);
+void embedded_sim_set_perf_profile(uint32_t profile_id);
+void embedded_sim_set_pessimism(double factor);
+void embedded_sim_set_cold_start_reporting(int enabled);
 
-SpectralError synth_arm32_emulation(SegmentArray sa, float* out_buffer, size_t out_len,
-                                    float stretch, float pitch, SpectralTimbre timbre,
-                                    int n_threads, double* t_synth);
+SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t out_len,
+                                     float stretch, float pitch, SpectralTimbre timbre,
+                                     int n_threads, double* t_synth);
 
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
-#define synth_cpu synth_arm32_emulation
+#define synth_cpu synth_arm32_simulation
 #endif
 
-#endif /* SPECTRAL_USE_EMBEDDED_SYNTH || SPECTRAL_EMBEDDED_EMULATION */
+#endif /* SPECTRAL_USE_EMBEDDED_SYNTH || SPECTRAL_EMBEDDED_SIMULATION */
 
 #ifdef __cplusplus
 }

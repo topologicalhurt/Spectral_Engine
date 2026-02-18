@@ -26,26 +26,20 @@
 #include "spectral_synth_arm32.h"
 #include "spectral_config.h"
 #include "spectral_io.h"
+#include "spectral_lut.h"
+#include "spectral_perf_accounting.h"
+#include "spectral_perf_model.h"
+#include "spectral_utils.h"
 
 #if SPECTRAL_EMBEDDED
 
 #include <string.h>
 
-/* SPECTRAL_DBG fallback — full definition is in spectral_utils.h (desktop) */
-#ifndef SPECTRAL_DBG
-#define SPECTRAL_DBG(...)       ((void)0)
-#endif
-
-#if defined(SPECTRAL_RESTRICTED_MODE) && SPECTRAL_ARM_M7
-#define SPECTRAL_HAS_SDRAM      1
-#define SPECTRAL_PREFETCH_DIST  4
-#endif
-
 /*
  * DMA prefetch from SDRAM to DTCM buffer.
  * User must provide dma_start_transfer() via HAL integration.
  */
-#if SPECTRAL_HAS_DMA && SPECTRAL_HAS_SDRAM
+#if SPECTRAL_HAS_DMA && SPECTRAL_ARM_M7
 extern void dma_start_transfer(const void* src, void* dst, size_t bytes);
 extern int  dma_transfer_complete(void);
 
@@ -85,231 +79,267 @@ static inline const SpectralSegmentQ15* get_segment(
 }
 #endif /* SPECTRAL_HAS_DMA */
 
-#if defined(ARM_MATH_CM7) || defined(ARM_MATH_CM4)
-#define SPECTRAL_USE_CMSIS      1
+#if SPECTRAL_USE_CMSIS
 #include "arm_math.h"
+#endif
 
-#define CMSIS_FILL_Q15(val, buf, len)     arm_fill_q15((val), (buf), (len))
-#define CMSIS_FILL_Q31(buf, val, len)     arm_fill_q31((val), (buf), (len))
-#define CMSIS_Q31_TO_Q15(src, dst, len)   arm_q31_to_q15((src), (dst), (len))
-#define CMSIS_SCALE_Q15(src, s, sh, dst, len)  arm_scale_q15((src), (s), (sh), (dst), (len))
-#define CMSIS_COPY_Q15(src, dst, len)     arm_copy_q15((src), (dst), (len))
-#define CMSIS_ABSMAX_Q15(src, len, max, idx)  arm_absmax_q15((src), (len), (max), (idx))
-#define CMSIS_SHIFT_Q15(src, sh, dst, len)    arm_shift_q15((src), (sh), (dst), (len))
+/* Keep op/cycle accounting gating centralized. */
+typedef struct SpectralPerfSegScanState {
+    uint32_t start_cycles;
+    uint32_t scan_start_idx;
+    uint32_t activations;
+} SpectralPerfSegScanState;
+
+#if SPECTRAL_RESTRICTED_PROFILE
+static SpectralPerfCounters s_perf_op_counts;
+
+typedef struct {
+    uint32_t total_cycles;
+    uint32_t call_count;
+    uint32_t min_cycles;
+    uint32_t max_cycles;
+} FunctionProfile;
+
+static struct {
+    FunctionProfile process;        /* spectral_arm32_process() */
+    FunctionProfile segment_scan;   /* Active segment scanning */
+    FunctionProfile oscillator;     /* LUT lookup + accumulation */
+    FunctionProfile amplitude;      /* Amplitude scaling */
+    uint32_t samples_processed;
+    uint32_t segments_active_total;
+} s_perf_stats = {0};
+
+static uint32_t s_last_cycle_count = 0;
+static uint32_t s_peak_cycle_count = 0;
+
+static inline uint32_t get_cycles(void) {
+#if defined(DWT) && defined(DWT_CYCCNT)
+    return DWT->CYCCNT;
 #else
-#define SPECTRAL_USE_CMSIS      0
-#define CMSIS_FILL_Q15(val, buf, len)     memset((buf), 0, (len) * sizeof(q15_t))
-#define CMSIS_FILL_Q31(buf, val, len)     do { for(uint32_t _i=0; _i<(len); _i++) (buf)[_i]=(val); } while(0)
-#define CMSIS_Q31_TO_Q15(src, dst, len)   /* fallback below */
-#define CMSIS_SCALE_Q15(src, s, sh, dst, len) /* fallback below */
-#define CMSIS_COPY_Q15(src, dst, len)     memcpy((dst), (src), (len) * sizeof(q15_t))
-#define CMSIS_ABSMAX_Q15(src, len, max, idx)  /* fallback below */
-#define CMSIS_SHIFT_Q15(src, sh, dst, len)    /* fallback below */
+    return 0;
+#endif
+}
+
+static inline void profile_update(FunctionProfile* prof, uint32_t cycles) {
+    prof->total_cycles += cycles;
+    prof->call_count++;
+    if (cycles < prof->min_cycles || prof->min_cycles == 0) prof->min_cycles = cycles;
+    if (cycles > prof->max_cycles) prof->max_cycles = cycles;
+}
+
+static inline uint32_t perf_cache_miss_threshold(void) {
+    const SpectralPerfModelProfile* p = spectral_perf_model_default_profile();
+    return p ? p->cache_miss_threshold_active : 24u;
+}
+
 #endif
 
-/* Performance tracking stubs (real impl at bottom of file when enabled) */
-#if !(defined(SPECTRAL_RESTRICTED_MODE) && defined(SPECTRAL_DEBUG_RESTRICTED) && SPECTRAL_DEBUG_RESTRICTED)
-#define get_cycles()            0
-#define profile_update(p, c)    ((void)0)
-#define PERF_PROCESS_START()
-#define PERF_PROCESS_END(n)
-#define PERF_TRACK_ACTIVE(n)
+#if !SPECTRAL_RESTRICTED_PROFILE
+static inline uint32_t get_cycles(void) {
+    return 0;
+}
 #endif
 
-/* Alias centralized macros for conciseness */
-#define UNROLL_HINT         SPECTRAL_UNROLL_4
-#define UNROLL_2            SPECTRAL_UNROLL_2
-#define LIKELY(x)           SPECTRAL_LIKELY(x)
-#define UNLIKELY(x)         SPECTRAL_UNLIKELY(x)
-#define RESTRICT            __restrict__
+static inline uint32_t spectral_perf_process_start(void) {
+    return get_cycles();
+}
 
-/* Optimization level: 0=safe, 1=balanced (default), 2=aggressive, 3=reserved */
-#ifndef SPECTRAL_OPT_LEVEL
-#define SPECTRAL_OPT_LEVEL 1
+static inline void spectral_perf_process_end(uint32_t start_cycles,
+                                             uint32_t samples_processed,
+                                             uint32_t active_segments) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    uint32_t elapsed = get_cycles() - start_cycles;
+    profile_update(&s_perf_stats.process, elapsed);
+    spectral_perf_record_peak_block(&s_perf_op_counts, elapsed, active_segments);
+    s_perf_stats.samples_processed += samples_processed;
+#else
+    (void)start_cycles;
+    (void)samples_processed;
+    (void)active_segments;
 #endif
+}
 
-#define SPECTRAL_UNSAFE_MATH    (SPECTRAL_OPT_LEVEL >= 1)
-#define SPECTRAL_NO_LUT_INTERP  (SPECTRAL_OPT_LEVEL >= 2)
+static inline void spectral_perf_track_active(uint32_t active_segments) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    s_perf_stats.segments_active_total += active_segments;
+#else
+    (void)active_segments;
+#endif
+}
+
+static inline SpectralPerfSegScanState spectral_perf_segment_scan_start(const SpectralArm32Ctx* ctx) {
+    SpectralPerfSegScanState state = {0, 0, 0};
+#if SPECTRAL_RESTRICTED_PROFILE
+    state.start_cycles = get_cycles();
+    state.scan_start_idx = ctx->next_seg_idx;
+#else
+    (void)ctx;
+#endif
+    return state;
+}
+
+static inline void spectral_perf_segment_activation(SpectralPerfSegScanState* state) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    state->activations++;
+#else
+    (void)state;
+#endif
+}
+
+static inline void spectral_perf_segment_scan_end(const SpectralArm32Ctx* ctx,
+                                                  const SpectralPerfSegScanState* state) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    profile_update(&s_perf_stats.segment_scan, get_cycles() - state->start_cycles);
+    spectral_perf_count_segment_scan(&s_perf_op_counts, ctx->next_seg_idx - state->scan_start_idx);
+    spectral_perf_count_segment_activations(&s_perf_op_counts, state->activations);
+#else
+    (void)ctx;
+    (void)state;
+#endif
+}
+
+static inline void spectral_perf_cache_pressure(uint32_t active_segments, uint32_t block_samples) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    spectral_perf_count_cache_pressure(&s_perf_op_counts,
+                                       active_segments,
+                                       perf_cache_miss_threshold(),
+                                       block_samples);
+#else
+    (void)active_segments;
+    (void)block_samples;
+#endif
+}
+
+static inline uint32_t spectral_perf_oscillator_start(void) {
+    return get_cycles();
+}
+
+static inline void spectral_perf_oscillator_end(uint32_t start_cycles) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    profile_update(&s_perf_stats.oscillator, get_cycles() - start_cycles);
+#else
+    (void)start_cycles;
+#endif
+}
+
+static inline void spectral_perf_segment_samples(uint32_t segment_samples) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    spectral_perf_count_segment_samples(&s_perf_op_counts, segment_samples);
+#else
+    (void)segment_samples;
+#endif
+}
+
+static inline uint32_t spectral_perf_amplitude_start(void) {
+    return get_cycles();
+}
+
+static inline void spectral_perf_amplitude_end(uint32_t start_cycles) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    profile_update(&s_perf_stats.amplitude, get_cycles() - start_cycles);
+#else
+    (void)start_cycles;
+#endif
+}
 
 /* Phase computation for 4-sample unrolling.
- * Independent outputs allow dual-issue on ARM M7. */
-#define SPECTRAL_PHASES_4(phase, freq_inc, p0, p1, p2, p3) do { \
-    const q31_t _base = (phase); \
-    const q31_t _inc = (freq_inc); \
-    (p0) = _base; \
-    (p1) = _base + _inc; \
-    (p2) = _base + (_inc << 1); \
-    (p3) = _base + _inc + (_inc << 1); \
-} while (0)
+ * Backend parity note: this intentionally diverges from float
+ * spectral_segment_phase_at_f32() by operating on fixed-point phase
+ * accumulators for deterministic embedded timing and throughput. */
+static inline void spectral_phase_batch4(q31_t phase,
+                                         q31_t freq_inc,
+                                         q31_t* p0,
+                                         q31_t* p1,
+                                         q31_t* p2,
+                                         q31_t* p3) {
+    const q31_t inc2 = freq_inc << 1;
+    *p0 = phase;
+    *p1 = phase + freq_inc;
+    *p2 = phase + inc2;
+    *p3 = phase + freq_inc + inc2;
+}
 
-/* Amplitude computation. OPT_LEVEL>=1 uses non-saturating parallel math. */
-#if SPECTRAL_UNSAFE_MATH
-#define SPECTRAL_AMPS_4(amp, amp_delta, a0, a1, a2, a3) do { \
-    const q15_t _a = (amp); \
-    const q15_t _d = (amp_delta); \
-    (a0) = _a; \
-    (a1) = (q15_t)(_a + _d); \
-    (a2) = (q15_t)(_a + (_d << 1)); \
-    (a3) = (q15_t)(_a + _d + (_d << 1)); \
-} while (0)
+/* Amplitude computation in Q15 domain.
+ * Backend parity note: this intentionally diverges from float
+ * spectral_segment_amp_at_f32() for fixed-point saturation behavior. */
+#if SPECTRAL_OPT_LEVEL >= 1
+static inline void spectral_amp_batch4(q15_t amp,
+                                       q15_t amp_delta,
+                                       q15_t* a0,
+                                       q15_t* a1,
+                                       q15_t* a2,
+                                       q15_t* a3) {
+    const q15_t delta2 = (q15_t)(amp_delta << 1);
+    *a0 = amp;
+    *a1 = (q15_t)(amp + amp_delta);
+    *a2 = (q15_t)(amp + delta2);
+    *a3 = (q15_t)(amp + amp_delta + delta2);
+}
 #else
-#define SPECTRAL_AMPS_4(amp, amp_delta, a0, a1, a2, a3) do { \
-    (a0) = (amp); \
-    (a1) = spectral_qadd16((amp), (amp_delta)); \
-    (a2) = spectral_qadd16((a1), (amp_delta)); \
-    (a3) = spectral_qadd16((a2), (amp_delta)); \
-} while (0)
+static inline void spectral_amp_batch4(q15_t amp,
+                                       q15_t amp_delta,
+                                       q15_t* a0,
+                                       q15_t* a1,
+                                       q15_t* a2,
+                                       q15_t* a3) {
+    *a0 = amp;
+    *a1 = spectral_qadd16(amp, amp_delta);
+    *a2 = spectral_qadd16(*a1, amp_delta);
+    *a3 = spectral_qadd16(*a2, amp_delta);
+}
 #endif
 
-#define SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3) do { \
-    (accum)[(j)]     = spectral_mac_q15((accum)[(j)],     (samples)[0], (a0)); \
-    (accum)[(j) + 1] = spectral_mac_q15((accum)[(j) + 1], (samples)[1], (a1)); \
-    (accum)[(j) + 2] = spectral_mac_q15((accum)[(j) + 2], (samples)[2], (a2)); \
-    (accum)[(j) + 3] = spectral_mac_q15((accum)[(j) + 3], (samples)[3], (a3)); \
-} while (0)
+static inline void spectral_accum_batch4(q31_t* accum,
+                                         uint32_t j,
+                                         const q15_t* samples,
+                                         q15_t a0,
+                                         q15_t a1,
+                                         q15_t a2,
+                                         q15_t a3) {
+    accum[j] = spectral_mac_q15(accum[j], samples[0], a0);
+    accum[j + 1] = spectral_mac_q15(accum[j + 1], samples[1], a1);
+    accum[j + 2] = spectral_mac_q15(accum[j + 2], samples[2], a2);
+    accum[j + 3] = spectral_mac_q15(accum[j + 3], samples[3], a3);
+}
 
 /* ARM M7 Prefetch & Cache */
 
 #if SPECTRAL_ARM_M7 && defined(__GNUC__)
 
-#define PREFETCH_READ(addr)     __builtin_prefetch((addr), 0, 3)
-#define PREFETCH_WRITE(addr)    __builtin_prefetch((addr), 1, 3)
-
-static inline void prefetch_segment(const SpectralSegmentQ15* seg) {
+static SPECTRAL_MAYBE_UNUSED inline void prefetch_segment(const SpectralSegmentQ15* seg) {
     PREFETCH_READ(seg);
 }
 
-/* Prefetch active segment state */
-static inline void prefetch_active(const SpectralActiveSegment* act) {
-    PREFETCH_READ(act);
+static inline void spectral_data_sync_barrier(void) {
+    __asm__ volatile ("dsb" ::: "memory");
 }
-
-/* Memory barrier for cache coherency */
-#define DMB()                   __asm__ volatile ("dmb" ::: "memory")
-#define DSB()                   __asm__ volatile ("dsb" ::: "memory")
-#define ISB()                   __asm__ volatile ("isb" ::: "memory")
 
 #else
-/* Use definitions from spectral_common.h if available */
-#ifndef PREFETCH_READ
-#define PREFETCH_READ(addr)     ((void)(addr))
-#endif
-#ifndef PREFETCH_WRITE
-#define PREFETCH_WRITE(addr)    ((void)(addr))
-#endif
-#define prefetch_segment(seg)   ((void)(seg))
-#define prefetch_active(act)    ((void)(act))
-#define DMB()
-#define DSB()
-#define ISB()
-#endif
-
-/* ARM M7 Dual MAC */
-
-#if SPECTRAL_ARM_M7 && defined(__ARM_FEATURE_DSP)
-
-/* Pack two Q15 values for dual MAC */
-static inline q31_t pack_q15(q15_t lo, q15_t hi) {
-    return ((q31_t)hi << 16) | ((q31_t)lo & 0xFFFF);
+static SPECTRAL_MAYBE_UNUSED inline void prefetch_segment(const SpectralSegmentQ15* seg) {
+    (void)seg;
 }
 
-/* Unpack Q31 to two Q15 values */
-static inline void unpack_q15(q31_t packed, q15_t* lo, q15_t* hi) {
-    *lo = (q15_t)(packed & 0xFFFF);
-    *hi = (q15_t)(packed >> 16);
+static inline void spectral_data_sync_barrier(void) {
 }
-
-/* Dual signed MAC: acc += (a0*b0) + (a1*b1)
- * Uses SMLAD instruction on ARM */
-static inline q31_t dual_mac_q15(q31_t acc, q31_t a_packed, q31_t b_packed) {
-#if defined(__GNUC__) && defined(__arm__)
-    q31_t result;
-    __asm__ volatile (
-        "smlad %0, %2, %3, %1"
-        : "=r" (result)
-        : "r" (acc), "r" (a_packed), "r" (b_packed)
-    );
-    return result;
-#else
-    /* Fallback - extract and MAC separately */
-    q15_t a0 = (q15_t)(a_packed & 0xFFFF);
-    q15_t a1 = (q15_t)(a_packed >> 16);
-    q15_t b0 = (q15_t)(b_packed & 0xFFFF);
-    q15_t b1 = (q15_t)(b_packed >> 16);
-    return acc + ((q31_t)a0 * b0) + ((q31_t)a1 * b1);
-#endif
-}
-
-#define SPECTRAL_HAS_DUAL_MAC   1
-
-#else
-#define SPECTRAL_HAS_DUAL_MAC   0
 #endif
 
 /* Optimized LUT Lookup */
 
 #if SPECTRAL_ARM_M7
 
-#define OSC_FRAC_BITS   (16 - SPECTRAL_OSC_LUT_BITS)
-#define OSC_FRAC_MASK   ((1u << OSC_FRAC_BITS) - 1)
-
-static inline void osc_lut_lookup_2(
-    const q15_t* RESTRICT lut,
-    uq16_t idx0, uq16_t idx1,
-    q15_t* RESTRICT out0, q15_t* RESTRICT out1
-) {
-    /* Extract table indices (upper 10 bits for 1024-entry LUT) */
-    uint32_t t0 = idx0 >> OSC_FRAC_BITS;
-    uint32_t t1 = idx1 >> OSC_FRAC_BITS;
-    
-    /* Always prefetch — redundant prefetches are free (ignored by HW) */
-    PREFETCH_READ(&lut[t1]);
-    
-    /* Extract fractional part and scale to 0-255 for 8-bit interpolation */
-    uint32_t f0 = ((idx0 & OSC_FRAC_MASK) * 256) >> OSC_FRAC_BITS;
-    uint32_t f1 = ((idx1 & OSC_FRAC_MASK) * 256) >> OSC_FRAC_BITS;
-    
-    q15_t s0_a = lut[t0];
-    q15_t s0_b = lut[t0 + 1];
-    q15_t s1_a = lut[t1];
-    q15_t s1_b = lut[t1 + 1];
-    
-    /* Interpolate: out = a + (b-a)*f/256 */
-    *out0 = s0_a + (q15_t)(((q31_t)(s0_b - s0_a) * (int32_t)f0) >> 8);
-    *out1 = s1_a + (q15_t)(((q31_t)(s1_b - s1_a) * (int32_t)f1) >> 8);
-}
-
-/* LUT interpolation: OPT_LEVEL>=2 uses nearest-neighbor (faster, ~0.1% THD) */
-#if SPECTRAL_NO_LUT_INTERP
-#define OSC_LOOKUP(lut, idx, out_ptr) do { \
-    *(out_ptr) = (lut)[(idx) >> OSC_FRAC_BITS]; \
-} while (0)
+static inline q15_t spectral_osc_lookup(const q15_t* restrict lut, uq16_t idx) {
+#if SPECTRAL_OPT_LEVEL >= 2
+    return lut[idx >> SPECTRAL_OSC_FRAC_BITS];
 #else
-#define OSC_LOOKUP(lut, idx, out_ptr) do { \
-    uint32_t _t = (idx) >> OSC_FRAC_BITS; \
-    uint32_t _f = (((idx) & OSC_FRAC_MASK) * 256) >> OSC_FRAC_BITS; \
-    q15_t _a = (lut)[_t]; \
-    q15_t _b = (lut)[_t + 1]; \
-    *(out_ptr) = _a + (q15_t)(((q31_t)(_b - _a) * (int32_t)_f) >> 8); \
-} while (0)
+    uint32_t table_idx = idx >> SPECTRAL_OSC_FRAC_BITS;
+    uint32_t frac = ((idx & SPECTRAL_OSC_FRAC_MASK) * 256u) >> SPECTRAL_OSC_FRAC_BITS;
+    q15_t a = lut[table_idx];
+    q15_t b = lut[table_idx + 1];
+    return a + (q15_t)(((q31_t)(b - a) * (int32_t)frac) >> 8);
 #endif
-
-static inline void osc_lut_lookup_4(
-    const q15_t* RESTRICT lut,
-    const uq16_t* RESTRICT idx,
-    q15_t* RESTRICT out
-) {
-    OSC_LOOKUP(lut, idx[0], &out[0]);
-    OSC_LOOKUP(lut, idx[1], &out[1]);
-    OSC_LOOKUP(lut, idx[2], &out[2]);
-    OSC_LOOKUP(lut, idx[3], &out[3]);
 }
 
 #endif /* SPECTRAL_ARM_M7 */
-
-/* Linear fade length for embedded paths (shorter than desktop's 64-sample Hann) */
-#define SPECTRAL_FADE_EMBEDDED  32
-#define FADE_STEP_Q15           (Q15_ONE / SPECTRAL_FADE_EMBEDDED)
 
 /* Initialization */
 
@@ -328,10 +358,10 @@ void spectral_arm32_init(SpectralArm32Ctx* ctx,
     ctx->freq_inc_scale_q24 = (sample_rate > 0)
         ? (uint32_t)(((1u << 24) + (sample_rate / 2u)) / sample_rate)
         : 0;
-    ctx->amplitude_q15 = Q15_ONE;
+    ctx->amplitude_q15 = Q15_MAX;
     
     /* Ensure caches are coherent after init */
-    DSB();
+    spectral_data_sync_barrier();
 }
 
 void spectral_arm32_reset(SpectralArm32Ctx* ctx) {
@@ -378,7 +408,7 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
     ctx->output_length = output_len;
     
     /* Ensure SDRAM writes are complete before synthesis */
-    DSB();
+    spectral_data_sync_barrier();
     
     spectral_arm32_reset(ctx);
     return SPECTRAL_OK;
@@ -389,7 +419,7 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
 void spectral_arm32_set_amplitude(SpectralArm32Ctx* ctx, float amplitude) {
     if (!ctx) return;
     amplitude = CLAMP(amplitude, 0.0f, 1.0f);
-    ctx->amplitude_q15 = (q15_t)(amplitude * Q15_ONE);
+    ctx->amplitude_q15 = (q15_t)(amplitude * Q15_MAX);
 }
 
 void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
@@ -405,12 +435,12 @@ void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
  * No fade applied — used for sustain region and as building block for fade regions. */
 SPECTRAL_ITCM
 static inline void synth_core_m7(
-    q31_t* RESTRICT accum,
-    const q15_t* RESTRICT osc_lut,
+    q31_t* restrict accum,
+    const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
-    q31_t* RESTRICT phase,
-    q15_t* RESTRICT amp,
+    q31_t* restrict phase,
+    q15_t* restrict amp,
     q31_t freq_inc,
     q15_t amp_delta
 ) {
@@ -424,16 +454,16 @@ static inline void synth_core_m7(
         PREFETCH_WRITE(&accum[j + 8]);
 
         q31_t p0, p1, p2, p3;
-        SPECTRAL_PHASES_4(*phase, freq_inc, p0, p1, p2, p3);
+        spectral_phase_batch4(*phase, freq_inc, &p0, &p1, &p2, &p3);
 
         q15_t a0, a1, a2, a3;
-        SPECTRAL_AMPS_4(*amp, amp_delta, a0, a1, a2, a3);
+        spectral_amp_batch4(*amp, amp_delta, &a0, &a1, &a2, &a3);
 
         q15_t s0, s1, s2, s3;
-        OSC_LOOKUP(osc_lut, (uq16_t)(p0 >> 16), &s0);
-        OSC_LOOKUP(osc_lut, (uq16_t)(p1 >> 16), &s1);
-        OSC_LOOKUP(osc_lut, (uq16_t)(p2 >> 16), &s2);
-        OSC_LOOKUP(osc_lut, (uq16_t)(p3 >> 16), &s3);
+        s0 = spectral_osc_lookup(osc_lut, (uq16_t)(p0 >> 16));
+        s1 = spectral_osc_lookup(osc_lut, (uq16_t)(p1 >> 16));
+        s2 = spectral_osc_lookup(osc_lut, (uq16_t)(p2 >> 16));
+        s3 = spectral_osc_lookup(osc_lut, (uq16_t)(p3 >> 16));
 
         accum[j]     = spectral_mac_q15(accum[j],     s0, a0);
         accum[j + 1] = spectral_mac_q15(accum[j + 1], s1, a1);
@@ -453,15 +483,17 @@ static inline void synth_core_m7(
 }
 
 /* Fade region synthesis: applies linear Q15 fade ramp to each sample.
- * fade_val/fade_step are Q15 ramp state (0→Q15_ONE for fade-in, Q15_ONE→0 for fade-out). */
+ * fade_val/fade_step are Q15 ramp state (0->Q15_MAX for fade-in, Q15_MAX->0 for fade-out).
+ * Backend parity note: envelope shape matches GPU/desktop fade semantics but uses
+ * fixed-point arithmetic to preserve embedded determinism. */
 SPECTRAL_ITCM
 static inline void synth_fade_m7(
-    q31_t* RESTRICT accum,
-    const q15_t* RESTRICT osc_lut,
+    q31_t* restrict accum,
+    const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
-    q31_t* RESTRICT phase,
-    q15_t* RESTRICT amp,
+    q31_t* restrict phase,
+    q15_t* restrict amp,
     q31_t freq_inc,
     q15_t amp_delta,
     q15_t fade_val,
@@ -479,11 +511,13 @@ static inline void synth_fade_m7(
 
 /* Full segment synthesis with linear fade envelope.
  * seg_offset: position within segment at blk_start
- * seg_length: total segment length in samples */
+ * seg_length: total segment length in samples
+ * Backend parity note: this path preserves the same three-region fade partition
+ * semantics used in desktop/GPU backends, but executes fully in Q15/Q31. */
 SPECTRAL_ITCM
 static inline void synth_segment_m7(
-    q31_t* RESTRICT accum,
-    const q15_t* RESTRICT osc_lut,
+    q31_t* restrict accum,
+    const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
     q31_t phase_start,
@@ -528,10 +562,10 @@ static inline void synth_segment_m7(
 
     /* Fade-in region */
     if (fi_end > orig_blk_start) {
-        q15_t fade_val = (q15_t)((int32_t)seg_offset * FADE_STEP_Q15);
+        q15_t fade_val = (q15_t)((int32_t)seg_offset * SPECTRAL_FADE_STEP_Q15);
         synth_fade_m7(accum, osc_lut, orig_blk_start, fi_end,
                       &phase, &amp, freq_inc, amp_delta,
-                      fade_val, FADE_STEP_Q15);
+                      fade_val, SPECTRAL_FADE_STEP_Q15);
     }
 
     /* Sustain region: no fade, full unrolled path */
@@ -544,10 +578,10 @@ static inline void synth_segment_m7(
     if (fo_start < blk_end) {
         uint32_t fo_seg_pos = seg_offset + (fo_start - orig_blk_start);
         uint32_t samples_into_fade = fo_seg_pos - seg_fade_out_start;
-        q15_t fade_val = Q15_ONE - (q15_t)((int32_t)samples_into_fade * FADE_STEP_Q15);
+        q15_t fade_val = Q15_MAX - (q15_t)((int32_t)samples_into_fade * SPECTRAL_FADE_STEP_Q15);
         synth_fade_m7(accum, osc_lut, fo_start, blk_end,
                       &phase, &amp, freq_inc, amp_delta,
-                      fade_val, -FADE_STEP_Q15);
+                      fade_val, -SPECTRAL_FADE_STEP_Q15);
     }
 
     *phase_out = phase;
@@ -561,10 +595,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                                    q15_t* out_left,
                                    q15_t* out_right,
                                    uint32_t num_samples) {
-    PERF_PROCESS_START();
+    uint32_t perf_start = spectral_perf_process_start();
     
-    if (UNLIKELY(!ctx || !out_left)) { PERF_PROCESS_END(0); return 0; }
-    if (UNLIKELY(ctx->num_segments == 0 || ctx->output_position >= ctx->output_length)) {
+    if (SPECTRAL_UNLIKELY(!ctx || !out_left)) {
+        spectral_perf_process_end(perf_start, 0, 0);
+        return 0;
+    }
+    if (SPECTRAL_UNLIKELY(ctx->num_segments == 0 || ctx->output_position >= ctx->output_length)) {
 #if SPECTRAL_USE_CMSIS
         arm_fill_q15(0, out_left, num_samples);
         if (out_right) arm_fill_q15(0, out_right, num_samples);
@@ -572,18 +609,18 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         memset(out_left, 0, num_samples * sizeof(q15_t));
         if (out_right) memset(out_right, 0, num_samples * sizeof(q15_t));
 #endif
-        PERF_PROCESS_END(0);
+        spectral_perf_process_end(perf_start, 0, 0);
         return 0;
     }
     
-    if (UNLIKELY(num_samples > 256)) {
+    if (SPECTRAL_UNLIKELY(num_samples > 256)) {
         SPECTRAL_DBG("arm32: block size %u truncated to 256", (unsigned)num_samples);
         num_samples = 256;
     }
 
     const uint32_t out_pos = ctx->output_position;
     const uint32_t out_end = out_pos + num_samples;
-    const q15_t* RESTRICT osc_lut = ctx->osc_lut;
+    const q15_t* restrict osc_lut = ctx->osc_lut;
     const q15_t master_amp = ctx->amplitude_q15;
     
 
@@ -604,9 +641,9 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #endif
     
     /* Prefetch first few segments from SDRAM */
-#if SPECTRAL_HAS_DMA && SPECTRAL_HAS_SDRAM
+#if SPECTRAL_HAS_DMA && SPECTRAL_ARM_M7
     spectral_arm32_dma_prefetch(ctx);
-#elif SPECTRAL_HAS_SDRAM
+#elif SPECTRAL_ARM_M7
     if (ctx->next_seg_idx < ctx->num_segments) {
         prefetch_segment(&ctx->segments[ctx->next_seg_idx]);
         if (ctx->next_seg_idx + 1 < ctx->num_segments)
@@ -615,7 +652,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #endif
     
     /* Activate new segments that start within this block */
-    uint32_t _seg_scan_start = get_cycles();
+    SpectralPerfSegScanState seg_scan_state = spectral_perf_segment_scan_start(ctx);
     while (ctx->next_seg_idx < ctx->num_segments &&
            ctx->num_active < SPECTRAL_ARM32_MAX_ACTIVE) {
         const SpectralSegmentQ15* seg = get_segment(ctx, ctx->next_seg_idx);
@@ -625,7 +662,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         if (seg_start >= out_end) break;
 
         /* Prefetch next segment while processing this one */
-#if SPECTRAL_HAS_SDRAM
+#if SPECTRAL_ARM_M7
         if (ctx->next_seg_idx + 2 < ctx->num_segments) {
             prefetch_segment(&ctx->segments[ctx->next_seg_idx + 2]);
         }
@@ -636,11 +673,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
             /* Calculate how many samples into the segment we are */
             uint32_t sample_offset = (out_pos > seg_start) ? (out_pos - seg_start) : 0;
-            uint32_t fade_len = SPECTRAL_FADE_EMBEDDED;
+            uint32_t fade_len = SPECTRAL_FADE_SAMPLES_EMBEDDED;
             if (fade_len > seg_length / 2) fade_len = seg_length / 2;
             if (fade_len == 0) fade_len = 1;
 
-            /* Convert Q8.8 frequency to phase increment */
+            /* Backend parity note:
+             * This is the fixed-point counterpart of spectral_segment_alpha_f32().
+             * Q8.8 frequency is mapped to Q31 phase increment for embedded synthesis. */
             q31_t freq_inc = (q31_t)((uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24);
             q31_t phase_acc = ((q31_t)seg->phase_q15 + 32768) << 16;
             q15_t amp_cur;
@@ -676,19 +715,20 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             act->fade_len = (uint16_t)fade_len;
 #endif
             ctx->num_active++;
+            spectral_perf_segment_activation(&seg_scan_state);
         }
         ctx->next_seg_idx++;
     }
-    (void)_seg_scan_start;
-    profile_update(&s_perf_stats.segment_scan, get_cycles() - _seg_scan_start);
+    spectral_perf_segment_scan_end(ctx, &seg_scan_state);
     
     /* Track peak polyphony */
-    if (UNLIKELY(ctx->num_active > ctx->peak_active)) {
+    if (SPECTRAL_UNLIKELY(ctx->num_active > ctx->peak_active)) {
         ctx->peak_active = ctx->num_active;
     }
+    spectral_perf_cache_pressure(ctx->num_active, num_samples);
     
     /* Process all active segments */
-    uint32_t _osc_start = get_cycles();
+    uint32_t osc_start = spectral_perf_oscillator_start();
     uint16_t i = 0;
     while (i < ctx->num_active) {
 #if SPECTRAL_SOA_ACTIVE
@@ -705,7 +745,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #endif
 
         /* Remove expired segments */
-        if (UNLIKELY(out_pos >= seg_end)) {
+        if (SPECTRAL_UNLIKELY(out_pos >= seg_end)) {
 #if SPECTRAL_SOA_ACTIVE
             /* SoA removal: copy last element's fields into slot i */
             uint16_t last = --ctx->num_active;
@@ -730,6 +770,8 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         /* Compute block range */
         uint32_t blk_start = (seg_start > out_pos) ? (seg_start - out_pos) : 0;
         uint32_t blk_end = (seg_end < out_end) ? (seg_end - out_pos) : num_samples;
+        uint32_t len = blk_end - blk_start;
+        spectral_perf_segment_samples(len);
 
         /* Read current state */
 #if SPECTRAL_SOA_ACTIVE
@@ -759,7 +801,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             uint32_t seg_len = seg_length;
 
             uint32_t seg_fo_start = seg_len - fade_len;
-            uint32_t blk_len = blk_end - blk_start;
+            uint32_t blk_len = len;
 
             /* Map fade regions to block offsets */
             uint32_t fi_end = blk_start;
@@ -775,14 +817,14 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             }
 
             /* Fade-in */
-            q15_t fade_val = (q15_t)((int32_t)seg_offset * FADE_STEP_Q15);
+            q15_t fade_val = (q15_t)((int32_t)seg_offset * SPECTRAL_FADE_STEP_Q15);
             for (uint32_t j = blk_start; j < fi_end; j++) {
                 q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                 sample = spectral_mul_q15(sample, fade_val);
                 accum[j] = spectral_mac_q15(accum[j], sample, amp);
                 phase += freq_inc;
                 amp = spectral_qadd16(amp, d_amp);
-                fade_val = spectral_qadd16(fade_val, FADE_STEP_Q15);
+                fade_val = spectral_qadd16(fade_val, SPECTRAL_FADE_STEP_Q15);
             }
 
             /* Sustain - 4 samples at a time */
@@ -794,10 +836,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             SPECTRAL_UNROLL_4
             for (; j < end4; j += 4) {
                 q31_t p0, p1, p2, p3;
-                SPECTRAL_PHASES_4(phase, freq_inc, p0, p1, p2, p3);
+                spectral_phase_batch4(phase, freq_inc, &p0, &p1, &p2, &p3);
 
                 q15_t a0, a1, a2, a3;
-                SPECTRAL_AMPS_4(amp, d_amp, a0, a1, a2, a3);
+                spectral_amp_batch4(amp, d_amp, &a0, &a1, &a2, &a3);
 
                 q15_t samples[4];
                 samples[0] = spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut);
@@ -805,7 +847,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                 samples[2] = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
                 samples[3] = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
 
-                SPECTRAL_ACCUM_4(accum, j, samples, a0, a1, a2, a3);
+                spectral_accum_batch4(accum, j, samples, a0, a1, a2, a3);
 
                 phase = p3 + freq_inc;
                 amp = spectral_qadd16(a3, d_amp);
@@ -821,14 +863,14 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             if (fo_start < blk_end) {
                 uint32_t fo_seg_pos = seg_offset + (fo_start - blk_start);
                 uint32_t into_fade = fo_seg_pos - seg_fo_start;
-                fade_val = Q15_ONE - (q15_t)((int32_t)into_fade * FADE_STEP_Q15);
+                fade_val = Q15_MAX - (q15_t)((int32_t)into_fade * SPECTRAL_FADE_STEP_Q15);
                 for (; j < blk_end; j++) {
                     q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                     sample = spectral_mul_q15(sample, fade_val);
                     accum[j] = spectral_mac_q15(accum[j], sample, amp);
                     phase += freq_inc;
                     amp = spectral_qadd16(amp, d_amp);
-                    fade_val = spectral_qadd16(fade_val, -FADE_STEP_Q15);
+                    fade_val = spectral_qadd16(fade_val, -SPECTRAL_FADE_STEP_Q15);
                 }
             }
         }
@@ -845,14 +887,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
         i++;
     }
-    (void)_osc_start;
-    profile_update(&s_perf_stats.oscillator, get_cycles() - _osc_start);
-    PERF_TRACK_ACTIVE(ctx->num_active);
+    spectral_perf_oscillator_end(osc_start);
+    spectral_perf_track_active(ctx->num_active);
     
     /* 
      * Convert Q31 accumulator to Q15 output with master gain
      */
-    uint32_t _amp_start = get_cycles();
+    uint32_t amp_start = spectral_perf_amplitude_start();
     spectral_q31_to_q15_scaled(accum, out_left, num_samples, master_amp);
     
     if (out_right && out_right != out_left) {
@@ -862,11 +903,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         memcpy(out_right, out_left, num_samples * sizeof(q15_t));
 #endif
     }
-        (void)_amp_start;
-    profile_update(&s_perf_stats.amplitude, get_cycles() - _amp_start);
+    spectral_perf_amplitude_end(amp_start);
     
     ctx->output_position = out_end;
-    PERF_PROCESS_END(num_samples);
+    spectral_perf_process_end(perf_start, num_samples, ctx->num_active);
     return num_samples;
 }
 
@@ -895,38 +935,8 @@ uint32_t spectral_arm32_process_interleaved(SpectralArm32Ctx* ctx,
 
 /* Restricted Mode Profiling */
 
-#if defined(SPECTRAL_RESTRICTED_MODE)
-
 /* Cycle-count profiling for optimization tuning */
-#if SPECTRAL_DEBUG_RESTRICTED
-static uint32_t s_last_cycle_count = 0;
-static uint32_t s_peak_cycle_count = 0;
-
-/* Per-function cycle tracking */
-typedef struct {
-    uint32_t total_cycles;
-    uint32_t call_count;
-    uint32_t min_cycles;
-    uint32_t max_cycles;
-} FunctionProfile;
-
-static struct {
-    FunctionProfile process;        /* spectral_arm32_process() */
-    FunctionProfile segment_scan;   /* Active segment scanning */
-    FunctionProfile oscillator;     /* LUT lookup + accumulation */
-    FunctionProfile amplitude;      /* Amplitude scaling */
-    uint32_t samples_processed;
-    uint32_t segments_active_total;
-} s_perf_stats = {0};
-
-/* Get current cycle count (Cortex-M7 DWT) */
-static inline uint32_t get_cycles(void) {
-#if defined(DWT) && defined(DWT_CYCCNT)
-    return DWT->CYCCNT;
-#else
-    return 0;
-#endif
-}
+#if SPECTRAL_RESTRICTED_PROFILE
 
 void arm32_synth_profile_start(void) {
     s_last_cycle_count = get_cycles();
@@ -945,14 +955,7 @@ uint32_t arm32_synth_get_peak_cycles(void) {
 void arm32_synth_reset_profile(void) {
     s_peak_cycle_count = 0;
     memset(&s_perf_stats, 0, sizeof(s_perf_stats));
-}
-
-/* Update function profile statistics */
-static inline void profile_update(FunctionProfile* prof, uint32_t cycles) {
-    prof->total_cycles += cycles;
-    prof->call_count++;
-    if (cycles < prof->min_cycles || prof->min_cycles == 0) prof->min_cycles = cycles;
-    if (cycles > prof->max_cycles) prof->max_cycles = cycles;
+    spectral_perf_counters_reset(&s_perf_op_counts);
 }
 
 /* TODO: DMA transfer whole struct or pack for UART/SWO */
@@ -981,23 +984,10 @@ uint32_t arm32_synth_get_samples_processed(void) {
     return s_perf_stats.samples_processed;
 }
 
-/* Hook for tracking within process function */
-#define PERF_PROCESS_START()    uint32_t _perf_start = get_cycles()
-#define PERF_PROCESS_END(n)     do { \
-    uint32_t _elapsed = get_cycles() - _perf_start; \
-    profile_update(&s_perf_stats.process, _elapsed); \
-    s_perf_stats.samples_processed += (n); \
-} while(0)
-#define PERF_TRACK_ACTIVE(n)    s_perf_stats.segments_active_total += (n)
-
-#else /* !SPECTRAL_DEBUG_RESTRICTED */
-
-#define PERF_PROCESS_START()
-#define PERF_PROCESS_END(n)
-#define PERF_TRACK_ACTIVE(n)
-
-#endif /* SPECTRAL_DEBUG_RESTRICTED */
-
-#endif /* SPECTRAL_RESTRICTED_MODE */
+void arm32_synth_get_op_counts(SpectralPerfCounters* out) {
+    if (!out) return;
+    *out = s_perf_op_counts;
+}
+#endif /* SPECTRAL_RESTRICTED_PROFILE */
 
 #endif /* SPECTRAL_EMBEDDED */

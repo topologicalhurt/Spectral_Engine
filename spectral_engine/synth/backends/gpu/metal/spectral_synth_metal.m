@@ -53,6 +53,30 @@ static const char* metalKernelCode =
 "#define THREADS_PER_TILE " SPECTRAL_STR(SPECTRAL_GPU_TILE_SIZE) "\n"
 "#define SEGMENT_CACHE_SIZE " SPECTRAL_STR(SPECTRAL_METAL_SEG_CACHE_SIZE) "\n"
 "\n"
+"/* Backend parity note:\n"
+" * MSL source is compiled from this runtime string, so it cannot include\n"
+" * core/spectral_segment_math.h directly.  Keep these helpers in lockstep\n"
+" * with spectral_segment_{alpha,beta,d_amp,phase_at,amp_at}_f32 formulas.\n"
+" *\n"
+" * WARNING: any change to spectral_segment_math.h MUST be mirrored here.\n"
+" * CUDA includes the header directly; Metal cannot.  If formulas drift,\n"
+" * Metal output will silently differ from CPU/CUDA. */\n"
+"inline float segment_alpha(float omega, float pitch_factor, float inv_stretch) {\n"
+"    return omega * pitch_factor * inv_stretch;\n"
+"}\n"
+"inline float segment_beta(float df, float pitch_factor, float inv_stretch_sq) {\n"
+"    return df * pitch_factor * inv_stretch_sq;\n"
+"}\n"
+"inline float segment_d_amp(float da, float inv_stretch) {\n"
+"    return da * inv_stretch;\n"
+"}\n"
+"inline float segment_phase_at(float phase0, float alpha, float beta, float sample_offset) {\n"
+"    return phase0 + sample_offset * (alpha + beta * sample_offset);\n"
+"}\n"
+"inline float segment_amp_at(float amp0, float d_amp, float sample_offset) {\n"
+"    return amp0 + d_amp * sample_offset;\n"
+"}\n"
+" \n"
 "kernel void synthesize_tile_parallel(\n"
 "    device const Segment* segments [[buffer(0)]],\n"
 "    device const uint* tile_segment_ids [[buffer(1)]],\n"
@@ -91,13 +115,13 @@ static const char* metalKernelCode =
 "                if (sample_pos < seg_start || sample_pos >= seg_end) continue;\n"
 "                \n"
 "                float j = sample_pos - seg_start;\n"
-"                float alpha = seg.omega * params.pitch_factor * params.inv_stretch;\n"
-"                float beta = seg.df * params.pitch_factor * params.inv_stretch_sq;\n"
-"                float d_a = seg.da * params.inv_stretch;\n"
+"                float alpha = segment_alpha(seg.omega, params.pitch_factor, params.inv_stretch);\n"
+"                float beta = segment_beta(seg.df, params.pitch_factor, params.inv_stretch_sq);\n"
+"                float d_a = segment_d_amp(seg.da, params.inv_stretch);\n"
 "                \n"
 "                float seg_len = seg.length * params.stretch;\n"
-"                float p = seg.phase + j * (alpha + beta * j);\n"
-"                sum += (seg.amp + d_a * j) * fade_envelope(j, seg_len) * oscillator(p, timbre);\n"
+"                float p = segment_phase_at(seg.phase, alpha, beta, j);\n"
+"                sum += segment_amp_at(seg.amp, d_a, j) * fade_envelope(j, seg_len) * oscillator(p, timbre);\n"
 "            }\n"
 "        }\n"
 "        \n"
@@ -122,6 +146,25 @@ typedef struct {
 } MetalBufferCache;
 
 static MetalBufferCache g_mtl;
+
+static int metal_grow_buffer(id<MTLDevice> device,
+                             __strong id<MTLBuffer>* buffer,
+                             size_t* capacity,
+                             size_t required_size) {
+    size_t next_capacity = 0;
+
+    if (!device || !buffer || !capacity) return 0;
+    if (*capacity >= required_size) return 1;
+    if (!spectral_next_capacity_3_over_2(required_size, &next_capacity)) return 0;
+
+    *buffer = nil;
+    *capacity = 0;
+    *buffer = [device newBufferWithLength:next_capacity
+                                  options:MTLResourceStorageModeShared];
+    if (!*buffer) return 0;
+    *capacity = next_capacity;
+    return 1;
+}
 
 void metal_init(void) {
     if (metalInitialized) return;
@@ -178,20 +221,35 @@ int metal_available(void) {
 SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
                           float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
     @autoreleasepool {
+        size_t output_size = 0;
+
         /* Shared preflight: validate + params + timing */
         SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
         if (!pf.ok) return SPECTRAL_OK;
+        if (!spectral_array_bytes(out_len, sizeof(float), &output_size)) {
+            *t_synth = 0;
+            return SPECTRAL_ERR_OVERFLOW;
+        }
 
         /* Check timbre support - fall back to CPU for unsupported timbres */
-        if (!gpu_check_timbre_or_fallback("Metal", sa, out_buffer, out_len, stretch, pitch, timbre, t_synth)) {
-            return SPECTRAL_OK;
+        {
+            int continue_backend = 1;
+            SpectralError gate_err = gpu_check_timbre_or_fallback(
+                "Metal", sa, out_buffer, out_len, stretch, pitch, timbre,
+                omp_get_max_threads(), t_synth, &continue_backend);
+            if (gate_err != SPECTRAL_OK) {
+                return gate_err;
+            }
+            if (!continue_backend) {
+                return SPECTRAL_OK;
+            }
         }
 
         GpuTileData td = {0};
         SpectralError tile_err = gpu_tile_preprocess(
             sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len, &td);
         if (tile_err != SPECTRAL_OK) {
-            memset(out_buffer, 0, out_len * sizeof(float));
+            memset(out_buffer, 0, output_size);
             *t_synth = 0;
             return tile_err;
         }
@@ -202,43 +260,34 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         
         GpuSynthParams params = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
         
-        size_t segment_buf_size = sa.count * sizeof(Segment);
-        size_t tile_ids_size = td.total_refs * sizeof(uint32_t);
-        size_t tile_ranges_size = td.num_tiles * sizeof(TileRange);
-        size_t output_size = out_len * sizeof(float);
+        size_t segment_buf_size = 0;
+        size_t tile_ids_size = 0;
+        size_t tile_ranges_size = 0;
+        if (!spectral_array_bytes((size_t)sa.count, sizeof(Segment), &segment_buf_size) ||
+            !spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
+            !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {
+            gpu_tile_data_free(&td);
+            memset(out_buffer, 0, output_size);
+            *t_synth = 0;
+            return SPECTRAL_ERR_OVERFLOW;
+        }
 
         SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile",
                 sa.count, td.num_tiles, avg_segs);
 
-        /* Reuse cached buffers when capacity suffices; grow with 1.5x headroom */
-        if (g_mtl.segCap < segment_buf_size) {
-            g_mtl.segBuf = nil;
-            g_mtl.segCap = segment_buf_size + segment_buf_size / 2;
-            g_mtl.segBuf = [metalDevice newBufferWithLength:g_mtl.segCap
-                                                   options:MTLResourceStorageModeShared];
-        }
-        if (g_mtl.tileIdsCap < tile_ids_size) {
-            g_mtl.tileIdsBuf = nil;
-            g_mtl.tileIdsCap = tile_ids_size + tile_ids_size / 2;
-            g_mtl.tileIdsBuf = [metalDevice newBufferWithLength:g_mtl.tileIdsCap
-                                                       options:MTLResourceStorageModeShared];
-        }
-        if (g_mtl.tileRangesCap < tile_ranges_size) {
-            g_mtl.tileRangesBuf = nil;
-            g_mtl.tileRangesCap = tile_ranges_size + tile_ranges_size / 2;
-            g_mtl.tileRangesBuf = [metalDevice newBufferWithLength:g_mtl.tileRangesCap
-                                                           options:MTLResourceStorageModeShared];
-        }
-        if (g_mtl.outputCap < output_size) {
-            g_mtl.outputBuf = nil;
-            g_mtl.outputCap = output_size + output_size / 2;
-            g_mtl.outputBuf = [metalDevice newBufferWithLength:g_mtl.outputCap
-                                                      options:MTLResourceStorageModeShared];
+        if (!metal_grow_buffer(metalDevice, &g_mtl.segBuf, &g_mtl.segCap, segment_buf_size) ||
+            !metal_grow_buffer(metalDevice, &g_mtl.tileIdsBuf, &g_mtl.tileIdsCap, tile_ids_size) ||
+            !metal_grow_buffer(metalDevice, &g_mtl.tileRangesBuf, &g_mtl.tileRangesCap, tile_ranges_size) ||
+            !metal_grow_buffer(metalDevice, &g_mtl.outputBuf, &g_mtl.outputCap, output_size)) {
+            gpu_tile_data_free(&td);
+            memset(out_buffer, 0, output_size);
+            *t_synth = 0;
+            return SPECTRAL_ERR_MEMORY;
         }
 
         if (!g_mtl.segBuf || !g_mtl.tileIdsBuf || !g_mtl.tileRangesBuf || !g_mtl.outputBuf) {
             gpu_tile_data_free(&td);
-            memset(out_buffer, 0, out_len * sizeof(float));
+            memset(out_buffer, 0, output_size);
             *t_synth = 0;
             return SPECTRAL_ERR_MEMORY;
         }

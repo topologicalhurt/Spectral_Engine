@@ -18,6 +18,7 @@
  */
 
 #include "spectral_debug_embedded_arm.h"
+#include "spectral_utils.h"
 
 #ifdef SPECTRAL_DEBUG_ARM
 
@@ -25,76 +26,102 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Cortex-M7 Registers */
+/* Cortex-M7 register map and bit contracts. */
+enum {
+    SPECTRAL_COREDEBUG_DEMCR_ADDR = 0xE000EDFCu,
+    SPECTRAL_DWT_CTRL_ADDR = 0xE0001000u,
+    SPECTRAL_DWT_CYCCNT_ADDR = 0xE0001004u,
+    SPECTRAL_DWT_CPICNT_ADDR = 0xE0001008u,
+    SPECTRAL_DWT_EXCCNT_ADDR = 0xE000100Cu,
+    SPECTRAL_DWT_SLEEPCNT_ADDR = 0xE0001010u,
+    SPECTRAL_DWT_LSUCNT_ADDR = 0xE0001014u,
+    SPECTRAL_DWT_FOLDCNT_ADDR = 0xE0001018u,
+    SPECTRAL_ITM_STIM_BASE_ADDR = 0xE0000000u,
+    SPECTRAL_ITM_TER_ADDR = 0xE0000E00u,
+    SPECTRAL_ITM_TCR_ADDR = 0xE0000E80u,
+    SPECTRAL_ITM_LAR_ADDR = 0xE0000FB0u
+};
 
-/* Core Debug */
-#define CoreDebug_DEMCR     (*(volatile uint32_t*)0xE000EDFC)
-#define CoreDebug_DEMCR_TRCENA_Msk  (1UL << 24)
+enum {
+    SPECTRAL_COREDEBUG_DEMCR_TRCENA_MASK = (1u << 24),
+    SPECTRAL_DWT_CTRL_CYCCNTENA_MASK = (1u << 0),
+    SPECTRAL_DWT_CTRL_CPIEVTENA_MASK = (1u << 17),
+    SPECTRAL_DWT_CTRL_EXCEVTENA_MASK = (1u << 18),
+    SPECTRAL_DWT_CTRL_SLEEPEVTENA_MASK = (1u << 19),
+    SPECTRAL_DWT_CTRL_LSUEVTENA_MASK = (1u << 20),
+    SPECTRAL_DWT_CTRL_FOLDEVTENA_MASK = (1u << 21),
+    SPECTRAL_ITM_TCR_ITMENA_MASK = (1u << 0),
+    SPECTRAL_ITM_LAR_UNLOCK_VALUE = 0xC5ACCE55u,
+    SPECTRAL_DEBUG_ITM_MAX_SPINS = 1024u
+};
 
-/* Data Watchpoint and Trace (DWT) */
-#define DWT_CTRL            (*(volatile uint32_t*)0xE0001000)
-#define DWT_CYCCNT          (*(volatile uint32_t*)0xE0001004)
-#define DWT_CPICNT          (*(volatile uint32_t*)0xE0001008)
-#define DWT_EXCCNT          (*(volatile uint32_t*)0xE000100C)
-#define DWT_SLEEPCNT        (*(volatile uint32_t*)0xE0001010)
-#define DWT_LSUCNT          (*(volatile uint32_t*)0xE0001014)
-#define DWT_FOLDCNT         (*(volatile uint32_t*)0xE0001018)
+static inline volatile uint32_t* spectral_reg_ptr(uint32_t addr) {
+    return (volatile uint32_t*)(uintptr_t)addr;
+}
 
-#define DWT_CTRL_CYCCNTENA_Msk  (1UL << 0)
-#define DWT_CTRL_CPIEVTENA_Msk  (1UL << 17)
-#define DWT_CTRL_EXCEVTENA_Msk  (1UL << 18)
-#define DWT_CTRL_SLEEPEVTENA_Msk (1UL << 19)
-#define DWT_CTRL_LSUEVTENA_Msk  (1UL << 20)
-#define DWT_CTRL_FOLDEVTENA_Msk (1UL << 21)
+static inline uint32_t spectral_reg_read(uint32_t addr) {
+    return *spectral_reg_ptr(addr);
+}
 
-/* Instrumentation Trace Macrocell (ITM) */
-#define ITM_STIM(n)         (*(volatile uint32_t*)(0xE0000000 + 4*(n)))
-#define ITM_TER             (*(volatile uint32_t*)0xE0000E00)
-#define ITM_TPR             (*(volatile uint32_t*)0xE0000E40)
-#define ITM_TCR             (*(volatile uint32_t*)0xE0000E80)
-#define ITM_LAR             (*(volatile uint32_t*)0xE0000FB0)
+static inline void spectral_reg_write(uint32_t addr, uint32_t value) {
+    *spectral_reg_ptr(addr) = value;
+}
 
-#define ITM_TCR_ITMENA_Msk  (1UL << 0)
-#define ITM_LAR_UNLOCK      0xC5ACCE55
+static inline void spectral_reg_or(uint32_t addr, uint32_t mask) {
+    *spectral_reg_ptr(addr) |= mask;
+}
 
-/* System Control Block */
-#define SCB_CCR             (*(volatile uint32_t*)0xE000ED14)
-#define SCB_CCR_IC_Msk      (1UL << 17)
-#define SCB_CCR_DC_Msk      (1UL << 16)
+static inline uint32_t spectral_itm_stim_addr(uint8_t port) {
+    return SPECTRAL_ITM_STIM_BASE_ADDR + (4u * (uint32_t)port);
+}
 
 /* Time source */
 #if defined(SPECTRAL_PLATFORM_DAISY)
-    extern uint32_t daisy_system_get_now_ms(void);
-    #define GET_MS() daisy_system_get_now_ms()
+extern uint32_t daisy_system_get_now_ms(void);
+static inline uint32_t spectral_debug_now_ms(void) {
+    return daisy_system_get_now_ms();
+}
 #else
-    #define SYSTICK_LOAD    (*(volatile uint32_t*)0xE000E014)
-    #define SYSTICK_VAL     (*(volatile uint32_t*)0xE000E018)
-    static uint32_t _debug_ms_counter = 0;
-    #define GET_MS() (_debug_ms_counter)
+static uint32_t s_debug_ms_counter = 0;
+static inline uint32_t spectral_debug_now_ms(void) {
+    return s_debug_ms_counter;
+}
 #endif
 
-/* Platform constants */
-#ifndef SPECTRAL_CPU_FREQ_HZ
-    #if defined(SPECTRAL_PLATFORM_DAISY)
-        #define SPECTRAL_CPU_FREQ_HZ    480000000
-    #else
-        #define SPECTRAL_CPU_FREQ_HZ    168000000
-    #endif
+static inline uint32_t spectral_debug_cpu_freq_hz(void) {
+#if defined(SPECTRAL_CPU_FREQ_HZ)
+    return (uint32_t)SPECTRAL_CPU_FREQ_HZ;
+#elif defined(SPECTRAL_PLATFORM_DAISY)
+    return 480000000u;
+#else
+    return 168000000u;
 #endif
+}
 
-#ifndef SPECTRAL_SDRAM_FREQ_HZ
-    #define SPECTRAL_SDRAM_FREQ_HZ  100000000
+static inline uint32_t spectral_debug_sdram_freq_hz(void) {
+#if defined(SPECTRAL_SDRAM_FREQ_HZ)
+    return (uint32_t)SPECTRAL_SDRAM_FREQ_HZ;
+#else
+    return 100000000u;
 #endif
-#ifndef SPECTRAL_SDRAM_BUS_WIDTH
-    #define SPECTRAL_SDRAM_BUS_WIDTH    32
-#endif
+}
 
-#define SDRAM_MAX_BANDWIDTH ((SPECTRAL_SDRAM_FREQ_HZ * SPECTRAL_SDRAM_BUS_WIDTH) / 8)
+static inline uint32_t spectral_debug_sdram_bus_width_bits(void) {
+#if defined(SPECTRAL_SDRAM_BUS_WIDTH)
+    return (uint32_t)SPECTRAL_SDRAM_BUS_WIDTH;
+#else
+    return 32u;
+#endif
+}
+
+static inline uint32_t spectral_debug_sdram_max_bandwidth_bytes_per_sec(void) {
+    return (spectral_debug_sdram_freq_hz() * spectral_debug_sdram_bus_width_bits()) / 8u;
+}
 
 /* Initialization */
 
 void spectral_debug_init(SpectralDebugCtx* ctx, uint32_t sample_rate, uint32_t block_size) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Clear context */
     memset(ctx, 0, sizeof(SpectralDebugCtx));
@@ -102,7 +129,7 @@ void spectral_debug_init(SpectralDebugCtx* ctx, uint32_t sample_rate, uint32_t b
     /* Calculate timing budget */
     ctx->realtime.sample_rate = sample_rate;
     ctx->realtime.block_size = block_size;
-    ctx->realtime.deadline_cycles = (SPECTRAL_CPU_FREQ_HZ / sample_rate) * block_size;
+    ctx->realtime.deadline_cycles = (spectral_debug_cpu_freq_hz() / sample_rate) * block_size;
     ctx->realtime.is_realtime = true;
     
     /* Initialize timing stats */
@@ -111,46 +138,48 @@ void spectral_debug_init(SpectralDebugCtx* ctx, uint32_t sample_rate, uint32_t b
     
     /* Memory pool sizes (platform-specific) */
 #if defined(SPECTRAL_PLATFORM_DAISY)
-    ctx->memory.sram_total = 128 * 1024;    /* 128KB SRAM */
-    ctx->memory.sdram_total = 64 * 1024 * 1024;  /* 64MB SDRAM */
-    ctx->memory.stack_total = 8 * 1024;     /* 8KB stack */
+    ctx->memory.sram_total = (uint32_t)(128u * SPECTRAL_BYTES_PER_KIB); /* 128KB SRAM */
+    ctx->memory.sdram_total = (uint32_t)(64u * SPECTRAL_BYTES_PER_MIB); /* 64MB SDRAM */
+    ctx->memory.stack_total = (uint32_t)(8u * SPECTRAL_BYTES_PER_KIB);   /* 8KB stack */
 #else
-    ctx->memory.sram_total = 64 * 1024;     /* Generic default */
+    ctx->memory.sram_total = (uint32_t)(64u * SPECTRAL_BYTES_PER_KIB);   /* Generic default */
     ctx->memory.sdram_total = 0;
-    ctx->memory.stack_total = 4 * 1024;
+    ctx->memory.stack_total = (uint32_t)(4u * SPECTRAL_BYTES_PER_KIB);
 #endif
     
     /* Enable DWT cycle counter */
-    CoreDebug_DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT_CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    spectral_reg_or(SPECTRAL_COREDEBUG_DEMCR_ADDR, SPECTRAL_COREDEBUG_DEMCR_TRCENA_MASK);
+    spectral_reg_or(SPECTRAL_DWT_CTRL_ADDR, SPECTRAL_DWT_CTRL_CYCCNTENA_MASK);
     
     /* Enable DWT performance counters */
-    DWT_CTRL |= DWT_CTRL_CPIEVTENA_Msk |
-                DWT_CTRL_EXCEVTENA_Msk |
-                DWT_CTRL_SLEEPEVTENA_Msk |
-                DWT_CTRL_LSUEVTENA_Msk |
-                DWT_CTRL_FOLDEVTENA_Msk;
+    spectral_reg_or(SPECTRAL_DWT_CTRL_ADDR,
+                    SPECTRAL_DWT_CTRL_CPIEVTENA_MASK |
+                    SPECTRAL_DWT_CTRL_EXCEVTENA_MASK |
+                    SPECTRAL_DWT_CTRL_SLEEPEVTENA_MASK |
+                    SPECTRAL_DWT_CTRL_LSUEVTENA_MASK |
+                    SPECTRAL_DWT_CTRL_FOLDEVTENA_MASK);
     
     /* Enable ITM */
-    ITM_LAR = ITM_LAR_UNLOCK;
-    ITM_TCR |= ITM_TCR_ITMENA_Msk;
-    ITM_TER |= (1UL << ITM_PORT_TIMING) |
-               (1UL << ITM_PORT_MEMORY) |
-               (1UL << ITM_PORT_CACHE) |
-               (1UL << ITM_PORT_SDRAM) |
-               (1UL << ITM_PORT_SDCARD) |
-               (1UL << ITM_PORT_REALTIME) |
-               (1UL << ITM_PORT_PRINTF);
+    spectral_reg_write(SPECTRAL_ITM_LAR_ADDR, SPECTRAL_ITM_LAR_UNLOCK_VALUE);
+    spectral_reg_or(SPECTRAL_ITM_TCR_ADDR, SPECTRAL_ITM_TCR_ITMENA_MASK);
+    spectral_reg_or(SPECTRAL_ITM_TER_ADDR,
+                    (1u << ITM_PORT_TIMING) |
+                    (1u << ITM_PORT_MEMORY) |
+                    (1u << ITM_PORT_CACHE) |
+                    (1u << ITM_PORT_SDRAM) |
+                    (1u << ITM_PORT_SDCARD) |
+                    (1u << ITM_PORT_REALTIME) |
+                    (1u << ITM_PORT_PRINTF));
     
     ctx->initialized = true;
-    ctx->last_update_ms = GET_MS();
+    ctx->last_update_ms = spectral_debug_now_ms();
     
     spectral_debug_printf("Spectral Debug: initialized @ %lu Hz, %lu samples\n",
                           (unsigned long)sample_rate, (unsigned long)block_size);
 }
 
 void spectral_debug_deinit(SpectralDebugCtx* ctx) {
-    if (!ctx || !ctx->initialized) return;
+    SPECTRAL_RETURN_IF(!ctx || !ctx->initialized);
     
     spectral_debug_printf("Spectral Debug: shutdown\n");
     spectral_debug_printf("  Peak cycles: %lu\n", (unsigned long)ctx->timing.cycles_peak);
@@ -160,10 +189,7 @@ void spectral_debug_deinit(SpectralDebugCtx* ctx) {
 }
 
 void spectral_debug_reset(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
-    
-    uint32_t sample_rate = ctx->realtime.sample_rate;
-    uint32_t block_size = ctx->realtime.block_size;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Preserve settings, reset statistics */
     memset(&ctx->timing, 0, sizeof(ctx->timing));
@@ -178,12 +204,12 @@ void spectral_debug_reset(SpectralDebugCtx* ctx) {
     ctx->realtime.is_realtime = true;
     
     /* Reset DWT counters */
-    DWT_CYCCNT = 0;
-    DWT_CPICNT = 0;
-    DWT_EXCCNT = 0;
-    DWT_SLEEPCNT = 0;
-    DWT_LSUCNT = 0;
-    DWT_FOLDCNT = 0;
+    spectral_reg_write(SPECTRAL_DWT_CYCCNT_ADDR, 0);
+    spectral_reg_write(SPECTRAL_DWT_CPICNT_ADDR, 0);
+    spectral_reg_write(SPECTRAL_DWT_EXCCNT_ADDR, 0);
+    spectral_reg_write(SPECTRAL_DWT_SLEEPCNT_ADDR, 0);
+    spectral_reg_write(SPECTRAL_DWT_LSUCNT_ADDR, 0);
+    spectral_reg_write(SPECTRAL_DWT_FOLDCNT_ADDR, 0);
     
     spectral_debug_printf("Spectral Debug: reset\n");
 }
@@ -191,14 +217,14 @@ void spectral_debug_reset(SpectralDebugCtx* ctx) {
 /* Timing Measurement */
 
 void spectral_debug_timing_start(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
-    ctx->dwt_start = DWT_CYCCNT;
+    SPECTRAL_RETURN_IF(!ctx);
+    ctx->dwt_start = spectral_reg_read(SPECTRAL_DWT_CYCCNT_ADDR);
 }
 
 uint32_t spectral_debug_timing_end(SpectralDebugCtx* ctx) {
-    if (!ctx) return 0;
+    SPECTRAL_RETURN_VAL_IF(!ctx, 0);
     
-    uint32_t end = DWT_CYCCNT;
+    uint32_t end = spectral_reg_read(SPECTRAL_DWT_CYCCNT_ADDR);
     uint32_t elapsed = end - ctx->dwt_start;
     
     /* Update timing stats */
@@ -227,19 +253,19 @@ uint32_t spectral_debug_timing_end(SpectralDebugCtx* ctx) {
 }
 
 bool spectral_debug_is_realtime(const SpectralDebugCtx* ctx) {
-    if (!ctx) return true;
+    SPECTRAL_RETURN_VAL_IF(!ctx, true);
     return ctx->realtime.is_realtime;
 }
 
 float spectral_debug_cpu_load(const SpectralDebugCtx* ctx) {
-    if (!ctx) return 0.0f;
+    SPECTRAL_RETURN_VAL_IF(!ctx, 0.0f);
     return ctx->realtime.cpu_load_percent;
 }
 
 /* Memory Tracking */
 
 void spectral_debug_update_memory(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Update peak values */
     if (ctx->memory.sram_used > ctx->memory.sram_peak) {
@@ -254,31 +280,31 @@ void spectral_debug_update_memory(SpectralDebugCtx* ctx) {
 }
 
 void spectral_debug_sdram_alloc(SpectralDebugCtx* ctx, uint32_t bytes) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->memory.sdram_used += bytes;
 }
 
 void spectral_debug_sdram_free(SpectralDebugCtx* ctx, uint32_t bytes) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     if (bytes <= ctx->memory.sdram_used) {
         ctx->memory.sdram_used -= bytes;
     }
 }
 
 void spectral_debug_sram_alloc(SpectralDebugCtx* ctx, uint32_t bytes) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->memory.sram_used += bytes;
 }
 
 void spectral_debug_sram_free(SpectralDebugCtx* ctx, uint32_t bytes) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     if (bytes <= ctx->memory.sram_used) {
         ctx->memory.sram_used -= bytes;
     }
 }
 
 void spectral_debug_update_stack(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Get current stack pointer */
     register uint32_t sp __asm("sp");
@@ -301,7 +327,7 @@ void spectral_debug_update_stack(SpectralDebugCtx* ctx) {
 /* Cache Monitoring */
 
 void spectral_debug_update_cache(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Note: STM32H7 doesn't have cache performance counters in DWT.
      * This would require custom instrumentation or external logic analyzer.
@@ -320,7 +346,7 @@ void spectral_debug_update_cache(SpectralDebugCtx* ctx) {
 }
 
 void spectral_debug_cache_invalidate(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Reset counters */
     ctx->cache.icache_hits = 0;
@@ -339,7 +365,7 @@ void spectral_debug_cache_invalidate(SpectralDebugCtx* ctx) {
 /* SDRAM Bandwidth */
 
 void spectral_debug_sdram_start(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     ctx->sdram.bytes_read = 0;
     ctx->sdram.bytes_written = 0;
@@ -348,31 +374,33 @@ void spectral_debug_sdram_start(SpectralDebugCtx* ctx) {
 }
 
 void spectral_debug_sdram_read(SpectralDebugCtx* ctx, uint32_t bytes) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->sdram.bytes_read += bytes;
 }
 
 void spectral_debug_sdram_write(SpectralDebugCtx* ctx, uint32_t bytes) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->sdram.bytes_written += bytes;
 }
 
 void spectral_debug_sdram_update(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
-    uint32_t now = GET_MS();
+    uint32_t now = spectral_debug_now_ms();
     uint32_t elapsed_ms = now - ctx->last_update_ms;
     
     if (elapsed_ms < 100) return;  /* Update at most 10 Hz */
     
     /* Calculate bandwidth (MB/s) */
-    float elapsed_sec = elapsed_ms / 1000.0f;
-    ctx->sdram.read_bandwidth_mbps = (ctx->sdram.bytes_read / (1024.0f * 1024.0f)) / elapsed_sec;
-    ctx->sdram.write_bandwidth_mbps = (ctx->sdram.bytes_written / (1024.0f * 1024.0f)) / elapsed_sec;
+    float elapsed_sec = elapsed_ms / SPECTRAL_MILLIS_PER_SECOND_F;
+    ctx->sdram.read_bandwidth_mbps = (float)(BYTES_TO_MB(ctx->sdram.bytes_read) / elapsed_sec);
+    ctx->sdram.write_bandwidth_mbps = (float)(BYTES_TO_MB(ctx->sdram.bytes_written) / elapsed_sec);
     
     /* Calculate utilization */
     uint32_t total_bytes = ctx->sdram.bytes_read + ctx->sdram.bytes_written;
-    float max_bytes_per_interval = (SDRAM_MAX_BANDWIDTH / 1000.0f) * elapsed_ms;
+    float max_bytes_per_interval =
+        (spectral_debug_sdram_max_bandwidth_bytes_per_sec() / SPECTRAL_MILLIS_PER_SECOND_F) *
+        elapsed_ms;
     ctx->sdram.utilization_percent = (100.0f * total_bytes) / max_bytes_per_interval;
     
     /* Reset for next interval */
@@ -384,7 +412,7 @@ void spectral_debug_sdram_update(SpectralDebugCtx* ctx) {
 /* SD Card I/O */
 
 void spectral_debug_sdcard_read(SpectralDebugCtx* ctx, uint32_t sectors, uint32_t latency_us) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     ctx->sdcard.sectors_read += sectors;
     
@@ -397,7 +425,7 @@ void spectral_debug_sdcard_read(SpectralDebugCtx* ctx, uint32_t sectors, uint32_
 }
 
 void spectral_debug_sdcard_write(SpectralDebugCtx* ctx, uint32_t sectors, uint32_t latency_us) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     ctx->sdcard.sectors_written += sectors;
     
@@ -410,19 +438,19 @@ void spectral_debug_sdcard_write(SpectralDebugCtx* ctx, uint32_t sectors, uint32
 }
 
 void spectral_debug_sdcard_error(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->sdcard.errors++;
 }
 
 void spectral_debug_sdcard_detect(SpectralDebugCtx* ctx, bool present) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->sdcard.card_present = present;
 }
 
 /* Real-time Monitoring */
 
 void spectral_debug_block_complete(SpectralDebugCtx* ctx, uint32_t cycles) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     ctx->realtime.actual_cycles = cycles;
     ctx->realtime.slack_cycles = (int32_t)ctx->realtime.deadline_cycles - (int32_t)cycles;
@@ -444,23 +472,30 @@ void spectral_debug_block_complete(SpectralDebugCtx* ctx, uint32_t cycles) {
 }
 
 void spectral_debug_xrun(SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     ctx->realtime.xruns++;
     ctx->realtime.is_realtime = false;
 }
 
 float spectral_debug_headroom(const SpectralDebugCtx* ctx) {
-    if (!ctx) return 100.0f;
+    SPECTRAL_RETURN_VAL_IF(!ctx, 100.0f);
     return ctx->realtime.headroom_percent;
 }
 
 /* ITM Output */
 
+static inline int itm_wait_ready(uint8_t port) {
+    uint32_t stim_addr = spectral_itm_stim_addr(port);
+    for (uint32_t spins = 0; spins < SPECTRAL_DEBUG_ITM_MAX_SPINS; spins++) {
+        if (spectral_reg_read(stim_addr) & 1u) return 1;
+    }
+    return 0;
+}
+
 static inline void itm_send_u32(uint8_t port, uint32_t value) {
-    if (ITM_TER & (1UL << port)) {
-        /* Wait for FIFO ready */
-        while ((ITM_STIM(port) & 1) == 0);
-        ITM_STIM(port) = value;
+    if (spectral_reg_read(SPECTRAL_ITM_TER_ADDR) & (1u << port)) {
+        if (!itm_wait_ready(port)) return;
+        spectral_reg_write(spectral_itm_stim_addr(port), value);
     }
 }
 
@@ -469,7 +504,7 @@ void spectral_debug_itm_u32(uint8_t port, uint32_t value) {
 }
 
 void spectral_debug_itm_report(const SpectralDebugCtx* ctx) {
-    if (!ctx) return;
+    SPECTRAL_RETURN_IF(!ctx);
     
     /* Send timing */
     itm_send_u32(ITM_PORT_TIMING, ctx->timing.cycles_avg);
@@ -500,9 +535,9 @@ void spectral_debug_printf(const char* fmt, ...) {
     
     /* Send character-by-character to ITM port 31 */
     for (int i = 0; i < len && i < (int)sizeof(buf); i++) {
-        if (ITM_TER & (1UL << ITM_PORT_PRINTF)) {
-            while ((ITM_STIM(ITM_PORT_PRINTF) & 1) == 0);
-            ITM_STIM(ITM_PORT_PRINTF) = (uint8_t)buf[i];
+        if (spectral_reg_read(SPECTRAL_ITM_TER_ADDR) & (1u << ITM_PORT_PRINTF)) {
+            if (!itm_wait_ready(ITM_PORT_PRINTF)) break;
+            spectral_reg_write(spectral_itm_stim_addr(ITM_PORT_PRINTF), (uint8_t)buf[i]);
         }
     }
 }

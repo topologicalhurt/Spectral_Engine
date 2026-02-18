@@ -3,9 +3,15 @@
 #define SPECTRAL_SYNTH_H
 
 #include "spectral_common.h"
-#include "spectral_config.h"
-#include "spectral_wavetable.h"
-#include "spectral_backend.h"
+#include "spectral_error.h"
+
+/* Forward declaration keeps this public API header lightweight.
+ * Include spectral_wavetable.h in implementation code that needs full layout. */
+typedef struct SpectralWavetableBank SpectralWavetableBank;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #if defined(SPECTRAL_USE_EMBEDDED_SYNTH)
 #include "spectral_synth_arm32.h"
@@ -53,5 +59,9 @@ SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out
                                          float stretch, float pitch,
                                          const SpectralWavetableBank* bank, SpectralTimbre timbre,
                                          int n_threads, double* t_synth);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

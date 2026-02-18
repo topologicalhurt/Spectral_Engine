@@ -24,25 +24,9 @@ extern "C" {
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "spectral_config.h"
 
 /* Configuration */
-
-/* LED timing (ms) for embedded status indicators */
-#ifndef SPECTRAL_ERROR_BLINK_ON_MS
-#define SPECTRAL_ERROR_BLINK_ON_MS      100
-#endif
-#ifndef SPECTRAL_ERROR_BLINK_OFF_MS
-#define SPECTRAL_ERROR_BLINK_OFF_MS     100
-#endif
-#ifndef SPECTRAL_ERROR_BLINK_PAUSE_MS
-#define SPECTRAL_ERROR_BLINK_PAUSE_MS   500
-#endif
-#ifndef SPECTRAL_LED_BLINK_PLAYING_MS
-#define SPECTRAL_LED_BLINK_PLAYING_MS   250
-#endif
-#ifndef SPECTRAL_LED_BLINK_DONE_MS
-#define SPECTRAL_LED_BLINK_DONE_MS      100
-#endif
 
 /* Enable debug monitoring on ARM targets when DEBUG is set */
 #if defined(SPECTRAL_DEBUG_RESTRICTED) || defined(SPECTRAL_DEBUG)
