@@ -8,6 +8,8 @@
 #include "spectral_config.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
+#include "spectral_fast_math.h"
+#include "spectral_osc_formulas.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +22,7 @@ void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -52,7 +54,7 @@ void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -84,7 +86,7 @@ void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -103,7 +105,7 @@ void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -137,7 +139,7 @@ void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -179,22 +181,41 @@ int osc_simd_available(SpectralTimbre timbre) {
 
 /* SIMDe SSE path: macOS ARM -> NEON, Linux x86 -> native SSE */
 
+static inline simde__m128 simde_floor_ps_portable(simde__m128 x) {
+#if defined(SIMDE_X86_SSE4_1_NATIVE) || defined(SIMDE_X86_SSE4_1_NO_NATIVE)
+    return simde_mm_floor_ps(x);
+#else
+    simde_float32 lanes[4];
+    simde_mm_storeu_ps(lanes, x);
+    lanes[0] = floorf(lanes[0]);
+    lanes[1] = floorf(lanes[1]);
+    lanes[2] = floorf(lanes[2]);
+    lanes[3] = floorf(lanes[3]);
+    return simde_mm_loadu_ps(lanes);
+#endif
+}
+
+/* Canonical SIMD phase normalization:
+ * mirrors spectral_normalize_phase() in spectral_osc_formulas.h exactly. */
+static inline simde__m128 simde_normalize_phase_ps(simde__m128 phase) {
+    const simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
+    const simde__m128 v_2pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
+    const simde__m128 v_half = simde_mm_set1_ps(0.5f);
+    simde__m128 norm = simde_mm_mul_ps(phase, v_inv_2pi);
+    simde__m128 floored = simde_floor_ps_portable(norm);
+    return simde_mm_mul_ps(v_2pi, simde_mm_sub_ps(simde_mm_sub_ps(norm, floored), v_half));
+}
+
 /* Vectorized Padé [5/4] sine approximation — matches fast_sin() but 4-wide */
 static inline simde__m128 simde_fast_sin_ps(simde__m128 x) {
-    /* Range reduce to [-pi, pi] */
-    simde__m128 inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-    simde__m128 two_pi  = simde_mm_set1_ps(SPECTRAL_TWO_PI);
-    simde__m128 half    = simde_mm_set1_ps(0.5f);
+    const simde__m128 inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
+    const simde__m128 two_pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
+    const simde__m128 half = simde_mm_set1_ps(0.5f);
 
-    /* x = x - 2pi * floor(x * inv_2pi + 0.5) */
-    simde__m128 n = simde_mm_add_ps(simde_mm_mul_ps(x, inv_2pi), half);
-    /* Floor via truncation toward zero then adjust */
-    n = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(n));
-    /* Handle negative: floor(x) for negative needs adjustment */
-    simde__m128 correction = simde_mm_and_ps(
-        simde_mm_cmpgt_ps(simde_mm_mul_ps(n, two_pi), simde_mm_add_ps(x, simde_mm_mul_ps(half, two_pi))),
-        simde_mm_set1_ps(1.0f));
-    n = simde_mm_sub_ps(n, correction);
+    /* Canonical range reduction:
+     * x = x - 2pi * floor(x * inv_2pi + 0.5) */
+    simde__m128 n = simde_floor_ps_portable(
+        simde_mm_add_ps(simde_mm_mul_ps(x, inv_2pi), half));
     x = simde_mm_sub_ps(x, simde_mm_mul_ps(n, two_pi));
 
     /* Padé [5/4]: num = x * (1 - x2*(0.16605 - x2*0.00761))
@@ -219,33 +240,31 @@ typedef simde__m128 (*WaveformFn4)(simde__m128 phase, const void* ctx);
 
 static inline float wave_saw_1(float rads, const void* ctx) {
     (void)ctx;
-    return rads * -SPECTRAL_INV_PI;
+    return spectral_osc_saw(rads, 0.0f);
 }
 static inline float wave_square_1(float rads, const void* ctx) {
     (void)ctx;
-    return rads > 0.0f ? 1.0f : -1.0f;
+    return spectral_osc_square(rads, 0.0f);
 }
 static inline float wave_triangle_1(float rads, const void* ctx) {
     (void)ctx;
-    return 1.0f - fabsf(rads * SPECTRAL_INV_PI) * 2.0f;
+    return spectral_osc_triangle(rads, 0.0f);
 }
 static inline float wave_parabola_1(float rads, const void* ctx) {
     (void)ctx;
-    return 1.0f - rads * rads * SPECTRAL_INV_PI_SQ;
+    return spectral_osc_parabola(rads, 0.0f);
 }
 static inline float wave_sine_1(float rads, const void* ctx) {
     (void)ctx;
-    return fast_sin(rads);
+    return spectral_osc_sine(rads, 0.0f);
 }
 static inline float wave_quantized_1(float rads, const void* ctx) {
     float width = *(const float*)ctx;
-    if (width <= 0.0f) return 0.0f;
-    return (float)(int)(rads * width) * (1.0f / width);
+    return spectral_osc_quantized(rads, width);
 }
 static inline float wave_pwm_1(float rads, const void* ctx) {
     float width = *(const float*)ctx;
-    if (width <= 0.0f) return 1.0f;
-    return ((rads + SPECTRAL_PI) * SPECTRAL_INV_TWO_PI < width) ? 1.0f : -1.0f;
+    return spectral_osc_pwm(rads, width);
 }
 
 static inline simde__m128 wave_saw_4(simde__m128 rads, const void* ctx) {
@@ -317,7 +336,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -336,10 +355,6 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
 
     /* Sustain region: fused vectorized path (no temp buffers) */
     {
-        const simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-        const simde__m128 v_2pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
-        const simde__m128 v_half = simde_mm_set1_ps(0.5f);
-        const simde__m128 v_one = simde_mm_set1_ps(1.0f);
         const simde__m128 v_alpha = simde_mm_set1_ps(alpha);
         const simde__m128 v_beta = simde_mm_set1_ps(beta);
         const simde__m128 v_phase0 = simde_mm_set1_ps(phase0);
@@ -357,15 +372,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
             simde__m128 ab = simde_mm_add_ps(v_alpha, bj);
             simde__m128 raw = simde_mm_add_ps(v_phase0, simde_mm_mul_ps(v_j, ab));
 
-            /* spectral_normalize_phase: rads = 2pi * (norm - floor(norm) - 0.5)
-             * Must match spectral_osc_formulas.h */
-            simde__m128 norm = simde_mm_mul_ps(raw, v_inv_2pi);
-            simde__m128 floored = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(norm));
-            simde__m128 corr = simde_mm_and_ps(
-                simde_mm_cmpgt_ps(floored, norm), v_one);
-            floored = simde_mm_sub_ps(floored, corr);
-            simde__m128 rads = simde_mm_mul_ps(v_2pi,
-                simde_mm_sub_ps(simde_mm_sub_ps(norm, floored), v_half));
+            simde__m128 rads = simde_normalize_phase_ps(raw);
 
             /* Waveform + amplitude + accumulate */
             simde__m128 wave = wave_fn4(rads, ctx);

@@ -1,6 +1,6 @@
 #include "spectral_envelope.h"
-#include "spectral_common.h"
-#include "oscillator.h"
+#include "spectral_consts.h"
+#include "spectral_fast_math.h"
 #include <assert.h>
 
 FadeParams fade_params_init(size_t segment_len, size_t max_fade) {

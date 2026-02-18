@@ -7,8 +7,8 @@
  *   - Fade envelope (Hann-window ramp)
  *
  * CPU and CUDA backends include this header directly.
- * Metal MSL backend must match these formulas exactly (see METAL_CONST_* macros
- * for injecting constants via SPECTRAL_STR()).
+ * Metal MSL backend must match these formulas exactly; constants are injected
+ * with SPECTRAL_STR(...) in oscillator.c.
  *
  * IMPORTANT: Any formula change here MUST be mirrored in the Metal shader string
  * in oscillator.c. Run `make parity-test` to verify cross-backend consistency.
@@ -25,17 +25,6 @@
 #else
 #define OSC_FORMULA_FUNC static inline
 #endif
-
-/* Metal constant macros for injecting C constants into MSL shader strings.
- * Usage: "float x = " METAL_CONST_TWO_PI "\n" */
-#define METAL_CONST_TWO_PI       SPECTRAL_STR(SPECTRAL_TWO_PI)
-#define METAL_CONST_INV_TWO_PI   SPECTRAL_STR(SPECTRAL_INV_TWO_PI)
-#define METAL_CONST_INV_PI       SPECTRAL_STR(SPECTRAL_INV_PI)
-#define METAL_CONST_INV_PI_SQ    SPECTRAL_STR(SPECTRAL_INV_PI_SQ)
-#define METAL_CONST_PI           SPECTRAL_STR(SPECTRAL_PI)
-#define METAL_CONST_PADE_C1      SPECTRAL_STR(SPECTRAL_PADE_SIN_C1)
-#define METAL_CONST_PADE_C2      SPECTRAL_STR(SPECTRAL_PADE_SIN_C2)
-#define METAL_CONST_PADE_C3      SPECTRAL_STR(SPECTRAL_PADE_SIN_C3)
 
 /* Phase normalization (canonical formula; all backends must match).
  * Maps arbitrary phase to [-pi, pi):

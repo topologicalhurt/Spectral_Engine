@@ -2,6 +2,7 @@
 #define OSCILLATOR_DISPATCH_H
 
 #include <stdint.h>
+#include "spectral_config.h"
 
 /* SIMD backend: CMSIS on ARM embedded, SIMDe SSE on desktop (maps to NEON/SSE/scalar) */
 #if defined(ARM_MATH_CM4) || defined(ARM_MATH_CM7) || defined(ARM_MATH_ARMV8MML)
@@ -16,8 +17,9 @@
     #endif
 #endif
 
-/* Forward declaration - full definition in spectral_config.h */
-typedef enum SpectralTimbre SpectralTimbre;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Dispatch mode: 2 bits per timbre */
 typedef enum {
@@ -82,5 +84,9 @@ int osc_simd_available(SpectralTimbre timbre);
 /* Native backend availability */
 int osc_native_available(void);
 void osc_set_native_available(int available);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* OSCILLATOR_DISPATCH_H */

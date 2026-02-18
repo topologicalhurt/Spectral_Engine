@@ -3,6 +3,7 @@
 #include "oscillator_dispatch.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
+#include "spectral_fast_math.h"
 #include "spectral_osc_formulas.h"
 #include "spectral_utils.h"
 #include <math.h>
@@ -60,7 +61,7 @@ static void synth_segment_scalar(
         float p = compute_phase(phase0, alpha, beta, j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = (amp0 + d_amp * (float)j) * fade_envelope_in(j, fp->inv_fade);
+        float amp = compute_amplitude(amp0, d_amp, j) * fade_envelope_in(j, fp->inv_fade);
         dst[j] += amp * wave;
     }
 
@@ -69,7 +70,7 @@ static void synth_segment_scalar(
         float p = compute_phase(phase0, alpha, beta, j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = amp0 + d_amp * (float)j;
+        float amp = compute_amplitude(amp0, d_amp, j);
         dst[j] += amp * wave;
     }
 
@@ -78,27 +79,41 @@ static void synth_segment_scalar(
         float p = compute_phase(phase0, alpha, beta, j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = (amp0 + d_amp * (float)j) * fade_envelope_out(j, len, fp->inv_fade);
+        float amp = compute_amplitude(amp0, d_amp, j) * fade_envelope_out(j, len, fp->inv_fade);
         dst[j] += amp * wave;
     }
 }
 
 void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParams* lp, SpectralTimbre timbre) {
     if ((unsigned int)timbre >= TIMBRE_COUNT) {
-        SPECTRAL_WARN_ONCE(TIMBRE_COUNT, "Invalid timbre %d, using sine", (int)timbre);
+        char resolution[384] = {0};
+        SpectralResolutionContext context = {
+            .event = SPECTRAL_RESOLUTION_EVENT_FALLBACK,
+            .backend = SPECTRAL_RESOLUTION_BACKEND_CPU,
+            .scope = SPECTRAL_RESOLUTION_SCOPE_TIMBRE,
+            .requested_label = timbre_name(timbre),
+            .requested_id = (int)timbre,
+            .effective_label = timbre_name(TIMBRE_SINE),
+            .effective_id = (int)TIMBRE_SINE,
+            .max_supported_id = (int)(TIMBRE_COUNT - 1),
+            .mode = spectral_exec_mode_name(),
+            .reason = SPECTRAL_RESOLUTION_REASON_INVALID_TIMBRE_ID
+        };
+        spectral_format_resolution_context(resolution, sizeof(resolution), &context);
+        SPECTRAL_WARN_ONCE(TIMBRE_COUNT, "%s", resolution);
         timbre = TIMBRE_SINE;
     }
     
     const size_t len = lp->length;
     if (len == 0) return;
     
-    OscDispatchMode mode = OSC_GET_MODE(g_osc_dispatch, timbre);
+    OscDispatchMode dispatch_mode = OSC_GET_MODE(g_osc_dispatch, timbre);
     
-    if (mode == OSC_MODE_FALLBACK) {
-        mode = osc_simd_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
+    if (dispatch_mode == OSC_MODE_FALLBACK) {
+        dispatch_mode = osc_simd_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
     }
     
-    if (mode == OSC_MODE_CPU_SIMD && osc_simd_available(timbre)) {
+    if (dispatch_mode == OSC_MODE_CPU_SIMD && osc_simd_available(timbre)) {
         switch (timbre) {
         case TIMBRE_SINE:      osc_simd_segment_sine(dst, lp);      return;
         case TIMBRE_SAW:       osc_simd_segment_saw(dst, lp);       return;
@@ -111,7 +126,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
         }
     }
     
-    FadeParams fp = fade_params_init(len, FADE_SAMPLES_DEFAULT);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
     synth_segment_scalar(
         dst, len, lp->phase, lp->alpha, lp->beta,
         lp->amp, lp->d_amp, lp->width, &fp, timbre_table[timbre]
@@ -132,18 +147,18 @@ const char* oscillator_metal_source =
 "#define TIMBRE_ASIN     4\n"
 "#define TIMBRE_PARABOLA 5\n"
 "\n"
-"#define TWO_PI " METAL_CONST_TWO_PI "\n"
-"#define INV_TWO_PI " METAL_CONST_INV_TWO_PI "\n"
-"#define INV_PI " METAL_CONST_INV_PI "\n"
-"#define INV_PI_SQ " METAL_CONST_INV_PI_SQ "\n"
-"#define PI " METAL_CONST_PI "\n"
+"#define TWO_PI " SPECTRAL_STR(SPECTRAL_TWO_PI) "\n"
+"#define INV_TWO_PI " SPECTRAL_STR(SPECTRAL_INV_TWO_PI) "\n"
+"#define INV_PI " SPECTRAL_STR(SPECTRAL_INV_PI) "\n"
+"#define INV_PI_SQ " SPECTRAL_STR(SPECTRAL_INV_PI_SQ) "\n"
+"#define PI " SPECTRAL_STR(SPECTRAL_PI) "\n"
 "\n"
 "/* Must match spectral_fast_sin_inline() in spectral_osc_formulas.h */\n"
 "inline float oscillator_fast_sin(float x) {\n"
 "    x = x - TWO_PI * floor(x * INV_TWO_PI + 0.5f);\n"
 "    float x2 = x * x;\n"
-"    float num = x * (1.0f - x2 * (" METAL_CONST_PADE_C1 " - x2 * " METAL_CONST_PADE_C2 "));\n"
-"    float den = 1.0f + x2 * " METAL_CONST_PADE_C3 ";\n"
+"    float num = x * (1.0f - x2 * (" SPECTRAL_STR(SPECTRAL_PADE_SIN_C1) " - x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C2) "));\n"
+"    float den = 1.0f + x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C3) ";\n"
 "    return num / den;\n"
 "}\n"
 "\n"
@@ -153,7 +168,7 @@ const char* oscillator_metal_source =
 "    return TWO_PI * (norm - floor(norm) - 0.5f);\n"
 "}\n"
 "\n"
-"#define FADE_SAMPLES 64\n"
+"#define FADE_SAMPLES " SPECTRAL_STR(SPECTRAL_FADE_SAMPLES_DESKTOP) "\n"
 "\n"
 "/* Must match spectral_fade_envelope_gpu() in spectral_osc_formulas.h */\n"
 "inline float fade_envelope(float j, float seg_len) {\n"
