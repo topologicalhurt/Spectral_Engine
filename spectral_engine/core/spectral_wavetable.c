@@ -16,13 +16,11 @@
  *   - Phase normalized to [0, 1) for float, [0, 65535] for fixed
  */
 #include "spectral_wavetable.h"
+#include "spectral_utils.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-
-#if !SPECTRAL_EMBEDDED
 #include <stdio.h>
-#endif
 
 static void wavetable_mark_loaded(SpectralWavetableBank* bank,
                                   SpectralWavetable* table,
@@ -87,147 +85,18 @@ void spectral_wavetable_generate_builtins(SpectralWavetableBank* bank) {
     wavetable_mark_loaded(bank, tri, TIMBRE_TRIANGLE);
 }
 
-#if !SPECTRAL_EMBEDDED
-
-WavetableError spectral_wavetable_load_raw(SpectralWavetableBank* bank,
-                                            const char* filename,
-                                            uint8_t timbre_id) {
-    if (!bank || !filename) return WAVETABLE_ERR_PARAM;
-    if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
-    
-    FILE* f = fopen(filename, "rb");
-    if (!f) return WAVETABLE_ERR_FILE;
-    
-    SpectralWavetable* table = &bank->tables[timbre_id];
-
-    spectral_sample_t* temp = (spectral_sample_t*)malloc(SPECTRAL_WAVETABLE_SIZE * sizeof(spectral_sample_t));
-    if (!temp) {
-        fclose(f);
-        return WAVETABLE_ERR_MEMORY;
-    }
-
-    /* Read samples in native format (float on desktop) */
-    size_t read = fread(temp, sizeof(spectral_sample_t), SPECTRAL_WAVETABLE_SIZE, f);
-    fclose(f);
-
-    if (read != SPECTRAL_WAVETABLE_SIZE) {
-        free(temp);
-        return WAVETABLE_ERR_SIZE;
-    }
-
-    memcpy(table->samples, temp, SPECTRAL_WAVETABLE_SIZE * sizeof(spectral_sample_t));
-    free(temp);
-    
-    table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
-    wavetable_mark_loaded(bank, table, timbre_id);
-    
-    return WAVETABLE_OK;
-}
-
-/* Parse HEX format - reads bytes and interprets as spectral_sample_t */
-static WavetableError parse_hex_line(const char* line, uint8_t* data, size_t data_capacity,
-                                      size_t* data_len, uint16_t* address, uint8_t* record_type) {
-    if (!line || line[0] != ':') return WAVETABLE_ERR_FORMAT;
-    
-    uint8_t byte_count;
-    uint8_t checksum_calc = 0;
-    
-    if (sscanf(line + 1, "%2hhx", &byte_count) != 1) return WAVETABLE_ERR_FORMAT;
-    if (sscanf(line + 3, "%4hx", address) != 1) return WAVETABLE_ERR_FORMAT;
-    if (sscanf(line + 7, "%2hhx", record_type) != 1) return WAVETABLE_ERR_FORMAT;
-    if (byte_count > data_capacity) return WAVETABLE_ERR_SIZE;
-    
-    checksum_calc += byte_count;
-    checksum_calc += (*address >> 8) & 0xFF;
-    checksum_calc += *address & 0xFF;
-    checksum_calc += *record_type;
-    
-    *data_len = byte_count;
-    for (size_t i = 0; i < byte_count; i++) {
-        if (sscanf(line + 9 + i * 2, "%2hhx", &data[i]) != 1) return WAVETABLE_ERR_FORMAT;
-        checksum_calc += data[i];
-    }
-    
-    uint8_t checksum_read;
-    if (sscanf(line + 9 + byte_count * 2, "%2hhx", &checksum_read) != 1) return WAVETABLE_ERR_FORMAT;
-    if ((uint8_t)(checksum_calc + checksum_read) != 0) return WAVETABLE_ERR_FORMAT;
-    
-    return WAVETABLE_OK;
-}
-
-WavetableError spectral_wavetable_load_hex(SpectralWavetableBank* bank,
-                                            const char* filename,
-                                            uint8_t timbre_id) {
-    if (!bank || !filename) return WAVETABLE_ERR_PARAM;
-    if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
-    
-    FILE* f = fopen(filename, "r");
-    if (!f) return WAVETABLE_ERR_FILE;
-    
-    SpectralWavetable* table = &bank->tables[timbre_id];
-    spectral_sample_t* temp_table = (spectral_sample_t*)calloc(SPECTRAL_WAVETABLE_SIZE + 1, sizeof(spectral_sample_t));
-    if (!temp_table) {
-        fclose(f);
-        return WAVETABLE_ERR_MEMORY;
-    }
-    
-    char line[256];
-    uint8_t data[32];
-    size_t data_len;
-    uint16_t address;
-    uint8_t record_type;
-    size_t total_bytes = 0;
-    const size_t expected_bytes = SPECTRAL_WAVETABLE_SIZE * sizeof(spectral_sample_t);
-    
-    while (fgets(line, sizeof(line), f)) {
-        if (line[0] != ':') continue;
-        
-        WavetableError parse_result = parse_hex_line(line, data, sizeof(data), &data_len, &address, &record_type);
-        if (parse_result != WAVETABLE_OK) {
-            fclose(f);
-            free(temp_table);
-            return parse_result;
-        }
-        
-        if (record_type == 0x00) {
-            if (address + data_len > expected_bytes) {
-                fclose(f);
-                free(temp_table);
-                return WAVETABLE_ERR_SIZE;
-            }
-            memcpy((uint8_t*)temp_table + address, data, data_len);
-            total_bytes += data_len;
-        } else if (record_type == 0x01) {
-            break;
-        } else {
-            fclose(f);
-            free(temp_table);
-            return WAVETABLE_ERR_FORMAT;
-        }
-    }
-    
-    fclose(f);
-    
-    if (total_bytes < expected_bytes) {
-        free(temp_table);
-        return WAVETABLE_ERR_SIZE;
-    }
-
-    memcpy(table->samples, temp_table, SPECTRAL_WAVETABLE_SIZE * sizeof(spectral_sample_t));
-    free(temp_table);
-    
-    table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
-    wavetable_mark_loaded(bank, table, timbre_id);
-    
-    return WAVETABLE_OK;
-}
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
 /* .spwt format - reads header and converts to runtime spectral_sample_t */
 
 WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id) {
-    if (!bank || !filename) return WAVETABLE_ERR_PARAM;
+#if SPECTRAL_EMBEDDED
+    (void)bank; (void)filename; (void)timbre_id;
+    return WAVETABLE_ERR_UNSUPPORTED;
+#else
+    if (!bank || spectral_is_empty_string(filename)) return WAVETABLE_ERR_PARAM;
     if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
     
     FILE* f = fopen(filename, "rb");
@@ -269,7 +138,13 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
     
     if (hdr.format == runtime_format) {
         /* No conversion needed - direct read */
-        spectral_sample_t* temp = (spectral_sample_t*)malloc(hdr.size * sizeof(spectral_sample_t));
+        size_t sample_bytes = 0;
+        spectral_sample_t* temp = NULL;
+        if (!spectral_array_bytes((size_t)hdr.size, sizeof(spectral_sample_t), &sample_bytes)) {
+            fclose(f);
+            return WAVETABLE_ERR_SIZE;
+        }
+        temp = (spectral_sample_t*)spectral_malloc_array((size_t)hdr.size, sizeof(spectral_sample_t));
         if (!temp) {
             fclose(f);
             return WAVETABLE_ERR_MEMORY;
@@ -280,11 +155,11 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
             fclose(f);
             return WAVETABLE_ERR_SIZE;
         }
-        memcpy(table->samples, temp, hdr.size * sizeof(spectral_sample_t));
+        memcpy(table->samples, temp, sample_bytes);
         free(temp);
     } else if (hdr.format == WAVETABLE_FORMAT_FLOAT && runtime_format == WAVETABLE_FORMAT_Q15) {
         /* File is float, runtime is Q15 - convert float->Q15 */
-        float* temp = (float*)malloc(hdr.size * sizeof(float));
+        float* temp = (float*)spectral_malloc_array((size_t)hdr.size, sizeof(float));
         if (!temp) {
             fclose(f);
             return WAVETABLE_ERR_MEMORY;
@@ -300,7 +175,7 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
         free(temp);
     } else {
         /* File is Q15, runtime is float - convert Q15->float */
-        int16_t* temp = (int16_t*)malloc(hdr.size * sizeof(int16_t));
+        int16_t* temp = (int16_t*)spectral_malloc_array((size_t)hdr.size, sizeof(int16_t));
         if (!temp) {
             fclose(f);
             return WAVETABLE_ERR_MEMORY;
@@ -323,12 +198,17 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
     wavetable_mark_loaded(bank, table, timbre_id);
     
     return WAVETABLE_OK;
+#endif
 }
 
 WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id) {
-    if (!bank || !filename) return WAVETABLE_ERR_PARAM;
+#if SPECTRAL_EMBEDDED
+    (void)bank; (void)filename; (void)timbre_id;
+    return WAVETABLE_ERR_UNSUPPORTED;
+#else
+    if (!bank || spectral_is_empty_string(filename)) return WAVETABLE_ERR_PARAM;
     if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
     
     const SpectralWavetable* table = &bank->tables[timbre_id];
@@ -364,6 +244,7 @@ WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
     
     fclose(f);
     return WAVETABLE_OK;
+#endif
 }
 
 #else /* SPECTRAL_EMBEDDED - no file I/O */
@@ -372,31 +253,179 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id) {
     (void)bank; (void)filename; (void)timbre_id;
-    return WAVETABLE_ERR_FILE;
+    return WAVETABLE_ERR_UNSUPPORTED;
 }
 
 WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id) {
     (void)bank; (void)filename; (void)timbre_id;
-    return WAVETABLE_ERR_FILE;
+    return WAVETABLE_ERR_UNSUPPORTED;
 }
+
+#endif /* SPECTRAL_EMBEDDED */
 
 WavetableError spectral_wavetable_load_raw(SpectralWavetableBank* bank,
                                             const char* filename,
                                             uint8_t timbre_id) {
-    (void)bank; (void)filename; (void)timbre_id;
-    return WAVETABLE_ERR_FILE;
+    size_t sample_bytes = 0;
+    size_t read = 0;
+    FILE* f = NULL;
+    SpectralWavetable* table = NULL;
+    spectral_sample_t* temp = NULL;
+
+    if (!bank || spectral_is_empty_string(filename)) return WAVETABLE_ERR_PARAM;
+    if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
+
+    if (!spectral_array_bytes(SPECTRAL_WAVETABLE_SIZE, sizeof(spectral_sample_t), &sample_bytes)) {
+        return WAVETABLE_ERR_SIZE;
+    }
+
+    f = fopen(filename, "rb");
+    if (!f) return WAVETABLE_ERR_FILE;
+
+    temp = (spectral_sample_t*)spectral_malloc_array(SPECTRAL_WAVETABLE_SIZE, sizeof(spectral_sample_t));
+    if (!temp) {
+        fclose(f);
+        return WAVETABLE_ERR_MEMORY;
+    }
+
+    read = fread(temp, sizeof(spectral_sample_t), SPECTRAL_WAVETABLE_SIZE, f);
+    fclose(f);
+    if (read != SPECTRAL_WAVETABLE_SIZE) {
+        free(temp);
+        return WAVETABLE_ERR_SIZE;
+    }
+
+    table = &bank->tables[timbre_id];
+    memcpy(table->samples, temp, sample_bytes);
+    free(temp);
+
+    table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
+    wavetable_mark_loaded(bank, table, timbre_id);
+
+    return WAVETABLE_OK;
+}
+
+static WavetableError parse_hex_line(const char* line, uint8_t* data, size_t data_capacity,
+                                     size_t* data_len, uint16_t* address, uint8_t* record_type) {
+    uint8_t byte_count = 0;
+    uint8_t checksum_calc = 0;
+    uint8_t checksum_read = 0;
+
+    if (!line || line[0] != ':') return WAVETABLE_ERR_FORMAT;
+    if (sscanf(line + 1, "%2hhx", &byte_count) != 1) return WAVETABLE_ERR_FORMAT;
+    if (sscanf(line + 3, "%4hx", address) != 1) return WAVETABLE_ERR_FORMAT;
+    if (sscanf(line + 7, "%2hhx", record_type) != 1) return WAVETABLE_ERR_FORMAT;
+    if (byte_count > data_capacity) return WAVETABLE_ERR_SIZE;
+
+    checksum_calc += byte_count;
+    checksum_calc += (uint8_t)((*address >> 8) & 0xFFu);
+    checksum_calc += (uint8_t)(*address & 0xFFu);
+    checksum_calc += *record_type;
+
+    *data_len = (size_t)byte_count;
+    for (size_t i = 0; i < (size_t)byte_count; i++) {
+        if (sscanf(line + 9 + (i * 2), "%2hhx", &data[i]) != 1) return WAVETABLE_ERR_FORMAT;
+        checksum_calc += data[i];
+    }
+
+    if (sscanf(line + 9 + ((size_t)byte_count * 2), "%2hhx", &checksum_read) != 1) return WAVETABLE_ERR_FORMAT;
+    if ((uint8_t)(checksum_calc + checksum_read) != 0) return WAVETABLE_ERR_FORMAT;
+
+    return WAVETABLE_OK;
 }
 
 WavetableError spectral_wavetable_load_hex(SpectralWavetableBank* bank,
                                             const char* filename,
                                             uint8_t timbre_id) {
-    (void)bank; (void)filename; (void)timbre_id;
-    return WAVETABLE_ERR_FILE;
-}
+    size_t expected_bytes = 0;
+    size_t covered_bytes = 0;
+    FILE* f = NULL;
+    SpectralWavetable* table = NULL;
+    spectral_sample_t* temp_table = NULL;
+    uint8_t* written = NULL;
+    char line[256];
+    uint8_t data[32];
+    size_t data_len = 0;
+    uint16_t address = 0;
+    uint8_t record_type = 0;
 
-#endif /* SPECTRAL_EMBEDDED */
+    if (!bank || spectral_is_empty_string(filename)) return WAVETABLE_ERR_PARAM;
+    if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
+    if (!spectral_array_bytes(SPECTRAL_WAVETABLE_SIZE, sizeof(spectral_sample_t), &expected_bytes)) {
+        return WAVETABLE_ERR_SIZE;
+    }
+
+    f = fopen(filename, "r");
+    if (!f) return WAVETABLE_ERR_FILE;
+
+    temp_table = (spectral_sample_t*)spectral_calloc_array(SPECTRAL_WAVETABLE_SIZE + 1, sizeof(spectral_sample_t));
+    if (!temp_table) {
+        fclose(f);
+        return WAVETABLE_ERR_MEMORY;
+    }
+    written = (uint8_t*)spectral_calloc_array(expected_bytes, sizeof(uint8_t));
+    if (!written) {
+        fclose(f);
+        free(temp_table);
+        return WAVETABLE_ERR_MEMORY;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        WavetableError parse_result;
+        if (line[0] != ':') continue;
+
+        parse_result = parse_hex_line(line, data, sizeof(data), &data_len, &address, &record_type);
+        if (parse_result != WAVETABLE_OK) {
+            fclose(f);
+            free(temp_table);
+            free(written);
+            return parse_result;
+        }
+
+        if (record_type == 0x00) {
+            if ((size_t)address + data_len > expected_bytes) {
+                fclose(f);
+                free(temp_table);
+                free(written);
+                return WAVETABLE_ERR_SIZE;
+            }
+            for (size_t i = 0; i < data_len; i++) {
+                size_t pos = (size_t)address + i;
+                if (!written[pos]) {
+                    written[pos] = 1;
+                    covered_bytes++;
+                }
+            }
+            memcpy((uint8_t*)temp_table + address, data, data_len);
+        } else if (record_type == 0x01) {
+            break;
+        } else {
+            fclose(f);
+            free(temp_table);
+            free(written);
+            return WAVETABLE_ERR_FORMAT;
+        }
+    }
+
+    fclose(f);
+    if (covered_bytes < expected_bytes) {
+        free(temp_table);
+        free(written);
+        return WAVETABLE_ERR_SIZE;
+    }
+
+    table = &bank->tables[timbre_id];
+    memcpy(table->samples, temp_table, expected_bytes);
+    free(temp_table);
+    free(written);
+
+    table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
+    wavetable_mark_loaded(bank, table, timbre_id);
+
+    return WAVETABLE_OK;
+}
 
 WavetableError spectral_wavetable_load_buffer(SpectralWavetableBank* bank,
                                                const spectral_sample_t* data,
@@ -405,9 +434,15 @@ WavetableError spectral_wavetable_load_buffer(SpectralWavetableBank* bank,
     if (!bank || !data) return WAVETABLE_ERR_PARAM;
     if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
     if (size < SPECTRAL_WAVETABLE_SIZE) return WAVETABLE_ERR_SIZE;
-    
+
     SpectralWavetable* table = &bank->tables[timbre_id];
-    memcpy(table->samples, data, SPECTRAL_WAVETABLE_SIZE * sizeof(spectral_sample_t));
+    {
+        size_t copy_bytes = 0;
+        if (!spectral_array_bytes(SPECTRAL_WAVETABLE_SIZE, sizeof(spectral_sample_t), &copy_bytes)) {
+            return WAVETABLE_ERR_SIZE;
+        }
+        memcpy(table->samples, data, copy_bytes);
+    }
     
     table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
     wavetable_mark_loaded(bank, table, timbre_id);
@@ -430,7 +465,8 @@ int spectral_wavetable_has_timbre(const SpectralWavetableBank* bank,
 
 spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
                                               float phase_norm) {
-    phase_norm = phase_norm - (float)(int)phase_norm;
+    if (!table || !spectral_is_finite_f32(phase_norm)) return SPECTRAL_SAMPLE_ZERO;
+    phase_norm = phase_norm - floorf(phase_norm);
     if (phase_norm < 0.0f) phase_norm += 1.0f;
     float idx_f = phase_norm * (float)SPECTRAL_WAVETABLE_SIZE;
     uint32_t idx = (uint32_t)idx_f;
@@ -448,6 +484,7 @@ spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
 
 spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
                                               uint16_t phase_u16) {
+    if (!table) return SPECTRAL_SAMPLE_ZERO;
     uint32_t idx = phase_u16 >> (16 - SPECTRAL_WAVETABLE_BITS);
     uint32_t frac_bits = 16 - SPECTRAL_WAVETABLE_BITS;
     uint32_t frac = (phase_u16 & ((1u << frac_bits) - 1)) >> (frac_bits > 8 ? frac_bits - 8 : 0);
@@ -481,4 +518,3 @@ spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank
         : &bank->tables[bank->default_timbre];
     return spectral_wavetable_lookup_q(table, phase_u16);
 }
-
