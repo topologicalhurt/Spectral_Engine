@@ -6,11 +6,13 @@
  * Endianness: Files are always stored in little-endian format.
  * On big-endian hosts, byte-swapping is performed during load/save.
  *
- * Desktop/emulator only — bare-metal embedded loads segments from flash/SDRAM.
+ * Desktop/simulation only — bare-metal embedded loads segments from flash/SDRAM.
  */
 #include "spectral_segment_parser.h"
+#include "spectral_utils.h"
+#include "spectral_log.h"
 
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,14 +77,14 @@ static void segment_from_le(Segment* seg) {
 
 /* Returns 1 if segment values are finite and in valid range, 0 if corrupt */
 static int segment_validate(const Segment* seg) {
-    if (!isfinite(seg->omega) || seg->omega < 0.0f) return 0;
-    if (!isfinite(seg->amp)) return 0;
-    if (!isfinite(seg->start) || seg->start < 0.0f) return 0;
-    if (!isfinite(seg->length) || seg->length < 0.0f) return 0;
-    if (!isfinite(seg->df)) return 0;
-    if (!isfinite(seg->da)) return 0;
-    if (!isfinite(seg->phase)) return 0;
-    if (!isfinite(seg->width)) return 0;
+    if (!spectral_is_finite_f32(seg->omega) || seg->omega < 0.0f) return 0;
+    if (!spectral_is_finite_f32(seg->amp)) return 0;
+    if (!spectral_is_finite_f32(seg->start) || seg->start < 0.0f) return 0;
+    if (!spectral_is_finite_f32(seg->length) || seg->length < 0.0f) return 0;
+    if (!spectral_is_finite_f32(seg->df)) return 0;
+    if (!spectral_is_finite_f32(seg->da)) return 0;
+    if (!spectral_is_finite_f32(seg->phase)) return 0;
+    if (!spectral_is_finite_f32(seg->width)) return 0;
     return 1;
 }
 
@@ -98,11 +100,16 @@ static int segments_validate_all(const Segment* segs, uint32_t count, uint32_t* 
 }
 
 SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, float stretch, float pitch) {
-    if (!path || !sa) return SPECTRAL_ERR_PARAM;
-    
-    FILE* f = fopen(path, "wb");
+    SpectralError err = SPECTRAL_OK;
+    FILE* f = NULL;
+    int needs_swap = is_big_endian();
+
+    if (spectral_is_empty_string(path) || !sa) return SPECTRAL_ERR_PARAM;
+    if (sa->count > 0 && !sa->segs) return SPECTRAL_ERR_PARAM;
+
+    f = fopen(path, "wb");
     if (!f) return SPECTRAL_ERR_FILE_OPEN;
-    
+
     SegmentFileHeader hdr = {
         .magic = {SEGMENT_FILE_MAGIC[0], SEGMENT_FILE_MAGIC[1], 
                   SEGMENT_FILE_MAGIC[2], SEGMENT_FILE_MAGIC[3]},
@@ -115,112 +122,138 @@ SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, fl
     };
     
     header_to_le(&hdr);
-    
-    if (fwrite(&hdr, sizeof(hdr), 1, f) != 1) { fclose(f); return SPECTRAL_ERR_FILE_WRITE; }
-    
+
+    if (fwrite(&hdr, sizeof(hdr), 1, f) != 1) {
+        err = SPECTRAL_ERR_FILE_WRITE;
+        goto cleanup;
+    }
+
     /* Write segments, converting each to little-endian if needed */
-    if (is_big_endian()) {
+    if (needs_swap) {
         for (uint32_t i = 0; i < sa->count; i++) {
             Segment seg = sa->segs[i];
             segment_to_le(&seg);
-            if (fwrite(&seg, sizeof(Segment), 1, f) != 1) { fclose(f); return SPECTRAL_ERR_FILE_WRITE; }
+            if (fwrite(&seg, sizeof(Segment), 1, f) != 1) {
+                err = SPECTRAL_ERR_FILE_WRITE;
+                goto cleanup;
+            }
         }
     } else {
-        if (fwrite(sa->segs, sizeof(Segment), sa->count, f) != sa->count) { fclose(f); return SPECTRAL_ERR_FILE_WRITE; }
+        if (fwrite(sa->segs, sizeof(Segment), sa->count, f) != sa->count) {
+            err = SPECTRAL_ERR_FILE_WRITE;
+            goto cleanup;
+        }
     }
-    
-    fclose(f);
-    return SPECTRAL_OK;
+
+cleanup:
+    if (f) fclose(f);
+    return err;
 }
 
 SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, float* out_stretch, float* out_pitch) {
-    if (!path || !sa || !out_sr || !out_stretch || !out_pitch) return SPECTRAL_ERR_PARAM;
-    
-    FILE* f = fopen(path, "rb");
-    if (!f) return SPECTRAL_ERR_FILE_OPEN;
-    
+    SpectralError err = SPECTRAL_OK;
+    FILE* f = NULL;
     SegmentFileHeader hdr;
-    if (fread(&hdr, sizeof(hdr), 1, f) != 1) { fclose(f); return SPECTRAL_ERR_FILE_READ; }
-    
-    /* Magic is not affected by endianness (char array) */
-    if (memcmp(hdr.magic, SEGMENT_FILE_MAGIC, 4) != 0) { 
-        fprintf(stderr, "Error: Invalid segment file format (bad magic)\n");
-        fclose(f); 
-        return SPECTRAL_ERR_FILE_FORMAT; 
+    Segment* loaded_segs = NULL;
+
+    if (spectral_is_empty_string(path) || !sa || !out_sr || !out_stretch || !out_pitch) return SPECTRAL_ERR_PARAM;
+
+    f = fopen(path, "rb");
+    if (!f) return SPECTRAL_ERR_FILE_OPEN;
+
+    if (fread(&hdr, sizeof(hdr), 1, f) != 1) {
+        err = SPECTRAL_ERR_FILE_READ;
+        goto cleanup;
     }
-    
+
+    /* Magic is not affected by endianness (char array) */
+    if (memcmp(hdr.magic, SEGMENT_FILE_MAGIC, 4) != 0) {
+        SPECTRAL_LOG_ERROR_STDERR("Error: Invalid segment file format (bad magic)");
+        err = SPECTRAL_ERR_FILE_FORMAT;
+        goto cleanup;
+    }
+
     /* Convert header from little-endian file format */
     header_from_le(&hdr);
-    
+
     /* Version compatibility check */
     if (hdr.version != SEGMENT_FILE_VERSION) {
         if (hdr.version > SEGMENT_FILE_VERSION) {
-                 fprintf(stderr, "Error: Segment file version %u is newer than supported version %u\n"
-                          "       Please update spectral tools.\n",
-                    hdr.version, SEGMENT_FILE_VERSION);
+            SPECTRAL_LOG_ERROR_STDERR(
+                "Error: Segment file version %u is newer than supported version %u\n"
+                "       Please update spectral tools.",
+                hdr.version, SEGMENT_FILE_VERSION);
         } else {
-            fprintf(stderr, "Error: Segment file version %u is older than current version %u\n"
-                           "       Re-export segments with current desktop build.\n",
-                    hdr.version, SEGMENT_FILE_VERSION);
+            SPECTRAL_LOG_ERROR_STDERR(
+                "Error: Segment file version %u is older than current version %u\n"
+                "       Re-export segments with current desktop build.",
+                hdr.version, SEGMENT_FILE_VERSION);
         }
-        fclose(f); 
-        return SPECTRAL_ERR_FILE_VERSION;
+        err = SPECTRAL_ERR_FILE_VERSION;
+        goto cleanup;
     }
-    
-    sa->count = hdr.count;
-    sa->capacity = hdr.count;
-    sa->segs = NULL;
 
     if (hdr.count == 0) {
+        sa->count = 0;
+        sa->capacity = 0;
+        sa->segs = NULL;
         *out_sr = (int)hdr.sr;
         *out_stretch = hdr.stretch;
         *out_pitch = hdr.pitch;
-        fclose(f);
-        return SPECTRAL_OK;
+        err = SPECTRAL_OK;
+        goto cleanup;
     }
 
-/* Overflow check - tautologically false on 64-bit but needed for 32-bit portability */
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
-#endif
-    if (hdr.count > SIZE_MAX / sizeof(Segment)) { fclose(f); return SPECTRAL_ERR_MEMORY; }
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-    sa->segs = (Segment*)malloc(hdr.count * sizeof(Segment));
-    if (!sa->segs) { fclose(f); return SPECTRAL_ERR_MEMORY; }
-    
-    if (fread(sa->segs, sizeof(Segment), hdr.count, f) != hdr.count) {
-        free(sa->segs);
-        sa->segs = NULL;
-        fclose(f);
-        return SPECTRAL_ERR_FILE_READ;
+    {
+        size_t alloc_bytes = 0;
+        if (!spectral_size_mul((size_t)hdr.count, sizeof(Segment), &alloc_bytes)) {
+            err = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
+        }
+        loaded_segs = (Segment*)malloc(alloc_bytes);
     }
-    
+    if (!loaded_segs) {
+        err = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
+    }
+
+    if (fread(loaded_segs, sizeof(Segment), hdr.count, f) != hdr.count) {
+        err = SPECTRAL_ERR_FILE_READ;
+        goto cleanup;
+    }
+
     /* Convert segments from little-endian if needed */
     if (is_big_endian()) {
         for (uint32_t i = 0; i < hdr.count; i++) {
-            segment_from_le(&sa->segs[i]);
+            segment_from_le(&loaded_segs[i]);
         }
     }
     
     /* Validate segment data integrity */
     uint32_t bad_idx = 0;
-    if (!segments_validate_all(sa->segs, hdr.count, &bad_idx)) {
-        fprintf(stderr, "Error: Corrupt segment data at index %u (NaN/inf detected)\n"
-                       "       Re-export segments or check source audio.\n", bad_idx);
-        free(sa->segs);
-        sa->segs = NULL;
-        fclose(f);
-        return SPECTRAL_ERR_FILE_CORRUPT;
+    if (!segments_validate_all(loaded_segs, hdr.count, &bad_idx)) {
+        SPECTRAL_LOG_ERROR_STDERR(
+            "Error: Corrupt segment data at index %u (NaN/inf detected)\n"
+            "       Re-export segments or check source audio.",
+            bad_idx);
+        err = SPECTRAL_ERR_FILE_CORRUPT;
+        goto cleanup;
     }
-    
+
+    sa->count = hdr.count;
+    sa->capacity = hdr.count;
+    sa->segs = loaded_segs;
+    loaded_segs = NULL;
+
     *out_sr = (int)hdr.sr;
     *out_stretch = hdr.stretch;
     *out_pitch = hdr.pitch;
-    fclose(f);
-    return SPECTRAL_OK;
+    err = SPECTRAL_OK;
+
+cleanup:
+    if (f) fclose(f);
+    free(loaded_segs);
+    return err;
 }
 
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR */
+#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */

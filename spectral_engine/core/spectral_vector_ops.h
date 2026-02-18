@@ -12,8 +12,8 @@
 #include "spectral_config.h"
 #include <stddef.h>
 
-/* Only use SIMD vector ops on desktop/emulator (not bare-metal CMSIS targets) */
-#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
+/* Only use SIMD vector ops on desktop/simulation (not bare-metal CMSIS targets) */
+#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +40,6 @@ void spectral_magsq_split(const float* re, const float* im,
 }
 #endif
 
-#endif /* (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR) && !CMSIS */
+#endif /* (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !CMSIS */
 
 #endif /* SPECTRAL_VECTOR_OPS_H */
