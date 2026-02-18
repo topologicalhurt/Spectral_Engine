@@ -16,8 +16,16 @@
 
 #include "spectral_common.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr, 
                            int n_fft, int hop, float db_thresh,
                            double* t_fft, double* t_track);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

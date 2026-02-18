@@ -10,6 +10,7 @@
  */
 
 #include "spectral_peak_track.h"
+#include "spectral_utils.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +29,7 @@
  */
 
 typedef struct SegBlock {
-    Segment segs[TRACK_BLOCK_SEGS];
+    Segment segs[SPECTRAL_TRACK_BLOCK_SEGS];
     uint32_t count;
     struct SegBlock* next;
 } SegBlock;
@@ -38,6 +39,11 @@ typedef struct {
     SegBlock* current;
     uint32_t total_count;
 } SegBlockChain;
+
+static SegmentArray peak_track_return_empty(double* t_track) {
+    if (t_track) *t_track = 0;
+    return (SegmentArray)SEGMENT_ARRAY_EMPTY;
+}
 
 static void seg_chain_init(SegBlockChain* chain) {
     chain->head = NULL;
@@ -56,7 +62,7 @@ static SegBlock* seg_block_new(void) {
 
 /* Returns pointer to a new segment slot, or NULL on allocation failure */
 static Segment* seg_chain_push(SegBlockChain* chain) {
-    if (!chain->current || chain->current->count >= TRACK_BLOCK_SEGS) {
+    if (!chain->current || chain->current->count >= SPECTRAL_TRACK_BLOCK_SEGS) {
         SegBlock* blk = seg_block_new();
         if (!blk) return NULL;
         if (chain->current) {
@@ -119,6 +125,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     SpectralTracker* tracker = (SpectralTracker*)malloc(sizeof(SpectralTracker));
     if (!tracker) return NULL;
 
+    if (n_threads < 1) n_threads = 1;
     tracker->n_threads = n_threads;
     tracker->n_freqs = n_freqs;
     tracker->alloc_failed = 0;
@@ -129,13 +136,13 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->threshsq = tracker->thresh_linear_sq * max_magsq;
 
     float freq_step = (float)sr / n_fft;
-    float two_pi_ts = TWO_PI / sr;
+    float two_pi_ts = SPECTRAL_TWO_PI / sr;
     tracker->inv_hop = 1.0f / hop;
     tracker->freq_step_omega = freq_step * two_pi_ts;
     tracker->freq_step_df = 0.5f * freq_step * tracker->inv_hop * two_pi_ts;
     tracker->hop_float = (float)hop;
 
-    tracker->chains = (SegBlockChain*)malloc(n_threads * sizeof(SegBlockChain));
+    tracker->chains = (SegBlockChain*)spectral_malloc_array((size_t)n_threads, sizeof(SegBlockChain));
     if (!tracker->chains) {
         free(tracker);
         return NULL;
@@ -177,12 +184,13 @@ void spectral_tracker_process(SpectralTracker* tracker,
 
     if (n_pairs == 0) return;
 
-    #pragma omp parallel
+    #pragma omp parallel num_threads(tracker->n_threads)
     {
         int tid = omp_get_thread_num();
         SegBlockChain* chain = &tracker->chains[tid];
 
-        #pragma omp for schedule(guided, 256) nowait
+        /* Static scheduling preserves deterministic frame-to-thread mapping. */
+        #pragma omp for schedule(static)
         for (size_t t = 0; t < n_pairs; t++) {
             const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
@@ -247,40 +255,33 @@ void spectral_tracker_process(SpectralTracker* tracker,
                 seg->df = (best_next - (int)f) * freq_step_df;
                 seg->amp = m;
                 seg->da = (max_v - m) * inv_hop;
-                seg->width = TRACK_DEFAULT_WIDTH;
+                seg->width = SPECTRAL_TRACK_DEFAULT_WIDTH;
             }
         }
     }
 }
 
 SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track) {
-    SegmentArray empty_result = SEGMENT_ARRAY_EMPTY;
+    size_t total_segs = 0;
+    size_t* offsets = NULL;
+    Segment* segs = NULL;
+    SegBlockChain* chains = NULL;
+    int n_threads = 0;
+    size_t merge_bytes = 0;
 
-    if (!tracker) {
-        if (t_track) *t_track = 0;
-        return empty_result;
-    }
+    if (!tracker) return peak_track_return_empty(t_track);
 
-    int n_threads = tracker->n_threads;
-    SegBlockChain* chains = tracker->chains;
+    n_threads = tracker->n_threads;
+    chains = tracker->chains;
 
     if (tracker->alloc_failed) {
-        for (int t = 0; t < n_threads; t++) seg_chain_free(&chains[t]);
-        free(chains);
-        if (t_track) *t_track = 0;
-        free(tracker);
-        return empty_result;
+        goto fail;
     }
 
     /* Compute total and per-thread offsets */
-    size_t total_segs = 0;
-    size_t* offsets = (size_t*)malloc(n_threads * sizeof(size_t));
+    offsets = (size_t*)spectral_malloc_array((size_t)n_threads, sizeof(size_t));
     if (!offsets) {
-        for (int t = 0; t < n_threads; t++) seg_chain_free(&chains[t]);
-        free(chains);
-        if (t_track) *t_track = 0;
-        free(tracker);
-        return empty_result;
+        goto fail;
     }
     for (int t = 0; t < n_threads; t++) {
         offsets[t] = total_segs;
@@ -288,20 +289,17 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
     }
 
     /* Merge into contiguous array */
-    Segment* segs = (total_segs > 0) ? (Segment*)malloc(total_segs * sizeof(Segment)) : NULL;
+    segs = (total_segs > 0) ? (Segment*)spectral_malloc_array(total_segs, sizeof(Segment)) : NULL;
     if (total_segs > 0 && !segs) {
-        for (int t = 0; t < n_threads; t++) seg_chain_free(&chains[t]);
-        free(chains);
-        free(offsets);
-        if (t_track) *t_track = 0;
-        free(tracker);
-        return empty_result;
+        goto fail;
     }
 
     /* Pre-fault pages in parallel for large merge allocations (>64MB) */
-    size_t merge_bytes = total_segs * sizeof(Segment);
-    if (segs && merge_bytes > PRETOUCH_THRESHOLD) {
-        size_t page_size = PRETOUCH_PAGE_SIZE;
+    if (!spectral_array_bytes(total_segs, sizeof(Segment), &merge_bytes)) {
+        goto fail;
+    }
+    if (segs && merge_bytes > SPECTRAL_PRETOUCH_THRESHOLD) {
+        size_t page_size = SPECTRAL_PRETOUCH_PAGE_SIZE;
         size_t n_pages = (merge_bytes + page_size - 1) / page_size;
         #pragma omp parallel for schedule(static)
         for (size_t p = 0; p < n_pages; p++) {
@@ -326,6 +324,16 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
 
     free(tracker);
     return res;
+
+fail:
+    free(segs);
+    free(offsets);
+    if (chains) {
+        for (int t = 0; t < n_threads; t++) seg_chain_free(&chains[t]);
+        free(chains);
+    }
+    free(tracker);
+    return peak_track_return_empty(t_track);
 }
 
 /* spectral_track_peaks — single-shot wrapper around SpectralTracker */
@@ -335,11 +343,8 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,
                                   float db_thresh, double* t_track) {
-    SegmentArray empty_result = SEGMENT_ARRAY_EMPTY;
-
     if (!magsq || !phases || !t_track || n_frames < 2 || n_freqs < 3) {
-        if (t_track) *t_track = 0;
-        return empty_result;
+        return peak_track_return_empty(t_track);
     }
 
     int n_threads = omp_get_max_threads();
@@ -347,8 +352,7 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
     SpectralTracker* tracker = spectral_tracker_create(
         n_threads, n_freqs, sr, n_fft, hop, db_thresh, max_magsq);
     if (!tracker) {
-        *t_track = 0;
-        return empty_result;
+        return peak_track_return_empty(t_track);
     }
 
     /* Process all frames in one shot — no overlap row (NULL for final chunk) */

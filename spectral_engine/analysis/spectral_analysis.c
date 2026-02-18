@@ -11,6 +11,7 @@
 
 #include "spectral_analysis.h"
 #include "spectral_peak_track.h"
+#include "spectral_utils.h"
 #include "spectral_windows.h"
 #include "spectral_vector_ops.h"
 #include <math.h>
@@ -58,14 +59,21 @@ static int fft_resources_alloc(FftResources* res, int n_threads,
 
 #if SPECTRAL_USE_VDSP
     res->log2n = (vDSP_Length)log2(n_fft);
-    res->fft_setups = malloc(n_threads * sizeof(FFTSetup));
-    res->thread_real = malloc(n_threads * sizeof(float*));
-    res->thread_imag = malloc(n_threads * sizeof(float*));
-    res->thread_windowed = malloc(n_threads * sizeof(float*));
-    res->thread_imag_sq = malloc(n_threads * sizeof(float*));
+    res->fft_setups = spectral_malloc_array((size_t)n_threads, sizeof(FFTSetup));
+    res->thread_real = spectral_malloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_imag = spectral_malloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_windowed = spectral_malloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_imag_sq = spectral_malloc_array((size_t)n_threads, sizeof(float*));
 
     if (!res->fft_setups || !res->thread_real || !res->thread_imag ||
         !res->thread_windowed || !res->thread_imag_sq) {
+        return 0;
+    }
+
+    size_t n_fft_f32_bytes = 0;
+    size_t n_freqs_f32_bytes = 0;
+    if (!spectral_array_bytes(n_fft, sizeof(float), &n_fft_f32_bytes) ||
+        !spectral_array_bytes(n_freqs, sizeof(float), &n_freqs_f32_bytes)) {
         return 0;
     }
 
@@ -79,19 +87,19 @@ static int fft_resources_alloc(FftResources* res, int n_threads,
 
     for (int t = 0; t < n_threads; t++) {
         res->fft_setups[t] = vDSP_create_fftsetup(res->log2n, FFT_RADIX2);
-        res->thread_real[t] = spectral_aligned_alloc(n_fft * sizeof(float));
-        res->thread_imag[t] = spectral_aligned_alloc(n_fft * sizeof(float));
-        res->thread_windowed[t] = spectral_aligned_alloc(n_fft * sizeof(float));
-        res->thread_imag_sq[t] = spectral_aligned_alloc(n_freqs * sizeof(float));
+        res->thread_real[t] = spectral_aligned_alloc(n_fft_f32_bytes);
+        res->thread_imag[t] = spectral_aligned_alloc(n_fft_f32_bytes);
+        res->thread_windowed[t] = spectral_aligned_alloc(n_fft_f32_bytes);
+        res->thread_imag_sq[t] = spectral_aligned_alloc(n_freqs_f32_bytes);
         if (!res->fft_setups[t] || !res->thread_real[t] || !res->thread_imag[t] ||
             !res->thread_windowed[t] || !res->thread_imag_sq[t]) {
             return 0;
         }
     }
 #else
-    res->fft_plans = malloc(n_threads * sizeof(fftwf_plan));
-    res->thread_in = malloc(n_threads * sizeof(float*));
-    res->thread_out = malloc(n_threads * sizeof(fftwf_complex*));
+    res->fft_plans = spectral_malloc_array((size_t)n_threads, sizeof(fftwf_plan));
+    res->thread_in = spectral_malloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_out = spectral_malloc_array((size_t)n_threads, sizeof(fftwf_complex*));
 
     if (!res->fft_plans || !res->thread_in || !res->thread_out) {
         return 0;
@@ -167,31 +175,31 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
                                            size_t n_frames, size_t n_freqs,
                                            double* t_fft, double* t_track);
 
+static SegmentArray analysis_return_empty(double* t_fft, double* t_track) {
+    if (t_fft) *t_fft = 0;
+    if (t_track) *t_track = 0;
+    return (SegmentArray)SEGMENT_ARRAY_EMPTY;
+}
+
 SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
                            int n_fft, int hop, float db_thresh,
                            double* t_fft, double* t_track) {
-    SegmentArray empty_result = SEGMENT_ARRAY_EMPTY;
+    size_t total_bins = 0;
+    size_t total_bytes = 0;
     if (!audio || !t_fft || !t_track || n_fft <= 0 || hop <= 0 || n_samples < (size_t)n_fft) {
-        if (t_fft) *t_fft = 0;
-        if (t_track) *t_track = 0;
-        return empty_result;
+        return analysis_return_empty(t_fft, t_track);
     }
     size_t n_frames = (n_samples - n_fft) / hop + 1;
     size_t n_freqs = n_fft / 2 + 1;
-    if (n_freqs == 0 || n_frames > SIZE_MAX / n_freqs) {
-        *t_fft = 0;
-        *t_track = 0;
-        return empty_result;
+    if (n_freqs == 0 || !spectral_size_mul(n_frames, n_freqs, &total_bins)) {
+        return analysis_return_empty(t_fft, t_track);
     }
-    size_t total_bins = n_frames * n_freqs;
-    if (total_bins > SIZE_MAX / sizeof(float)) {
-        *t_fft = 0;
-        *t_track = 0;
-        return empty_result;
+    if (!spectral_size_mul(total_bins, sizeof(float), &total_bytes)) {
+        return analysis_return_empty(t_fft, t_track);
     }
 
     /* Dispatch to chunked path for large datasets */
-    if (total_bins > STFT_CHUNK_THRESHOLD) {
+    if (total_bins > SPECTRAL_STFT_CHUNK_THRESHOLD) {
         return analyze_audio_chunked(audio, n_samples, sr, n_fft, hop,
                                       db_thresh, n_frames, n_freqs,
                                       t_fft, t_track);
@@ -199,22 +207,25 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
 
     /* --- Standard path: full STFT allocation --- */
 
-    float* window_func = spectral_aligned_alloc(n_fft * sizeof(float));
-    float* magsq = spectral_aligned_alloc(total_bins * sizeof(float));
-    float* phases = spectral_aligned_alloc(total_bins * sizeof(float));
+    size_t n_fft_f32_bytes = 0;
+    if (!spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes)) {
+        return analysis_return_empty(t_fft, t_track);
+    }
+
+    float* window_func = spectral_aligned_alloc(n_fft_f32_bytes);
+    float* magsq = spectral_aligned_alloc(total_bytes);
+    float* phases = spectral_aligned_alloc(total_bytes);
     if (!window_func || !magsq || !phases) {
         free(window_func);
         free(magsq);
         free(phases);
-        *t_fft = 0;
-        *t_track = 0;
-        return empty_result;
+        return analysis_return_empty(t_fft, t_track);
     }
     spectral_window_hann(window_func, n_fft);
 
     /* Hint to the OS that STFT matrices will be accessed sequentially */
-    posix_madvise(magsq, total_bins * sizeof(float), POSIX_MADV_SEQUENTIAL);
-    posix_madvise(phases, total_bins * sizeof(float), POSIX_MADV_SEQUENTIAL);
+    posix_madvise(magsq, total_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(phases, total_bytes, POSIX_MADV_SEQUENTIAL);
 
     float max_magsq = 0.0f;
     FftResources res;
@@ -223,8 +234,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     if (!fft_resources_alloc(&res, n_threads, n_fft, n_freqs)) {
         fft_resources_free(&res);
         free(magsq); free(phases); free(window_func);
-        *t_fft = 0; *t_track = 0;
-        return empty_result;
+        return analysis_return_empty(t_fft, t_track);
     }
 
     double fft_start = omp_get_wtime();
@@ -306,7 +316,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
 }
 
 /* Chunked analysis path — for large datasets (>256MB STFT).
- * Single-pass: FFT+Track in STFT_CHUNK_FRAMES-sized chunks with running max. */
+ * Single-pass: FFT+Track in SPECTRAL_STFT_CHUNK_FRAMES-sized chunks with running max. */
 
 /* Helper: compute FFT for a range of frames into magsq/phases buffers.
  * The buffers must hold (frame_end - frame_start) * n_freqs floats.
@@ -422,24 +432,29 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
                                            float db_thresh,
                                            size_t n_frames, size_t n_freqs,
                                            double* t_fft, double* t_track) {
-    SegmentArray empty_result = SEGMENT_ARRAY_EMPTY;
+    size_t chunk_bins = 0;
+    size_t chunk_bytes = 0;
+    float* window_func = NULL;
+    float* chunk_magsq = NULL;
+    float* chunk_phases = NULL;
+    FftResources res = {0};
     (void)n_samples;
 
     int n_threads = omp_get_max_threads();
 
-    float* window_func = spectral_aligned_alloc(n_fft * sizeof(float));
+    size_t n_fft_f32_bytes = 0;
+    if (!spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes)) {
+        goto fail;
+    }
+
+    window_func = spectral_aligned_alloc(n_fft_f32_bytes);
     if (!window_func) {
-        *t_fft = 0; *t_track = 0;
-        return empty_result;
+        goto fail;
     }
     spectral_window_hann(window_func, n_fft);
 
-    FftResources res;
     if (!fft_resources_alloc(&res, n_threads, n_fft, n_freqs)) {
-        fft_resources_free(&res);
-        free(window_func);
-        *t_fft = 0; *t_track = 0;
-        return empty_result;
+        goto fail;
     }
 
     /* Single-pass chunked FFT + Track.
@@ -453,31 +468,19 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
     float first_chunk_max = 0.0f;
     SpectralTracker* tracker = NULL;
 
-    size_t chunk_frames = STFT_CHUNK_FRAMES;
+    size_t chunk_frames = SPECTRAL_STFT_CHUNK_FRAMES;
     size_t chunk_alloc_frames = chunk_frames + 1;
-    if (n_freqs == 0 || chunk_alloc_frames > SIZE_MAX / n_freqs) {
-        fft_resources_free(&res);
-        free(window_func);
-        *t_fft = 0; *t_track = 0;
-        return empty_result;
+    if (n_freqs == 0 || !spectral_size_mul(chunk_alloc_frames, n_freqs, &chunk_bins)) {
+        goto fail;
     }
-    size_t chunk_bins = chunk_alloc_frames * n_freqs;
-    if (chunk_bins > SIZE_MAX / sizeof(float)) {
-        fft_resources_free(&res);
-        free(window_func);
-        *t_fft = 0; *t_track = 0;
-        return empty_result;
+    if (!spectral_size_mul(chunk_bins, sizeof(float), &chunk_bytes)) {
+        goto fail;
     }
-    float* chunk_magsq = spectral_aligned_alloc(chunk_bins * sizeof(float));
-    float* chunk_phases = spectral_aligned_alloc(chunk_bins * sizeof(float));
+    chunk_magsq = spectral_aligned_alloc(chunk_bytes);
+    chunk_phases = spectral_aligned_alloc(chunk_bytes);
 
     if (!chunk_magsq || !chunk_phases) {
-        free(chunk_magsq);
-        free(chunk_phases);
-        fft_resources_free(&res);
-        free(window_func);
-        *t_fft = 0; *t_track = 0;
-        return empty_result;
+        goto fail;
     }
 
     for (size_t chunk_start = 0; chunk_start < n_frames; chunk_start += chunk_frames) {
@@ -507,12 +510,7 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
             tracker = spectral_tracker_create(
                 n_threads, n_freqs, sr, n_fft, hop, db_thresh, global_max_magsq);
             if (!tracker) {
-                free(chunk_magsq);
-                free(chunk_phases);
-                fft_resources_free(&res);
-                free(window_func);
-                *t_fft = 0; *t_track = 0;
-                return empty_result;
+                goto fail;
             }
         } else if (max_increased) {
             /* Refine threshold with updated global max so subsequent chunks
@@ -539,8 +537,7 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
     *t_fft = fft_time_total;
 
     if (!tracker) {
-        *t_track = 0;
-        return empty_result;
+        return analysis_return_empty(t_fft, t_track);
     }
 
     SegmentArray result = spectral_tracker_finalize(tracker, t_track);
@@ -565,4 +562,11 @@ static SegmentArray analyze_audio_chunked(const float* audio, size_t n_samples,
     }
 
     return result;
+
+fail:
+    free(chunk_magsq);
+    free(chunk_phases);
+    fft_resources_free(&res);
+    free(window_func);
+    return analysis_return_empty(t_fft, t_track);
 }
