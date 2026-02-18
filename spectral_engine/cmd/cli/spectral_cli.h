@@ -1,13 +1,14 @@
 /* spectral_cli.h - Command-Line Argument Parsing
  * 
  * Parses and validates command-line arguments for spectral processing.
- * Handles different argument layouts for desktop, emulator, and restricted modes.
+ * Handles different argument layouts for desktop, simulation, and restricted modes.
  */
 #ifndef SPECTRAL_CLI_H
 #define SPECTRAL_CLI_H
 
 #include "spectral_config.h"
-#include "spectral_synth.h"
+#include "spectral_error.h"
+#include "spectral_backend.h"
 #include "spectral_processing_chain.h"
 
 #ifdef __cplusplus
@@ -15,7 +16,7 @@ extern "C" {
 #endif
 
 /* Parsed command-line options */
-typedef struct {
+typedef struct SpectralCliOptions {
     const char*    input_path;
     const char*    wavetable_path;
     SpectralTimbre timbre;

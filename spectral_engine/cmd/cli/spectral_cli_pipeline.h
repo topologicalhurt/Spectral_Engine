@@ -9,10 +9,10 @@
 #ifndef SPECTRAL_PIPELINE_H
 #define SPECTRAL_PIPELINE_H
 
-#include "spectral_cli.h"
-#include "spectral_common.h"
-#include "spectral_wavetable.h"
 #include "spectral_error.h"
+#include <stdint.h>
+
+typedef struct SpectralCliOptions SpectralCliOptions;
 
 #ifdef __cplusplus
 extern "C" {
