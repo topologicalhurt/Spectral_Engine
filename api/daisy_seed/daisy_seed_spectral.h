@@ -3,7 +3,7 @@
 #define DAISY_SEED_SPECTRAL_H
 
 #include "daisy_seed_config.h"
-#include "../../spectral_engine/spectral_synth_embedded.h"
+#include "../../spectral_engine/synth/backends/arm/spectral_synth_arm32.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -111,6 +111,7 @@ uint32_t daisy_spectral_get_duration(const DaisySpectralCtx* ctx);
 #define DAISY_UART_RESP_ERR         0xFF
 #define DAISY_UART_RESP_STATUS      0x30
 
+#define DAISY_UART_SYNC             0x7E
 #define DAISY_UART_MAX_MSG_LEN      64
 
 typedef struct {

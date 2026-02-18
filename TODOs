@@ -36,15 +36,21 @@
     - Support batching the memory or queuing instructions if we can't keep up in realtime (this is a requirement for embedded targets!)
 
 - Improving performance:
-    - Introducing FPU / float support onto embedded devices (investigate: because we use half-words and pack them could we get effective 1.5x bandwidth by doing a mix-in with
-    words and half-words?)
+
+    - Introducing FPU / float support onto embedded devices (investigate: because we use half-words and pack them could we get effective 1.5x bandwidth by doing a mix-in with words and half-words?)
+
         - Note on this: we are ~probably~ memory or latency bound on an embedded device before being compute bound. However, (a) having this fancy hybrid architecture is awesome (b) why would we not utilize a stalled FPU? (I guess in low power mode) (c) it makes meeting real-time requirements easier if we can offload to the FPU or interleave with the FPU if we need more work done on CPU etc.
 
     - Levarge the CMSIS / VDSP / SIMD (AVX, SSE, NEON?) libs better
-    - Offline analysis is mostly good enough for now, especially since in our current program we export the segments onto embedded targets. However, synthesis is pretty fast & bottle-necked mostly by STFT & tracking logic - this might give a path for analysis on embedded targets or at the very least expedite offline processing if we work actively on improving that section, E.g. analysis pipeline
-    - Support rebuilding shader kernels (or maybe build a select few at runtime) if we add more complex oscillator behaviour
 
-- Improving emulation quality of embedded hardware:
+    - Offline analysis is mostly good enough for now, especially since in our current program we export the segments onto embedded targets. However, synthesis is pretty fast & bottle-necked mostly by STFT / tracking logic & this might give a path for analysis on embedded targets, or at the very least expedite offline processing, if we work actively on improving that section. E.g. work on analysis pipeline for embedded targets.
+
+    - Support dynamically rebuilding shader kernels
+
+    - Build a merged PGO profile based on common tuning tables or some other heuristic / statistic,
+    particularly for embedded targets
+
+- Improving simulation quality of embedded hardware:
     - Empirically verify the results (or get close enough)
     - Heuristic for things like cache, pipeline stalling, or instruction cost Etc.
     - Account for unions, program memory, memory in transit etc. when tracking active memory use

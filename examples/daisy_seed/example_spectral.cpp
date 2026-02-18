@@ -113,8 +113,8 @@ int main(void) {
     if (result != DAISY_OK) {
         hw.PrintLine("Failed to load spectral.spq: %d", result);
     } else {
-        hw.PrintLine("Loaded %d segments (%.2fs)", spectral_ctx.num_segments,
-                     spectral_ctx.output_length / (float)DAISY_SAMPLE_RATE);
+        hw.PrintLine("Loaded %d segments (%.2fs)", spectral_ctx.synth.num_segments,
+                     spectral_ctx.synth.output_length / (float)DAISY_SAMPLE_RATE);
     }
     #endif
     
