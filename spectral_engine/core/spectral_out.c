@@ -6,19 +6,19 @@
 
 #include "spectral_io.h"
 #include "spectral_q15.h"
+#include "spectral_utils.h"
 #include "spectral_vector_ops.h"
 #include <math.h>
 
 #if SPECTRAL_HAS_FILE_IO
 #include <sndfile.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #endif
 
-#if defined(ARM_MATH_CM7) || defined(ARM_MATH_CM4)
+#if SPECTRAL_USE_CMSIS
 #include "arm_math.h"
-#define SPECTRAL_USE_CMSIS 1
-#else
-#define SPECTRAL_USE_CMSIS 0
 #endif
 
 /*
@@ -30,7 +30,7 @@ float spectral_normalize_float(float* buffer, size_t len, float headroom) {
 
     float max_amp = 0.0f;
 
-#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
+#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !SPECTRAL_USE_CMSIS
     spectral_vmaxmgv(buffer, &max_amp, len);
     if (max_amp > 0.0f) {
         float scale = headroom / max_amp;
@@ -146,9 +146,56 @@ void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_fr
 
 #if SPECTRAL_HAS_FILE_IO
 
+/* libsndfile writes a PEAK chunk with a run-time timestamp for float WAV.
+ * Scrub the timestamp field so rendered artifacts are byte-for-byte reproducible. */
+static void spectral_wav_scrub_peak_timestamp(const char* path) {
+    FILE* f;
+    unsigned char hdr[12];
+    if (spectral_is_empty_string(path)) return;
+
+    f = fopen(path, "r+b");
+    if (!f) return;
+
+    if (fread(hdr, 1, sizeof(hdr), f) != sizeof(hdr)) {
+        fclose(f);
+        return;
+    }
+    if (memcmp(hdr, "RIFF", 4) != 0 || memcmp(hdr + 8, "WAVE", 4) != 0) {
+        fclose(f);
+        return;
+    }
+
+    for (;;) {
+        unsigned char chunk[8];
+        long data_pos;
+        unsigned int size;
+        if (fread(chunk, 1, sizeof(chunk), f) != sizeof(chunk)) break;
+
+        data_pos = ftell(f);
+        size = (unsigned int)chunk[4]
+             | ((unsigned int)chunk[5] << 8)
+             | ((unsigned int)chunk[6] << 16)
+             | ((unsigned int)chunk[7] << 24);
+
+        if (memcmp(chunk, "PEAK", 4) == 0 && size >= 8) {
+            unsigned char zero4[4] = {0, 0, 0, 0};
+            if (fseek(f, data_pos + 4, SEEK_SET) == 0) {
+                (void)fwrite(zero4, 1, sizeof(zero4), f);
+            }
+            break;
+        }
+
+        if (fseek(f, data_pos + (long)size + (long)(size & 1u), SEEK_SET) != 0) {
+            break;
+        }
+    }
+
+    fclose(f);
+}
+
 SpectralError spectral_audio_write(const char* path, const float* buffer,
                          size_t num_frames, int sample_rate, int channels) {
-    if (!path || !buffer || num_frames == 0 || sample_rate <= 0 || channels <= 0) {
+    if (spectral_is_empty_string(path) || !buffer || num_frames == 0 || sample_rate <= 0 || channels <= 0) {
         return SPECTRAL_ERR_PARAM;
     }
     
@@ -157,27 +204,40 @@ SpectralError spectral_audio_write(const char* path, const float* buffer,
     info.frames = (sf_count_t)num_frames;
     info.channels = channels;
     info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+
+#ifdef SFC_SET_ADD_PEAK_CHUNK
+    /* Configure libsndfile globally before open to avoid non-deterministic PEAK timestamps. */
+    int add_peak_chunk = SF_FALSE;
+    (void)sf_command(NULL, SFC_SET_ADD_PEAK_CHUNK, &add_peak_chunk, (int)sizeof(add_peak_chunk));
+#endif
     
     SNDFILE* file = sf_open(path, SFM_WRITE, &info);
     if (!file) return SPECTRAL_ERR_FILE_OPEN;
     
     sf_count_t written = sf_writef_float(file, buffer, (sf_count_t)num_frames);
     sf_close(file);
+
+    if (written == (sf_count_t)num_frames) {
+        spectral_wav_scrub_peak_timestamp(path);
+    }
     
     return (written == (sf_count_t)num_frames) ? SPECTRAL_OK : SPECTRAL_ERR_FILE_WRITE;
 }
 
 SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
                                 size_t num_frames, int sample_rate) {
-    if (!path || !mono || num_frames == 0 || sample_rate <= 0) {
+    if (spectral_is_empty_string(path) || !mono || num_frames == 0 || sample_rate <= 0) {
         return SPECTRAL_ERR_PARAM;
     }
 
-    if (num_frames > SIZE_MAX / (2 * sizeof(float))) {
+    size_t stereo_samples = 0;
+    size_t stereo_bytes = 0;
+    if (!spectral_size_mul(num_frames, 2u, &stereo_samples) ||
+        !spectral_size_mul(stereo_samples, sizeof(float), &stereo_bytes)) {
         return SPECTRAL_ERR_OVERFLOW;
     }
     
-    float* stereo = malloc(num_frames * 2 * sizeof(float));
+    float* stereo = malloc(stereo_bytes);
     if (!stereo) return SPECTRAL_ERR_MEMORY;
 
     spectral_mono_to_stereo_float(mono, stereo, num_frames);
