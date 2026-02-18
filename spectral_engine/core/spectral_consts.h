@@ -44,18 +44,4 @@
  * Used for high-precision phase accumulators in embedded synth. */
 #define SPECTRAL_Q31_PER_RAD    (4294967296.0 / SPECTRAL_TWO_PI)  /* ~683565275.6 */
 
-/* Short aliases for convenience (guarded to avoid conflicts) */
-#ifndef PI
-#define PI          SPECTRAL_PI
-#endif
-#ifndef TWO_PI
-#define TWO_PI      SPECTRAL_TWO_PI
-#endif
-#ifndef INV_TWO_PI
-#define INV_TWO_PI  SPECTRAL_INV_TWO_PI
-#endif
-#ifndef PI_SQ
-#define PI_SQ       SPECTRAL_PI_SQ
-#endif
-
 #endif /* SPECTRAL_CONSTS_H */

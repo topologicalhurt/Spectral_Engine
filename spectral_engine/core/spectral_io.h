@@ -9,23 +9,23 @@
  * 
  * SPECTRAL_HAS_FILE_IO: Defined when libsndfile is available
  *   - Desktop builds: always
- *   - Emulator builds: yes (runs on desktop)
+ *   - Simulation builds: yes (runs on desktop)
  *   - Cross-compile ARM: no
  */
 #ifndef SPECTRAL_IO_H
 #define SPECTRAL_IO_H
 
 #include "spectral_config.h"
+#include "spectral_error.h"
 #include "spectral_q15.h"
 #include <stddef.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Determine if file I/O is available (desktop and emulator only) */
-#if !SPECTRAL_EMBEDDED || defined(SPECTRAL_EMBEDDED_EMULATION)
+/* Determine if file I/O is available (desktop and simulation only) */
+#if !SPECTRAL_EMBEDDED || defined(SPECTRAL_EMBEDDED_SIMULATION)
 #define SPECTRAL_HAS_FILE_IO 1
 #else
 #define SPECTRAL_HAS_FILE_IO 0

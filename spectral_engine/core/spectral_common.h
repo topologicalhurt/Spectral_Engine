@@ -1,11 +1,16 @@
-/* spectral_common.h - Core Types and Fast Math */
+/* spectral_common.h - Core Types and Shared Segment Contracts */
 #ifndef SPECTRAL_COMMON_H
 #define SPECTRAL_COMMON_H
 
 #include <stdint.h>
 #include <stddef.h>
+#include <math.h>
 
 #include "spectral_config.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Convert semitones to pitch multiplier: 2^(semitones/12) */
 #define SPECTRAL_PITCH_FACTOR(semitones) powf(2.0f, (semitones) / 12.0f)
@@ -62,6 +67,8 @@ typedef struct {
 void* spectral_aligned_alloc(size_t size);
 #endif
 
-#include "spectral_fast_math.h"
-
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* SPECTRAL_COMMON_H */

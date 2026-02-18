@@ -3,7 +3,6 @@
 #define SPECTRAL_LUT_H
 
 #include "spectral_q15.h"
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,4 +54,4 @@ static inline q15_t spectral_lut_cos(uq16_t phase_u16, const q15_t* lut) {
 }
 #endif
 
-#endif
+#endif /* SPECTRAL_LUT_H */
