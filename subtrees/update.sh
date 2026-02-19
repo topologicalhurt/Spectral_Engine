@@ -18,6 +18,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_FILE="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+SUBTREE_STASH_REF=""
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIBS_FILE="$SCRIPT_DIR/libs.txt"
 
@@ -52,11 +54,39 @@ normalize() {
     printf '%s' "$p"
 }
 
-# Check for any uncommitted changes (staged, unstaged, or untracked)
+# Check for any uncommitted changes (staged, unstaged, or untracked),
+# but ignore updates to libs.txt and this script itself.
 has_changes() {
-    ! git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null && return 0
-    ! git -C "$REPO_ROOT" diff --quiet 2>/dev/null && return 0
-    [[ -n "$(git -C "$REPO_ROOT" ls-files --others --exclude-standard 2>/dev/null)" ]] && return 0
+    local -a ignore_abs=("$LIBS_FILE" "$SCRIPT_FILE")
+    local -a ignore_rel=()
+    local p rel
+
+    # Convert ignored absolute paths to repo-relative paths (only if inside repo)
+    for p in "${ignore_abs[@]}"; do
+        if [[ "$p" == "$REPO_ROOT/"* ]]; then
+            rel="${p#"$REPO_ROOT/"}"
+            ignore_rel+=("$rel")
+        fi
+    done
+
+    local -a excludes=()
+    for rel in "${ignore_rel[@]}"; do
+        excludes+=(":(exclude)$rel")
+    done
+
+    ! git -C "$REPO_ROOT" diff --cached --quiet -- . "${excludes[@]}" 2>/dev/null && return 0
+    ! git -C "$REPO_ROOT" diff --quiet -- . "${excludes[@]}" 2>/dev/null && return 0
+
+    local u
+    while IFS= read -r u; do
+        [[ -z "$u" ]] && continue
+        local keep=1
+        for rel in "${ignore_rel[@]}"; do
+            [[ "$u" == "$rel" ]] && keep=0 && break
+        done
+        [[ $keep -eq 1 ]] && return 0
+    done < <(git -C "$REPO_ROOT" ls-files --others --exclude-standard 2>/dev/null)
+
     return 1
 }
 
@@ -65,6 +95,57 @@ require_clean_tree() {
         die "Working tree is not clean. Commit or stash your changes first.
   git stash push --include-untracked"
     fi
+}
+
+_prepare_subtree_clean_tree() {
+    local -a allow_abs=("$LIBS_FILE" "$SCRIPT_FILE")
+    local -a allow_rel=()
+    local p rel
+
+    for p in "${allow_abs[@]}"; do
+        [[ "$p" == "$REPO_ROOT/"* ]] || continue
+        rel="${p#"$REPO_ROOT/"}"
+        allow_rel+=("$rel")
+    done
+
+    # Collect dirty paths
+    local -a dirty=()
+    local rec xy path extra
+    while IFS= read -r -d '' rec; do
+        xy="${rec:0:2}"
+        path="${rec:3}"
+        dirty+=("$path")
+        # porcelain -z: renames/copies have an extra NUL path
+        if [[ "${xy:0:1}" == "R" || "${xy:0:1}" == "C" ]]; then
+            IFS= read -r -d '' extra || true
+            [[ -n "${extra:-}" ]] && dirty+=("$extra")
+        fi
+    done < <(git -C "$REPO_ROOT" status --porcelain=v1 -z)
+
+    [[ ${#dirty[@]} -eq 0 ]] && return 0
+
+    # Die if anything dirty outside allowed files
+    local d ok
+    for d in "${dirty[@]}"; do
+        ok=0
+        for rel in "${allow_rel[@]}"; do
+            [[ "$d" == "$rel" ]] && ok=1 && break
+        done
+        [[ $ok -eq 1 ]] || die "Working tree has modifications in '$d'. Commit or stash before running subtree."
+    done
+
+    # Only allowed files are dirty: stash them so git subtree is happy
+    local msg="subtree-temp-$$"
+    git -C "$REPO_ROOT" stash push -u -m "$msg" -- "${allow_rel[@]}" >/dev/null
+    if git -C "$REPO_ROOT" stash list -1 | grep -qF "$msg"; then
+        SUBTREE_STASH_REF="stash@{0}"
+    fi
+}
+
+_restore_subtree_clean_tree() {
+    [[ -n "${SUBTREE_STASH_REF:-}" ]] || return 0
+    git -C "$REPO_ROOT" stash pop -q "$SUBTREE_STASH_REF" || warn "stash pop had conflicts; resolve manually."
+    SUBTREE_STASH_REF=""
 }
 
 # --- libs.txt parsing -------------------------------------------------------
@@ -198,6 +279,16 @@ print_summary() {
 
 # --- Commands ---------------------------------------------------------------
 
+_run_subtree() {
+    local out
+    if ! out="$(git -C "$REPO_ROOT" subtree "$@" 2>&1)"; then
+        printf '\n%s\n' "$(_red "git subtree failed:")" >&2
+        printf '%s\n' "$out" >&2
+        return 1
+    fi
+    return 0
+}
+
 do_pull() {
     local dry_run=0
     local -a filters=()
@@ -213,7 +304,10 @@ do_pull() {
     [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { printf 'No entries in libs.txt\n'; return 0; }
     validate_entries
 
-    [[ $dry_run -eq 0 ]] && require_clean_tree
+    if [[ $dry_run -eq 0 ]]; then
+        _prepare_subtree_clean_tree
+        trap _restore_subtree_clean_tree RETURN
+    fi
 
     for entry in "${LIB_ENTRIES[@]}"; do
         parse_lib_entry "$entry"
@@ -233,8 +327,8 @@ do_pull() {
 
         if [[ -d "$REPO_ROOT/$LOCAL_PATH" ]]; then
             printf '  pull  %s ← %s ... ' "$(_bold "$LOCAL_PATH")" "$BRANCH"
-            if git -C "$REPO_ROOT" subtree pull --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
-                    --squash -m "Update subtree $LOCAL_PATH" >/dev/null 2>&1; then
+            if _run_subtree pull --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
+                    --squash -m "Update subtree $LOCAL_PATH"; then
                 printf '%s\n' "$(_green "ok")"
                 record_ok "$LOCAL_PATH"
             else
@@ -243,8 +337,8 @@ do_pull() {
             fi
         else
             printf '  add   %s ← %s ... ' "$(_bold "$LOCAL_PATH")" "$BRANCH"
-            if git -C "$REPO_ROOT" subtree add --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
-                    --squash >/dev/null 2>&1; then
+            if _run_subtree add --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
+                    --squash; then
                 printf '%s\n' "$(_green "ok")"
                 record_ok "$LOCAL_PATH"
             else
@@ -274,7 +368,10 @@ do_push() {
     [[ ${#LIB_ENTRIES[@]} -eq 0 ]] && { printf 'No entries in libs.txt\n'; return 0; }
     validate_entries
 
-    [[ $dry_run -eq 0 ]] && require_clean_tree
+    if [[ $dry_run -eq 0 ]]; then
+        _prepare_subtree_clean_tree
+        trap _restore_subtree_clean_tree RETURN
+    fi
 
     for entry in "${LIB_ENTRIES[@]}"; do
         parse_lib_entry "$entry"
@@ -299,8 +396,7 @@ do_push() {
         fi
 
         printf '  push  %s → %s ... ' "$(_bold "$LOCAL_PATH")" "$BRANCH"
-        if git -C "$REPO_ROOT" subtree push --prefix="$LOCAL_PATH" "$REPO" "$BRANCH" \
-                >/dev/null 2>&1; then
+        if _run_subtree push --prefix="$LOCAL_PATH" "$REPO" "$BRANCH"; then
             printf '%s\n' "$(_green "ok")"
             record_ok "$LOCAL_PATH"
         else
