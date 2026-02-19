@@ -1,12 +1,19 @@
-SPECTRAL
+##########################################################################
+#                                                                        #
+#                           SPECTRAL_ENGINE                              #
+#                                                                        #
+##########################################################################
 
-Real-time spectral analysis and resynthesis engine.
+Real-time spectral analysis and resynthesis engine for macOS/Linux/FreeRTOS/FreeBSD & baremetal ARM Cortex-M/A targets, with graphics acceleration support available for Metal & CUDA platforms.
 
-Platforms: Desktop (macOS/Linux), Metal GPU, CUDA GPU, ARM Cortex-M/A
+With planned support for the following:
+
+[] OpenGL
+[] Subset of RISC-V for baremetal embedded targets
 
 WHAT IS IT?
 
-Spectral_Engine performs spectral synthesis on audio signals. It aims to be a 'synthesis from first principles' engine as Additive, Subtractive, Wavelett (& most other forms of synthesis*) can be derived in the spectral or STFT domain directly. I believe this makes spectral synthesis an especially intuitive domain in the world of DSP, which is all too often un-unified making it difficult to follow or apply design patterns consistently. Spectral synthesis gives us one 'homomorphic' domain to focus on rather than branching off into many different sub-problem domains; if we focus our sole attention on spectral synthesis then that is hopefully admissable to one consistent, featured, performant, rigorous & intuitive regime for manipulating & experimenting with sound-design / synthesis design more broadly.
+Spectral_Engine performs spectral synthesis on audio signals either offline or in realtime. It aims to be a 'synthesis from first principles' engine as Additive, Subtractive, Wavelett (& most other forms of synthesis*) can be derived in the spectral or STFT domain directly. I believe this makes spectral synthesis an especially intuitive domain in the world of DSP, which is all too often un-unified making it difficult to follow or apply design patterns consistently. Spectral synthesis gives us one 'homomorphic' domain to focus on rather than branching off into many different sub-problem domains; if we focus our sole attention on spectral synthesis then that is hopefully admissable to one consistent, featured, performant, rigorous & intuitive regime for manipulating & experimenting with sound-design / synthesis design more broadly.
 
 DESCRIPTION
 
@@ -32,17 +39,14 @@ FEATURES
 
 [] Multiple methods for performing spectral analysis
   - Wavelett bases for accelerated/custom applications
-  - Other bases with special implications for our sound design[*]
+  - Other bases with special implications for sound or synthesis design[*]
 [] Resynthesis using standard or arbitrary oscillators
   - Complex oscillator design per segment group
   - High granularity for segment groups / frequency bins 
   - Envelope design per voice
 [] Essentially unlimited polyphony count
-[] Increased effective sample size, sample rate, hop-size, buffers, data types ...
-  - Full float support as opposed to q8.8 / q15 half-word format
-  - Support for 64bit platforms
 [] GPU acceleration, openMP support
-[] O.S. functionality
+[] O.S. functionality or bare metal for embedded targets
 
 The full-fledged desktop version builds with offline processing features & other QOL features not afforded on embedded targets, but they can be forcefully enabled with potentially breaking behaviour[*].
 
@@ -79,12 +83,12 @@ make simulate          # generic profile
 make simulate_daisy    # Daisy profile
 ```
 
-The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices' flash. I.e.
+The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices' flash. E.g,
 ```
-make configure && \
-make desktop daisy && \
-./build/bin/spectral_*_desktop ./resources/motormouth_recites_shakespeare_he_saw_the_cat.wav ... && \
-make daisy-flash
+make configure
+make desktop daisy
+./build/bin/spectral_*_desktop ./resources/motormouth_recites_shakespeare_he_saw_the_cat.wav <...> 4
+make daisy-flash       # Flash the target device with the segment binary
 ```
 
 ```
@@ -98,24 +102,12 @@ make help
 ```
 for the full matrix/options.
 
-Canonical build flag definitions live in `spectral_engine/cmake/options.cmake`.
-
-Cleanup helpers
-```
-make clean-cache        # clear runtime cache under output/cache and output/pgo
-make clean-sounds       # delete generated audio files in output/ and build/
-make clean-output       # clear all output/artifacts (equiv: clean-cache + clean-sounds)
-make clean-cmake-cache  # clear CMake cache/metadata under build/
-```
-
 USAGE
 
   ./build/bin/spectral_*_desktop input.wav [timbre] [stretch] [pitch] [n_fft] [hop] [thresh] [threads] [backend]
 
   Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm
   Backends: 0=auto 1=cpu 2=metal 3=cuda 4=export
-
-The embedded cross-compiled targets all build with a real-time assurance for a subset of the Arm platform (Arm Cortex A/M series) [*subject to parameter choice's & build path]. It supports dynamic, real-time resynthesis of imported segment binaries with up to 1024 concurrent voices of polyphony*. For a specific target refer to the daisy_seed api.
 
 STRUCTURE
 
