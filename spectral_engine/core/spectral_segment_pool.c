@@ -1,5 +1,6 @@
 /* spectral_segment_pool.c - Block-allocated segment storage */
 #include "spectral_segment_pool.h"
+#include "spectral_utils.h"
 
 /* Segment pool is desktop/analysis-only */
 #if !SPECTRAL_EMBEDDED
@@ -10,7 +11,7 @@
 SpectralError segment_pool_init(SegmentPool* pool, uint32_t expected_count) {
     if (!pool) return SPECTRAL_ERR_PARAM;
     
-    pool->block_size = SEGMENT_POOL_BLOCK_SIZE;
+    pool->block_size = SPECTRAL_SEGMENT_POOL_BLOCK_SIZE;
     pool->num_blocks = 0;
     pool->count = 0;
     
@@ -18,7 +19,7 @@ SpectralError segment_pool_init(SegmentPool* pool, uint32_t expected_count) {
     if (est_blocks < 4) est_blocks = 4;
     
     pool->max_blocks = est_blocks;
-    pool->blocks = (Segment**)calloc(est_blocks, sizeof(Segment*));
+    pool->blocks = (Segment**)spectral_calloc_array((size_t)est_blocks, sizeof(Segment*));
     return pool->blocks ? SPECTRAL_OK : SPECTRAL_ERR_MEMORY;
 }
 
@@ -32,13 +33,14 @@ SpectralError segment_pool_push(SegmentPool* pool, const Segment* seg) {
         if (block_idx >= pool->max_blocks) {
             uint32_t new_max = pool->max_blocks * 2;
             if (new_max < pool->max_blocks) return SPECTRAL_ERR_OVERFLOW;
-            Segment** new_blocks = (Segment**)realloc(pool->blocks, new_max * sizeof(Segment*));
+            Segment** new_blocks = (Segment**)spectral_realloc_array(
+                pool->blocks, (size_t)new_max, sizeof(Segment*));
             if (!new_blocks) return SPECTRAL_ERR_MEMORY;
             pool->blocks = new_blocks;
             pool->max_blocks = new_max;
         }
-        
-        Segment* new_block = (Segment*)malloc(pool->block_size * sizeof(Segment));
+
+        Segment* new_block = (Segment*)spectral_malloc_array((size_t)pool->block_size, sizeof(Segment));
         if (!new_block) return SPECTRAL_ERR_MEMORY;
         pool->blocks[block_idx] = new_block;
         pool->num_blocks++;
@@ -53,7 +55,7 @@ SegmentArray segment_pool_to_array(SegmentPool* pool) {
     SegmentArray sa = SEGMENT_ARRAY_EMPTY;
     if (!pool || pool->count == 0) return sa;
     
-    sa.segs = (Segment*)malloc(pool->count * sizeof(Segment));
+    sa.segs = (Segment*)spectral_malloc_array((size_t)pool->count, sizeof(Segment));
     if (!sa.segs) return sa;
     
     uint32_t copied = 0;
@@ -62,7 +64,13 @@ SegmentArray segment_pool_to_array(SegmentPool* pool) {
         if (copied + to_copy > pool->count) {
             to_copy = pool->count - copied;
         }
-        memcpy(&sa.segs[copied], pool->blocks[b], to_copy * sizeof(Segment));
+        size_t copy_bytes = 0;
+        if (!spectral_array_bytes((size_t)to_copy, sizeof(Segment), &copy_bytes)) {
+            free(sa.segs);
+            sa = (SegmentArray)SEGMENT_ARRAY_EMPTY;
+            return sa;
+        }
+        memcpy(&sa.segs[copied], pool->blocks[b], copy_bytes);
         copied += to_copy;
     }
     

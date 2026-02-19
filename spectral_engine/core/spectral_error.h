@@ -2,6 +2,10 @@
 #ifndef SPECTRAL_ERROR_H
 #define SPECTRAL_ERROR_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     SPECTRAL_OK                  =    0,
     
@@ -40,10 +44,10 @@ typedef enum {
     SPECTRAL_ERR_PROTO_OVERFLOW  = -202,
     SPECTRAL_ERR_PROTO_TIMEOUT   = -203,
 
-    /* Emulator (-250 to -299) */
-    SPECTRAL_ERR_EMU_UNAVAIL     = -250,
-    SPECTRAL_ERR_EMU_SEG_FAIL    = -251,
-    SPECTRAL_ERR_EMU_ACCUM_FAIL  = -252,
+    /* Simulation (-250 to -299) */
+    SPECTRAL_ERR_SIM_UNAVAIL     = -250,
+    SPECTRAL_ERR_SIM_SEG_FAIL    = -251,
+    SPECTRAL_ERR_SIM_ACCUM_FAIL  = -252,
     
 
 } SpectralError;
@@ -57,7 +61,8 @@ typedef enum WavetableError {
     WAVETABLE_ERR_FULL      = -5,
     WAVETABLE_ERR_NOT_FOUND = -6,
     WAVETABLE_ERR_VERSION   = -7,
-    WAVETABLE_ERR_MEMORY    = -8
+    WAVETABLE_ERR_MEMORY    = -8,
+    WAVETABLE_ERR_UNSUPPORTED = -9
 } WavetableError;
 
 typedef enum PipelineError {
@@ -70,11 +75,21 @@ typedef enum PipelineError {
     PIPELINE_ERR_MEMORY     = -6
 } PipelineError;
 
-const char* spectral_strerror(SpectralError err);
-const char* wavetable_strerror(WavetableError err);
-const char* pipeline_strerror(PipelineError err);
+typedef enum SpectralErrorDomain {
+    SPECTRAL_ERROR_DOMAIN_CORE = 0,
+    SPECTRAL_ERROR_DOMAIN_WAVETABLE = 1,
+    SPECTRAL_ERROR_DOMAIN_PIPELINE = 2
+} SpectralErrorDomain;
+
+const char* spectral_error_message(SpectralErrorDomain domain, int code);
+void spectral_log_error_codef(SpectralErrorDomain domain, int code, const char* context_fmt, ...);
+void spectral_log_warn_codef(SpectralErrorDomain domain, int code, const char* context_fmt, ...);
 
 static inline int spectral_is_ok(SpectralError err) { return err == SPECTRAL_OK; }
 static inline int spectral_is_error(SpectralError err) { return err != SPECTRAL_OK; }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

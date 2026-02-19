@@ -7,6 +7,11 @@
 #define SPECTRAL_SEGMENT_PARSER_H
 
 #include "spectral_common.h"
+#include "spectral_error.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct {
     char magic[4];
@@ -48,8 +53,8 @@ typedef struct __attribute__((packed, aligned(4))) {
 _Static_assert(sizeof(SpqFileHeader) == 32, "SpqFileHeader must be 32 bytes");
 #endif
 
-/* File I/O functions — desktop/emulator only (uses stdio, malloc) */
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR
+/* File I/O functions — desktop/simulation only (uses stdio, malloc) */
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
 /* Save segments to binary file.
  * Returns SPECTRAL_OK on success, SPECTRAL_ERR_* on failure. */
@@ -60,6 +65,10 @@ SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, fl
  * Returns SPECTRAL_OK on success, SPECTRAL_ERR_* on failure. */
 SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, float* out_stretch, float* out_pitch);
 
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR */
+#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SPECTRAL_SEGMENT_PARSER_H */

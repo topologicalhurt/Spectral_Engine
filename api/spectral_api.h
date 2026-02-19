@@ -1,4 +1,9 @@
-/* spectral_api.h - Platform-agnostic API for spectral engine */
+/* spectral_api.h - Draft platform-agnostic API surface
+ *
+ * Note: This header is currently a forward-looking contract and is not
+ * backed by a complete implementation in this repository.
+ * For shipping code paths, use api/daisy_seed/daisy_seed_spectral.h instead
+ */
 
 #ifndef SPECTRAL_API_H
 #define SPECTRAL_API_H

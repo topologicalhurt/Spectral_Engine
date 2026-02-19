@@ -70,4 +70,28 @@
   #endif
 #endif
 
+/*
+ * Maybe-unused annotation for local helper functions/variables.
+ */
+#ifndef SPECTRAL_MAYBE_UNUSED
+  #if defined(__GNUC__) || defined(__clang__)
+    #define SPECTRAL_MAYBE_UNUSED __attribute__((unused))
+  #else
+    #define SPECTRAL_MAYBE_UNUSED
+  #endif
+#endif
+
+/*
+ * Thread-local storage annotation
+ */
+#ifndef SPECTRAL_THREAD_LOCAL
+  #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+    #define SPECTRAL_THREAD_LOCAL _Thread_local
+  #elif defined(__GNUC__) || defined(__clang__)
+    #define SPECTRAL_THREAD_LOCAL __thread
+  #else
+    #define SPECTRAL_THREAD_LOCAL
+  #endif
+#endif
+
 #endif /* SPECTRAL_MACROS_H */

@@ -1,0 +1,91 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default Release (Repo Root)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (Repo Root)",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "simulate-daisy",
+      "displayName": "Simulation Daisy Profile",
+      "inherits": "default",
+      "cacheVariables": {
+        "SPECTRAL_SIMULATION_BOARD": "daisy"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "desktop",
+      "configurePreset": "default",
+      "targets": ["desktop"]
+    },
+    {
+      "name": "simulate",
+      "configurePreset": "default",
+      "targets": ["simulate"]
+    },
+    {
+      "name": "simulate-daisy",
+      "configurePreset": "simulate-daisy",
+      "targets": ["simulate_daisy"]
+    },
+    {
+      "name": "embedded-arm",
+      "configurePreset": "default",
+      "targets": ["embedded_arm"]
+    },
+    {
+      "name": "embedded-arm-float",
+      "configurePreset": "default",
+      "targets": ["embedded_arm_float"]
+    },
+    {
+      "name": "embedded-arm-restricted",
+      "configurePreset": "default",
+      "targets": ["embedded_arm_restricted"]
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "default",
+      "targets": ["cuda"]
+    },
+    {
+      "name": "daisy",
+      "configurePreset": "default",
+      "targets": ["daisy"]
+    },
+    {
+      "name": "daisy-example",
+      "configurePreset": "default",
+      "targets": ["daisy_example"]
+    },
+    {
+      "name": "convert-segments",
+      "configurePreset": "default",
+      "targets": ["convert_segments"]
+    },
+    {
+      "name": "log-check",
+      "configurePreset": "default",
+      "targets": ["log_check"]
+    }
+  ]
+}

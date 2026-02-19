@@ -1,5 +1,6 @@
 /* spectral_segment_mt.c - Thread-safe segment array */
 #include "spectral_segment_mt.h"
+#include "spectral_utils.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,12 +66,17 @@ SpectralError segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out) {
     out->capacity = sa->array.count;
     out->segs = NULL;
     if (sa->array.count > 0 && sa->array.segs) {
-        out->segs = (Segment*)malloc(sa->array.count * sizeof(Segment));
+        size_t copy_bytes = 0;
+        if (!spectral_array_bytes((size_t)sa->array.count, sizeof(Segment), &copy_bytes)) {
+            pthread_mutex_unlock(&sa->mutex);
+            return SPECTRAL_ERR_OVERFLOW;
+        }
+        out->segs = (Segment*)spectral_malloc_array((size_t)sa->array.count, sizeof(Segment));
         if (!out->segs) {
             pthread_mutex_unlock(&sa->mutex);
             return SPECTRAL_ERR_MEMORY;
         }
-        memcpy(out->segs, sa->array.segs, sa->array.count * sizeof(Segment));
+        memcpy(out->segs, sa->array.segs, copy_bytes);
     }
     pthread_mutex_unlock(&sa->mutex);
     return SPECTRAL_OK;

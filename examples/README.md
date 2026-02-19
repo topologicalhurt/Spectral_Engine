@@ -6,13 +6,14 @@ Platform-specific example applications.
 
     daisy_seed/           Daisy Seed ARM example
       example_spectral.cpp
-      Makefile
 
 ## Build
 
-    cd daisy_seed
-    make
-    make flash
+Run all commands from the repository root.
+
+    make configure CMAKE_CONFIGURE_ARGS='-DSPECTRAL_DAISY_LIBDAISY_DIR=/path/to/libDaisy -DSPECTRAL_DAISY_DAISYSP_DIR=/path/to/DaisySP -DSPECTRAL_DAISY_BUILD_EXAMPLE=ON'
+    make daisy_example
+    make daisy_example_flash
 
 ## Daisy Seed Pins
 

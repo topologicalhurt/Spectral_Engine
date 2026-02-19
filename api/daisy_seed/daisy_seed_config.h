@@ -13,8 +13,8 @@
 #undef  SPECTRAL_NO_PERF
 #define SPECTRAL_NO_PERF            1
 
-#include "../../spectral_engine/spectral_config.h"
-#include "../../spectral_engine/spectral_q15.h"
+#include "../../spectral_engine/core/spectral_config.h"
+#include "../../spectral_engine/synth/math/spectral_q15.h"
 
 /* STM32H750 CPU */
 #define DAISY_CPU_FREQ_HZ           480000000UL
@@ -70,13 +70,6 @@
 #ifndef DAISY_USE_CMSIS_DSP
 #define DAISY_USE_CMSIS_DSP         0
 #endif
-#define DAISY_OSC_LUT_BITS          SPECTRAL_OSC_LUT_BITS
-#define DAISY_OSC_LUT_SIZE          SPECTRAL_OSC_LUT_SIZE
-#define DAISY_OSC_LUT_MASK          SPECTRAL_OSC_LUT_MASK
-/* Legacy aliases */
-#define DAISY_SIN_LUT_BITS          DAISY_OSC_LUT_BITS
-#define DAISY_SIN_LUT_SIZE          DAISY_OSC_LUT_SIZE
-#define DAISY_SIN_LUT_MASK          DAISY_OSC_LUT_MASK
 #define DAISY_SYNTH_UNROLL_FACTOR   4
 
 /* GCC section attributes - only valid on ARM embedded targets */

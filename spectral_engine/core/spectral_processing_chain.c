@@ -62,7 +62,7 @@ static int parse_named_token(const char* token, SpectralProcessMask* out_bit) {
         return 1;
     }
     if (token_equal_ci(token, "default")) {
-        *out_bit = SPECTRAL_PROC_DEFAULT;
+        *out_bit = SPECTRAL_PROC_NONE;
         return 1;
     }
     if (token_equal_ci(token, "all")) {
@@ -211,5 +211,8 @@ SpectralError spectral_process_chain_apply(
     local.pending = mask & ~local.applied;
 
     if (report) *report = local;
+#if SPECTRAL_PROCESS_STRICT
+    if (local.pending != SPECTRAL_PROC_NONE) return SPECTRAL_ERR_PARAM;
+#endif
     return SPECTRAL_OK;
 }

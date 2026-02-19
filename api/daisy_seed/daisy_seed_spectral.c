@@ -1,5 +1,6 @@
 /* daisy_seed_spectral.c - Daisy Seed spectral synthesis wrapper */
 #include "daisy_seed_spectral.h"
+#include "spectral_lut.h"
 #include <string.h>
 #include <math.h>
 
@@ -13,17 +14,22 @@
 static SpectralSegmentQ15 s_segment_pool[DAISY_MAX_SEGMENTS_SAFE] DAISY_SDRAM_BSS;
 static q15_t s_osc_lut[SPECTRAL_OSC_LUT_SIZE + 1] DAISY_SRAM;
 static uint8_t s_lut_initialized = 0;
-static uint32_t s_memory_used = 0;
+static DaisySpectralCtx* s_active_ctx = NULL;
 
 #ifdef DAISY_HAS_FATFS
 static FATFS s_fatfs;
 static uint8_t s_sd_mounted = 0;
 #endif
 
+static inline uint32_t daisy_base_memory_used(void) {
+    return (uint32_t)(sizeof(DaisySpectralCtx) + sizeof(s_osc_lut));
+}
+
 /* Initialization */
 
 DaisyResult daisy_spectral_init(DaisySpectralCtx* ctx, uint32_t sample_rate) {
     if (!ctx) return DAISY_ERR_PARAM;
+    if (s_active_ctx && s_active_ctx != ctx) return DAISY_ERR_MEMORY;
     memset(ctx, 0, sizeof(DaisySpectralCtx));
     
     /* Validate sample rate */
@@ -48,15 +54,15 @@ DaisyResult daisy_spectral_init(DaisySpectralCtx* ctx, uint32_t sample_rate) {
     spectral_arm32_set_amplitude(&ctx->synth, DAISY_DEFAULT_AMPLITUDE);
     
     /* Track memory usage */
-    s_memory_used = sizeof(DaisySpectralCtx) + sizeof(s_osc_lut);
-    ctx->total_memory_used = s_memory_used;
+    ctx->total_memory_used = daisy_base_memory_used();
+    s_active_ctx = ctx;
     
     return DAISY_OK;
 }
 
 void daisy_spectral_deinit(DaisySpectralCtx* ctx) {
     if (!ctx) return;
-    s_memory_used = 0;
+    if (s_active_ctx == ctx) s_active_ctx = NULL;
     memset(ctx, 0, sizeof(DaisySpectralCtx));
 }
 
@@ -126,7 +132,7 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
     /* Update context state */
     ctx->synth.num_segments = header.num_segments;
     ctx->synth.output_length = header.output_length;
-    ctx->total_memory_used = s_memory_used + seg_bytes;
+    ctx->total_memory_used = daisy_base_memory_used() + seg_bytes;
     
     /* Reset playback position */
     spectral_arm32_reset(&ctx->synth);
@@ -165,7 +171,7 @@ DaisyResult daisy_spectral_load_buffer(DaisySpectralCtx* ctx,
     
     /* Update memory tracking */
     uint32_t seg_bytes = num_segments * sizeof(SpectralSegmentQ15);
-    ctx->total_memory_used = s_memory_used + seg_bytes;
+    ctx->total_memory_used = daisy_base_memory_used() + seg_bytes;
     
     return DAISY_OK;
 }
@@ -182,9 +188,11 @@ void daisy_spectral_get_memory(const DaisySpectralCtx* ctx,
     }
     
     uint32_t seg_bytes = ctx->synth.num_segments * sizeof(SpectralSegmentQ15);
+    uint32_t total_used = ctx->total_memory_used;
+    if (total_used > DAISY_SDRAM_SIZE) total_used = DAISY_SDRAM_SIZE;
     if (segments_bytes) *segments_bytes = seg_bytes;
-    if (total_bytes) *total_bytes = ctx->total_memory_used;
-    if (available_bytes) *available_bytes = DAISY_SDRAM_SIZE - ctx->total_memory_used;
+    if (total_bytes) *total_bytes = total_used;
+    if (available_bytes) *available_bytes = DAISY_SDRAM_SIZE - total_used;
 }
 
 /* Parameters */
@@ -229,14 +237,17 @@ void daisy_spectral_seek(DaisySpectralCtx* ctx, uint32_t sample_pos) {
 }
 
 int daisy_spectral_is_complete(const DaisySpectralCtx* ctx) {
+    if (!ctx) return 1;
     return spectral_arm32_is_complete(&ctx->synth);
 }
 
 uint32_t daisy_spectral_get_position(const DaisySpectralCtx* ctx) {
+    if (!ctx) return 0;
     return spectral_arm32_get_position(&ctx->synth);
 }
 
 uint32_t daisy_spectral_get_duration(const DaisySpectralCtx* ctx) {
+    if (!ctx) return 0;
     return spectral_arm32_get_duration(&ctx->synth);
 }
 
@@ -281,6 +292,9 @@ static struct {
     uint8_t checksum;
 } s_uart_state = { .state = UART_STATE_IDLE };
 
+#define UART_CMD_LEN_UNKNOWN  0xFFu
+#define UART_CMD_LEN_VARIABLE 0xFEu
+
 /* Compute expected data length for command */
 static uint8_t uart_cmd_data_len(uint8_t cmd) {
     switch (cmd) {
@@ -290,9 +304,24 @@ static uint8_t uart_cmd_data_len(uint8_t cmd) {
         case DAISY_UART_CMD_RESET:       return 0;
         case DAISY_UART_CMD_SEEK:        return 4;  /* uint32 */
         case DAISY_UART_CMD_GET_STATUS:  return 0;
-        case DAISY_UART_CMD_LOAD_FILE:   return 0;  /* Variable, null-terminated */
-        default:                         return 0xFF; /* Unknown command */
+        case DAISY_UART_CMD_LOAD_FILE:   return UART_CMD_LEN_VARIABLE;  /* Null-terminated filename */
+        default:                         return UART_CMD_LEN_UNKNOWN; /* Unknown command */
     }
+}
+
+static int uart_begin_command(uint8_t cmd) {
+    s_uart_state.cmd = cmd;
+    s_uart_state.expected_len = uart_cmd_data_len(cmd);
+    s_uart_state.data_len = 0;
+    s_uart_state.checksum = cmd;
+
+    if (s_uart_state.expected_len == UART_CMD_LEN_UNKNOWN) {
+        s_uart_state.state = UART_STATE_IDLE;
+        return 0;
+    }
+
+    s_uart_state.state = (s_uart_state.expected_len == 0) ? UART_STATE_CHECKSUM : UART_STATE_DATA;
+    return 1;
 }
 
 /* Execute command and build response */
@@ -402,29 +431,32 @@ int daisy_uart_process_byte(DaisySpectralCtx* ctx,
     
     switch (s_uart_state.state) {
         case UART_STATE_IDLE:
+            if (byte == DAISY_UART_SYNC) {
+                s_uart_state.state = UART_STATE_CMD;
+                break;
+            }
+            if (!uart_begin_command(byte)) break; /* Ignore framing noise in idle state. */
+            break;
+
         case UART_STATE_CMD:
-            s_uart_state.cmd = byte;
-            s_uart_state.expected_len = uart_cmd_data_len(byte);
-            s_uart_state.data_len = 0;
-            s_uart_state.checksum = byte;
-            
-            if (s_uart_state.expected_len == 0xFF) {
-                /* Unknown command */
-                s_uart_state.state = UART_STATE_IDLE;
+            if (!uart_begin_command(byte)) {
                 response_buf[0] = DAISY_UART_RESP_ERR;
                 response_buf[1] = 0x00;
                 response_buf[2] = response_buf[0] ^ response_buf[1];
                 *response_len = 3;
                 return 1;
-            } else if (s_uart_state.expected_len == 0) {
-                /* No data expected, wait for checksum */
-                s_uart_state.state = UART_STATE_CHECKSUM;
-            } else {
-                s_uart_state.state = UART_STATE_DATA;
             }
             break;
             
         case UART_STATE_DATA:
+            if (s_uart_state.data_len >= DAISY_UART_MAX_MSG_LEN) {
+                s_uart_state.state = UART_STATE_IDLE;
+                response_buf[0] = DAISY_UART_RESP_ERR;
+                response_buf[1] = (uint8_t)(-DAISY_ERR_OVERFLOW);
+                response_buf[2] = response_buf[0] ^ response_buf[1];
+                *response_len = 3;
+                return 1;
+            }
             s_uart_state.data[s_uart_state.data_len++] = byte;
             s_uart_state.checksum ^= byte;
             
@@ -432,7 +464,7 @@ int daisy_uart_process_byte(DaisySpectralCtx* ctx,
             if (s_uart_state.cmd == DAISY_UART_CMD_LOAD_FILE) {
                 if (byte == '\0') {
                     s_uart_state.state = UART_STATE_CHECKSUM;
-                } else if (s_uart_state.data_len >= DAISY_UART_MAX_MSG_LEN - 1) {
+                } else if (s_uart_state.data_len >= DAISY_UART_MAX_MSG_LEN) {
                     /* Buffer overflow, reset */
                     s_uart_state.state = UART_STATE_IDLE;
                     response_buf[0] = DAISY_UART_RESP_ERR;
@@ -441,7 +473,8 @@ int daisy_uart_process_byte(DaisySpectralCtx* ctx,
                     *response_len = 3;
                     return 1;
                 }
-            } else if (s_uart_state.data_len >= s_uart_state.expected_len) {
+            } else if (s_uart_state.expected_len != UART_CMD_LEN_VARIABLE &&
+                       s_uart_state.data_len >= s_uart_state.expected_len) {
                 s_uart_state.state = UART_STATE_CHECKSUM;
             }
             break;

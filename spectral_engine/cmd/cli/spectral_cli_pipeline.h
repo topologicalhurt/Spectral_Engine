@@ -1,0 +1,51 @@
+/* spectral_cli_pipeline.h - Main Processing Pipeline
+ * 
+ * Orchestrates the spectral processing pipeline:
+ *   1. Input: Load audio file or pre-analyzed segments
+ *   2. Analysis: FFT analysis and peak tracking (desktop only)
+ *   3. Synthesis: Render segments with selected backend
+ *   4. Output: Normalize and write audio file
+ */
+#ifndef SPECTRAL_PIPELINE_H
+#define SPECTRAL_PIPELINE_H
+
+#include "spectral_error.h"
+#include <stdint.h>
+
+typedef struct SpectralCliOptions SpectralCliOptions;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Pipeline timing results */
+typedef struct {
+    double t_fft;
+    double t_track;
+    double t_synth;
+    double t_norm;
+    double t_total;
+    double audio_dur;
+    double realtime_x;
+} SpectralTimingResults;
+
+/* Run the full processing pipeline
+ * 
+ * Parameters:
+ *   opts    - Parsed and validated command-line options
+ *   timing  - Output: timing results (may be NULL)
+ * 
+ * Returns: PIPELINE_OK on success, negative error code on failure
+ */
+PipelineError spectral_pipeline_run(const SpectralCliOptions* opts, 
+                                     SpectralTimingResults* timing);
+
+/* Print timing results */
+void spectral_pipeline_print_timing(const SpectralTimingResults* timing, 
+                                    uint32_t segment_count);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SPECTRAL_PIPELINE_H */

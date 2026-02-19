@@ -5,6 +5,7 @@
  */
 
 #include "spectral_io.h"
+#include "spectral_utils.h"
 
 #if SPECTRAL_HAS_FILE_IO
 
@@ -14,7 +15,7 @@
 #include <string.h>
 
 SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, float** out_mono) {
-    if (!path || !info || !out_mono) return SPECTRAL_ERR_PARAM;
+    if (spectral_is_empty_string(path) || !info || !out_mono) return SPECTRAL_ERR_PARAM;
     
     SF_INFO sfinfo = {0};
     SNDFILE* file = sf_open(path, SFM_READ, &sfinfo);
@@ -30,16 +31,14 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
     info->frames = (size_t)sfinfo.frames;
     
     /* Read all audio data */
-    if ((size_t)sfinfo.frames > SIZE_MAX / (size_t)sfinfo.channels) {
+    size_t total_samples = 0;
+    size_t audio_bytes = 0;
+    if (!spectral_size_mul((size_t)sfinfo.frames, (size_t)sfinfo.channels, &total_samples) ||
+        !spectral_size_mul(total_samples, sizeof(float), &audio_bytes)) {
         sf_close(file);
         return SPECTRAL_ERR_OVERFLOW;
     }
-    size_t total_samples = (size_t)sfinfo.frames * (size_t)sfinfo.channels;
-    if (total_samples > SIZE_MAX / sizeof(float)) {
-        sf_close(file);
-        return SPECTRAL_ERR_OVERFLOW;
-    }
-    float* audio = malloc(total_samples * sizeof(float));
+    float* audio = malloc(audio_bytes);
     if (!audio) {
         sf_close(file);
         return SPECTRAL_ERR_MEMORY;
@@ -53,11 +52,12 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         return SPECTRAL_ERR_FILE_READ;
     }
     
-    if ((size_t)sfinfo.frames > SIZE_MAX / sizeof(float)) {
+    size_t mono_bytes = 0;
+    if (!spectral_size_mul((size_t)sfinfo.frames, sizeof(float), &mono_bytes)) {
         free(audio);
         return SPECTRAL_ERR_OVERFLOW;
     }
-    float* mono = malloc((size_t)sfinfo.frames * sizeof(float));
+    float* mono = malloc(mono_bytes);
     if (!mono) {
         free(audio);
         return SPECTRAL_ERR_MEMORY;
@@ -87,7 +87,7 @@ SpectralError spectral_audio_window(float* audio, size_t total_frames,
 
     double start_d = (start_sec > 0.0f) ? (double)start_sec * (double)sample_rate : 0.0;
     double end_d = (end_sec < 0.0f) ? (double)total_frames : (double)end_sec * (double)sample_rate;
-    if (!isfinite(start_d) || !isfinite(end_d)) return SPECTRAL_ERR_PARAM;
+    if (!spectral_is_finite_f64(start_d) || !spectral_is_finite_f64(end_d)) return SPECTRAL_ERR_PARAM;
     if (start_d < 0.0) start_d = 0.0;
     if (end_d < 0.0) end_d = 0.0;
     if (start_d > (double)total_frames) start_d = (double)total_frames;

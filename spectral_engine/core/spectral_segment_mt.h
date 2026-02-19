@@ -7,6 +7,11 @@
 #define SPECTRAL_SEGMENT_MT_H
 
 #include "spectral_common.h"
+#include "spectral_error.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #if !SPECTRAL_EMBEDDED
 #include <pthread.h>
@@ -26,4 +31,9 @@ void segment_array_mt_get(SegmentArrayMT* sa, SegmentArray* out);
 SpectralError segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out);
 
 #endif
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

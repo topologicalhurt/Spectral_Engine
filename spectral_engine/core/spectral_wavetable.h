@@ -5,8 +5,8 @@
  * 
  * File Formats:
  *   .spwt - Native format with header (auto-converts float<->Q15)
- *   .bin  - Raw samples in runtime format
- *   .hex  - Intel HEX text format
+ *   .bin  - Raw spectral_sample_t samples (SPECTRAL_WAVETABLE_SIZE entries)
+ *   .hex  - HEX encoded sample bytes
  * 
  * Lookup:
  *   Float phase (0.0-1.0) for desktop synthesis
@@ -61,7 +61,7 @@ typedef struct {
     uint8_t timbre_id;
 } SpectralWavetable;
 
-typedef struct {
+typedef struct SpectralWavetableBank {
     SpectralWavetable tables[SPECTRAL_MAX_WAVETABLES];
     uint8_t num_loaded;
     uint8_t default_timbre;
@@ -81,7 +81,8 @@ WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id);
 
-/* Legacy file loading (deprecated - prefer .spwt format) */
+/* Raw/hex loaders used by native and embedded workflows.
+ * .spwt remains the canonical native format loader. */
 WavetableError spectral_wavetable_load_raw(SpectralWavetableBank* bank,
                                             const char* filename,
                                             uint8_t timbre_id);
@@ -112,15 +113,6 @@ spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank
 spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      uint16_t phase_u16);
-
-/* Backward-compatible aliases based on expected usage pattern */
-#if SPECTRAL_EMBEDDED
-#define spectral_wavetable_lookup(table, phase) spectral_wavetable_lookup_q(table, phase)
-#define spectral_wavetable_lookup_timbre(bank, id, phase) spectral_wavetable_lookup_timbre_q(bank, id, phase)
-#else
-#define spectral_wavetable_lookup(table, phase) spectral_wavetable_lookup_f(table, phase)
-#define spectral_wavetable_lookup_timbre(bank, id, phase) spectral_wavetable_lookup_timbre_f(bank, id, phase)
-#endif
 
 #ifdef __cplusplus
 }

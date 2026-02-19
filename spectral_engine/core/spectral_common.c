@@ -3,5 +3,8 @@
 #include <stdlib.h>
 
 void* spectral_aligned_alloc(size_t size) {
-    return aligned_alloc(CACHE_ALIGN, (size + CACHE_ALIGN - 1) & ~(CACHE_ALIGN - 1));
+    if (size == 0) return NULL;
+    if (size > (SIZE_MAX - (SPECTRAL_CACHE_ALIGN - 1))) return NULL;
+    size_t aligned_size = (size + SPECTRAL_CACHE_ALIGN - 1) & ~(SPECTRAL_CACHE_ALIGN - 1);
+    return aligned_alloc(SPECTRAL_CACHE_ALIGN, aligned_size);
 }

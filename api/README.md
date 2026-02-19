@@ -19,26 +19,41 @@ STM32H750 @ 480MHz, 64MB SDRAM, 96kHz audio.
 ## Usage
 
 ```c
-#include "api/spectral_api.h"
+#include "api/daisy_seed/daisy_seed_spectral.h"
 
-spectral_init(48000, SPECTRAL_BACKEND_AUTO);
+DaisySpectralCtx ctx;
+if (daisy_spectral_init(&ctx, DAISY_SAMPLE_RATE) != DAISY_OK) {
+    return;
+}
 
-SpectralStreamCtx ctx;
-spectral_load_file(&ctx, "segments.bin");
+if (daisy_spectral_load_sd(&ctx, "segments.spq") != DAISY_OK) {
+    daisy_spectral_deinit(&ctx);
+    return;
+}
 
-SpectralParams params = { .stretch = 2.0f, .pitch = -5.0f };
-spectral_set_params(&ctx, &params);
-float output[256];
-spectral_process_float(&ctx, output, 256);
-spectral_unload(&ctx);
-spectral_deinit();
+q15_t left[DAISY_AUDIO_BLOCK_SIZE];
+q15_t right[DAISY_AUDIO_BLOCK_SIZE];
+daisy_spectral_process_q15(&ctx, left, right, DAISY_AUDIO_BLOCK_SIZE);
+daisy_spectral_deinit(&ctx);
 ```
 
 ## Build
 
-    cd spectral_engine && make daisy
-    Or
-    cd api/daisy_seed && make
+Run all commands from the repository root.
+
+    make configure CMAKE_CONFIGURE_ARGS='-DSPECTRAL_DAISY_LIBDAISY_DIR=/path/to/libDaisy -DSPECTRAL_DAISY_DAISYSP_DIR=/path/to/DaisySP'
+    make daisy
+
+Optional Daisy example firmware:
+
+    make configure CMAKE_CONFIGURE_ARGS='-DSPECTRAL_DAISY_LIBDAISY_DIR=/path/to/libDaisy -DSPECTRAL_DAISY_DAISYSP_DIR=/path/to/DaisySP -DSPECTRAL_DAISY_BUILD_EXAMPLE=ON'
+    make daisy
+    make daisy_example
+
+## API status
+
+`api/spectral_api.h` is a draft generic interface and is not wired to a complete implementation in this repository.  
+For release builds, use `api/daisy_seed/daisy_seed_spectral.h`.
 
 
 ## Realtime notice
@@ -51,6 +66,6 @@ It is impossible to know the frequency content of a file *a priori*. It could be
 
 ## Workflow
 
-    1. Analyze on desktop:   ./bin/spectral input.wav 0 1.0 0 4096 128 -90 8 4
-    2. Convert segments:     ./bin/convert_segments segments.bin daisy.bin
+    1. Analyze on desktop:   ./build/bin/spectral_*_desktop input.wav 0 1.0 0 4096 128 -90 8 4
+    2. Convert segments:     ./build/bin/convert_segments segments.bin daisy.spq
     3. Load on Daisy:        SD card or firmware embed

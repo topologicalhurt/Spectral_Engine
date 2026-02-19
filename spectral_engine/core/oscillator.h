@@ -2,11 +2,7 @@
 #ifndef OSCILLATOR_H
 #define OSCILLATOR_H
 
-#include "spectral_common.h"
-#include "spectral_config.h"
-#include "spectral_lut.h"
 #include "oscillator_dispatch.h"
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {

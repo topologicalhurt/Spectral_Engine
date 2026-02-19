@@ -6,11 +6,14 @@
 #define SPECTRAL_SEGMENT_POOL_H
 
 #include "spectral_common.h"
+#include "spectral_error.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Segment pool is desktop/analysis-only (uses malloc) */
 #if !SPECTRAL_EMBEDDED
-
-#define SEGMENT_POOL_BLOCK_SIZE 4096
 
 typedef struct SegmentPool {
     Segment** blocks;
@@ -27,5 +30,9 @@ void segment_pool_destroy(SegmentPool* pool);
 void segment_pool_reset(SegmentPool* pool);
 
 #endif /* !SPECTRAL_EMBEDDED */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

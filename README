@@ -1,52 +1,113 @@
-SPECTRAL
+##########################################################################
+#                                                                        #
+#                           SPECTRAL_ENGINE                              #
+#                                                                        #
+##########################################################################
 
-Real-time spectral analysis and resynthesis engine.
+Real-time spectral analysis and resynthesis engine for macOS/Linux/FreeRTOS/FreeBSD & baremetal ARM Cortex-M/A targets, with graphics acceleration support available for Metal & CUDA platforms.
 
-Platforms: Desktop (macOS/Linux), Metal GPU, CUDA GPU, ARM Cortex-M7
+With planned support for the following:
+
+[] OpenGL
+[] Subset of RISC-V for baremetal embedded targets
+
+WHAT IS IT?
+
+Spectral_Engine performs spectral synthesis on audio signals either offline or in realtime. It aims to be a 'synthesis from first principles' engine as Additive, Subtractive, Wavelett (& most other forms of synthesis*) can be derived in the spectral or STFT domain directly. I believe this makes spectral synthesis an especially intuitive domain in the world of DSP, which is all too often un-unified making it difficult to follow or apply design patterns consistently. Spectral synthesis gives us one 'homomorphic' domain to focus on rather than branching off into many different sub-problem domains; if we focus our sole attention on spectral synthesis then that is hopefully admissable to one consistent, featured, performant, rigorous & intuitive regime for manipulating & experimenting with sound-design / synthesis design more broadly.
+
+DESCRIPTION
+
+The top-level topology of the system is:
+
+INPUT --> STFT / Wavelett transform (or other analysis function) --> PARTIAL / SEGMENT CULL --> (RE)SYNTHESIS --> OUTPUT
+
+STFT, (Or DWT, WVD etc.): the key class of transforms we deal with. The FFT, by itself, is structurally insufficient to embed multiple 'layers' of sound, hence, not a spectrographic transform but fundamentally an average response of frequency & magnitude across the phase domain. With the FFT we 'lose' a dimension of data, that is, we are dealing with a reduced version of the frequency data wherein the overlapping frequency/magnitude content of each phase-bin is mixed-down into a single vector / complex number; an instantaneous frequency & magnitude pair at a given angular frequency. In comparison the STFT, as an example, is a matrix encoding a collection of N vectors in each bin. How is this so? It is merely the natural result of running the FFT a number of times in the time-domain.
+
+Why does this matter?
+
+Good question. Because loosing that aforementioned dimension limits how we can manipulate sound, & indeed, the FFT is entropic in this keen sense: it has 0 temporal resolution. If we imagine recording drums, which have many transients and quickly modulating frequency components (approximate chirps), an FFT is an aggregate measure which looses the attack & responsiveness of the signal. Other transforms make dual-tradeoffs between temporal & frequency resolution. Wavelett transforms are a general class of that rank-2 tensor called Linear Time Frequency Representations (LTFR) that can be configured using a custom basis for different corollaries when dealing with the entire system[*]. The WVD (Wigner Ville Distribution) is a concept that links DSP to Physics in a beautiful way; it is the transform which has the theoretical minimum possible tradeoff between temporal & frequency resolution due to Heisenberg's uncertainty principle, but comes at extra computational cost[*]. In any case, while this might all sound theoretical it is very extensible & useful in practice.
+
+What about the rest of the chain?
+
+The particle of this system is called a partial. A partial is one of many waves, S.T when summed in its phase-band, produce the frequency response of the system. A group of partials live in a segment. If we playback all partials in a segment by synthesizing all of those waves in parallel we are playing back the sound post-transform.
+
+Partial & segment culling: is quite simple conceptually (but can be very complex depending on the specific implementation.) We will have a whole bunch of harmnoically unrelated or 'irrelevant' content after our transform. Irrelevant is the operational term because there are many stochastic, statistical & dynamical models which can give us tight bounds, saving us a linear factor of work later-on when we have to synthesize these partials without any perceptible difference[*]. Spectral synthesis can be quite demanding because we are using thousands or even millions of oscillators simultaneously! So when we run this series of transforms & processing techniques designed to remove *unnecessary partials -- by this we really mean possessing an underdetermined contribution relative to our psychoacoustic perception -- we are saving ourselves work.
+
+Synthesis: Finally, we already mentioned how this stage worked. Now here's where the fun part comes... We can treat each partial as just another point in a dataset because up to the level of each 'particle' in our system, we can synthesize it however we want (with an arbitrary waveform, envelope, controlled with an LFO Etc.) By 'batching' segments, or using algorithms that intelligently account for how the particles interact between one another, we can affect the content harmonically or musically to get very 'cool' sounding results. So this is where the experimentation begins!
+
+FEATURES
+
+[] Multiple methods for performing spectral analysis
+  - Wavelett bases for accelerated/custom applications
+  - Other bases with special implications for sound or synthesis design[*]
+[] Resynthesis using standard or arbitrary oscillators
+  - Complex oscillator design per segment group
+  - High granularity for segment groups / frequency bins 
+  - Envelope design per voice
+[] Essentially unlimited polyphony count
+[] GPU acceleration, openMP support
+[] O.S. functionality or bare metal for embedded targets
+
+The full-fledged desktop version builds with offline processing features & other QOL features not afforded on embedded targets, but they can be forcefully enabled with potentially breaking behaviour[*].
 
 BUILD
 
+Run all build commands from the repository root.
+
 Native build
 ```
-  cd spectral_engine
-  make deps && make
+  make configure
+  make
 ```
 
-Cross-compiled build (currently supports arm cortex-M4/7 & daisy seed)
+CUDA desktop build (Linux + nvcc; `cuda` is an alias for desktop, not a standalone CUDA demo binary)
 ```
-cd spectral_engine
-make deps && make embedded <target>
-```
-
-Emulator build (for simulating cross-compiled code on desktop)
-```
-cd spectral_engine
-make deps && make emulator <target>
+  make configure CMAKE_CONFIGURE_ARGS='-DSPECTRAL_USE_CUDA=ON'
+  make cuda
 ```
 
-Refer to make info for more
+Embedded-target builds
+```
+make configure CMAKE_CONFIGURE_ARGS='-DSPECTRAL_DAISY_LIBDAISY_DIR=/path/to/libDaisy -DSPECTRAL_DAISY_DAISYSP_DIR=/path/to/DaisySP'
+make embedded_arm_restricted   # host build with embedded constraints
+make daisy                     # Cortex-M firmware build (Daisy Seed)
+```
+
+We also support a very primitive simulator which is designed to give a *very* rough estimate of the ARM-M7 chip's
+performance on the native target. NOTE: In future releases this will be deprecated in favour of a much more reliable QEMU emulation of the cross-compiled code.
+
+Simulation build (for modeling cross-compiled code on desktop)
+```
+make configure
+make simulate          # generic profile
+make simulate_daisy    # Daisy profile
+```
+
+The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices' flash. E.g,
+```
+make configure
+make desktop daisy
+./build/bin/spectral_*_desktop ./resources/motormouth_recites_shakespeare_he_saw_the_cat.wav <...> 4
+make daisy-flash       # Flash the target device with the segment binary
+```
+
+```
+./build/bin/spectral_*_native_simulation*_target output/segments.bin  # Run the simulation using the binary segment output from the native build
+```
+
+Refer to:
+```
+make info
+make help
+```
+for the full matrix/options.
 
 USAGE
 
-  ./bin/spectral input.wav [timbre] [stretch] [pitch] [n_fft] [hop] [thresh] [threads] [backend]
+  ./build/bin/spectral_*_desktop input.wav [timbre] [stretch] [pitch] [n_fft] [hop] [thresh] [threads] [backend]
 
   Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm
   Backends: 0=auto 1=cpu 2=metal 3=cuda 4=export
-
-FEATURES & WORKFLOW
-
-The full-fledged desktop version builds with offline processing features & other QOL features not afforded on embedded targets, including (but not limited to):
-
-STFT spectral analysis / resynthesis, wavelett transforms, essentially unlimited polyphony count, much larger sample sizes, complex oscillator design (envelope design per voice), exporting segment binaries, GPU acceleration, multi-threading support, full floats as opposed to q8.8 / q15 half-word format, 64bit support (& more) tools for sound design.
-
-However, the embedded cross-compiled targets all build with a real-time assurance for the CMSIS platform (Arm Cortex A/M series) [*subject to certain parameter choices*], supporting dynamic (real-time!) resynthesis of imported segment binaries with up to 512 concurrent voices of polyphony. For a specific application refer to the daisy_seed api.
-
-The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices flash (DMA support coming soon!) I.e.
-```
-make && ../bin/spectral ../resources/motormouth_recites_shakespeare_he_saw_the_cat.wav 0 1 0 4096 128 -90 8 4 && make emulator daisy && ../bin/spectral_emulator_daisy segments.bin
-```
-
-It is currently being investigated whether or not it is possible to support real-time tracking on embedded devices* by running the firmware on top of an RTOS.
 
 STRUCTURE
 
@@ -55,7 +116,7 @@ STRUCTURE
   examples/           Example applications & Demo's
   tools/              Useful scripts or toolings
   resources/          Location for auxiliary files
-  bin/                Compiled binaries
+  build/bin/          Compiled binaries
 
 AUTHOR
 

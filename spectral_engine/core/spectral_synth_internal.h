@@ -3,11 +3,13 @@
 #define SPECTRAL_SYNTH_INTERNAL_H
 
 #include "spectral_common.h"
-#include "spectral_config.h"
 #include "spectral_error.h"
-#include "oscillator.h"
+#include "spectral_segment_math.h"
 #include <stdlib.h>
-#include <string.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Precomputed segment parameters for inner synthesis loop */
 typedef struct SegmentLoopParams {
@@ -27,8 +29,11 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
 /* Compute instantaneous phase at sample j (quadratic phase model) */
 static inline float compute_phase(float phase0, float alpha, float beta, size_t j) {
-    float jf = (float)j;
-    return phase0 + jf * (alpha + beta * jf);
+    return spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
+}
+
+static inline float compute_amplitude(float amp0, float d_amp, size_t j) {
+    return spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
 }
 
 /* Validate synth inputs; call at start of every synth function */
@@ -59,15 +64,38 @@ SynthPreflight synth_preflight_float(
     float* out_buffer, size_t out_len, SegmentArray sa,
     float stretch, float pitch, double** t_synth);
 
-/* GPU timbre support: timbres 0-5 only (6-7 need width param, CPU only) */
+/* Per-dispatch effective timbre tracking for logging/reporting. */
+void synth_effective_timbre_reset(SpectralTimbre requested_timbre);
+void synth_effective_timbre_set(SpectralTimbre effective_timbre);
+SpectralTimbre synth_effective_timbre_get(void);
 
-int gpu_check_timbre_or_fallback(const char* backend_name,
-                                  SegmentArray sa, float* out_buffer, size_t out_len,
-                                  float stretch, float pitch, SpectralTimbre timbre, 
-                                  double* t_synth);
+/* Canonical unsupported-timbre fallback hook used by synthesis backends. */
+typedef SpectralError (*SpectralUnsupportedTimbreFallbackFn)(
+    SegmentArray sa, float* out_buffer, size_t out_len,
+    float stretch, float pitch, SpectralTimbre timbre,
+    int n_threads, double* t_synth, void* user_data);
+
+SpectralError spectral_handle_unsupported_timbre(
+    const char* backend_name,
+    int max_supported_timbre,
+    SpectralTimbre requested_timbre,
+    SpectralTimbre fallback_timbre,
+    const char* backend_constraint_note,
+    SegmentArray sa, float* out_buffer, size_t out_len,
+    float stretch, float pitch, int n_threads, double* t_synth,
+    SpectralUnsupportedTimbreFallbackFn fallback_fn, void* user_data,
+    int* out_continue_backend);
+
+/* GPU timbre support: timbres 0-5 only (6-7 need width param, CPU only). */
+
+SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
+                                           SegmentArray sa, float* out_buffer, size_t out_len,
+                                           float stretch, float pitch, SpectralTimbre timbre,
+                                           int n_threads, double* t_synth,
+                                           int* out_continue_backend);
 
 static inline int gpu_timbre_supported(SpectralTimbre timbre) {
-    return (int)timbre <= OSC_GPU_MAX_TIMBRE;
+    return (int)timbre <= TIMBRE_PARABOLA;
 }
 
 /* GPU tile preprocessing - shared between Metal and CUDA backends */
@@ -103,5 +131,9 @@ static inline GpuSynthParams gpu_synth_params_pack(
         (uint32_t)sp->out_len, sp->num_segments, tile_size, (uint32_t)timbre
     };
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SPECTRAL_SYNTH_INTERNAL_H */

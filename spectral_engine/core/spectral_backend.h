@@ -7,8 +7,13 @@
 #define SPECTRAL_BACKEND_H
 
 #include "spectral_common.h"
-#include "spectral_config.h"
-#include "spectral_wavetable.h"
+#include "spectral_error.h"
+
+typedef struct SpectralWavetableBank SpectralWavetableBank;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef enum {
     BACKEND_AUTO   = 0,
@@ -18,15 +23,17 @@ typedef enum {
     BACKEND_EXPORT = 4
 } SynthBackend;
 
-/* Backend timbre limits */
-#define BACKEND_CPU_TIMBRE_MAX          TIMBRE_MAX
-#define BACKEND_METAL_TIMBRE_MAX        TIMBRE_PARABOLA
-#define BACKEND_CUDA_TIMBRE_MAX         TIMBRE_PARABOLA
+/* Backend static capability flags */
 #define BACKEND_CPU_WAVETABLE_SUPPORT   1
 #define BACKEND_METAL_WAVETABLE_SUPPORT 0
 #define BACKEND_CUDA_WAVETABLE_SUPPORT  0
 
-/* Backend vtable — one static entry per backend */
+/* Backend vtable — one static entry per backend.
+ *
+ * The synth pointer intentionally omits n_threads: GPU backends ignore it and
+ * the CPU wrapper hardcodes 1.  For multi-threaded CPU synthesis, callers must
+ * use spectral_synth_dispatch_ex() which routes n_threads directly to
+ * synth_cpu() / synth_cpu_wavetable(), bypassing the vtable. */
 typedef struct SpectralBackendVTable {
     SynthBackend  id;
     const char*   name;
@@ -66,10 +73,22 @@ SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu);
 int spectral_backend_available(SynthBackend backend);
 
 /* Unified synthesis dispatch - handles backend selection, timbre checks, fallback */
+SpectralError spectral_synth_dispatch_ex(
+    SegmentArray sa, float* out_buffer, size_t out_len,
+    float stretch, float pitch, SpectralTimbre timbre,
+    SynthBackend backend, const SpectralWavetableBank* bank,
+    int n_threads, double* t_synth,
+    SynthBackend* out_effective_backend,
+    SpectralTimbre* out_effective_timbre);
+
 SpectralError spectral_synth_dispatch(
     SegmentArray sa, float* out_buffer, size_t out_len,
     float stretch, float pitch, SpectralTimbre timbre,
     SynthBackend backend, const SpectralWavetableBank* bank,
-    int n_threads, double* t_synth);
+    int n_threads, double* t_synth, SynthBackend* out_effective_backend);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SPECTRAL_BACKEND_H */

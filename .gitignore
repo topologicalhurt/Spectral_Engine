@@ -27,6 +27,11 @@ __pycache__/
 
 # Build directories
 build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+spectral_engine/spectral_log_check.cmake
 
 # macOS
 .DS_Store
@@ -36,6 +41,9 @@ build/
 .vscode/
 *.swp
 *~
+
+# External tool databases
+orb.db/
 
 # Env
 *.env

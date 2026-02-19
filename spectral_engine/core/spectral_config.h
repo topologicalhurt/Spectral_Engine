@@ -16,7 +16,6 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "spectral_error.h"
 #include "spectral_consts.h"
 #include "spectral_macros.h"
 
@@ -34,8 +33,13 @@
 #ifndef SPECTRAL_NO_PERF
 #define SPECTRAL_NO_PERF        0
 #endif
-#ifndef SPECTRAL_MAX_SEGS
-#define SPECTRAL_MAX_SEGS       0
+/* Restricted profiling gate (single ownership).
+ * Enabled only when restricted mode is active and restricted debug profiling
+ * has been explicitly enabled by the build. */
+#if SPECTRAL_RESTRICTED_MODE && defined(SPECTRAL_DEBUG_RESTRICTED) && SPECTRAL_DEBUG_RESTRICTED
+#define SPECTRAL_RESTRICTED_PROFILE 1
+#else
+#define SPECTRAL_RESTRICTED_PROFILE 0
 #endif
 
 /* Embedded float mode: use FPU instead of Q15 integer for synthesis.
@@ -62,11 +66,11 @@
 #endif
 #endif
 
-/* Emulator mode: desktop build simulating embedded target constraints */
-#if defined(SPECTRAL_EMBEDDED_EMULATION) || defined(SPECTRAL_USE_EMBEDDED_SYNTH)
-#define SPECTRAL_IS_EMULATOR 1
+/* Embedded simulation mode: desktop build modeling embedded target constraints. */
+#if defined(SPECTRAL_EMBEDDED_SIMULATION) || defined(SPECTRAL_USE_EMBEDDED_SYNTH)
+#define SPECTRAL_IS_EMBEDDED_SIM 1
 #else
-#define SPECTRAL_IS_EMULATOR 0
+#define SPECTRAL_IS_EMBEDDED_SIM 0
 #endif
 
 /* Q15 Segment Configuration */
@@ -140,12 +144,228 @@ typedef enum SpectralTimbre {
     TIMBRE_COUNT    = 8
 } SpectralTimbre;
 
-#define TIMBRE_MIN              TIMBRE_SINE
-#define TIMBRE_MAX              TIMBRE_PWM
-#define OSC_GPU_MAX_TIMBRE      TIMBRE_PARABOLA
+/* Canonical resolution/fallback context labels */
+#ifndef SPECTRAL_RESOLUTION_EVENT_FALLBACK
+#define SPECTRAL_RESOLUTION_EVENT_FALLBACK "fallback"
+#endif
+#ifndef SPECTRAL_RESOLUTION_EVENT_RESOLUTION
+#define SPECTRAL_RESOLUTION_EVENT_RESOLUTION "resolution"
+#endif
+#ifndef SPECTRAL_RESOLUTION_SCOPE_SELECTION
+#define SPECTRAL_RESOLUTION_SCOPE_SELECTION "selection"
+#endif
+#ifndef SPECTRAL_RESOLUTION_SCOPE_BACKEND
+#define SPECTRAL_RESOLUTION_SCOPE_BACKEND "backend"
+#endif
+#ifndef SPECTRAL_RESOLUTION_SCOPE_TIMBRE
+#define SPECTRAL_RESOLUTION_SCOPE_TIMBRE "timbre"
+#endif
+#ifndef SPECTRAL_RESOLUTION_SCOPE_WAVETABLE
+#define SPECTRAL_RESOLUTION_SCOPE_WAVETABLE "wavetable"
+#endif
+#ifndef SPECTRAL_RESOLUTION_LABEL_UNKNOWN
+#define SPECTRAL_RESOLUTION_LABEL_UNKNOWN "unknown"
+#endif
+#ifndef SPECTRAL_RESOLUTION_BACKEND_DISPATCH
+#define SPECTRAL_RESOLUTION_BACKEND_DISPATCH "dispatch"
+#endif
+#ifndef SPECTRAL_RESOLUTION_BACKEND_CPU
+#define SPECTRAL_RESOLUTION_BACKEND_CPU "CPU"
+#endif
+#ifndef SPECTRAL_RESOLUTION_BACKEND_SIMULATION
+#define SPECTRAL_RESOLUTION_BACKEND_SIMULATION "Simulation"
+#endif
 
-#ifndef SPECTRAL_BACKEND_TIMBRE_MAX
-#define SPECTRAL_BACKEND_TIMBRE_MAX     TIMBRE_MAX
+/* Canonical execution-mode labels for logging/diagnostics */
+#ifndef SPECTRAL_EXEC_MODE_DESKTOP
+#define SPECTRAL_EXEC_MODE_DESKTOP "desktop"
+#endif
+#ifndef SPECTRAL_EXEC_MODE_EMBEDDED_SIM
+#define SPECTRAL_EXEC_MODE_EMBEDDED_SIM "embedded-simulation"
+#endif
+#ifndef SPECTRAL_EXEC_MODE_RESTRICTED
+#define SPECTRAL_EXEC_MODE_RESTRICTED "restricted"
+#endif
+#ifndef SPECTRAL_EXEC_MODE_EMBEDDED
+#define SPECTRAL_EXEC_MODE_EMBEDDED "embedded"
+#endif
+
+/* Canonical resolution/fallback reason strings */
+#ifndef SPECTRAL_RESOLUTION_REASON_AUTO_BACKEND
+#define SPECTRAL_RESOLUTION_REASON_AUTO_BACKEND \
+    "automatic backend selection resolved request"
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_BACKEND_NOT_COMPILED
+#define SPECTRAL_RESOLUTION_REASON_BACKEND_NOT_COMPILED \
+    "requested backend is not compiled in this build"
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_BACKEND_UNAVAILABLE
+#define SPECTRAL_RESOLUTION_REASON_BACKEND_UNAVAILABLE \
+    "requested backend is unavailable at runtime"
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_WAVETABLE_CPU_ONLY
+#define SPECTRAL_RESOLUTION_REASON_WAVETABLE_CPU_ONLY \
+    "wavetable rendering requires CPU backend"
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_GPU_TIMBRE_LIMIT
+#define SPECTRAL_RESOLUTION_REASON_GPU_TIMBRE_LIMIT \
+    "GPU oscillators currently support sine..parabola (0..5); quantized/pwm require CPU path."
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_SIM_TIMBRE_LIMIT
+#define SPECTRAL_RESOLUTION_REASON_SIM_TIMBRE_LIMIT \
+    "Embedded simulation currently models sine-only oscillator behavior."
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_SIM_WAVETABLE_UNSUPPORTED
+#define SPECTRAL_RESOLUTION_REASON_SIM_WAVETABLE_UNSUPPORTED \
+    "embedded simulation does not support wavetable rendering; continuing with oscillator synthesis"
+#endif
+#ifndef SPECTRAL_RESOLUTION_REASON_INVALID_TIMBRE_ID
+#define SPECTRAL_RESOLUTION_REASON_INVALID_TIMBRE_ID \
+    "invalid timbre id outside supported enum range"
+#endif
+
+/* Canonical simulation environment keys */
+#ifndef SPECTRAL_ENV_SIM_PERF_PROFILE
+#define SPECTRAL_ENV_SIM_PERF_PROFILE "SPECTRAL_SIM_PERF_PROFILE"
+#endif
+#ifndef SPECTRAL_ENV_SIM_PESSIMISM
+#define SPECTRAL_ENV_SIM_PESSIMISM "SPECTRAL_SIM_PESSIMISM"
+#endif
+#ifndef SPECTRAL_ENV_SIM_PERF_COLD
+#define SPECTRAL_ENV_SIM_PERF_COLD "SPECTRAL_SIM_PERF_COLD"
+#endif
+
+/* Shared execution mode helper to avoid drift across modules. */
+static inline const char* spectral_exec_mode_name(void) {
+#if SPECTRAL_IS_EMBEDDED_SIM
+    return SPECTRAL_EXEC_MODE_EMBEDDED_SIM;
+#elif SPECTRAL_RESTRICTED_MODE
+    return SPECTRAL_EXEC_MODE_RESTRICTED;
+#elif SPECTRAL_EMBEDDED
+    return SPECTRAL_EXEC_MODE_EMBEDDED;
+#else
+    return SPECTRAL_EXEC_MODE_DESKTOP;
+#endif
+}
+
+/* Canonical runtime/CLI validation bounds */
+#ifndef SPECTRAL_MIN_FFT_SIZE
+#define SPECTRAL_MIN_FFT_SIZE           64
+#endif
+#ifndef SPECTRAL_MIN_SAMPLE_RATE
+#define SPECTRAL_MIN_SAMPLE_RATE        8000
+#endif
+#ifndef SPECTRAL_MAX_SAMPLE_RATE
+#define SPECTRAL_MAX_SAMPLE_RATE        192000
+#endif
+#ifndef SPECTRAL_MAX_THREADS
+#define SPECTRAL_MAX_THREADS            256
+#endif
+#ifndef SPECTRAL_EMBEDDED_MAX_BUFFER_SIZE
+#define SPECTRAL_EMBEDDED_MAX_BUFFER_SIZE 4096
+#endif
+#ifndef SPECTRAL_MAX_STRETCH
+#define SPECTRAL_MAX_STRETCH            1000.0f
+#endif
+#ifndef SPECTRAL_MIN_PITCH
+#define SPECTRAL_MIN_PITCH              (-48.0f)
+#endif
+#ifndef SPECTRAL_MAX_PITCH
+#define SPECTRAL_MAX_PITCH              48.0f
+#endif
+
+/* Canonical output/pipeline defaults */
+#ifndef SPECTRAL_PIPELINE_PATH_CAPACITY
+#define SPECTRAL_PIPELINE_PATH_CAPACITY 1024
+#endif
+#ifndef SPECTRAL_OUTPUT_DIR_PRIMARY
+#define SPECTRAL_OUTPUT_DIR_PRIMARY     "../output"
+#endif
+#ifndef SPECTRAL_OUTPUT_DIR_FALLBACK
+#define SPECTRAL_OUTPUT_DIR_FALLBACK    "output"
+#endif
+#ifndef SPECTRAL_OUTPUT_WAV_NAME
+#define SPECTRAL_OUTPUT_WAV_NAME        "out_c.wav"
+#endif
+#ifndef SPECTRAL_OUTPUT_SEGMENTS_NAME
+#define SPECTRAL_OUTPUT_SEGMENTS_NAME   "segments.bin"
+#endif
+#ifndef SPECTRAL_OUTPUT_CACHE_SUBDIR
+#define SPECTRAL_OUTPUT_CACHE_SUBDIR    "cache"
+#endif
+
+/* Canonical tool/runtime defaults */
+#ifndef SPECTRAL_CONVERT_DEFAULT_POOL_MB
+#define SPECTRAL_CONVERT_DEFAULT_POOL_MB 48u
+#endif
+#ifndef SPECTRAL_DEBUG_ONCE_MAX
+#define SPECTRAL_DEBUG_ONCE_MAX         64
+#endif
+
+/* Canonical analysis/tracker defaults */
+#ifndef SPECTRAL_TRACK_BLOCK_SEGS
+#define SPECTRAL_TRACK_BLOCK_SEGS       16384u
+#endif
+#ifndef SPECTRAL_TRACK_DEFAULT_WIDTH
+#define SPECTRAL_TRACK_DEFAULT_WIDTH    0.5f
+#endif
+#ifndef SPECTRAL_STFT_CHUNK_FRAMES
+#define SPECTRAL_STFT_CHUNK_FRAMES      4096u
+#endif
+#ifndef SPECTRAL_STFT_CHUNK_THRESHOLD
+#define SPECTRAL_STFT_CHUNK_THRESHOLD   (32ul * 1024ul * 1024ul)
+#endif
+#ifndef SPECTRAL_PRETOUCH_THRESHOLD
+#define SPECTRAL_PRETOUCH_THRESHOLD     (64ul * 1024ul * 1024ul)
+#endif
+#ifndef SPECTRAL_PRETOUCH_PAGE_SIZE
+#define SPECTRAL_PRETOUCH_PAGE_SIZE     4096u
+#endif
+#ifndef SPECTRAL_SEGMENT_POOL_BLOCK_SIZE
+#define SPECTRAL_SEGMENT_POOL_BLOCK_SIZE 4096u
+#endif
+
+/* Canonical optional-processing policy flags */
+#ifndef SPECTRAL_PROCESS_STRICT
+#define SPECTRAL_PROCESS_STRICT         0
+#endif
+
+/* Canonical embedded debug LED timing defaults (milliseconds) */
+#ifndef SPECTRAL_ERROR_BLINK_ON_MS
+#define SPECTRAL_ERROR_BLINK_ON_MS      100u
+#endif
+#ifndef SPECTRAL_ERROR_BLINK_OFF_MS
+#define SPECTRAL_ERROR_BLINK_OFF_MS     100u
+#endif
+#ifndef SPECTRAL_ERROR_BLINK_PAUSE_MS
+#define SPECTRAL_ERROR_BLINK_PAUSE_MS   500u
+#endif
+#ifndef SPECTRAL_LED_BLINK_PLAYING_MS
+#define SPECTRAL_LED_BLINK_PLAYING_MS   250u
+#endif
+#ifndef SPECTRAL_LED_BLINK_DONE_MS
+#define SPECTRAL_LED_BLINK_DONE_MS      100u
+#endif
+
+/* Canonical embedded target defaults used by perf estimation */
+#ifndef SPECTRAL_EMBEDDED_DEFAULT_CPU_MHZ
+#define SPECTRAL_EMBEDDED_DEFAULT_CPU_MHZ      480u
+#endif
+#ifndef SPECTRAL_EMBEDDED_DEFAULT_SAMPLE_RATE
+#define SPECTRAL_EMBEDDED_DEFAULT_SAMPLE_RATE  48000u
+#endif
+#ifndef SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE
+#define SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE   256u
+#endif
+#ifndef SPECTRAL_EMBEDDED_SRAM_KB
+#define SPECTRAL_EMBEDDED_SRAM_KB              512u
+#endif
+#ifndef SPECTRAL_EMBEDDED_SDRAM_KB
+#define SPECTRAL_EMBEDDED_SDRAM_KB             65536u
+#endif
+#ifndef SPECTRAL_EMBEDDED_DEFAULT_MEMORY_KB
+#define SPECTRAL_EMBEDDED_DEFAULT_MEMORY_KB \
+    (SPECTRAL_EMBEDDED_SRAM_KB + SPECTRAL_EMBEDDED_SDRAM_KB)
 #endif
 
 /* Wavetable Configuration */
@@ -165,9 +385,29 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 
 /* Synthesis Defaults */
 
+/* Canonical fade lengths used by synthesis paths.
+ * Desktop backends use a longer fade for smoother overlap,
+ * embedded paths use a shorter fade to reduce CPU work. */
+#ifndef SPECTRAL_FADE_SAMPLES_DESKTOP
+#define SPECTRAL_FADE_SAMPLES_DESKTOP 64
+#endif
+#ifndef SPECTRAL_FADE_SAMPLES_EMBEDDED
+#define SPECTRAL_FADE_SAMPLES_EMBEDDED 32
+#endif
+/* Optimization level: 0=safe, 1=balanced (default), 2=aggressive, 3=reserved. */
+#ifndef SPECTRAL_OPT_LEVEL
+#define SPECTRAL_OPT_LEVEL      1
+#endif
+
 /* GPU/compute block size for Metal/CUDA backends */
 #ifndef SPECTRAL_GPU_TILE_SIZE
 #define SPECTRAL_GPU_TILE_SIZE          512
+#endif
+
+/* Max deterministic work partitions for CPU synthesis reduction.
+ * 0 keeps partition count aligned to the selected thread count. */
+#ifndef SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS
+#define SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS 0
 #endif
 
 /* Headroom factor for normalization (0.95 = -0.45dB) */
@@ -175,8 +415,8 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_NORMALIZE_HEADROOM     0.95f
 #endif
 
-/* Emulator headroom for Q15 amplitude scaling */
-#define SPECTRAL_EMULATOR_HEADROOM      0.99f
+/* Embedded simulation headroom for Q15 amplitude scaling */
+#define SPECTRAL_SIMULATION_HEADROOM    0.99f
 
 /* Metal segment cache size (threadgroup shared memory) */
 #define SPECTRAL_METAL_SEG_CACHE_SIZE   128
@@ -194,6 +434,14 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #else
 #define SPECTRAL_USE_VDSP       0
 #endif
+/* CMSIS-DSP availability (arm_math.h expected when enabled). */
+#ifndef SPECTRAL_USE_CMSIS
+#if defined(ARM_MATH_CM7) || defined(ARM_MATH_CM4)
+#define SPECTRAL_USE_CMSIS      1
+#else
+#define SPECTRAL_USE_CMSIS      0
+#endif
+#endif
 
 /* ARM32 Embedded Configuration */
 
@@ -206,14 +454,6 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_DTCM_SIZE_KB   128
 #define SPECTRAL_DTCM_SIZE      (SPECTRAL_DTCM_SIZE_KB * 1024)
 #define SPECTRAL_CACHE_LINE     32
-
-#ifndef SPECTRAL_OPT_LEVEL
-#define SPECTRAL_OPT_LEVEL      1
-#endif
-
-#ifndef SPECTRAL_ARM32_MAX_ACTIVE
-#define SPECTRAL_ARM32_MAX_ACTIVE    512
-#endif
 
 #endif /* SPECTRAL_ARM_M7 */
 
@@ -243,15 +483,31 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 /* Analysis Defaults */
 
 #if SPECTRAL_EMBEDDED
-#define DEFAULT_N_FFT           1024
-#define DEFAULT_HOP             256
-#define DEFAULT_DB_THRESH       (-70.0f)
-#define CACHE_ALIGN             32
+#ifndef SPECTRAL_DEFAULT_N_FFT
+#define SPECTRAL_DEFAULT_N_FFT      1024
+#endif
+#ifndef SPECTRAL_DEFAULT_HOP
+#define SPECTRAL_DEFAULT_HOP        256
+#endif
+#ifndef SPECTRAL_DEFAULT_DB_THRESH
+#define SPECTRAL_DEFAULT_DB_THRESH  (-70.0f)
+#endif
+#ifndef SPECTRAL_CACHE_ALIGN
+#define SPECTRAL_CACHE_ALIGN        32
+#endif
 #else
-#define DEFAULT_N_FFT           4096
-#define DEFAULT_HOP             128
-#define DEFAULT_DB_THRESH       (-85.0f)
-#define CACHE_ALIGN             64
+#ifndef SPECTRAL_DEFAULT_N_FFT
+#define SPECTRAL_DEFAULT_N_FFT      4096
+#endif
+#ifndef SPECTRAL_DEFAULT_HOP
+#define SPECTRAL_DEFAULT_HOP        128
+#endif
+#ifndef SPECTRAL_DEFAULT_DB_THRESH
+#define SPECTRAL_DEFAULT_DB_THRESH  (-85.0f)
+#endif
+#ifndef SPECTRAL_CACHE_ALIGN
+#define SPECTRAL_CACHE_ALIGN        64
+#endif
 #endif
 
 #endif /* SPECTRAL_CONFIG_H */

@@ -1,7 +1,7 @@
 /* spectral_vector_ops.c - SIMDe-based vector operations implementation */
 #include "spectral_vector_ops.h"
 
-#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
+#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
 
 #include "simde/x86/sse2.h"
 #ifdef __AVX2__
@@ -567,4 +567,4 @@ void spectral_magsq_split(const float* re, const float* im, float* dst, size_t l
     }
 }
 
-#endif /* (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR) && !CMSIS */
+#endif /* (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !CMSIS */
