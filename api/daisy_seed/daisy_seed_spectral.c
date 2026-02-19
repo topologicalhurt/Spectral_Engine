@@ -394,7 +394,23 @@ static void uart_execute(DaisySpectralCtx* ctx, uint8_t* response_buf, uint8_t* 
         
         case DAISY_UART_CMD_LOAD_FILE: {
 #ifdef DAISY_HAS_FATFS
-            DaisyResult result = daisy_spectral_load_sd(ctx, (const char*)s_uart_state.data);
+            /* Reject path traversal: disallow ".." components */
+            const char* fname = (const char*)s_uart_state.data;
+            int path_ok = (fname[0] != '\0');
+            for (const char* p = fname; *p && path_ok; p++) {
+                if (p[0] == '.' && p[1] == '.' &&
+                    (p[2] == '/' || p[2] == '\\' || p[2] == '\0')) {
+                    path_ok = 0;
+                }
+            }
+            if (!path_ok) {
+                response_buf[0] = DAISY_UART_RESP_ERR;
+                response_buf[1] = (uint8_t)(-DAISY_ERR_PARAM);
+                response_buf[2] = response_buf[0] ^ response_buf[1];
+                *response_len = 3;
+                return;
+            }
+            DaisyResult result = daisy_spectral_load_sd(ctx, fname);
             if (result == DAISY_OK) {
                 response_buf[0] = DAISY_UART_RESP_OK;
                 response_buf[1] = DAISY_UART_RESP_OK;

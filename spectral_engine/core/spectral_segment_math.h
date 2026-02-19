@@ -4,6 +4,11 @@
 
 #include <stddef.h>
 
+/* Bump when any formula below changes.  Metal shader (spectral_synth_metal.m)
+ * duplicates these formulas as MSL strings and checks this version at
+ * compile time.  A mismatch means the Metal copy is stale. */
+#define SPECTRAL_SEGMENT_MATH_VERSION 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif

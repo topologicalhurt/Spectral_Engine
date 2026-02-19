@@ -12,6 +12,16 @@
 #include "spectral_utils.h"
 #include "oscillator.h"
 #include "spectral_omp.h"
+#include "spectral_segment_math.h"
+#include "spectral_osc_formulas.h"
+
+/* Compile-time parity guard: if the canonical C formulas change, bump their
+ * version constant and update the MSL strings below to match.  A mismatch
+ * here means the Metal shader is out of sync with CPU/CUDA backends. */
+_Static_assert(SPECTRAL_SEGMENT_MATH_VERSION == 1,
+    "Metal segment_math MSL strings are stale — update metalKernelCode and bump version");
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 1,
+    "Metal oscillator MSL strings are stale — update oscillator_metal_source and bump version");
 
 /* Metal kernel source - struct definitions and synthesis kernel.
  * Oscillator functions come from oscillator_metal_source (defined in oscillator.c) */
@@ -192,9 +202,14 @@ void metal_init(void) {
         options.fastMathEnabled = YES;
         options.languageVersion = MTLLanguageVersion2_4;
         
+        if (!oscillator_metal_source) {
+            SPECTRAL_WARN("Metal: oscillator_metal_source is NULL (oscillator.c not linked?)");
+            return;
+        }
+
         /* Combine shader sources: structs + oscillator (from oscillator.c) + kernel */
-        NSString* source = [NSString stringWithFormat:@"%s%s%s", 
-                           metalKernelStructs, 
+        NSString* source = [NSString stringWithFormat:@"%s%s%s",
+                           metalKernelStructs,
                            oscillator_metal_source,  /* From oscillator.c */
                            metalKernelCode];
         id<MTLLibrary> library = [metalDevice newLibraryWithSource:source options:options error:&error];
@@ -275,17 +290,13 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile",
                 sa.count, td.num_tiles, avg_segs);
 
+        /* Grow cached Metal buffers.  metal_grow_buffer sets the buffer to nil
+         * and capacity to 0 on failure, so successful earlier allocations remain
+         * in the cache for reuse on the next call. */
         if (!metal_grow_buffer(metalDevice, &g_mtl.segBuf, &g_mtl.segCap, segment_buf_size) ||
             !metal_grow_buffer(metalDevice, &g_mtl.tileIdsBuf, &g_mtl.tileIdsCap, tile_ids_size) ||
             !metal_grow_buffer(metalDevice, &g_mtl.tileRangesBuf, &g_mtl.tileRangesCap, tile_ranges_size) ||
             !metal_grow_buffer(metalDevice, &g_mtl.outputBuf, &g_mtl.outputCap, output_size)) {
-            gpu_tile_data_free(&td);
-            memset(out_buffer, 0, output_size);
-            *t_synth = 0;
-            return SPECTRAL_ERR_MEMORY;
-        }
-
-        if (!g_mtl.segBuf || !g_mtl.tileIdsBuf || !g_mtl.tileRangesBuf || !g_mtl.outputBuf) {
             gpu_tile_data_free(&td);
             memset(out_buffer, 0, output_size);
             *t_synth = 0;

@@ -82,13 +82,15 @@ if(APPLE)
         ${SPECTRAL_METAL_FRAMEWORK}
         ${SPECTRAL_FOUNDATION_FRAMEWORK})
 else()
+    find_package(OpenMP REQUIRED)
+
     list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
         -flto=auto
         -floop-nest-optimize
         -fgraphite-identity
         -fipa-pta
-        -fopenmp)
-    list(APPEND SPECTRAL_COMMON_LINK_OPTIONS -flto=auto -fopenmp)
+        ${OpenMP_C_FLAGS})
+    list(APPEND SPECTRAL_COMMON_LINK_OPTIONS -flto=auto ${OpenMP_C_FLAGS})
 
     find_library(SPECTRAL_SNDFILE_LIB NAMES sndfile REQUIRED)
     find_library(SPECTRAL_FFTW3F_LIB NAMES fftw3f REQUIRED)
@@ -110,6 +112,7 @@ if(SPECTRAL_PGO STREQUAL "gen")
         list(APPEND SPECTRAL_PGO_COMPILE_OPTIONS -fprofile-instr-generate)
         list(APPEND SPECTRAL_PGO_LINK_OPTIONS -fprofile-instr-generate)
     else()
+        file(MAKE_DIRECTORY "${SPECTRAL_PGO_DIR}")
         list(APPEND SPECTRAL_PGO_COMPILE_OPTIONS "-fprofile-generate=${SPECTRAL_PGO_DIR}")
         list(APPEND SPECTRAL_PGO_LINK_OPTIONS "-fprofile-generate=${SPECTRAL_PGO_DIR}")
     endif()

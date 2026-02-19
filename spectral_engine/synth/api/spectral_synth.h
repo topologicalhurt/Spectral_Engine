@@ -13,7 +13,11 @@ typedef struct SpectralWavetableBank SpectralWavetableBank;
 extern "C" {
 #endif
 
-#if defined(SPECTRAL_USE_EMBEDDED_SYNTH)
+/* When building with embedded synth simulation, include the ARM32 header
+ * for the `#define synth_cpu synth_arm32_simulation` redirect.  The header
+ * guards its embedded-only types behind SPECTRAL_EMBEDDED so desktop
+ * translation units only see the simulation forward declarations. */
+#if defined(SPECTRAL_USE_EMBEDDED_SYNTH) || defined(SPECTRAL_EMBEDDED_SIMULATION)
 #include "spectral_synth_arm32.h"
 #endif
 
