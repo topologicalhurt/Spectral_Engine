@@ -1,16 +1,32 @@
-/* spectral_api.h - Draft platform-agnostic API surface
+/* spectral_api.h - Draft platform-agnostic API surface (v0.1.0)
  *
- * Note: This header is currently a forward-looking contract and is not
- * backed by a complete implementation in this repository.
- * For shipping code paths, use api/daisy_seed/daisy_seed_spectral.h instead
+ * STATUS: DRAFT — NOT YET IMPLEMENTED
+ *
+ * This header defines a forward-looking, platform-agnostic API contract for
+ * the Spectral Engine.  None of the functions declared here have backing
+ * implementations in this repository yet.
+ *
+ * For production code paths use:
+ *   - Desktop:    spectral_engine/synth/api/spectral_synth.h
+ *   - Daisy Seed: api/daisy_seed/daisy_seed_spectral.h
+ *
+ * Including this header outside of API design work will produce link errors.
+ * Guard your usage with SPECTRAL_API_DRAFT to acknowledge the draft status:
+ *
+ *   #define SPECTRAL_API_DRAFT 1
+ *   #include "spectral_api.h"
  */
 
 #ifndef SPECTRAL_API_H
 #define SPECTRAL_API_H
 
+#ifndef SPECTRAL_API_DRAFT
+#error "spectral_api.h is a draft header with no implementation. " \
+       "Define SPECTRAL_API_DRAFT=1 before including to acknowledge this."
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
-#include "../spectral_engine/core/spectral_error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,36 +36,22 @@ extern "C" {
 #define SPECTRAL_API_VERSION_MINOR  1
 #define SPECTRAL_API_VERSION_PATCH  0
 
-/* Platform detection */
-#if defined(SPECTRAL_PLATFORM_DAISY)
-    #define SPECTRAL_EMBEDDED       1
-    #define SPECTRAL_MAX_SEGMENTS   4096
-    #define SPECTRAL_SAMPLE_TYPE    int16_t
-    #define SPECTRAL_USE_FIXED      0
-#elif defined(SPECTRAL_PLATFORM_DESKTOP)
-    #define SPECTRAL_EMBEDDED       0
-    #define SPECTRAL_MAX_SEGMENTS   0
-    #define SPECTRAL_SAMPLE_TYPE    float
-    #define SPECTRAL_USE_FIXED      0
-#else
-    #define SPECTRAL_EMBEDDED       0
-    #define SPECTRAL_MAX_SEGMENTS   0
-    #define SPECTRAL_SAMPLE_TYPE    float
-    #define SPECTRAL_USE_FIXED      0
-#endif
+typedef enum {
+    SPECTRAL_API_OK          =  0,
+    SPECTRAL_API_ERR_MEMORY  = -1,
+    SPECTRAL_API_ERR_PARAM   = -2,
+    SPECTRAL_API_ERR_FORMAT  = -3,
+    SPECTRAL_API_ERR_IO      = -4,
+} SpectralApiResult;
 
-/* Core types */
+typedef enum SpectralApiBackend {
+    SPECTRAL_BACKEND_AUTO   = 0,
+    SPECTRAL_BACKEND_CPU    = 1,
+    SPECTRAL_BACKEND_SIMD   = 2,
+    SPECTRAL_BACKEND_GPU    = 3
+} SpectralApiBackend;
 
-typedef struct SpectralSegmentCompact {
-    float start, length, phase, omega, df, amp, da, width;
-} SpectralSegmentCompact;
-
-typedef struct SpectralSegment {
-    float start, length, phase, omega, df, amp, da, width;
-    float _pad[8];
-} SpectralSegment;
-
-typedef struct SpectralParams {
+typedef struct SpectralApiParams {
     float stretch;
     float pitch;
     float amplitude;
@@ -57,82 +59,48 @@ typedef struct SpectralParams {
     uint8_t quality;
     uint8_t mono;
     uint8_t _reserved;
-} SpectralParams;
+} SpectralApiParams;
 
-typedef struct SpectralStreamCtx {
+typedef struct SpectralApiStreamCtx {
     void* segments;
     uint32_t num_segments;
     uint32_t current_segment;
     uint32_t sample_position;
     uint32_t sample_rate;
-    SpectralParams params;
+    SpectralApiParams params;
     void* user_data;
-} SpectralStreamCtx;
+} SpectralApiStreamCtx;
 
-typedef SpectralError SpectralResult;
-
-typedef enum SpectralBackend {
-    SPECTRAL_BACKEND_AUTO   = 0,
-    SPECTRAL_BACKEND_CPU    = 1,
-    SPECTRAL_BACKEND_SIMD   = 2,
-    SPECTRAL_BACKEND_GPU    = 3
-} SpectralBackend;
-
-/* Initialization */
-SpectralResult spectral_init(uint32_t sample_rate, SpectralBackend backend);
-void spectral_deinit(void);
-const char* spectral_version(void);
-
-/* Segment loading */
-SpectralResult spectral_load_file(SpectralStreamCtx* ctx, const char* path);
-SpectralResult spectral_load_buffer(SpectralStreamCtx* ctx, 
-                                    const void* data, size_t size);
-SpectralResult spectral_load_streaming(SpectralStreamCtx* ctx, 
-                                       const char* path, 
-                                       uint32_t max_cached);
-void spectral_unload(SpectralStreamCtx* ctx);
-
-/* Synthesis */
-void spectral_set_params(SpectralStreamCtx* ctx, const SpectralParams* params);
-uint32_t spectral_process(SpectralStreamCtx* ctx, 
-                          SPECTRAL_SAMPLE_TYPE* output,
-                          uint32_t num_samples);
-uint32_t spectral_process_float(SpectralStreamCtx* ctx,
-                                float* output,
-                                uint32_t num_samples);
-void spectral_reset(SpectralStreamCtx* ctx);
-void spectral_seek(SpectralStreamCtx* ctx, uint32_t sample_pos);
-
-/* Utility */
-uint32_t spectral_get_position(const SpectralStreamCtx* ctx);
-uint32_t spectral_get_duration(const SpectralStreamCtx* ctx);
-int spectral_is_complete(const SpectralStreamCtx* ctx);
-
-typedef struct SpectralMemStats {
+typedef struct SpectralApiMemStats {
     uint32_t segments_loaded;
     uint32_t segments_cached;
     uint32_t bytes_used;
     uint32_t bytes_available;
-} SpectralMemStats;
+} SpectralApiMemStats;
 
-SpectralMemStats spectral_get_mem_stats(const SpectralStreamCtx* ctx);
+/* Initialization */
+SpectralApiResult spectral_api_init(uint32_t sample_rate, SpectralApiBackend backend);
+void spectral_api_deinit(void);
+const char* spectral_api_version(void);
 
-/* Embedded-specific */
-#if SPECTRAL_EMBEDDED
+/* Segment loading */
+SpectralApiResult spectral_api_load_file(SpectralApiStreamCtx* ctx, const char* path);
+SpectralApiResult spectral_api_load_buffer(SpectralApiStreamCtx* ctx,
+                                           const void* data, size_t size);
+void spectral_api_unload(SpectralApiStreamCtx* ctx);
 
-void spectral_segment_compact(const SpectralSegment* full, 
-                              SpectralSegmentCompact* compact);
-void spectral_segment_expand(const SpectralSegmentCompact* compact,
-                             SpectralSegment* full);
+/* Synthesis */
+void spectral_api_set_params(SpectralApiStreamCtx* ctx, const SpectralApiParams* params);
+uint32_t spectral_api_process_float(SpectralApiStreamCtx* ctx,
+                                    float* output, uint32_t num_samples);
+void spectral_api_reset(SpectralApiStreamCtx* ctx);
+void spectral_api_seek(SpectralApiStreamCtx* ctx, uint32_t sample_pos);
 
-#if SPECTRAL_USE_FIXED
-typedef int32_t spectral_fixed_t;
-#define SPECTRAL_FIXED_SHIFT    16
-#define SPECTRAL_FLOAT_TO_FIXED(x)  ((spectral_fixed_t)((x) * (1 << SPECTRAL_FIXED_SHIFT)))
-#define SPECTRAL_FIXED_TO_FLOAT(x)  ((float)(x) / (1 << SPECTRAL_FIXED_SHIFT))
-#endif
-
-#endif /* SPECTRAL_EMBEDDED */
+/* Status */
+uint32_t spectral_api_get_position(const SpectralApiStreamCtx* ctx);
+uint32_t spectral_api_get_duration(const SpectralApiStreamCtx* ctx);
+int spectral_api_is_complete(const SpectralApiStreamCtx* ctx);
+SpectralApiMemStats spectral_api_get_mem_stats(const SpectralApiStreamCtx* ctx);
 
 #ifdef __cplusplus
 }

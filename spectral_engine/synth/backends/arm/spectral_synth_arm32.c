@@ -59,13 +59,20 @@ static void spectral_arm32_dma_prefetch(SpectralArm32Ctx* ctx) {
     }
 }
 
-/* Get segment pointer: use DMA buffer if segment was prefetched, else SDRAM */
+/* Get segment pointer: use DMA buffer if segment was prefetched, else SDRAM.
+ * DSB after DMA completion ensures the CPU sees coherent data even if the
+ * DMA buffer is placed in cacheable SRAM rather than tightly-coupled DTCM. */
 static inline const SpectralSegmentQ15* get_segment(
     const SpectralArm32Ctx* ctx, uint32_t idx)
 {
     if (idx >= dma_prefetch_start &&
         idx < dma_prefetch_start + dma_prefetch_count &&
         dma_transfer_complete()) {
+#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
+        __DSB();
+#else
+        __sync_synchronize();
+#endif
         return &dma_seg_buf[idx - dma_prefetch_start];
     }
     return &ctx->segments[idx];
@@ -261,21 +268,11 @@ static inline void spectral_phase_batch4(q31_t phase,
 
 /* Amplitude computation in Q15 domain.
  * Backend parity note: this intentionally diverges from float
- * spectral_segment_amp_at_f32() for fixed-point saturation behavior. */
-#if SPECTRAL_OPT_LEVEL >= 1
-static inline void spectral_amp_batch4(q15_t amp,
-                                       q15_t amp_delta,
-                                       q15_t* a0,
-                                       q15_t* a1,
-                                       q15_t* a2,
-                                       q15_t* a3) {
-    const q15_t delta2 = (q15_t)(amp_delta << 1);
-    *a0 = amp;
-    *a1 = (q15_t)(amp + amp_delta);
-    *a2 = (q15_t)(amp + delta2);
-    *a3 = (q15_t)(amp + amp_delta + delta2);
-}
-#else
+ * spectral_segment_amp_at_f32() for fixed-point saturation behavior.
+ *
+ * All paths use saturating adds to prevent wrap-around when amp is
+ * near Q15_MAX/Q15_MIN.  On ARM with DSP extensions spectral_qadd16()
+ * compiles to a single QADD16 instruction — no extra cost. */
 static inline void spectral_amp_batch4(q15_t amp,
                                        q15_t amp_delta,
                                        q15_t* a0,
@@ -287,7 +284,6 @@ static inline void spectral_amp_batch4(q15_t amp,
     *a2 = spectral_qadd16(*a1, amp_delta);
     *a3 = spectral_qadd16(*a2, amp_delta);
 }
-#endif
 
 static inline void spectral_accum_batch4(q31_t* accum,
                                          uint32_t j,

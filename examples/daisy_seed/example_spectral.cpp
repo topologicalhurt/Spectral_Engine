@@ -53,8 +53,8 @@ void AudioCallback(AudioHandle::InterleavingInputBuffer in,
                    size_t size) {
     (void)in;
     
-    uint16_t stretch_adc = hw.adc.Get(ADC_STRETCH) >> 4;
-    uint16_t volume_adc = hw.adc.Get(ADC_VOLUME) >> 4;
+    uint16_t stretch_adc = hw.adc.Get(ADC_STRETCH);
+    uint16_t volume_adc = hw.adc.Get(ADC_VOLUME);
     daisy_spectral_set_params_adc(&spectral_ctx, stretch_adc, volume_adc);
     
     if (!g_is_playing || daisy_spectral_is_complete(&spectral_ctx)) {

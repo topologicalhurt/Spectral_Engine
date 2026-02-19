@@ -17,6 +17,11 @@
 #define SPECTRAL_OSC_FORMULAS_H
 
 #include "spectral_consts.h"
+
+/* Bump when any oscillator formula, fast_sin, normalize_phase, or
+ * fade_envelope changes.  Metal shader (oscillator.c) duplicates these
+ * as MSL strings and checks this version at compile time. */
+#define SPECTRAL_OSC_FORMULAS_VERSION 1
 #include <math.h>
 
 /* Dual-compile: C inline or CUDA device inline */
