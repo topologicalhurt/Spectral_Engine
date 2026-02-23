@@ -132,7 +132,8 @@ set(SPECTRAL_CUDA_COMPILE_OPTIONS
     --fmad=true
     -Xcompiler=-fPIC
     -Xcompiler=-ffast-math
-    -Xcompiler=-funroll-loops)
+    -Xcompiler=-funroll-loops
+    -Xcompiler=-fno-lto)
 
 set(SPECTRAL_EMBEDDED_COMPILE_OPTIONS
     -O3
@@ -148,7 +149,11 @@ endif()
 
 function(spectral_apply_common_target target_name)
     target_include_directories(${target_name} PRIVATE ${SPECTRAL_INCLUDE_DIRS})
-    target_compile_options(${target_name} PRIVATE ${SPECTRAL_COMMON_COMPILE_OPTIONS} ${SPECTRAL_PGO_COMPILE_OPTIONS})
+    # Gate C/ObjC options behind a generator expression so they are never
+    # forwarded to nvcc (which would pass -flto=auto to g++, embedding
+    # LTO bytecode that is potentially incompatible with the GCC linker).
+    target_compile_options(${target_name} PRIVATE
+        $<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:${SPECTRAL_COMMON_COMPILE_OPTIONS} ${SPECTRAL_PGO_COMPILE_OPTIONS}>)
     target_link_options(${target_name} PRIVATE ${SPECTRAL_COMMON_LINK_OPTIONS} ${SPECTRAL_PGO_LINK_OPTIONS})
 endfunction()
 

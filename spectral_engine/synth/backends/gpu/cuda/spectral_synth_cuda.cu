@@ -214,6 +214,13 @@ extern "C" SpectralError synth_cuda(
     /* Tile preprocessing on CPU */
     GpuTileData td = {0};
 
+    /* Hoist declarations above first goto to satisfy C++ scoping rules */
+    SpectralError tile_err = SPECTRAL_OK;
+    size_t tile_ids_size = 0;
+    size_t tile_ranges_size = 0;
+    GpuSynthParams gp = {0};
+    cudaError_t kernel_err = cudaSuccess;
+
     /* Start async segment upload while we preprocess tiles */
     size_t seg_size = 0;
     if (!spectral_array_bytes((size_t)sa.count, sizeof(Segment), &seg_size)) {
@@ -226,7 +233,7 @@ extern "C" SpectralError synth_cuda(
     }
     cudaMemcpyAsync(g_cuda.d_segments, sa.segs, seg_size, cudaMemcpyHostToDevice, g_cuda.stream);
 
-    SpectralError tile_err = gpu_tile_preprocess(sa, stretch, CUDA_TILE_SIZE, out_len, &td);
+    tile_err = gpu_tile_preprocess(sa, stretch, CUDA_TILE_SIZE, out_len, &td);
     if (tile_err != SPECTRAL_OK) {
         cudaStreamSynchronize(g_cuda.stream);
         memset(out_buffer, 0, out_size);
@@ -234,8 +241,6 @@ extern "C" SpectralError synth_cuda(
         return tile_err;
     }
 
-    size_t tile_ids_size = 0;
-    size_t tile_ranges_size = 0;
     if (!spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
         !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {
         gpu_tile_data_free(&td);
@@ -260,7 +265,7 @@ extern "C" SpectralError synth_cuda(
     cudaMemcpyAsync(g_cuda.d_tile_ranges, td.ranges, tile_ranges_size, cudaMemcpyHostToDevice, g_cuda.stream);
 
     /* Pack GPU params and launch tile-parallel kernel */
-    GpuSynthParams gp = gpu_synth_params_pack(&pf.params, CUDA_TILE_SIZE, timbre);
+    gp = gpu_synth_params_pack(&pf.params, CUDA_TILE_SIZE, timbre);
 
     cudaEvent_t ev_start, ev_stop;
     cudaEventCreate(&ev_start);
@@ -277,7 +282,7 @@ extern "C" SpectralError synth_cuda(
     cudaMemcpyAsync(out_buffer, g_cuda.d_output, out_size, cudaMemcpyDeviceToHost, g_cuda.stream);
     cudaStreamSynchronize(g_cuda.stream);
 
-    cudaError_t kernel_err = cudaGetLastError();
+    kernel_err = cudaGetLastError();
     if (kernel_err != cudaSuccess) {
         SPECTRAL_LOG_ERROR_STDERR("CUDA kernel error: %s", cudaGetErrorString(kernel_err));
         gpu_tile_data_free(&td);
