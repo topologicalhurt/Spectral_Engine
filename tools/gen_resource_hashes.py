@@ -25,8 +25,8 @@ import argparse
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
 
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
