@@ -24,6 +24,7 @@ __pycache__/
 *.py[cod]
 *.nbc
 *.nbi
+*.venv
 
 # Build directories
 build/

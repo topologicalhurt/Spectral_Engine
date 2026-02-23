@@ -75,7 +75,8 @@ if(APPLE)
         m
         ${SPECTRAL_OMP_LIB}
         ${SPECTRAL_SNDFILE_LIB}
-        ${SPECTRAL_ACCELERATE_FRAMEWORK})
+        ${SPECTRAL_ACCELERATE_FRAMEWORK}
+        spectral_xxhash)
 
     set(SPECTRAL_GPU_LINK_LIBS
         ${SPECTRAL_CPU_LINK_LIBS}
@@ -98,7 +99,8 @@ else()
     set(SPECTRAL_CPU_LINK_LIBS
         m
         ${SPECTRAL_SNDFILE_LIB}
-        ${SPECTRAL_FFTW3F_LIB})
+        ${SPECTRAL_FFTW3F_LIB}
+        spectral_xxhash)
 
     set(SPECTRAL_GPU_LINK_LIBS ${SPECTRAL_CPU_LINK_LIBS})
 endif()

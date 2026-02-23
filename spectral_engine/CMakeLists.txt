@@ -79,9 +79,14 @@ endforeach()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/source-manifest.cmake")
 
+set(SPECTRAL_XXHASH_SOURCE "${SPECTRAL_REPO_ROOT}/third_party/xxHash/xxhash.c")
+add_library(spectral_xxhash STATIC "${SPECTRAL_XXHASH_SOURCE}")
+target_include_directories(spectral_xxhash PUBLIC "${SPECTRAL_XXHASH_INCLUDE_DIR}")
+
 set(SPECTRAL_INCLUDE_DIRS
     ${SPECTRAL_ENGINE_INCLUDE_DIRS}
-    "${SPECTRAL_SIMDE_INCLUDE_DIR}")
+    "${SPECTRAL_SIMDE_INCLUDE_DIR}"
+    "${SPECTRAL_XXHASH_INCLUDE_DIR}")
 
 set(SPECTRAL_SIMULATION_DEFINES
     SPECTRAL_EMBEDDED=1
