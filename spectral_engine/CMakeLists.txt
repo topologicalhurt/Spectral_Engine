@@ -18,6 +18,17 @@ get_filename_component(SPECTRAL_REPO_ROOT "${SPECTRAL_ENGINE_ROOT}/.." ABSOLUTE)
 include("${SPECTRAL_ENGINE_ROOT}/cmake/options.cmake")
 
 if(SPECTRAL_USE_CUDA)
+    # CUDA 12.4 supports GCC <= 13.  Pin nvcc's host compiler to g++-13
+    # while the rest of the build uses the system GCC (14).  The desktop
+    # target forces LINKER_LANGUAGE C so the final link is driven by GCC 14
+    # (which can read its own LTO bytecode).
+    if(NOT CMAKE_CUDA_HOST_COMPILER)
+        find_program(_cuda_host_13 g++-13)
+        if(_cuda_host_13)
+            set(CMAKE_CUDA_HOST_COMPILER "${_cuda_host_13}")
+        endif()
+        unset(_cuda_host_13)
+    endif()
     enable_language(CUDA)
     find_package(CUDAToolkit REQUIRED)
 endif()
@@ -68,9 +79,14 @@ endforeach()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/source-manifest.cmake")
 
+set(SPECTRAL_XXHASH_SOURCE "${SPECTRAL_REPO_ROOT}/third_party/xxHash/xxhash.c")
+add_library(spectral_xxhash STATIC "${SPECTRAL_XXHASH_SOURCE}")
+target_include_directories(spectral_xxhash PUBLIC "${SPECTRAL_XXHASH_INCLUDE_DIR}")
+
 set(SPECTRAL_INCLUDE_DIRS
     ${SPECTRAL_ENGINE_INCLUDE_DIRS}
-    "${SPECTRAL_SIMDE_INCLUDE_DIR}")
+    "${SPECTRAL_SIMDE_INCLUDE_DIR}"
+    "${SPECTRAL_XXHASH_INCLUDE_DIR}")
 
 set(SPECTRAL_SIMULATION_DEFINES
     SPECTRAL_EMBEDDED=1

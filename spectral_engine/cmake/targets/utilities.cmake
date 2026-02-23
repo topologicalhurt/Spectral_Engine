@@ -1,5 +1,66 @@
 # Utility targets: checks, bench, and build matrix/help display.
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/gen_resource_hashes.py")
+set(SPECTRAL_RESOURCE_HASH_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_hash_resources_xx32_xx3.c")
+file(GLOB_RECURSE SPECTRAL_FIRMWARE_RESOURCE_FILES CONFIGURE_DEPENDS
+    "${SPECTRAL_REPO_ROOT}/resources/*")
+
+add_custom_command(
+    OUTPUT "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
+    COMMAND ${Python3_EXECUTABLE} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+            --resources-dir "${SPECTRAL_REPO_ROOT}/resources"
+            --output "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
+            --mode generate
+    DEPENDS
+        "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+        ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
+    VERBATIM)
+
+add_custom_target(generate_resource_hashes
+    DEPENDS "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+
+set_source_files_properties(
+    "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
+    PROPERTIES GENERATED TRUE)
+
+add_custom_target(verify_resource_hashes
+    COMMAND ${Python3_EXECUTABLE} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+            --resources-dir "${SPECTRAL_REPO_ROOT}/resources"
+            --output "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
+            --mode verify
+    DEPENDS
+        generate_resource_hashes
+        "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+        ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
+    VERBATIM)
+
+if(TARGET desktop)
+    target_sources(desktop PRIVATE "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    add_dependencies(desktop verify_resource_hashes)
+endif()
+if(TARGET simulate)
+    target_sources(simulate PRIVATE "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    add_dependencies(simulate verify_resource_hashes)
+endif()
+if(TARGET simulate_daisy)
+    target_sources(simulate_daisy PRIVATE "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    add_dependencies(simulate_daisy verify_resource_hashes)
+endif()
+if(TARGET embedded_arm)
+    target_sources(embedded_arm PRIVATE "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    add_dependencies(embedded_arm verify_resource_hashes)
+endif()
+if(TARGET embedded_arm_float)
+    target_sources(embedded_arm_float PRIVATE "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    add_dependencies(embedded_arm_float verify_resource_hashes)
+endif()
+if(TARGET embedded_arm_restricted)
+    target_sources(embedded_arm_restricted PRIVATE "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    add_dependencies(embedded_arm_restricted verify_resource_hashes)
+endif()
+
 set(SPECTRAL_LOG_CHECK_FILES
     ${SPECTRAL_SOURCES_CORE}
     ${SPECTRAL_SOURCES_MONITORING}

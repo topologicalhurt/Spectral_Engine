@@ -35,6 +35,7 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_envelope.c"
     "${SPECTRAL_CORE_DIR}/spectral_error.c"
     "${SPECTRAL_CORE_DIR}/spectral_fast_math.c"
+    "${SPECTRAL_CORE_DIR}/spectral_hash_xx32_xx3.c"
     "${SPECTRAL_CORE_DIR}/spectral_in.c"
     "${SPECTRAL_CORE_DIR}/spectral_log.c"
     "${SPECTRAL_CORE_DIR}/spectral_lut.c"
@@ -43,6 +44,7 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_proc_johnston_1988.c"
     "${SPECTRAL_CORE_DIR}/spectral_proc_serra_smith_1990.c"
     "${SPECTRAL_CORE_DIR}/spectral_processing_chain.c"
+    "${SPECTRAL_CORE_DIR}/spectral_resource_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_mt.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_parser.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_pool.c"
@@ -135,4 +137,5 @@ set(SPECTRAL_ENGINE_INCLUDE_DIRS
     "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}"
     "${SPECTRAL_SYNTH_MATH_DIR}")
 
-set(SPECTRAL_SIMDE_INCLUDE_DIR "${SPECTRAL_MANIFEST_REPO_ROOT}/third_party/simde")
+set(SPECTRAL_SIMDE_INCLUDE_DIR  "${SPECTRAL_MANIFEST_REPO_ROOT}/third_party/simde")
+set(SPECTRAL_XXHASH_INCLUDE_DIR "${SPECTRAL_MANIFEST_REPO_ROOT}/third_party/xxHash")

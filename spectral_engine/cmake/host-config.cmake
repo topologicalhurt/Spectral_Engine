@@ -75,7 +75,8 @@ if(APPLE)
         m
         ${SPECTRAL_OMP_LIB}
         ${SPECTRAL_SNDFILE_LIB}
-        ${SPECTRAL_ACCELERATE_FRAMEWORK})
+        ${SPECTRAL_ACCELERATE_FRAMEWORK}
+        spectral_xxhash)
 
     set(SPECTRAL_GPU_LINK_LIBS
         ${SPECTRAL_CPU_LINK_LIBS}
@@ -98,7 +99,8 @@ else()
     set(SPECTRAL_CPU_LINK_LIBS
         m
         ${SPECTRAL_SNDFILE_LIB}
-        ${SPECTRAL_FFTW3F_LIB})
+        ${SPECTRAL_FFTW3F_LIB}
+        spectral_xxhash)
 
     set(SPECTRAL_GPU_LINK_LIBS ${SPECTRAL_CPU_LINK_LIBS})
 endif()
@@ -132,7 +134,8 @@ set(SPECTRAL_CUDA_COMPILE_OPTIONS
     --fmad=true
     -Xcompiler=-fPIC
     -Xcompiler=-ffast-math
-    -Xcompiler=-funroll-loops)
+    -Xcompiler=-funroll-loops
+    -Xcompiler=-fno-lto)
 
 set(SPECTRAL_EMBEDDED_COMPILE_OPTIONS
     -O3
@@ -148,7 +151,11 @@ endif()
 
 function(spectral_apply_common_target target_name)
     target_include_directories(${target_name} PRIVATE ${SPECTRAL_INCLUDE_DIRS})
-    target_compile_options(${target_name} PRIVATE ${SPECTRAL_COMMON_COMPILE_OPTIONS} ${SPECTRAL_PGO_COMPILE_OPTIONS})
+    # Gate C/ObjC options behind a generator expression so they are never
+    # forwarded to nvcc (which would pass -flto=auto to g++, embedding
+    # LTO bytecode that is potentially incompatible with the GCC linker).
+    target_compile_options(${target_name} PRIVATE
+        $<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:${SPECTRAL_COMMON_COMPILE_OPTIONS} ${SPECTRAL_PGO_COMPILE_OPTIONS}>)
     target_link_options(${target_name} PRIVATE ${SPECTRAL_COMMON_LINK_OPTIONS} ${SPECTRAL_PGO_LINK_OPTIONS})
 endfunction()
 
