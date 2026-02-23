@@ -7,6 +7,22 @@
 #endif
 
 /* ---------------------------------------------------------------------------
+ * Locale-independent ASCII helpers used only by path canonicalization below.
+ * Deliberately *not* using <ctype.h> tolower() to avoid locale-dependent
+ * behaviour that would produce different canonical forms across machines.
+ * ---------------------------------------------------------------------------*/
+static inline int spectral_to_lower(int c)
+{
+    return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+}
+
+static inline char spectral_hex_nibble(unsigned n)
+{
+    n &= 0xfu;
+    return (char)(n < 10u ? '0' + n : 'a' + (n - 10u));
+}
+
+/* ---------------------------------------------------------------------------
  * Path canonicalization — must match compress_path() in gen_resource_hashes.py.
  *
  * Five transforms in order:

@@ -151,6 +151,7 @@ endif()
 
 function(spectral_apply_common_target target_name)
     target_include_directories(${target_name} PRIVATE ${SPECTRAL_INCLUDE_DIRS})
+    target_include_directories(${target_name} SYSTEM PRIVATE ${SPECTRAL_SYSTEM_INCLUDE_DIRS})
     # Gate C/ObjC options behind a generator expression so they are never
     # forwarded to nvcc (which would pass -flto=auto to g++, embedding
     # LTO bytecode that is potentially incompatible with the GCC linker).
@@ -161,6 +162,7 @@ endfunction()
 
 function(spectral_apply_embedded_target target_name)
     target_include_directories(${target_name} PRIVATE ${SPECTRAL_INCLUDE_DIRS})
+    target_include_directories(${target_name} SYSTEM PRIVATE ${SPECTRAL_SYSTEM_INCLUDE_DIRS})
     target_compile_options(${target_name} PRIVATE ${SPECTRAL_EMBEDDED_COMPILE_OPTIONS})
     target_link_options(${target_name} PRIVATE ${SPECTRAL_COMMON_LINK_OPTIONS} ${SPECTRAL_PGO_LINK_OPTIONS})
     target_link_libraries(${target_name} PRIVATE ${SPECTRAL_CPU_LINK_LIBS})

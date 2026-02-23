@@ -6,6 +6,7 @@ add_executable(convert_segments EXCLUDE_FROM_ALL
     "${SPECTRAL_CORE_DIR}/spectral_log.c")
 set_target_properties(convert_segments PROPERTIES OUTPUT_NAME convert_segments)
 target_include_directories(convert_segments PRIVATE ${SPECTRAL_INCLUDE_DIRS})
+target_include_directories(convert_segments SYSTEM PRIVATE ${SPECTRAL_SYSTEM_INCLUDE_DIRS})
 target_compile_options(convert_segments PRIVATE ${SPECTRAL_COMMON_COMPILE_OPTIONS} ${SPECTRAL_PGO_COMPILE_OPTIONS})
 target_link_options(convert_segments PRIVATE ${SPECTRAL_COMMON_LINK_OPTIONS} ${SPECTRAL_PGO_LINK_OPTIONS})
 target_link_libraries(convert_segments PRIVATE m)

@@ -36,6 +36,12 @@
 
 #if SPECTRAL_HASH_HAS_HOST_FILE_API
 #include <stdio.h>
+
+/* Read buffer size for stream-based file hashing.  64 KiB is a good default
+ * that balances syscall overhead against stack usage. */
+#ifndef SPECTRAL_HASH_FILE_IO_CHUNK_SIZE
+#define SPECTRAL_HASH_FILE_IO_CHUNK_SIZE ((size_t)65536u)
+#endif
 #endif
 
 #ifdef __cplusplus

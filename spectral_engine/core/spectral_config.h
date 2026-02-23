@@ -73,6 +73,18 @@
 #define SPECTRAL_IS_EMBEDDED_SIM 0
 #endif
 
+/* Host file-system API availability.
+ * Desktop builds have stdio/fopen; embedded and simulation builds do not.
+ * Controls whether resource entries carry a path string (host) or an FNV-1a
+ * file ID (embedded), and whether the hash digest is 64-bit or 32-bit. */
+#ifndef SPECTRAL_HASH_HAS_HOST_FILE_API
+#if !SPECTRAL_EMBEDDED && !SPECTRAL_IS_EMBEDDED_SIM
+#define SPECTRAL_HASH_HAS_HOST_FILE_API 1
+#else
+#define SPECTRAL_HASH_HAS_HOST_FILE_API 0
+#endif
+#endif
+
 /* Q15 Segment Configuration */
 
 #ifndef SPECTRAL_Q15_COMPACT

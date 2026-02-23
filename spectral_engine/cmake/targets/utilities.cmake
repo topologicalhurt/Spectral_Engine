@@ -1,6 +1,19 @@
 # Utility targets: checks, bench, and build matrix/help display.
 
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
+# Python: prefer a local .venv so venv-installed packages are
+# visible.  Resolution order:
+#   1. <repo-root>/.venv/bin/python3   (local virtual-env)
+#   2. Fall back to whatever the current shell provides via find_package.
+set(_spectral_venv_python "${SPECTRAL_REPO_ROOT}/.venv/bin/python3")
+if(EXISTS "${_spectral_venv_python}")
+    set(SPECTRAL_PYTHON "${_spectral_venv_python}")
+    message(STATUS "Using local .venv Python: ${SPECTRAL_PYTHON}")
+else()
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(SPECTRAL_PYTHON "${Python3_EXECUTABLE}")
+    message(STATUS "Using system Python: ${SPECTRAL_PYTHON}")
+endif()
+unset(_spectral_venv_python)
 
 set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/gen_resource_hashes.py")
 set(SPECTRAL_RESOURCE_HASH_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_hash_resources_xx32_xx3.c")
@@ -9,7 +22,7 @@ file(GLOB_RECURSE SPECTRAL_FIRMWARE_RESOURCE_FILES CONFIGURE_DEPENDS
 
 add_custom_command(
     OUTPUT "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
-    COMMAND ${Python3_EXECUTABLE} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+    COMMAND ${SPECTRAL_PYTHON} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
             --resources-dir "${SPECTRAL_REPO_ROOT}/resources"
             --output "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
             --mode generate
@@ -26,7 +39,7 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE)
 
 add_custom_target(verify_resource_hashes
-    COMMAND ${Python3_EXECUTABLE} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+    COMMAND ${SPECTRAL_PYTHON} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
             --resources-dir "${SPECTRAL_REPO_ROOT}/resources"
             --output "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
             --mode verify
