@@ -12,7 +12,26 @@ if(NOT DEFINED SPECTRAL_ENGINE_ROOT OR NOT DEFINED SPECTRAL_REPO_ROOT)
 endif()
 
 option(SPECTRAL_SKIP_VERSION_CHECK "Skip minimum compiler version checks" OFF)
-option(SPECTRAL_REPRO_BUILD "Use reproducible optimization profile" ON)
+option(SPECTRAL_PRODUCTION_BUILD
+    "Enable production build defaults (release-oriented + reproducible profile)"
+    OFF)
+
+if(SPECTRAL_PRODUCTION_BUILD
+   AND NOT CMAKE_CONFIGURATION_TYPES
+   AND SPECTRAL_BUILD_TYPE_DEFAULTED)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
+endif()
+
+set(_SPECTRAL_REPRO_DEFAULT OFF)
+if(SPECTRAL_PRODUCTION_BUILD)
+    set(_SPECTRAL_REPRO_DEFAULT ON)
+endif()
+
+set(SPECTRAL_REPRO_BUILD ${_SPECTRAL_REPRO_DEFAULT} CACHE BOOL
+    "Use reproducible optimization profile (derived from SPECTRAL_PRODUCTION_BUILD)"
+    FORCE)
+unset(_SPECTRAL_REPRO_DEFAULT)
 
 set(SPECTRAL_PGO "off" CACHE STRING "Profile-guided optimization mode (off, gen, use)")
 set_property(CACHE SPECTRAL_PGO PROPERTY STRINGS off gen use)
