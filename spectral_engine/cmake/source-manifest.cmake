@@ -41,10 +41,6 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_log.c"
     "${SPECTRAL_CORE_DIR}/spectral_lut.c"
     "${SPECTRAL_CORE_DIR}/spectral_out.c"
-    "${SPECTRAL_CORE_DIR}/spectral_proc_adaptive_track_density.c"
-    "${SPECTRAL_CORE_DIR}/spectral_proc_johnston_1988.c"
-    "${SPECTRAL_CORE_DIR}/spectral_proc_serra_smith_1990.c"
-    "${SPECTRAL_CORE_DIR}/spectral_processing_chain.c"
     "${SPECTRAL_CORE_DIR}/spectral_resource_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache.c"
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache_fs.c"
@@ -67,8 +63,18 @@ set(SPECTRAL_SOURCES_RUNTIME_PERF_MODEL
     "${SPECTRAL_RUNTIME_DIR}/spectral_perf_embedded.c"
     "${SPECTRAL_RUNTIME_DIR}/spectral_perf_model.c")
 
+set(SPECTRAL_SOURCES_ANALYSIS_PROC
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_processing_chain.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_adaptive_track_density.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_johnston_1988.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_serra_smith_1990.c")
+
 set(SPECTRAL_SOURCES_ANALYSIS
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_fft.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_full.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_fused.c"
+    ${SPECTRAL_SOURCES_ANALYSIS_PROC}
     "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_track.c")
 
 set(SPECTRAL_SOURCES_CLI
@@ -97,6 +103,7 @@ set(SPECTRAL_SOURCES_HOST_CLI_STACK
     ${SPECTRAL_SOURCES_CORE})
 
 set(SPECTRAL_SOURCES_HOST_Q15_STACK
+    ${SPECTRAL_SOURCES_ANALYSIS_PROC}
     ${SPECTRAL_SOURCES_RUNTIME_PERF_MODEL}
     ${SPECTRAL_SOURCES_SYNTH_EMBEDDED}
     ${SPECTRAL_SOURCES_SYNTH_SIMULATION})
