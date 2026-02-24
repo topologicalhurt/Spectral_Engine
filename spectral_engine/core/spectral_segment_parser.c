@@ -9,70 +9,31 @@
  * Desktop/simulation only — bare-metal embedded loads segments from flash/SDRAM.
  */
 #include "spectral_segment_parser.h"
+#include "spectral_fs.h"
+#include "spectral_endian.h"
 #include "spectral_utils.h"
 #include "spectral_log.h"
 
 #if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
 
-/*
- * Endianness detection and byte-swap utilities
- */
-
-static inline int is_big_endian(void) {
-    union { uint32_t i; uint8_t c[4]; } u = { .i = 0x01020304 };
-    return u.c[0] == 0x01;
-}
-
-static inline uint32_t swap_u32(uint32_t x) {
-    return ((x >> 24) & 0x000000FF) |
-           ((x >>  8) & 0x0000FF00) |
-           ((x <<  8) & 0x00FF0000) |
-           ((x << 24) & 0xFF000000);
-}
-
-static inline float swap_float(float f) {
-    union { float f; uint32_t u; } u;
-    u.f = f;
-    u.u = swap_u32(u.u);
-    return u.f;
-}
-
-/* Swap header fields to/from little-endian */
+/* Swap header fields to/from little-endian (symmetric). */
 static void header_to_le(SegmentFileHeader* hdr) {
-    if (!is_big_endian()) return;
-    hdr->version = swap_u32(hdr->version);
-    hdr->sr = swap_u32(hdr->sr);
-    hdr->stretch = swap_float(hdr->stretch);
-    hdr->pitch = swap_float(hdr->pitch);
-    hdr->count = swap_u32(hdr->count);
-    hdr->reserved = swap_u32(hdr->reserved);
+    if (!spectral_is_big_endian()) return;
+    hdr->version  = spectral_swap_u32(hdr->version);
+    hdr->sr       = spectral_swap_u32(hdr->sr);
+    hdr->stretch  = spectral_swap_float(hdr->stretch);
+    hdr->pitch    = spectral_swap_float(hdr->pitch);
+    hdr->count    = spectral_swap_u32(hdr->count);
+    hdr->reserved = spectral_swap_u32(hdr->reserved);
 }
 
 static void header_from_le(SegmentFileHeader* hdr) {
-    header_to_le(hdr);  /* Symmetric operation */
-}
-
-/* Swap segment fields to/from little-endian */
-static void segment_to_le(Segment* seg) {
-    if (!is_big_endian()) return;
-    seg->start = swap_float(seg->start);
-    seg->length = swap_float(seg->length);
-    seg->phase = swap_float(seg->phase);
-    seg->omega = swap_float(seg->omega);
-    seg->df = swap_float(seg->df);
-    seg->amp = swap_float(seg->amp);
-    seg->da = swap_float(seg->da);
-    seg->width = swap_float(seg->width);
-}
-
-static void segment_from_le(Segment* seg) {
-    segment_to_le(seg);  /* Symmetric operation */
+    header_to_le(hdr);
 }
 
 /* Returns 1 if segment values are finite and in valid range, 0 if corrupt */
@@ -102,13 +63,14 @@ static int segments_validate_all(const Segment* segs, uint32_t count, uint32_t* 
 SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, float stretch, float pitch) {
     SpectralError err = SPECTRAL_OK;
     FILE* f = NULL;
-    int needs_swap = is_big_endian();
+    int needs_swap = spectral_is_big_endian();
+    size_t seg_bytes = 0;
 
     if (spectral_is_empty_string(path) || !sa) return SPECTRAL_ERR_PARAM;
     if (sa->count > 0 && !sa->segs) return SPECTRAL_ERR_PARAM;
 
-    f = fopen(path, "wb");
-    if (!f) return SPECTRAL_ERR_FILE_OPEN;
+    err = spectral_fs_open(&f, path, "wb");
+    if (err != SPECTRAL_OK) return err;
 
     SegmentFileHeader hdr = {
         .magic = {SEGMENT_FILE_MAGIC[0], SEGMENT_FILE_MAGIC[1], 
@@ -123,30 +85,31 @@ SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, fl
     
     header_to_le(&hdr);
 
-    if (fwrite(&hdr, sizeof(hdr), 1, f) != 1) {
-        err = SPECTRAL_ERR_FILE_WRITE;
-        goto cleanup;
-    }
+    err = spectral_fs_write_exact(f, &hdr, sizeof(hdr), SPECTRAL_ERR_FILE_WRITE);
+    if (err != SPECTRAL_OK) goto cleanup;
 
     /* Write segments, converting each to little-endian if needed */
     if (needs_swap) {
         for (uint32_t i = 0; i < sa->count; i++) {
             Segment seg = sa->segs[i];
-            segment_to_le(&seg);
-            if (fwrite(&seg, sizeof(Segment), 1, f) != 1) {
-                err = SPECTRAL_ERR_FILE_WRITE;
-                goto cleanup;
-            }
+            spectral_segment_swap_endian(&seg);
+            err = spectral_fs_write_exact(f, &seg, sizeof(Segment), SPECTRAL_ERR_FILE_WRITE);
+            if (err != SPECTRAL_OK) goto cleanup;
         }
     } else {
-        if (fwrite(sa->segs, sizeof(Segment), sa->count, f) != sa->count) {
-            err = SPECTRAL_ERR_FILE_WRITE;
+        if (!spectral_array_bytes((size_t)sa->count, sizeof(Segment), &seg_bytes)) {
+            err = SPECTRAL_ERR_OVERFLOW;
             goto cleanup;
         }
+        err = spectral_fs_write_exact(f, sa->segs, seg_bytes, SPECTRAL_ERR_FILE_WRITE);
+        if (err != SPECTRAL_OK) goto cleanup;
     }
 
 cleanup:
-    if (f) fclose(f);
+    {
+        SpectralError close_err = spectral_fs_close(&f, SPECTRAL_ERR_FILE_WRITE);
+        if (err == SPECTRAL_OK && close_err != SPECTRAL_OK) err = close_err;
+    }
     return err;
 }
 
@@ -158,13 +121,11 @@ SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, flo
 
     if (spectral_is_empty_string(path) || !sa || !out_sr || !out_stretch || !out_pitch) return SPECTRAL_ERR_PARAM;
 
-    f = fopen(path, "rb");
-    if (!f) return SPECTRAL_ERR_FILE_OPEN;
+    err = spectral_fs_open(&f, path, "rb");
+    if (err != SPECTRAL_OK) return err;
 
-    if (fread(&hdr, sizeof(hdr), 1, f) != 1) {
-        err = SPECTRAL_ERR_FILE_READ;
-        goto cleanup;
-    }
+    err = spectral_fs_read_exact(f, &hdr, sizeof(hdr), SPECTRAL_ERR_FILE_READ);
+    if (err != SPECTRAL_OK) goto cleanup;
 
     /* Magic is not affected by endianness (char array) */
     if (memcmp(hdr.magic, SEGMENT_FILE_MAGIC, 4) != 0) {
@@ -217,15 +178,20 @@ SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, flo
         goto cleanup;
     }
 
-    if (fread(loaded_segs, sizeof(Segment), hdr.count, f) != hdr.count) {
-        err = SPECTRAL_ERR_FILE_READ;
-        goto cleanup;
+    {
+        size_t seg_bytes = 0;
+        if (!spectral_array_bytes((size_t)hdr.count, sizeof(Segment), &seg_bytes)) {
+            err = SPECTRAL_ERR_OVERFLOW;
+            goto cleanup;
+        }
+        err = spectral_fs_read_exact(f, loaded_segs, seg_bytes, SPECTRAL_ERR_FILE_READ);
+        if (err != SPECTRAL_OK) goto cleanup;
     }
 
     /* Convert segments from little-endian if needed */
-    if (is_big_endian()) {
+    if (spectral_is_big_endian()) {
         for (uint32_t i = 0; i < hdr.count; i++) {
-            segment_from_le(&loaded_segs[i]);
+            spectral_segment_swap_endian(&loaded_segs[i]);
         }
     }
     
@@ -251,7 +217,10 @@ SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, flo
     err = SPECTRAL_OK;
 
 cleanup:
-    if (f) fclose(f);
+    {
+        SpectralError close_err = spectral_fs_close(&f, SPECTRAL_ERR_FILE_READ);
+        if (err == SPECTRAL_OK && close_err != SPECTRAL_OK) err = close_err;
+    }
     free(loaded_segs);
     return err;
 }

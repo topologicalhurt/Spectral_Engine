@@ -31,7 +31,7 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/oscillator.c"
     "${SPECTRAL_CORE_DIR}/oscillator_simd.c"
     "${SPECTRAL_CORE_DIR}/spectral_backend.c"
-    "${SPECTRAL_CORE_DIR}/spectral_binary_fs.c"
+    "${SPECTRAL_CORE_DIR}/spectral_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_common.c"
     "${SPECTRAL_CORE_DIR}/spectral_envelope.c"
     "${SPECTRAL_CORE_DIR}/spectral_error.c"
