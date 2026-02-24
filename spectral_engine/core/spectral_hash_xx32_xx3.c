@@ -15,11 +15,8 @@
  * making unsupported methods fail deterministically at lookup/init time.
  */
 #include "spectral_hash_xx32_xx3.h"
-
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
-#include <stdlib.h>  /* malloc/free for full_direct host buffer; <stdio.h> via header */
+#include <stdlib.h>  /* free for full_direct host buffer */
 #include "spectral_utils.h"
-#endif
 
 /* ---------------------------------------------------------------------------
  * Internal state helpers
