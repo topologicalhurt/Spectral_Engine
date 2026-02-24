@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2019 Evan Nemerson <evan@nemerson.com>
+/* SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -19,14 +19,25 @@
  * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
+ * Copyright:
+ *   2018-2020 Evan Nemerson <evan@nemerson.com>
+ *   2020      Christopher Moore <moore@free.fr>
+ *   2020-2025 Michael R. Crusoe <crusoe@debian.org>
+ *   2020      Himanshi Mathur <himanshi18037@iiitd.ac.in>
+ *   2023      k-dominik <k-dominik@users.noreply.github.com>
+ *   2024      Quang Vinh Dang <dqvinh101@gmail.com>
+ *   2025      ethomag <ethomag@users.noreply.github.com>
+ *   2026      Max Slater <max@thenumb.at>
  */
 
 #define SIMDE_TESTS_CURRENT_ISAX avx
 #if !defined(__clang__) && (defined(__linux__) || defined(__linux) || defined(__gnu_linux__)) && !defined(_GNU_SOURCE)
   #define _GNU_SOURCE 1  // for MAP_ANONYMOUS
 #endif
+#include "../test.h"
+#include "test-avx.h"
 #include <simde/x86/avx.h>
-#include <test/x86/test-avx.h>
 #if !defined(HEDLEY_MSVC_VERSION) && !defined(__wasi__)
   #include <sys/mman.h>
 #endif
@@ -14998,10 +15009,13 @@ test_simde_mm256_sub_pd(SIMDE_MUNIT_TEST_ARGS) {
 }
 
 #if defined(SIMDE_DIAGNOSTIC_DISABLE_UNINITIALIZED_)
-  HEDLEY_DIAGNOSTIC_PUSH
-  SIMDE_DIAGNOSTIC_DISABLE_UNINITIALIZED_
+HEDLEY_DIAGNOSTIC_PUSH
+SIMDE_DIAGNOSTIC_DISABLE_UNINITIALIZED_
 #endif
-
+#if defined(HEDLEY_GCC_VERSION) && HEDLEY_GCC_VERSION_CHECK(12,0,0)
+HEDLEY_DIAGNOSTIC_PUSH
+#pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
+#endif
 static int
 test_simde_mm256_undefined_ps(SIMDE_MUNIT_TEST_ARGS) {
   simde__m256 r;
@@ -15039,9 +15053,11 @@ test_simde_mm256_undefined_si256(SIMDE_MUNIT_TEST_ARGS) {
   simde_assert_m256i_equal(simde_mm256_castpd_si256(r), simde_mm256_castpd_si256(e));
   return 0;
 }
-
+#if defined(HEDLEY_GCC_VERSION) && HEDLEY_GCC_VERSION_CHECK(12,0,0)
+HEDLEY_DIAGNOSTIC_POP
+#endif
 #if defined(SIMDE_DIAGNOSTIC_DISABLE_UNINITIALIZED_)
-  HEDLEY_DIAGNOSTIC_POP
+HEDLEY_DIAGNOSTIC_POP
 #endif
 
 static int
