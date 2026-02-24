@@ -7,8 +7,8 @@ Usage:
   benchmark_spectral.sh --binary <path> --input <wav> [--runs N] [--mode normal|cache] [--cache-dir <dir>] -- [legacy positional args]
 
 Examples:
-  benchmark_spectral.sh --binary ../bin/spectral_arm64_metal_desktop --input ../resources/motormouth_recites_shakespeare_he_saw_the_cat.wav --runs 6 --mode normal -- 0 1.0 0 4096 128 -90 8 1
-  benchmark_spectral.sh --binary ../bin/spectral_arm64_metal_desktop --input ../resources/motormouth_recites_shakespeare_he_saw_the_cat.wav --runs 6 --mode cache  -- 0 1.0 0 4096 128 -90 8 1
+  benchmark_spectral.sh --binary ../bin/spectral_arm64_metal_desktop --input ../resources/testing/shakespeare_he_saw_the_cat.wav --runs 6 --mode normal -- 0 1.0 0 4096 128 -90 8 1
+  benchmark_spectral.sh --binary ../bin/spectral_arm64_metal_desktop --input ../resources/testing/shakespeare_he_saw_the_cat.wav --runs 6 --mode cache  -- 0 1.0 0 4096 128 -90 8 1
 EOF
 }
 
