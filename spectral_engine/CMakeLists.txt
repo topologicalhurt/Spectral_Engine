@@ -13,6 +13,16 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
+# Default to Debug for single-config generators unless explicitly set.
+set(SPECTRAL_BUILD_TYPE_DEFAULTED OFF)
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING
+        "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
+    set(SPECTRAL_BUILD_TYPE_DEFAULTED ON)
+endif()
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    Debug Release RelWithDebInfo MinSizeRel)
+
 set(SPECTRAL_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 get_filename_component(SPECTRAL_REPO_ROOT "${SPECTRAL_ENGINE_ROOT}/.." ABSOLUTE)
 include("${SPECTRAL_ENGINE_ROOT}/cmake/options.cmake")
@@ -116,3 +126,8 @@ message(STATUS "  desktop target: ${TARGET_DESKTOP}")
 message(STATUS "  simulate target: ${TARGET_SIMULATION}")
 message(STATUS "  simulate daisy target: ${TARGET_SIMULATION_DAISY}")
 message(STATUS "  cuda enabled: ${SPECTRAL_USE_CUDA}")
+if(NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "  build type: ${CMAKE_BUILD_TYPE}")
+endif()
+message(STATUS "  production build: ${SPECTRAL_PRODUCTION_BUILD}")
+message(STATUS "  reproducible profile: ${SPECTRAL_REPRO_BUILD}")

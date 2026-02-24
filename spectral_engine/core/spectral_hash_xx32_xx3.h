@@ -34,14 +34,12 @@
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash.h"
 
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
-#include <stdio.h>
+#include "spectral_fs.h"
 
 /* Read buffer size for stream-based file hashing.  64 KiB is a good default
  * that balances syscall overhead against stack usage. */
 #ifndef SPECTRAL_HASH_FILE_IO_CHUNK_SIZE
 #define SPECTRAL_HASH_FILE_IO_CHUNK_SIZE ((size_t)65536u)
-#endif
 #endif
 
 #ifdef __cplusplus
@@ -51,15 +49,11 @@ extern "C" {
 typedef struct SpectralHashFileMethod SpectralHashFileMethod;
 typedef struct SpectralHashFileMethodDescriptor SpectralHashFileMethodDescriptor;
 
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
-typedef XXH64_hash_t SpectralHashDigest;
-#else
-typedef XXH32_hash_t SpectralHashDigest;
-#endif
+typedef uint64_t SpectralHashDigest;
 
 typedef enum SpectralHashFileMethodType {
     SPECTRAL_HASH_FILE_FULL_DIRECT = 0,
-    SPECTRAL_HASH_FILE_FULL_MMAP   = 1,  /* available=0 when !SPECTRAL_HASH_HAS_MMAP */
+    SPECTRAL_HASH_FILE_FULL_MMAP   = 1,
     SPECTRAL_HASH_FILE_STREAM      = 2,
     SPECTRAL_HASH_FILE_METHOD_COUNT = 3
 } SpectralHashFileMethodType;
@@ -89,9 +83,8 @@ struct SpectralHashFileMethodDescriptor {
      *
      * Note for SPECTRAL_HASH_FILE_STREAM: available=1 on all targets, meaning
      * the reset/update/digest lifecycle API is fully functional.  However,
-     * consume_file() is only declared when SPECTRAL_HASH_HAS_HOST_FILE_API is
-     * set; on embedded targets there is no file I/O layer and consume_file()
-     * does not exist.  Callers on embedded feed data through update() directly. */
+     * consume_file() on embedded targets will return SPECTRAL_ERR_BACKEND_UNAVAIL.
+     * Callers on embedded feed data through update() directly. */
     int                        available;
 };
 
@@ -120,14 +113,16 @@ SpectralError spectral_hash_file_method_update(
 SpectralError spectral_hash_file_method_digest(
     const SpectralHashFileMethod* method,
     SpectralHashDigest* out_digest);
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
 /* Hashes the entire file in one call using the method's preferred I/O strategy.
  * The method is reset before reading; digest can be retrieved afterward. */
 SpectralError spectral_hash_file_method_consume_file(
     SpectralHashFileMethod* method,
     FILE* file);
-#endif
 void spectral_hash_file_method_destroy(SpectralHashFileMethod* method);
+
+/* One-shot hash of a memory buffer.
+ * Returns SpectralHashDigest (uint64_t). */
+SpectralHashDigest spectral_hash_oneshot(const void* data, size_t len);
 
 #ifdef __cplusplus
 }

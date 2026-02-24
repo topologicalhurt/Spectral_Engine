@@ -216,6 +216,15 @@ SpectralError gpu_tile_preprocess(
     if (out_len > UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;
     uint32_t out_len_u32 = (uint32_t)out_len;
     uint32_t num_tiles = out_len_u32 / tile_size + ((out_len_u32 % tile_size) ? 1u : 0u);
+    SpectralError return_err = SPECTRAL_OK;
+    int tile_overflow = 0;
+    uint32_t total_refs = 0;
+
+    uint32_t** thread_counts = NULL;
+    uint32_t* tile_counts = NULL;
+    TileRange* tile_ranges = NULL;
+    uint32_t* tile_segment_ids = NULL;
+    uint32_t* tile_cursors = NULL;
 
 #ifdef _OPENMP
     int n_threads = omp_get_max_threads();
@@ -225,20 +234,23 @@ SpectralError gpu_tile_preprocess(
     if (n_threads < 1) n_threads = 1;
 
     if (!spectral_size_mul((size_t)n_threads, sizeof(uint32_t*), &bytes)) {
-        return SPECTRAL_ERR_OVERFLOW;
+        return_err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
     }
-    uint32_t** thread_counts = spectral_malloc_array((size_t)n_threads, sizeof(uint32_t*));
-    if (!thread_counts) return SPECTRAL_ERR_MEMORY;
+    thread_counts = spectral_calloc_array((size_t)n_threads, sizeof(uint32_t*));
+    if (!thread_counts) {
+        return_err = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
+    }
     if (!spectral_size_mul((size_t)num_tiles, sizeof(uint32_t), &counts_bytes)) {
-        free(thread_counts);
-        return SPECTRAL_ERR_OVERFLOW;
+        return_err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
     }
     for (int t = 0; t < n_threads; t++) {
         thread_counts[t] = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
         if (!thread_counts[t]) {
-            for (int i = 0; i < t; i++) free(thread_counts[i]);
-            free(thread_counts);
-            return SPECTRAL_ERR_MEMORY;
+            return_err = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
         }
     }
 
@@ -269,67 +281,55 @@ SpectralError gpu_tile_preprocess(
         }
     }
 
-    uint32_t* tile_counts = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
+    tile_counts = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
     if (!tile_counts) {
-        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
-        free(thread_counts);
-        return SPECTRAL_ERR_MEMORY;
+        return_err = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
     }
-    int tile_overflow = 0;
     for (int t = 0; t < n_threads; t++) {
         for (uint32_t i = 0; i < num_tiles; i++) {
             uint32_t sum = tile_counts[i] + thread_counts[t][i];
             if (sum < tile_counts[i]) { tile_overflow = 1; break; }
             tile_counts[i] = sum;
         }
-        free(thread_counts[t]);
-        if (tile_overflow) {
-            for (int j = t + 1; j < n_threads; j++) free(thread_counts[j]);
-            break;
-        }
+        if (tile_overflow) break;
     }
-    free(thread_counts);
     if (tile_overflow) {
-        free(tile_counts);
-        return SPECTRAL_ERR_OVERFLOW;
+        return_err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
     }
 
     if (!spectral_size_mul((size_t)num_tiles, sizeof(TileRange), &ranges_bytes)) {
-        free(tile_counts);
-        return SPECTRAL_ERR_OVERFLOW;
+        return_err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
     }
-    TileRange* tile_ranges = spectral_malloc_array((size_t)num_tiles, sizeof(TileRange));
+    tile_ranges = spectral_malloc_array((size_t)num_tiles, sizeof(TileRange));
     if (!tile_ranges) {
-        free(tile_counts);
-        return SPECTRAL_ERR_MEMORY;
+        return_err = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
     }
-    uint32_t total_refs = 0;
+    total_refs = 0;
     for (uint32_t t = 0; t < num_tiles; t++) {
         tile_ranges[t].start = total_refs;
         tile_ranges[t].count = tile_counts[t];
         if (total_refs > UINT32_MAX - tile_counts[t]) {
-            free(tile_counts);
-            free(tile_ranges);
-            return SPECTRAL_ERR_OVERFLOW;
+            return_err = SPECTRAL_ERR_OVERFLOW;
+            goto cleanup;
         }
         total_refs += tile_counts[t];
     }
 
     if (!spectral_size_mul((size_t)total_refs, sizeof(uint32_t), &ids_bytes) ||
         !spectral_size_mul((size_t)num_tiles, sizeof(uint32_t), &cursors_bytes)) {
-        free(tile_counts);
-        free(tile_ranges);
-        return SPECTRAL_ERR_OVERFLOW;
+        return_err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
     }
 
-    uint32_t* tile_segment_ids = spectral_malloc_array((size_t)total_refs, sizeof(uint32_t));
-    uint32_t* tile_cursors = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
+    tile_segment_ids = spectral_malloc_array((size_t)total_refs, sizeof(uint32_t));
+    tile_cursors = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
     if (!tile_segment_ids || !tile_cursors) {
-        free(tile_counts);
-        free(tile_ranges);
-        free(tile_segment_ids);
-        free(tile_cursors);
-        return SPECTRAL_ERR_MEMORY;
+        return_err = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
     }
 
     #pragma omp parallel for schedule(static)
@@ -354,12 +354,125 @@ SpectralError gpu_tile_preprocess(
 
     free(tile_counts);
     free(tile_cursors);
+    if (thread_counts) {
+        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
+        free(thread_counts);
+    }
 
     out->ranges = tile_ranges;
     out->segment_ids = tile_segment_ids;
     out->num_tiles = num_tiles;
     out->total_refs = total_refs;
     return SPECTRAL_OK;
+
+cleanup:
+    free(tile_counts);
+    free(tile_cursors);
+    free(tile_ranges);
+    free(tile_segment_ids);
+    if (thread_counts) {
+        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
+        free(thread_counts);
+    }
+    return return_err;
 }
 
 #endif /* !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE */
+
+/* --- GPU tile cache (process-global, single-slot) -----------------------
+ * Always compiled (trivial, no GPU dependency) so the pipeline can call
+ * these even in simulation/embedded builds where gpu_tile_preprocess is
+ * unavailable — the cache simply stays empty. */
+
+static SPECTRAL_THREAD_LOCAL struct {
+    TileRange*  ranges;
+    uint32_t*   segment_ids;
+    uint32_t    num_tiles;
+    uint32_t    total_refs;
+    float       stretch;
+    size_t      out_len;
+    int         valid;
+} g_gpu_tile_cache;
+
+void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
+                        uint32_t num_tiles, uint32_t total_refs,
+                        float stretch, size_t out_len)
+{
+    g_gpu_tile_cache.ranges      = (TileRange*)ranges;
+    g_gpu_tile_cache.segment_ids = (uint32_t*)segment_ids;
+    g_gpu_tile_cache.num_tiles   = num_tiles;
+    g_gpu_tile_cache.total_refs  = total_refs;
+    g_gpu_tile_cache.stretch     = stretch;
+    g_gpu_tile_cache.out_len     = out_len;
+    g_gpu_tile_cache.valid       = 1;
+}
+
+int gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out)
+{
+    if (!g_gpu_tile_cache.valid || !out) return 0;
+    if (g_gpu_tile_cache.stretch != stretch || g_gpu_tile_cache.out_len != out_len) return 0;
+    out->ranges      = g_gpu_tile_cache.ranges;
+    out->segment_ids = g_gpu_tile_cache.segment_ids;
+    out->num_tiles   = g_gpu_tile_cache.num_tiles;
+    out->total_refs  = g_gpu_tile_cache.total_refs;
+    return 1;
+}
+
+void gpu_tile_cache_clear(void)
+{
+    g_gpu_tile_cache.valid = 0;
+    g_gpu_tile_cache.ranges = NULL;
+    g_gpu_tile_cache.segment_ids = NULL;
+    g_gpu_tile_cache.num_tiles = 0;
+    g_gpu_tile_cache.total_refs = 0;
+}
+
+SpectralError gpu_tile_preprocess_cached(
+    SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
+    GpuTileData* out_td, int* out_owns_data)
+{
+    if (!out_td || !out_owns_data) return SPECTRAL_ERR_PARAM;
+    *out_owns_data = 0;
+    if (gpu_tile_cache_try_get(stretch, out_len, out_td)) {
+        return SPECTRAL_OK;
+    }
+#if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
+    SpectralError tile_err = gpu_tile_preprocess(sa, stretch, tile_size, out_len, out_td);
+    if (tile_err == SPECTRAL_OK) {
+        *out_owns_data = 1;
+    }
+    return tile_err;
+#else
+    return SPECTRAL_ERR_BACKEND_UNAVAIL;
+#endif
+}
+
+/* ---------- GPU segment cache (pre-packed SegmentGpu from seg cache) ----- */
+
+static SPECTRAL_THREAD_LOCAL struct {
+    const SegmentGpu* segs;
+    uint32_t          count;
+    int               valid;
+} g_gpu_seg_cache;
+
+void gpu_seg_cache_set(const SegmentGpu* segs, uint32_t count)
+{
+    g_gpu_seg_cache.segs  = segs;
+    g_gpu_seg_cache.count = count;
+    g_gpu_seg_cache.valid = (segs != NULL);
+}
+
+int gpu_seg_cache_try_get(uint32_t count, const SegmentGpu** out)
+{
+    if (!g_gpu_seg_cache.valid || !out) return 0;
+    if (g_gpu_seg_cache.count != count) return 0;
+    *out = g_gpu_seg_cache.segs;
+    return 1;
+}
+
+void gpu_seg_cache_clear(void)
+{
+    g_gpu_seg_cache.valid = 0;
+    g_gpu_seg_cache.segs  = NULL;
+    g_gpu_seg_cache.count = 0;
+}

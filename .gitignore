@@ -6,15 +6,22 @@
 spectral_engine/spectral
 spectral_engine/spectral_cuda
 bin/
+build/
+build-*
+
+# Build directories
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+spectral_log_check.cmake
 
 resources/*
-!resources/motormouth_recites_shakespeare_he_saw_the_cat.wav
-!resources/motormouth\ test\ 1.txt
+!resources/testing/
 
-# Output files
-out*.wav
+# Output artefacts
+*.wav
 *.bin
-output/*
 
 # Python
 venv/
@@ -25,14 +32,6 @@ __pycache__/
 *.nbc
 *.nbi
 *.venv
-
-# Build directories
-build/
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-compile_commands.json
-spectral_engine/spectral_log_check.cmake
 
 # macOS
 .DS_Store
@@ -49,3 +48,8 @@ orb.db/
 # Env
 *.env
 /env/
+
+# Allow specific testing resources
+!resources/testing/shakespeare_he_saw_the_cat.wav
+!resources/testing/motormouth_test1_uncompressed_spear.txt
+!resources/testing/sin_440hz.wav

@@ -1415,6 +1415,9 @@ static int XSUM_usage_advanced(const char* exename)
     XSUM_log( "  -b                   Run benchmark \n");
     XSUM_log( "  -b#                  Bench only algorithm variant # \n");
     XSUM_log( "  -i#                  Number of times to run the benchmark (default: %i) \n", NBLOOPS_DEFAULT);
+    XSUM_log( "  -B#                  Block size to hash per benchmark iteration "
+                                     "(default: %llu B) \n",
+                                     (unsigned long long)XSUM_DEFAULT_SAMPLE_SIZE);
     XSUM_log( "  -q, --quiet          Don't display version header in benchmark mode \n");
     XSUM_log( "\n");
     XSUM_log( "The following five options are useful only when using lists in [files] to verify or generate checksums: \n");

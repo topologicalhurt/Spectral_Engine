@@ -430,8 +430,11 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 /* Embedded simulation headroom for Q15 amplitude scaling */
 #define SPECTRAL_SIMULATION_HEADROOM    0.99f
 
-/* Metal segment cache size (threadgroup shared memory) */
-#define SPECTRAL_METAL_SEG_CACHE_SIZE   128
+/* GPU segment cache size (threadgroup / shared memory).
+ * Both Metal and CUDA use 256 entries of SegmentGpu (32 bytes each),
+ * fitting in the same 8 KB budget that formerly held 128 × 64-byte
+ * Segments. */
+#define SPECTRAL_GPU_SEG_CACHE_SIZE     256
 
 /* Platform Detection */
 

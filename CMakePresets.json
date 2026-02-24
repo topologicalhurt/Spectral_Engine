@@ -8,19 +8,51 @@
   "configurePresets": [
     {
       "name": "default",
-      "displayName": "Default Release (Repo Root)",
+      "displayName": "Default Debug (Repo Root)",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPECTRAL_PRODUCTION_BUILD": "OFF"
+      }
+    },
+    {
+      "name": "production",
+      "displayName": "Production Release (Repo Root)",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPECTRAL_PRODUCTION_BUILD": "ON"
+      }
+    },
+    {
+      "name": "release-fast",
+      "displayName": "Release Fast (Repo Root)",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPECTRAL_PRODUCTION_BUILD": "OFF"
+      }
+    },
+    {
+      "name": "pgo-gen",
+      "displayName": "PGO Generate (Release Fast)",
+      "inherits": "release-fast",
+      "cacheVariables": {
+        "SPECTRAL_PGO": "gen"
+      }
+    },
+    {
+      "name": "pgo-use",
+      "displayName": "PGO Use (Release Fast)",
+      "inherits": "release-fast",
+      "cacheVariables": {
+        "SPECTRAL_PGO": "use"
       }
     },
     {
       "name": "debug",
       "displayName": "Debug (Repo Root)",
-      "inherits": "default",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
+      "inherits": "default"
     },
     {
       "name": "simulate-daisy",
@@ -38,8 +70,43 @@
       "targets": ["desktop"]
     },
     {
+      "name": "desktop-production",
+      "configurePreset": "production",
+      "targets": ["desktop"]
+    },
+    {
+      "name": "desktop-release-fast",
+      "configurePreset": "release-fast",
+      "targets": ["desktop"]
+    },
+    {
+      "name": "desktop-pgo-gen",
+      "configurePreset": "pgo-gen",
+      "targets": ["desktop"]
+    },
+    {
+      "name": "desktop-pgo-use",
+      "configurePreset": "pgo-use",
+      "targets": ["desktop"]
+    },
+    {
+      "name": "pgo-collect",
+      "configurePreset": "pgo-gen",
+      "targets": ["pgo_collect"]
+    },
+    {
+      "name": "pgo-merge",
+      "configurePreset": "pgo-gen",
+      "targets": ["pgo_merge"]
+    },
+    {
       "name": "simulate",
       "configurePreset": "default",
+      "targets": ["simulate"]
+    },
+    {
+      "name": "simulate-production",
+      "configurePreset": "production",
       "targets": ["simulate"]
     },
     {

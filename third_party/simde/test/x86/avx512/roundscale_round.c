@@ -1,3 +1,30 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use, copy,
+ * modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * Copyright:
+ *   2021      Kunwar Maheep Singh <kunwar.maheep@students.iiit.ac.in>
+ *   2023      Michael R. Crusoe <crusoe@debian.org>
+ */
+
 #define SIMDE_TEST_X86_AVX512_INSN roundscale_round
 
 #include <test/x86/avx512/test-avx512.h>
@@ -1481,6 +1508,7 @@ test_simde_mm_roundscale_round_sd (SIMDE_MUNIT_TEST_ARGS) {
   r = simde_mm_roundscale_round_sd(a, b, INT32_C(          84), INT32_C(           8));
   simde_test_x86_assert_equal_f64x2(r, simde_mm_loadu_pd(test_vec[4].r), 1);
 
+  #if !defined(SIMDE_FAST_MATH)
   a = simde_mm_loadu_pd(test_vec[5].a);
   b = simde_mm_loadu_pd(test_vec[5].b);
   r = simde_mm_roundscale_round_sd(a, b, INT32_C(         240), INT32_C(           4));
@@ -1490,6 +1518,7 @@ test_simde_mm_roundscale_round_sd (SIMDE_MUNIT_TEST_ARGS) {
   b = simde_mm_loadu_pd(test_vec[6].b);
   r = simde_mm_roundscale_round_sd(a, b, INT32_C(          33), INT32_C(           8));
   simde_test_x86_assert_equal_f64x2(r, simde_mm_loadu_pd(test_vec[6].r), 1);
+  #endif
 
   a = simde_mm_loadu_pd(test_vec[7].a);
   b = simde_mm_loadu_pd(test_vec[7].b);

@@ -24,6 +24,7 @@ typedef struct {
     double t_track;
     double t_synth;
     double t_norm;
+    double t_write;
     double t_total;
     double audio_dur;
     double realtime_x;

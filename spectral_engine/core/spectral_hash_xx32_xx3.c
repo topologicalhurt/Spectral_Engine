@@ -18,6 +18,7 @@
 
 #if SPECTRAL_HASH_HAS_HOST_FILE_API
 #include <stdlib.h>  /* malloc/free for full_direct host buffer; <stdio.h> via header */
+#include "spectral_utils.h"
 #endif
 
 /* ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ static SpectralError spectral_hash_state_digest(const void* state, SpectralHashD
 #if SPECTRAL_HASH_HAS_HOST_FILE_API
     *out_digest = XXH3_64bits_digest((const XXH3_state_t*)state);
 #else
-    *out_digest = XXH32_digest((const XXH32_state_t*)state);
+    *out_digest = (uint64_t)XXH32_digest((const XXH32_state_t*)state);
 #endif
     return SPECTRAL_OK;
 }
@@ -157,10 +158,9 @@ static SpectralError spectral_hash_method_digest_impl(
 }
 
 /* ---------------------------------------------------------------------------
- * File consume impls (host only)
+ * File consume impls
  * ---------------------------------------------------------------------------*/
 
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
 static SpectralError spectral_hash_method_consume_file_stream_impl(
     SpectralHashFileMethod* method,
     FILE* file)
@@ -178,7 +178,7 @@ static SpectralError spectral_hash_method_consume_file_stream_impl(
         return reset_err;
     }
 
-    while ((nread = fread(chunk, 1, sizeof(chunk), file)) > 0u) {
+    while ((nread = spectral_fs_read(chunk, 1, sizeof(chunk), file)) > 0u) {
         SpectralError update_err = spectral_hash_method_update_impl(method, chunk, nread);
         if (update_err != SPECTRAL_OK) {
             return update_err;
@@ -196,8 +196,8 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
     SpectralHashFileMethod* method,
     FILE* file)
 {
-    long start_pos;
-    long end_pos;
+    uint64_t start_pos = 0;
+    uint64_t end_pos = 0;
     size_t total_len;
     unsigned char* data = NULL;
     SpectralError err;
@@ -206,31 +206,32 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
         return SPECTRAL_ERR_PARAM;
     }
 
-    start_pos = ftell(file);
-    if (start_pos < 0) {
+    if (spectral_fs_tell(file, &start_pos, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
         return spectral_hash_method_consume_file_stream_impl(method, file);
     }
 
-    if (fseek(file, 0L, SEEK_END) != 0) {
+    if (spectral_fs_seek(file, 0, SEEK_END, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
         return spectral_hash_method_consume_file_stream_impl(method, file);
     }
 
-    end_pos = ftell(file);
+    if (spectral_fs_tell(file, &end_pos, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
+        return SPECTRAL_ERR_FILE_READ;
+    }
     if (end_pos < start_pos) {
         return SPECTRAL_ERR_FILE_READ;
     }
 
-    if (fseek(file, start_pos, SEEK_SET) != 0) {
+    if (spectral_fs_seek(file, (int64_t)start_pos, SEEK_SET, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
         return SPECTRAL_ERR_FILE_READ;
     }
 
     total_len = (size_t)(end_pos - start_pos);
     if (total_len > 0u) {
-        data = (unsigned char*)malloc(total_len);
+        data = (unsigned char*)spectral_malloc_array(total_len, 1);
         if (!data) {
             return SPECTRAL_ERR_MEMORY;
         }
-        if (fread(data, 1, total_len, file) != total_len) {
+        if (spectral_fs_read(data, 1, total_len, file) != total_len) {
             free(data);
             return SPECTRAL_ERR_FILE_READ;
         }
@@ -249,7 +250,6 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
     return err;
 }
 
-#if SPECTRAL_HASH_HAS_MMAP
 /* TODO: implement mmap-backed hashing; currently falls back to SPECTRAL_ERR_BACKEND_UNAVAIL.
  * When implemented: mmap the file, call update() over the mapped region, munmap. */
 static SpectralError spectral_hash_method_consume_file_mmap_impl(
@@ -260,8 +260,6 @@ static SpectralError spectral_hash_method_consume_file_mmap_impl(
     (void)file;
     return SPECTRAL_ERR_BACKEND_UNAVAIL;
 }
-#endif /* SPECTRAL_HASH_HAS_MMAP */
-#endif /* SPECTRAL_HASH_HAS_HOST_FILE_API */
 
 /* ---------------------------------------------------------------------------
  * Descriptor table
@@ -271,20 +269,12 @@ static const SpectralHashFileMethodDescriptor k_hash_file_method_desc[SPECTRAL_H
     [SPECTRAL_HASH_FILE_FULL_DIRECT] = {
         .type      = SPECTRAL_HASH_FILE_FULL_DIRECT,
         .name      = "full_direct",
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
         .available = 1
-#else
-        .available = 0
-#endif
     },
     [SPECTRAL_HASH_FILE_FULL_MMAP] = {
         .type      = SPECTRAL_HASH_FILE_FULL_MMAP,
         .name      = "full_mmap",
-#if SPECTRAL_HASH_HAS_MMAP
         .available = 1
-#else
-        .available = 0
-#endif
     },
     /* STREAM is always available: callers feed data via update() directly.
      * consume_file() is not available on embedded (no file API), but the
@@ -390,7 +380,6 @@ SpectralError spectral_hash_file_method_digest(
     return spectral_hash_method_digest_impl(method, out_digest);
 }
 
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
 SpectralError spectral_hash_file_method_consume_file(
     SpectralHashFileMethod* method,
     FILE* file)
@@ -403,18 +392,13 @@ SpectralError spectral_hash_file_method_consume_file(
         case SPECTRAL_HASH_FILE_FULL_DIRECT:
             return spectral_hash_method_consume_file_full_direct_impl(method, file);
         case SPECTRAL_HASH_FILE_FULL_MMAP:
-#if SPECTRAL_HASH_HAS_MMAP
             return spectral_hash_method_consume_file_mmap_impl(method, file);
-#else
-            return SPECTRAL_ERR_BACKEND_UNAVAIL;
-#endif
         case SPECTRAL_HASH_FILE_STREAM:
             return spectral_hash_method_consume_file_stream_impl(method, file);
         default:
             return SPECTRAL_ERR_BACKEND_UNAVAIL;
     }
 }
-#endif
 
 void spectral_hash_file_method_destroy(SpectralHashFileMethod* method)
 {
@@ -429,4 +413,13 @@ void spectral_hash_file_method_destroy(SpectralHashFileMethod* method)
 
     method->initialized = 0;
     method->type        = SPECTRAL_HASH_FILE_METHOD_COUNT;
+}
+
+SpectralHashDigest spectral_hash_oneshot(const void* data, size_t len)
+{
+#if SPECTRAL_HASH_HAS_HOST_FILE_API
+    return XXH3_64bits(data, len);
+#else
+    return (uint64_t)XXH32(data, len, 0u);
+#endif
 }

@@ -24,13 +24,14 @@ _Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 1,
     "Metal oscillator MSL strings are stale — update oscillator_metal_source and bump version");
 
 /* Metal kernel source - struct definitions and synthesis kernel.
- * Oscillator functions come from oscillator_metal_source (defined in oscillator.c) */
+ * Oscillator functions come from oscillator_metal_source (defined in oscillator.c).
+ * Uses SegmentGpu (32 bytes) for parity with CUDA — doubles threadgroup cache. */
 static const char* metalKernelStructs = 
 "#include <metal_stdlib>\n"
 "using namespace metal;\n"
 "\n"
-/* NOTE: Must match Segment layout in spectral_common.h (no compile-time check possible) */
-"struct Segment {\n"
+/* NOTE: Must match SegmentGpu layout in spectral_common.h (no compile-time check possible) */
+"struct SegmentGpu {\n"
 "    float start;\n"
 "    float length;\n"
 "    float phase;\n"
@@ -38,8 +39,7 @@ static const char* metalKernelStructs =
 "    float df;\n"
 "    float amp;\n"
 "    float da;\n"
-"    float width;\n"
-"    float _pad[8];\n"
+"    float _pad;\n"
 "};\n"
 "\n"
 "struct SynthParams {\n"
@@ -61,7 +61,8 @@ static const char* metalKernelStructs =
 
 static const char* metalKernelCode = 
 "#define THREADS_PER_TILE " SPECTRAL_STR(SPECTRAL_GPU_TILE_SIZE) "\n"
-"#define SEGMENT_CACHE_SIZE " SPECTRAL_STR(SPECTRAL_METAL_SEG_CACHE_SIZE) "\n"
+"#define SEGMENT_CACHE_SIZE " SPECTRAL_STR(SPECTRAL_GPU_SEG_CACHE_SIZE) "\n"
+"/* 32-byte SegmentGpu = 2x entries in same threadgroup budget */\n"
 "\n"
 "/* Backend parity note:\n"
 " * MSL source is compiled from this runtime string, so it cannot include\n"
@@ -88,7 +89,7 @@ static const char* metalKernelCode =
 "}\n"
 " \n"
 "kernel void synthesize_tile_parallel(\n"
-"    device const Segment* segments [[buffer(0)]],\n"
+"    device const SegmentGpu* segments [[buffer(0)]],\n"
 "    device const uint* tile_segment_ids [[buffer(1)]],\n"
 "    device const TileRange* tile_ranges [[buffer(2)]],\n"
 "    device float* output [[buffer(3)]],\n"
@@ -96,7 +97,7 @@ static const char* metalKernelCode =
 "    uint tile_idx [[threadgroup_position_in_grid]],\n"
 "    uint tid [[thread_index_in_threadgroup]]\n"
 ") {\n"
-"    threadgroup Segment seg_cache[SEGMENT_CACHE_SIZE];\n"
+"    threadgroup SegmentGpu seg_cache[SEGMENT_CACHE_SIZE];\n"
 "    \n"
 "    TileRange range = tile_ranges[tile_idx];\n"
 "    uint sample_idx = tile_idx * params.tile_size + tid;\n"
@@ -117,7 +118,7 @@ static const char* metalKernelCode =
 "        \n"
 "        if (sample_idx < params.out_len) {\n"
 "            for (uint i = 0; i < chunk_size; i++) {\n"
-"                Segment seg = seg_cache[i];\n"
+"                SegmentGpu seg = seg_cache[i];\n"
 "                \n"
 "                float seg_start = seg.start * params.stretch;\n"
 "                float seg_end = seg_start + seg.length * params.stretch;\n"
@@ -152,6 +153,7 @@ static bool metalIsAvailable = false;
 /* Persistent buffer cache — avoids per-call VM page allocation */
 typedef struct {
     id<MTLBuffer> segBuf, tileIdsBuf, tileRangesBuf, outputBuf;
+    id<MTLBuffer> segBufNoCopy;       /* zero-copy wrapper for mmap'd SegmentGpu */
     size_t segCap, tileIdsCap, tileRangesCap, outputCap;
 } MetalBufferCache;
 
@@ -260,13 +262,52 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             }
         }
 
+        SpectralError return_err = SPECTRAL_OK;
+
+        /* ── Segment upload ─────────────────────────────────────────────
+         * Prefer pre-packed SegmentGpu from cache (zero-copy via UMA),
+         * fall back to packing from the 64-byte Segment array. */
+        size_t gpu_seg_size = 0;
+        if (!spectral_array_bytes((size_t)sa.count, sizeof(SegmentGpu), &gpu_seg_size)) {
+            return_err = SPECTRAL_ERR_OVERFLOW;
+            goto cleanup;
+        }
+
+        id<MTLBuffer> segBufForDispatch = nil;
+        int seg_buf_is_nocopy = 0;
+        {
+            const SegmentGpu* cached_gpu_segs = NULL;
+            if (gpu_seg_cache_try_get(sa.count, &cached_gpu_segs)) {
+                /* Fast path: wrap mmap'd SegmentGpu directly — zero memcpy on UMA. */
+                g_mtl.segBufNoCopy = [metalDevice
+                    newBufferWithBytesNoCopy:(void*)cached_gpu_segs
+                                     length:gpu_seg_size
+                                    options:MTLResourceStorageModeShared
+                                deallocator:nil];
+                if (g_mtl.segBufNoCopy) {
+                    segBufForDispatch = g_mtl.segBufNoCopy;
+                    seg_buf_is_nocopy = 1;
+                }
+            }
+            if (!segBufForDispatch) {
+                /* Slow path: pack 64-byte Segments → 32-byte SegmentGpu into Metal buffer. */
+                if (!metal_grow_buffer(metalDevice, &g_mtl.segBuf, &g_mtl.segCap, gpu_seg_size)) {
+                    return_err = SPECTRAL_ERR_MEMORY;
+                    goto cleanup;
+                }
+                /* Pack directly into UMA memory without an intermediate buffer. */
+                spectral_segment_pack_gpu_array(sa.segs, sa.count, (SegmentGpu*)[g_mtl.segBuf contents]);
+                segBufForDispatch = g_mtl.segBuf;
+            }
+        }
+
+        /* ── Tile preprocessing (or cache) ──────────────────────────── */
         GpuTileData td = {0};
-        SpectralError tile_err = gpu_tile_preprocess(
-            sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len, &td);
+        int owns_tile_data = 0;
+        SpectralError tile_err = gpu_tile_preprocess_cached(sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len, &td, &owns_tile_data);
         if (tile_err != SPECTRAL_OK) {
-            memset(out_buffer, 0, output_size);
-            *t_synth = 0;
-            return tile_err;
+            return_err = tile_err;
+            goto cleanup;
         }
 
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
@@ -275,36 +316,29 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         
         GpuSynthParams params = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
         
-        size_t segment_buf_size = 0;
         size_t tile_ids_size = 0;
         size_t tile_ranges_size = 0;
-        if (!spectral_array_bytes((size_t)sa.count, sizeof(Segment), &segment_buf_size) ||
-            !spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
+        if (!spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
             !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {
-            gpu_tile_data_free(&td);
-            memset(out_buffer, 0, output_size);
-            *t_synth = 0;
-            return SPECTRAL_ERR_OVERFLOW;
+            return_err = SPECTRAL_ERR_OVERFLOW;
+            goto cleanup;
         }
 
         SPECTRAL_DBG("Metal: %u segs, %u tiles, avg %.0f segs/tile",
                 sa.count, td.num_tiles, avg_segs);
 
-        /* Grow cached Metal buffers.  metal_grow_buffer sets the buffer to nil
-         * and capacity to 0 on failure, so successful earlier allocations remain
-         * in the cache for reuse on the next call. */
-        if (!metal_grow_buffer(metalDevice, &g_mtl.segBuf, &g_mtl.segCap, segment_buf_size) ||
-            !metal_grow_buffer(metalDevice, &g_mtl.tileIdsBuf, &g_mtl.tileIdsCap, tile_ids_size) ||
+        /* Grow cached Metal buffers (tile ids, tile ranges, output).
+         * metal_grow_buffer sets the buffer to nil and capacity to 0 on
+         * failure, so successful earlier allocations remain in the cache
+         * for reuse on the next call. */
+        if (!metal_grow_buffer(metalDevice, &g_mtl.tileIdsBuf, &g_mtl.tileIdsCap, tile_ids_size) ||
             !metal_grow_buffer(metalDevice, &g_mtl.tileRangesBuf, &g_mtl.tileRangesCap, tile_ranges_size) ||
             !metal_grow_buffer(metalDevice, &g_mtl.outputBuf, &g_mtl.outputCap, output_size)) {
-            gpu_tile_data_free(&td);
-            memset(out_buffer, 0, output_size);
-            *t_synth = 0;
-            return SPECTRAL_ERR_MEMORY;
+            return_err = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
         }
 
-        /* Copy data into cached buffers */
-        memcpy([g_mtl.segBuf contents], sa.segs, segment_buf_size);
+        /* Copy tile data into cached buffers */
         memcpy([g_mtl.tileIdsBuf contents], td.segment_ids, tile_ids_size);
         memcpy([g_mtl.tileRangesBuf contents], td.ranges, tile_ranges_size);
 
@@ -317,7 +351,7 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
         
         [encoder setComputePipelineState:metalSynthPipeline];
-        [encoder setBuffer:g_mtl.segBuf offset:0 atIndex:0];
+        [encoder setBuffer:segBufForDispatch offset:0 atIndex:0];
         [encoder setBuffer:g_mtl.tileIdsBuf offset:0 atIndex:1];
         [encoder setBuffer:g_mtl.tileRangesBuf offset:0 atIndex:2];
         [encoder setBuffer:g_mtl.outputBuf offset:0 atIndex:3];
@@ -333,9 +367,16 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         memcpy(out_buffer, [g_mtl.outputBuf contents], output_size);
         *t_synth = omp_get_wtime() - pf.start_time;
 
-        gpu_tile_data_free(&td);
+    cleanup:
+        if (return_err != SPECTRAL_OK) {
+            memset(out_buffer, 0, output_size);
+            *t_synth = 0;
+        }
+        if (owns_tile_data) gpu_tile_data_free(&td);
+        if (seg_buf_is_nocopy) g_mtl.segBufNoCopy = nil;
+
+        return return_err;
     }
-    return SPECTRAL_OK;
 }
 
 void metal_cleanup(void) {

@@ -12,12 +12,33 @@ if(NOT DEFINED SPECTRAL_ENGINE_ROOT OR NOT DEFINED SPECTRAL_REPO_ROOT)
 endif()
 
 option(SPECTRAL_SKIP_VERSION_CHECK "Skip minimum compiler version checks" OFF)
-option(SPECTRAL_REPRO_BUILD "Use reproducible optimization profile" ON)
+option(SPECTRAL_PRODUCTION_BUILD
+    "Enable production build defaults (release-oriented + reproducible profile)"
+    OFF)
+
+if(SPECTRAL_PRODUCTION_BUILD
+   AND NOT CMAKE_CONFIGURATION_TYPES
+   AND SPECTRAL_BUILD_TYPE_DEFAULTED)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
+endif()
+
+set(_SPECTRAL_REPRO_DEFAULT OFF)
+if(SPECTRAL_PRODUCTION_BUILD)
+    set(_SPECTRAL_REPRO_DEFAULT ON)
+endif()
+
+set(SPECTRAL_REPRO_BUILD ${_SPECTRAL_REPRO_DEFAULT} CACHE BOOL
+    "Use reproducible optimization profile (derived from SPECTRAL_PRODUCTION_BUILD)"
+    FORCE)
+unset(_SPECTRAL_REPRO_DEFAULT)
 
 set(SPECTRAL_PGO "off" CACHE STRING "Profile-guided optimization mode (off, gen, use)")
 set_property(CACHE SPECTRAL_PGO PROPERTY STRINGS off gen use)
 set(SPECTRAL_PGO_DIR "${SPECTRAL_REPO_ROOT}/output/pgo" CACHE PATH "Profile-guided optimization directory")
 set(SPECTRAL_PGO_PROFILE "${SPECTRAL_PGO_DIR}/spectral.profdata" CACHE FILEPATH "Clang PGO profile data file")
+set(SPECTRAL_PGO_RAW_PATTERN "${SPECTRAL_PGO_DIR}/spectral-%p.profraw" CACHE STRING
+    "Clang PGO raw profile output pattern")
 
 set(SPECTRAL_SIMULATION_BOARD "generic" CACHE STRING "Simulation profile board (generic or daisy)")
 set_property(CACHE SPECTRAL_SIMULATION_BOARD PROPERTY STRINGS generic daisy)
@@ -33,7 +54,7 @@ if(NOT SPECTRAL_SIMULATION_BOARD IN_LIST SPECTRAL_VALID_SIMULATION_BOARDS)
 endif()
 
 set(SPECTRAL_BENCH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/benchmark_spectral.sh" CACHE FILEPATH "Benchmark harness script")
-set(SPECTRAL_BENCH_INPUT "${SPECTRAL_REPO_ROOT}/resources/motormouth_recites_shakespeare_he_saw_the_cat.wav" CACHE FILEPATH "Benchmark input file")
+set(SPECTRAL_BENCH_INPUT "${SPECTRAL_REPO_ROOT}/resources/testing/shakespeare_he_saw_the_cat.wav" CACHE FILEPATH "Benchmark input file")
 set(SPECTRAL_BENCH_RUNS "6" CACHE STRING "Benchmark run count")
 set(SPECTRAL_BENCH_ARGS "0 1.0 0 4096 128 -90 8 1" CACHE STRING "Benchmark CLI arguments")
 set(SPECTRAL_BENCH_CACHE_ARGS "${SPECTRAL_BENCH_ARGS}" CACHE STRING "Benchmark cache-mode CLI arguments")

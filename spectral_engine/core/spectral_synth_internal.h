@@ -118,6 +118,27 @@ SpectralError gpu_tile_preprocess(
     SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
     GpuTileData* out);
 
+/* Fetches pre-computed tile layout from cache if available, otherwise allocates
+ * and executes gpu_tile_preprocess. out_owns_data is set to 1 only if a new
+ * allocation occurred (must call gpu_tile_data_free later). */
+SpectralError gpu_tile_preprocess_cached(
+    SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
+    GpuTileData* out_td, int* out_owns_data);
+
+/* Global GPU tile cache — pre-computed tiles from the segment cache
+ * bypass tile preprocessing in GPU backends. */
+void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
+                        uint32_t num_tiles, uint32_t total_refs,
+                        float stretch, size_t out_len);
+int  gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out);
+void gpu_tile_cache_clear(void);
+
+/* Global GPU segment cache — pre-packed SegmentGpu data from the segment
+ * cache (mmap'd).  Lets GPU backends skip the Segment→SegmentGpu pack loop. */
+void gpu_seg_cache_set(const SegmentGpu* segs, uint32_t count);
+int  gpu_seg_cache_try_get(uint32_t count, const SegmentGpu** out);
+void gpu_seg_cache_clear(void);
+
 /* GPU synthesis params — layout must match Metal shader SynthParams struct */
 typedef struct {
     float    stretch, inv_stretch, inv_stretch_sq, pitch_factor;

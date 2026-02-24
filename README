@@ -87,7 +87,7 @@ The currently supported workflow on supported embedded devices is to build the s
 ```
 make configure
 make desktop daisy
-./build/bin/spectral_*_desktop ./resources/motormouth_recites_shakespeare_he_saw_the_cat.wav <...> 4
+./build/bin/spectral_*_desktop ./resources/testing/shakespeare_he_saw_the_cat.wav <...> 4
 make daisy-flash       # Flash the target device with the segment binary
 ```
 

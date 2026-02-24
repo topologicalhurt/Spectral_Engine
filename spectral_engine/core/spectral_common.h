@@ -41,6 +41,42 @@ typedef struct __attribute__((aligned(4))) {
 _Static_assert(sizeof(SegmentCompact) == 32, "SegmentCompact size");
 #endif
 
+/* 32-byte GPU segment — packs only the 7 active fields used by GPU kernels.
+ * Stored in the segment cache for zero-copy GPU upload via mmap. */
+typedef struct __attribute__((aligned(4))) {
+    float start, length, phase, omega, df, amp, da;
+    float _pad;
+} SegmentGpu;
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(SegmentGpu) == 32, "SegmentGpu size");
+#endif
+
+/* Pack a full Segment into the 32-byte GPU layout used by CUDA/Metal. */
+static inline SegmentGpu spectral_segment_pack_gpu(const Segment* seg)
+{
+    SegmentGpu out = {0};
+    if (!seg) return out;
+    out.start  = seg->start;
+    out.length = seg->length;
+    out.phase  = seg->phase;
+    out.omega  = seg->omega;
+    out.df     = seg->df;
+    out.amp    = seg->amp;
+    out.da     = seg->da;
+    out._pad   = 0.0f;
+    return out;
+}
+
+static inline void spectral_segment_pack_gpu_array(
+    const Segment* src, uint32_t count, SegmentGpu* dst)
+{
+    if (!src || !dst) return;
+    for (uint32_t i = 0; i < count; i++) {
+        dst[i] = spectral_segment_pack_gpu(&src[i]);
+    }
+}
+
 #if SPECTRAL_COMPACT_SEG
 typedef SegmentCompact SegmentActive;
 #define SEGMENT_SIZE 32

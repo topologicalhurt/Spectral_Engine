@@ -18,7 +18,8 @@ if(NOT SPECTRAL_REPRO_BUILD)
         -freciprocal-math
         -ffp-contract=fast
         -march=native
-        -mtune=native)
+        -mtune=native
+        -mno-avx512f)
 endif()
 
 set(SPECTRAL_COMMON_LINK_OPTIONS)
@@ -110,11 +111,11 @@ list(APPEND SPECTRAL_INCLUDE_DIRS ${SPECTRAL_PLATFORM_INCLUDE_DIRS})
 set(SPECTRAL_PGO_COMPILE_OPTIONS)
 set(SPECTRAL_PGO_LINK_OPTIONS)
 if(SPECTRAL_PGO STREQUAL "gen")
+    file(MAKE_DIRECTORY "${SPECTRAL_PGO_DIR}")
     if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-        list(APPEND SPECTRAL_PGO_COMPILE_OPTIONS -fprofile-instr-generate)
-        list(APPEND SPECTRAL_PGO_LINK_OPTIONS -fprofile-instr-generate)
+        list(APPEND SPECTRAL_PGO_COMPILE_OPTIONS "-fprofile-instr-generate=${SPECTRAL_PGO_RAW_PATTERN}")
+        list(APPEND SPECTRAL_PGO_LINK_OPTIONS "-fprofile-instr-generate=${SPECTRAL_PGO_RAW_PATTERN}")
     else()
-        file(MAKE_DIRECTORY "${SPECTRAL_PGO_DIR}")
         list(APPEND SPECTRAL_PGO_COMPILE_OPTIONS "-fprofile-generate=${SPECTRAL_PGO_DIR}")
         list(APPEND SPECTRAL_PGO_LINK_OPTIONS "-fprofile-generate=${SPECTRAL_PGO_DIR}")
     endif()
