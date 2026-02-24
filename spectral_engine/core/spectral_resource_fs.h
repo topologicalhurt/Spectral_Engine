@@ -7,6 +7,10 @@
  *   Embedded: resources are identified by a 32-bit FNV-1a hash of that path.
  *             (no filesystem; the hash table is compiled into flash.)
  *
+ * NOTE: FNV-1a is STRICTLY used for path-to-ID generation on Embedded.
+ * For hashing the actual payload content, Host uses XXH3-64 and 
+ * Embedded uses XXH32.
+ *
  * The generated file (spectral_hash_resources_xx32_xx3.c) defines the actual
  * hash table.  All callers look up entries through this header's API rather
  * than touching the table directly, so the table format can evolve without
@@ -30,16 +34,11 @@ extern "C" {
 typedef uint32_t SpectralResourceFileId;
 
 /* Width of the hash digest stored in the resource table.
- * Host builds use XXH3-64 (8 bytes); embedded/sim builds use XXH32 or FNV-1a
- * (both 4 bytes, selected at table-generation time via --hash-embedded-algo).
+ * Host builds use XXH3-64 (8 bytes); embedded/sim builds use XXH32 (4 bytes).
  * SpectralHashDigest in spectral_hash_xx32_xx3.h matches this width —
  * both exist because the resource table entry and the runtime compute result
  * are semantically distinct even though they are the same width. */
-#if SPECTRAL_HASH_HAS_HOST_FILE_API
 typedef uint64_t SpectralHashStoredDigest;
-#else
-typedef uint32_t SpectralHashStoredDigest;
-#endif
 
 /* One row in the resource hash table.
  * The identity field is conditional on build target (see above). */
