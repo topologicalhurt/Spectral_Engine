@@ -3,6 +3,8 @@
 #include "spectral_cli.h"
 #include "spectral_synth.h"
 #include "spectral_segment_parser.h"
+#include "spectral_seg_cache.h"
+#include "spectral_synth_internal.h"
 #include "spectral_io.h"
 #include "spectral_utils.h"
 #include "spectral_log.h"
@@ -133,7 +135,7 @@ pipeline_resources_track_render(PipelineRunResources* resources,
 
 static void pipeline_reset_segment_array(SegmentArray* segments) {
     if (!segments) return;
-    free(segments->segs);
+    if (segments->capacity > 0) free(segments->segs);
     *segments = (SegmentArray){0};
 }
 
@@ -217,23 +219,15 @@ static PipelineError ensure_output_dir_exists(void) {
 }
 
 #if !SPECTRAL_RESTRICTED_MODE
-static PipelineError build_cache_path(const SpectralCliOptions* opts, char* out, size_t out_size) {
-    if (!opts || !out || out_size == 0) return PIPELINE_ERR_INPUT;
-    if (resolve_output_paths() != PIPELINE_OK) return PIPELINE_ERR_OUTPUT;
-
+static uint64_t build_cache_key(const SpectralCliOptions* opts) {
     char stem[192] = {0};
-    if (!spectral_basename_no_ext(opts->input_path, stem, sizeof(stem)) || spectral_is_empty_string(stem)) {
-        return PIPELINE_ERR_INPUT;
+    if (!opts || !spectral_basename_no_ext(opts->input_path, stem, sizeof(stem))
+        || spectral_is_empty_string(stem)) {
+        return 0;
     }
-
-    int db10 = (int)(opts->db_thresh * 10.0f);
-    int start_ms = (int)(opts->start_sec * SPECTRAL_MILLIS_PER_SECOND_F);
-    int end_ms = (int)(opts->end_sec * SPECTRAL_MILLIS_PER_SECOND_F);
-    int w = snprintf(out, out_size,
-                     "%s/%s_n%d_h%d_db%d_s%d_e%d.segbin",
-                     g_paths.output_cache_dir, stem,
-                     opts->n_fft, opts->hop, db10, start_ms, end_ms);
-    return (w > 0 && (size_t)w < out_size) ? PIPELINE_OK : PIPELINE_ERR_INPUT;
+    return spectral_seg_cache_key(stem, opts->n_fft, opts->hop,
+                                  opts->db_thresh, opts->start_sec, opts->end_sec,
+                                  opts->stretch, SPECTRAL_GPU_TILE_SIZE);
 }
 #endif
 
@@ -249,6 +243,7 @@ static size_t segment_array_output_length(const SegmentArray* sa) {
     return max_end;
 }
 
+#if SPECTRAL_RESTRICTED_MODE
 static SpectralError pipeline_load_segments_with_metadata(
     const char* path,
     SegmentArray* segments,
@@ -269,6 +264,7 @@ static SpectralError pipeline_load_segments_with_metadata(
     *out_sample_rate = sample_rate_loaded;
     return SPECTRAL_OK;
 }
+#endif /* SPECTRAL_RESTRICTED_MODE */
 
 static void print_processing_mask_report(const SpectralProcessReport* report) {
     char requested_buf[192] = {0};
@@ -372,8 +368,10 @@ static PipelineError pipeline_render_and_write(
     }
 
     {
+        double write_start = omp_get_wtime();
         SpectralError write_err = spectral_audio_write(
             g_paths.output_wav, resources->output, out_len, sample_rate, 1);
+        timing->t_write = omp_get_wtime() - write_start;
         if (write_err != SPECTRAL_OK) {
             spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, write_err,
                                      "Output write failed (path=%s, frames=%zu, sample_rate=%d)",
@@ -388,11 +386,9 @@ static PipelineError pipeline_render_and_write(
 
 #if !SPECTRAL_RESTRICTED_MODE
 typedef struct {
-    const char* cache_path;
     int use_cache_labels;
     int print_window_range;
     int release_input_buffer_after_analysis;
-    int* out_cache_saved;
 } PipelineAnalyzeRequest;
 
 static PipelineAnalyzeRequest pipeline_make_default_analyze_request(void) {
@@ -401,16 +397,12 @@ static PipelineAnalyzeRequest pipeline_make_default_analyze_request(void) {
     return request;
 }
 
-static PipelineAnalyzeRequest pipeline_make_cache_analyze_request(
-    const char* cache_path,
-    int* out_cache_saved)
+static PipelineAnalyzeRequest pipeline_make_cache_analyze_request(void)
 {
     PipelineAnalyzeRequest request = {0};
-    request.cache_path = cache_path;
     request.use_cache_labels = 1;
     request.print_window_range = 0;
     request.release_input_buffer_after_analysis = 1;
-    request.out_cache_saved = out_cache_saved;
     return request;
 }
 
@@ -424,21 +416,16 @@ static PipelineError pipeline_analyze_input_to_segments(
 {
     SpectralAudioInfo audio_info = {0};
     float* windowed_audio = NULL;
-    const char* cache_path = NULL;
     int use_cache_labels = 0;
     int print_window_range = 0;
     int release_input_buffer_after_analysis = 0;
-    int* out_cache_saved = NULL;
 
     if (request) {
-        cache_path = request->cache_path;
         use_cache_labels = request->use_cache_labels;
         print_window_range = request->print_window_range;
         release_input_buffer_after_analysis = request->release_input_buffer_after_analysis;
-        out_cache_saved = request->out_cache_saved;
     }
 
-    if (out_cache_saved) *out_cache_saved = 0;
     if (!opts || !resources || !timing || !out_n_samples || !out_sample_rate) {
         return PIPELINE_ERR_INPUT;
     }
@@ -498,18 +485,6 @@ static PipelineError pipeline_analyze_input_to_segments(
         SPECTRAL_LOG_INFO("Cache build: found %u segments", resources->segments.count);
     } else {
         SPECTRAL_LOG_INFO("Found %u segments", resources->segments.count);
-    }
-
-    if (cache_path && cache_path[0]) {
-        SpectralError cache_save_err = segments_save(cache_path, &resources->segments,
-                                                     *out_sample_rate, opts->stretch, opts->pitch);
-        if (cache_save_err == SPECTRAL_OK) {
-            SPECTRAL_LOG_INFO("Cache saved: %s", cache_path);
-            if (out_cache_saved) *out_cache_saved = 1;
-        } else {
-            spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, cache_save_err,
-                                    "Cache save failed (path=%s)", cache_path);
-        }
     }
 
     if (release_input_buffer_after_analysis) {
@@ -668,36 +643,13 @@ static PipelineError pipeline_try_run_export_backend(
     return PIPELINE_OK;
 }
 
-static PipelineError run_synthesis_from_segments(
-    const SpectralCliOptions* opts,
-    SegmentArray* sa,
-    int sample_rate,
-    SpectralTimingResults* t,
-    float* mono,
-    size_t input_alloc_bytes)
-{
-    PipelineError result = PIPELINE_OK;
-    PipelineRunResources resources = {0};
-
-    if (!opts || !sa || !sa->segs || !t) return PIPELINE_ERR_INPUT;
-
-    resources.segments = pipeline_take_segment_array(sa);
-    resources.mono = mono;
-#if !SPECTRAL_RESTRICTED_MODE && !SPECTRAL_NO_PERF
-    resources.tracked_input_bytes = input_alloc_bytes;
-#else
-    (void)input_alloc_bytes;
-#endif
-
-    result = pipeline_run_synthesis_stage(opts, &resources, sample_rate, 0, t);
-    pipeline_release_resources(&resources);
-    return result;
-}
-
 typedef struct {
     int enabled;
     int loaded;
-    char path[512];
+    uint64_t key;
+    char cache_dir[512];
+    double t_lookup;
+    SpectralSegCacheLookupResult lr; /* kept alive for mmap lifetime */
 } PipelineCacheState;
 
 static PipelineError pipeline_prepare_cache_state(
@@ -718,21 +670,36 @@ static PipelineError pipeline_prepare_cache_state(
             ensure_dir_exists(g_paths.output_cache_dir) != PIPELINE_OK) {
             SPECTRAL_LOG_WARN("Warning: cache disabled (cannot create cache directory)");
             cache_state->enabled = 0;
-        } else if (build_cache_path(opts, cache_state->path, sizeof(cache_state->path)) != PIPELINE_OK) {
-            SPECTRAL_LOG_WARN("Warning: cache disabled (invalid cache key path)");
-            cache_state->enabled = 0;
+        } else {
+            size_t dir_len = strlen(g_paths.output_cache_dir);
+            if (dir_len >= sizeof(cache_state->cache_dir)) {
+                cache_state->enabled = 0;
+            } else {
+                memcpy(cache_state->cache_dir, g_paths.output_cache_dir, dir_len + 1);
+                cache_state->key = build_cache_key(opts);
+                if (cache_state->key == 0) {
+                    SPECTRAL_LOG_WARN("Warning: cache disabled (invalid cache key)");
+                    cache_state->enabled = 0;
+                }
+            }
         }
     }
 
-    if (cache_state->enabled && access(cache_state->path, F_OK) == 0) {
-        SpectralError cache_err = pipeline_load_segments_with_metadata(
-            cache_state->path, &resources->segments, out_sample_rate);
-        if (cache_err == SPECTRAL_OK) {
-            *out_n_samples = segment_array_output_length(&resources->segments);
+    if (cache_state->enabled) {
+        double lookup_start = omp_get_wtime();
+        SpectralError cache_err = spectral_seg_cache_lookup(
+            cache_state->cache_dir, cache_state->key, &cache_state->lr);
+        cache_state->t_lookup = omp_get_wtime() - lookup_start;
+        if (cache_err == SPECTRAL_OK && cache_state->lr.hit) {
+            resources->segments = spectral_seg_cache_result_take_segments(&cache_state->lr);
+            *out_sample_rate = cache_state->lr.sample_rate;
+            *out_n_samples = cache_state->lr.output_length;
             cache_state->loaded = 1;
-            SPECTRAL_LOG_INFO("Cache hit: %s (%u segments)", cache_state->path, resources->segments.count);
-        } else {
-            SPECTRAL_LOG_INFO("Cache miss (invalid cache file): %s", cache_state->path);
+            SPECTRAL_LOG_INFO("Cache hit: key=%016llx (%u segments)",
+                              (unsigned long long)cache_state->key,
+                              resources->segments.count);
+        } else if (cache_err != SPECTRAL_OK) {
+            SPECTRAL_LOG_INFO("Cache index unreadable — will rebuild");
         }
     }
     return PIPELINE_OK;
@@ -741,34 +708,38 @@ static PipelineError pipeline_prepare_cache_state(
 static PipelineError pipeline_prepare_cached_segments_for_synthesis(
     const PipelineCacheState* cache_state,
     PipelineRunResources* resources,
-    int cache_saved_this_run,
-    int* inout_sample_rate,
     SegmentArray* out_cached_segments)
 {
-    if (!cache_state || !resources || !inout_sample_rate || !out_cached_segments) {
+    if (!cache_state || !resources || !out_cached_segments) {
         return PIPELINE_ERR_INPUT;
     }
 
-    *out_cached_segments = (SegmentArray){0};
-    if (cache_state->loaded) {
-        *out_cached_segments = pipeline_take_segment_array(&resources->segments);
-        return PIPELINE_OK;
-    }
-
-    if (cache_saved_this_run) {
-        SpectralError cache_load_err = pipeline_load_segments_with_metadata(
-            cache_state->path, out_cached_segments, inout_sample_rate);
-        if (cache_load_err != SPECTRAL_OK) {
-            spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, cache_load_err,
-                                     "Cache load failed (path=%s)", cache_state->path);
-            return PIPELINE_ERR_INPUT;
-        }
-        pipeline_reset_segment_array(&resources->segments);
-        return PIPELINE_OK;
-    }
-
+    /* Both cache-hit (mmap'd, capacity=0) and cache-miss (heap, capacity>0)
+     * segments are transferred here.  pipeline_reset_segment_array respects
+     * the capacity flag — mmap'd segments are not freed by free(). */
     *out_cached_segments = pipeline_take_segment_array(&resources->segments);
-    SPECTRAL_LOG_INFO("Cache mode: using in-memory analysis result (cache artifact unavailable)");
+    return PIPELINE_OK;
+}
+
+static PipelineError pipeline_ensure_segments_mutable(SegmentArray* segments)
+{
+    Segment* copy = NULL;
+    size_t bytes = 0;
+
+    if (!segments) return PIPELINE_ERR_INPUT;
+    if (segments->count == 0 || segments->capacity > 0) return PIPELINE_OK;
+    if (!segments->segs) return PIPELINE_ERR_INPUT;
+
+    if (!spectral_array_bytes((size_t)segments->count, sizeof(Segment), &bytes)) {
+        return PIPELINE_ERR_MEMORY;
+    }
+
+    copy = (Segment*)spectral_malloc_array((size_t)segments->count, sizeof(Segment));
+    if (!copy) return PIPELINE_ERR_MEMORY;
+
+    memcpy(copy, segments->segs, bytes);
+    segments->segs = copy;
+    segments->capacity = segments->count;
     return PIPELINE_OK;
 }
 
@@ -776,13 +747,18 @@ static void pipeline_print_cache_mode_summary(
     const SpectralTimingResults* timing,
     int cache_was_loaded,
     int cache_built_this_run,
-    double cached_synth_total,
+    double t_cache_io,
+    double cached_render_total,
     double cache_mode_total)
 {
     if (!timing) return;
 
     SPECTRAL_LOG_INFO("\n--- Cache Mode ---");
     SPECTRAL_LOG_INFO("Shader/backend prewarm: complete");
+    if (t_cache_io > 0.0) {
+        SPECTRAL_LOG_INFO("Cache I/O: %.1fms",
+                          t_cache_io * SPECTRAL_MILLIS_PER_SECOND_D);
+    }
     if (cache_built_this_run) {
         SPECTRAL_LOG_INFO("Cache build (analysis only): FFT %.1fms Track %.1fms",
                           timing->t_fft * SPECTRAL_MILLIS_PER_SECOND_D,
@@ -790,14 +766,15 @@ static void pipeline_print_cache_mode_summary(
     } else if (cache_was_loaded) {
         SPECTRAL_LOG_INFO("Cache build (analysis only): skipped (cache hit)");
     } else {
-        SPECTRAL_LOG_INFO("Cache build (analysis only): FFT %.1fms Track %.1fms (cache artifact unavailable)",
+        SPECTRAL_LOG_INFO("Cache build (analysis only): FFT %.1fms Track %.1fms (in-memory)",
                           timing->t_fft * SPECTRAL_MILLIS_PER_SECOND_D,
                           timing->t_track * SPECTRAL_MILLIS_PER_SECOND_D);
     }
-    SPECTRAL_LOG_INFO("Segment-binary synth run: Synth %.1fms Norm %.1fms Total %.1fms",
+    SPECTRAL_LOG_INFO("Render: Synth %.1fms Norm %.1fms Write %.1fms (%.1fms)",
                       timing->t_synth * SPECTRAL_MILLIS_PER_SECOND_D,
                       timing->t_norm * SPECTRAL_MILLIS_PER_SECOND_D,
-                      cached_synth_total * SPECTRAL_MILLIS_PER_SECOND_D);
+                      timing->t_write * SPECTRAL_MILLIS_PER_SECOND_D,
+                      cached_render_total * SPECTRAL_MILLIS_PER_SECOND_D);
     SPECTRAL_LOG_INFO("Cache-mode end-to-end total: %.1fms",
                       cache_mode_total * SPECTRAL_MILLIS_PER_SECOND_D);
 }
@@ -809,6 +786,7 @@ static PipelineError pipeline_execute_cache_mode(
     size_t* out_n_samples,
     int* out_sample_rate,
     const PipelineCacheState* cache_state,
+    double cache_wall_start,
     int* out_mode_handled)
 {
     PipelineError result = PIPELINE_OK;
@@ -822,42 +800,142 @@ static PipelineError pipeline_execute_cache_mode(
     if (!cache_state->enabled) return PIPELINE_OK;
 
     {
-        double cache_mode_start = omp_get_wtime();
         int cache_built_this_run = 0;
-        int cache_saved_this_run = 0;
+        GpuTileData td_store = {0};
+        int owns_td_store = 0;
+        const int can_reuse_gpu_aux = (opts->processing_mask == SPECTRAL_PROC_NONE);
 
         if (!cache_was_loaded) {
-            int analyzed_cache_saved = 0;
             const PipelineAnalyzeRequest analyze_request =
-                pipeline_make_cache_analyze_request(
-                    cache_state->path, &analyzed_cache_saved);
+                pipeline_make_cache_analyze_request();
             result = pipeline_analyze_from_input(
                 opts, resources, timing, out_n_samples, out_sample_rate,
                 &analyze_request);
             if (result != PIPELINE_OK) return result;
-            cache_built_this_run = analyzed_cache_saved;
-            cache_saved_this_run = analyzed_cache_saved;
+
+            /* Pre-compute GPU tile data for cache storage + this-run synth. */
+#if !SPECTRAL_EMBEDDED
+            {
+                size_t out_len = (size_t)((double)*out_n_samples * (double)opts->stretch);
+                if (out_len > 0) {
+                    SpectralError te = gpu_tile_preprocess(
+                        resources->segments, opts->stretch,
+                        SPECTRAL_GPU_TILE_SIZE, out_len, &td_store);
+                    if (te == SPECTRAL_OK) owns_td_store = 1;
+                }
+            }
+#endif
+
+            {
+                SpectralError store_err = spectral_seg_cache_store(
+                    cache_state->cache_dir, cache_state->key,
+                    &resources->segments, *out_sample_rate,
+                    opts->stretch, opts->pitch, *out_n_samples,
+                    owns_td_store ? td_store.ranges : NULL,
+                    owns_td_store ? td_store.segment_ids : NULL,
+                    owns_td_store ? td_store.num_tiles : 0,
+                    owns_td_store ? td_store.total_refs : 0);
+                if (store_err == SPECTRAL_OK) {
+                    SPECTRAL_LOG_INFO("Cache stored: key=%016llx (%u segments, %u tiles)",
+                                      (unsigned long long)cache_state->key,
+                                      resources->segments.count,
+                                      owns_td_store ? td_store.num_tiles : 0u);
+                    cache_built_this_run = 1;
+                } else {
+                    spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, store_err,
+                                            "Cache store failed (key=%016llx)",
+                                            (unsigned long long)cache_state->key);
+                }
+            }
+        }
+
+        /* Reuse cached GPU aux buffers only when no processing stages run.
+         * Processing stages may mutate segments before synth, which would
+         * invalidate pre-packed/tiled cache payloads. */
+        if (can_reuse_gpu_aux) {
+            size_t out_len = (size_t)((double)*out_n_samples * (double)opts->stretch);
+
+            /* Set the global GPU tile cache so GPU backends (CUDA / Metal)
+             * skip tile preprocessing.  Prefer mmap'd tile data (cache hit)
+             * over freshly-computed data (cache miss). */
+            if (cache_was_loaded &&
+                cache_state->lr.tile_count > 0 &&
+                cache_state->lr.tile_size == SPECTRAL_GPU_TILE_SIZE &&
+                fabsf(cache_state->lr.stretch - opts->stretch) <= 1e-6f) {
+                gpu_tile_cache_set(cache_state->lr.tile_ranges,
+                                   cache_state->lr.tile_segment_ids,
+                                   cache_state->lr.tile_count,
+                                   cache_state->lr.tile_total_refs,
+                                   opts->stretch, out_len);
+            } else if (cache_was_loaded && cache_state->lr.tile_count > 0) {
+                SPECTRAL_LOG_INFO("Cache tile metadata mismatch — skipping tile reuse");
+            } else if (owns_td_store && td_store.num_tiles > 0) {
+                gpu_tile_cache_set(td_store.ranges, td_store.segment_ids,
+                                   td_store.num_tiles, td_store.total_refs,
+                                   opts->stretch, out_len);
+            }
+
+            /* Set the global GPU segment cache so GPU backends (CUDA / Metal)
+             * use pre-packed SegmentGpu data directly (zero pack loop). */
+            if (cache_was_loaded &&
+                cache_state->lr.gpu_segs &&
+                fabsf(cache_state->lr.stretch - opts->stretch) <= 1e-6f) {
+                gpu_seg_cache_set(cache_state->lr.gpu_segs,
+                                  cache_state->lr.seg_count);
+            }
+        } else if (cache_was_loaded &&
+                   (cache_state->lr.tile_count > 0 || cache_state->lr.gpu_segs)) {
+            SPECTRAL_LOG_INFO("Cache GPU aux reuse disabled due to processing mask");
         }
 
         {
             SegmentArray sa_cached = {0};
             result = pipeline_prepare_cached_segments_for_synthesis(
-                cache_state, resources, cache_saved_this_run, out_sample_rate, &sa_cached);
-            if (result != PIPELINE_OK) return result;
+                cache_state, resources, &sa_cached);
+            if (result != PIPELINE_OK) {
+                gpu_tile_cache_clear();
+                gpu_seg_cache_clear();
+                if (owns_td_store) gpu_tile_data_free(&td_store);
+                return result;
+            }
 
             {
-                double cached_synth_start = omp_get_wtime();
-                result = run_synthesis_from_segments(opts, &sa_cached, *out_sample_rate, timing, NULL, 0);
-                if (result != PIPELINE_OK) return result;
-                {
-                    double cached_synth_total = omp_get_wtime() - cached_synth_start;
-                    double cache_mode_total = omp_get_wtime() - cache_mode_start;
+                PipelineRunResources synth_res = {0};
+                synth_res.segments = sa_cached;
+                sa_cached = (SegmentArray){0};
 
-                    pipeline_print_cache_mode_summary(
-                        timing, cache_was_loaded, cache_built_this_run,
-                        cached_synth_total, cache_mode_total);
-                    timing->t_total = cache_mode_total;
+                if (opts->processing_mask != SPECTRAL_PROC_NONE) {
+                    result = pipeline_ensure_segments_mutable(&synth_res.segments);
+                    if (result != PIPELINE_OK) {
+                        gpu_tile_cache_clear();
+                        gpu_seg_cache_clear();
+                        if (owns_td_store) gpu_tile_data_free(&td_store);
+                        pipeline_release_resources(&synth_res);
+                        return result;
+                    }
                 }
+
+                double render_start = omp_get_wtime();
+                result = pipeline_run_synthesis_stage(
+                    opts, &synth_res, *out_sample_rate, *out_n_samples, timing);
+
+                double cached_render_total = omp_get_wtime() - render_start;
+                double cache_mode_total = omp_get_wtime() - cache_wall_start;
+
+                gpu_tile_cache_clear();
+                gpu_seg_cache_clear();
+
+                pipeline_print_cache_mode_summary(
+                    timing, cache_was_loaded, cache_built_this_run,
+                    cache_state->t_lookup,
+                    cached_render_total, cache_mode_total);
+                timing->t_total = cache_mode_total;
+
+                pipeline_release_resources(&synth_res);
+
+                if (owns_td_store) gpu_tile_data_free(&td_store);
+
+                if (result != PIPELINE_OK) return result;
             }
         }
 
@@ -967,6 +1045,12 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
     if (err == SPECTRAL_OK) {
         SPECTRAL_LOG_INFO("Backend used: %s", spectral_backend_name(effective_backend));
         SPECTRAL_LOG_INFO("Timbre used: %s", timbre_name(effective_timbre));
+#if HAS_CUDA
+        if (effective_backend == BACKEND_CUDA) {
+            size_t vram = cuda_vram_usage_bytes();
+            SPECTRAL_LOG_INFO("VRAM used: %.1f MB", (double)vram / (1024.0 * 1024.0));
+        }
+#endif
     }
     return err;
 }
@@ -1022,17 +1106,25 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
 #else
     PipelineCacheState cache_state = {0};
     int cache_mode_handled = 0;
+    double cache_wall_start = omp_get_wtime();
 
     result = pipeline_prepare_cache_state(
         run_opts, &resources, &cache_state, &n_samples, &sample_rate);
     if (result != PIPELINE_OK) goto cleanup;
 
     result = pipeline_execute_cache_mode(
-        run_opts, &resources, &t, &n_samples, &sample_rate, &cache_state, &cache_mode_handled);
+        run_opts, &resources, &t, &n_samples, &sample_rate, &cache_state,
+        cache_wall_start, &cache_mode_handled);
     if (result != PIPELINE_OK) goto cleanup;
     if (cache_mode_handled) {
         if (timing) *timing = t;
         result = PIPELINE_OK;
+#if !SPECTRAL_NO_PERF
+        {
+            PerfMetrics perf_end = perf_snapshot(wall_start);
+            perf_print(&perf_start, &perf_end, run_opts->n_threads);
+        }
+#endif
         goto cleanup;
     }
 
@@ -1061,7 +1153,7 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     result = pipeline_run_synthesis_stage(run_opts, &resources, sample_rate, n_samples, &t);
     if (result != PIPELINE_OK) goto cleanup;
 
-    t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm;
+    t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm + t.t_write;
     t.audio_dur = (double)n_samples / sample_rate;
     t.realtime_x = (t.t_total > 0) ? (t.audio_dur / t.t_total) : 0.0;
     spectral_pipeline_print_timing(&t, resources.segments.count);
@@ -1077,6 +1169,9 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     result = PIPELINE_OK;
 
 cleanup:
+#if !SPECTRAL_RESTRICTED_MODE
+    spectral_seg_cache_result_free(&cache_state.lr);
+#endif
     pipeline_release_resources(&resources);
     return result;
 }
@@ -1086,12 +1181,12 @@ void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t seg
     
 #if SPECTRAL_RESTRICTED_MODE
     SPECTRAL_LOG_INFO("\n--- Timing ---");
-    SPECTRAL_LOG_INFO("Synth: %.1fms Norm: %.1fms Total: %.1fms",
-                      t->t_synth*1000, t->t_norm*1000, t->t_total*1000);
+    SPECTRAL_LOG_INFO("Synth: %.1fms Norm: %.1fms Write: %.1fms Total: %.1fms",
+                      t->t_synth*1000, t->t_norm*1000, t->t_write*1000, t->t_total*1000);
 #else
     SPECTRAL_LOG_INFO("\n--- Timing ---");
-    SPECTRAL_LOG_INFO("FFT: %.1fms Track: %.1fms Synth: %.1fms Norm: %.1fms Total: %.1fms",
-                      t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_total*1000);
+    SPECTRAL_LOG_INFO("FFT: %.1fms Track: %.1fms Synth: %.1fms Norm: %.1fms Write: %.1fms Total: %.1fms",
+                      t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_write*1000, t->t_total*1000);
 #endif
     SPECTRAL_LOG_INFO("Audio: %.2fs Realtime: %.1fx Segs/sec: %.0fK",
                       t->audio_dur, t->realtime_x,

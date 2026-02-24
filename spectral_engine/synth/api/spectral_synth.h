@@ -38,6 +38,7 @@ void metal_cleanup(void);
 #define HAS_CUDA 1
 void cuda_init(void);
 int  cuda_available(void);
+size_t cuda_vram_usage_bytes(void);
 SpectralError synth_cuda(SegmentArray sa, float* out_buffer, size_t out_len,
                          float stretch, float pitch, SpectralTimbre timbre, double* t_synth);
 void cuda_cleanup(void);
