@@ -135,6 +135,51 @@ add_custom_target(bench_cache
     WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
 
 add_custom_target(bench_all DEPENDS bench bench_cache)
+add_custom_target(pgo_collect DEPENDS bench bench_cache)
+
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    find_program(SPECTRAL_LLVM_PROFDATA_EXECUTABLE llvm-profdata)
+    if(SPECTRAL_LLVM_PROFDATA_EXECUTABLE)
+        set(SPECTRAL_PGO_MERGE_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/spectral_pgo_merge.cmake")
+        file(WRITE "${SPECTRAL_PGO_MERGE_SCRIPT}"
+"file(MAKE_DIRECTORY \"${SPECTRAL_PGO_DIR}\")
+file(GLOB _spectral_profraw_files \"${SPECTRAL_PGO_DIR}/*.profraw\")
+if(NOT _spectral_profraw_files)
+    message(FATAL_ERROR \"No .profraw files found in ${SPECTRAL_PGO_DIR}. Run pgo_collect with SPECTRAL_PGO=gen first.\")
+endif()
+execute_process(
+    COMMAND \"${SPECTRAL_LLVM_PROFDATA_EXECUTABLE}\" merge -output=\"${SPECTRAL_PGO_PROFILE}\" \${_spectral_profraw_files}
+    RESULT_VARIABLE _spectral_merge_result)
+if(NOT _spectral_merge_result EQUAL 0)
+    message(FATAL_ERROR \"llvm-profdata merge failed (exit=\${_spectral_merge_result})\")
+endif()
+message(STATUS \"Wrote merged profile: ${SPECTRAL_PGO_PROFILE}\")
+")
+        add_custom_target(pgo_merge
+            COMMAND ${CMAKE_COMMAND} -P "${SPECTRAL_PGO_MERGE_SCRIPT}"
+            VERBATIM)
+    else()
+        add_custom_target(pgo_merge
+            COMMAND ${CMAKE_COMMAND} -E echo "llvm-profdata not found; install LLVM tools to merge Clang .profraw files.")
+    endif()
+else()
+    add_custom_target(pgo_merge
+        COMMAND ${CMAKE_COMMAND} -E echo "GCC PGO does not require profraw merge. Use SPECTRAL_PGO=use after profile run.")
+endif()
+
+add_custom_target(pgo_help
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "PGO workflow (recommended release-fast build):"
+    COMMAND ${CMAKE_COMMAND} -E echo "  1) Configure gen: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPECTRAL_PRODUCTION_BUILD=OFF -DSPECTRAL_PGO=gen"
+    COMMAND ${CMAKE_COMMAND} -E echo "  2) Build + run training: cmake --build build --target pgo_collect"
+    COMMAND ${CMAKE_COMMAND} -E echo "  3) Clang only: cmake --build build --target pgo_merge"
+    COMMAND ${CMAKE_COMMAND} -E echo "  4) Reconfigure use: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPECTRAL_PRODUCTION_BUILD=OFF -DSPECTRAL_PGO=use"
+    COMMAND ${CMAKE_COMMAND} -E echo "  5) Rebuild optimized: cmake --build build --target desktop"
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "PGO directory: ${SPECTRAL_PGO_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E echo "Clang raw pattern: ${SPECTRAL_PGO_RAW_PATTERN}"
+    COMMAND ${CMAKE_COMMAND} -E echo "Clang merged profile: ${SPECTRAL_PGO_PROFILE}"
+    VERBATIM)
 
 add_custom_target(info
     COMMAND ${CMAKE_COMMAND} -E echo ""
@@ -183,5 +228,6 @@ add_custom_target(spectral_help
     COMMAND ${CMAKE_COMMAND} -E echo "  convert_segments"
     COMMAND ${CMAKE_COMMAND} -E echo "  log_check | syntax_test"
     COMMAND ${CMAKE_COMMAND} -E echo "  bench | bench_cache | bench_all"
+    COMMAND ${CMAKE_COMMAND} -E echo "  pgo_collect | pgo_merge | pgo_help"
     COMMAND ${CMAKE_COMMAND} -E echo "  info | spectral_help"
     VERBATIM)
