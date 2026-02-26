@@ -1,0 +1,30 @@
+set(_bootstrap_python "@SPECTRAL_PYTHON_SYSTEM@")
+set(_venv_dir "@SPECTRAL_PYTHON_VENV_DIR@")
+set(_venv_python "@SPECTRAL_PYTHON@")
+set(_requirements "@SPECTRAL_PYTHON_REQUIREMENTS_FILE@")
+
+if(NOT EXISTS "${_bootstrap_python}")
+    message(FATAL_ERROR "System Python interpreter not found: ${_bootstrap_python}")
+endif()
+
+if(NOT EXISTS "${_venv_python}")
+    message(STATUS "Creating Python virtual environment: ${_venv_dir}")
+    execute_process(
+        COMMAND "${_bootstrap_python}" -m venv "${_venv_dir}"
+        RESULT_VARIABLE _venv_result)
+    if(NOT _venv_result EQUAL 0)
+        message(FATAL_ERROR "Failed to create virtual environment (exit=${_venv_result}).")
+    endif()
+endif()
+
+if(NOT EXISTS "${_requirements}")
+    message(FATAL_ERROR "Python requirements file not found: ${_requirements}")
+endif()
+
+message(STATUS "Installing Python tooling dependencies from ${_requirements}")
+execute_process(
+    COMMAND "${_venv_python}" -m pip install --disable-pip-version-check -r "${_requirements}"
+    RESULT_VARIABLE _pip_result)
+if(NOT _pip_result EQUAL 0)
+    message(FATAL_ERROR "pip install failed (exit=${_pip_result}).")
+endif()

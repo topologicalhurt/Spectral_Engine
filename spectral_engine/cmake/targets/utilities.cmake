@@ -1,51 +1,46 @@
 # Utility targets: checks, bench, and build matrix/help display.
 
-# Python: prefer a local .venv so venv-installed packages are
-# visible.  Resolution order:
-#   1. <repo-root>/.venv/bin/python3   (local virtual-env)
-#   2. Fall back to whatever the current shell provides via find_package.
-set(_spectral_venv_python "${SPECTRAL_REPO_ROOT}/.venv/bin/python3")
-if(EXISTS "${_spectral_venv_python}")
-    set(SPECTRAL_PYTHON "${_spectral_venv_python}")
-    message(STATUS "Using local .venv Python: ${SPECTRAL_PYTHON}")
-else()
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    set(SPECTRAL_PYTHON "${Python3_EXECUTABLE}")
-    message(STATUS "Using system Python: ${SPECTRAL_PYTHON}")
-endif()
-unset(_spectral_venv_python)
+include("${SPECTRAL_ENGINE_ROOT}/cmake/python_env.cmake")
 
 set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/gen_resource_hashes.py")
 set(SPECTRAL_RESOURCE_HASH_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_hash_resources_xx32_xx3.c")
+set(SPECTRAL_RESOURCE_HASH_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_resource_hashes.cmake")
+configure_file(
+    "${SPECTRAL_ENGINE_ROOT}/cmake/scripts/run_resource_hashes.cmake.in"
+    "${SPECTRAL_RESOURCE_HASH_RUNNER}"
+    @ONLY)
 file(GLOB_RECURSE SPECTRAL_FIRMWARE_RESOURCE_FILES CONFIGURE_DEPENDS
     "${SPECTRAL_REPO_ROOT}/resources/*")
 
 add_custom_command(
     OUTPUT "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
-    COMMAND ${SPECTRAL_PYTHON} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
-            --resources-dir "${SPECTRAL_REPO_ROOT}/resources"
-            --output "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
-            --mode generate
+    COMMAND ${CMAKE_COMMAND}
+            -DSPECTRAL_HASH_MODE=generate
+            -P "${SPECTRAL_RESOURCE_HASH_RUNNER}"
     DEPENDS
+        "${SPECTRAL_PYTHON_ENV_STAMP}"
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+        "${SPECTRAL_RESOURCE_HASH_RUNNER}"
         ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
     VERBATIM)
 
 add_custom_target(generate_resource_hashes
     DEPENDS "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+add_dependencies(generate_resource_hashes prepare_python_tools)
 
 set_source_files_properties(
     "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
     PROPERTIES GENERATED TRUE)
 
 add_custom_target(verify_resource_hashes
-    COMMAND ${SPECTRAL_PYTHON} "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
-            --resources-dir "${SPECTRAL_REPO_ROOT}/resources"
-            --output "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
-            --mode verify
+    COMMAND ${CMAKE_COMMAND}
+            -DSPECTRAL_HASH_MODE=verify
+            -P "${SPECTRAL_RESOURCE_HASH_RUNNER}"
     DEPENDS
+        prepare_python_tools
         generate_resource_hashes
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
+        "${SPECTRAL_RESOURCE_HASH_RUNNER}"
         ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
     VERBATIM)
 
@@ -113,25 +108,26 @@ endif()
 
 add_custom_target(syntax_test DEPENDS desktop embedded_arm embedded_arm_restricted)
 
-separate_arguments(SPECTRAL_BENCH_ARGS_LIST NATIVE_COMMAND "${SPECTRAL_BENCH_ARGS}")
-separate_arguments(SPECTRAL_BENCH_CACHE_ARGS_LIST NATIVE_COMMAND "${SPECTRAL_BENCH_CACHE_ARGS}")
-
 add_custom_target(bench
-    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C bash "${SPECTRAL_BENCH_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C "${SPECTRAL_PYTHON}" "${SPECTRAL_BENCH_SCRIPT}"
+            bench
             --binary "${SPECTRAL_BIN_DIR}/${TARGET_DESKTOP}"
             --input "${SPECTRAL_BENCH_INPUT}"
             --runs "${SPECTRAL_BENCH_RUNS}"
-            --mode normal -- ${SPECTRAL_BENCH_ARGS_LIST}
-    DEPENDS desktop
+            --mode normal
+            --bench-args "${SPECTRAL_BENCH_ARGS}"
+    DEPENDS prepare_python_tools desktop
     WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
 
 add_custom_target(bench_cache
-    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C bash "${SPECTRAL_BENCH_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C "${SPECTRAL_PYTHON}" "${SPECTRAL_BENCH_SCRIPT}"
+            bench
             --binary "${SPECTRAL_BIN_DIR}/${TARGET_DESKTOP}"
             --input "${SPECTRAL_BENCH_INPUT}"
             --runs "${SPECTRAL_BENCH_RUNS}"
-            --mode cache -- ${SPECTRAL_BENCH_CACHE_ARGS_LIST}
-    DEPENDS desktop
+            --mode cache
+            --bench-args "${SPECTRAL_BENCH_CACHE_ARGS}"
+    DEPENDS prepare_python_tools desktop
     WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
 
 add_custom_target(bench_all DEPENDS bench bench_cache)

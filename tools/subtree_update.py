@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Thin entrypoint for LUT generation."""
+"""Thin CLI entrypoint for subtree tooling."""
 
 from __future__ import annotations
 
-from spectral_tools.lut_generator import main
+from spectral_tools.subtree_manager import main
 
 
 if __name__ == "__main__":

@@ -1,0 +1,27 @@
+if(NOT DEFINED SPECTRAL_HASH_MODE)
+    message(FATAL_ERROR "SPECTRAL_HASH_MODE is required (generate|verify).")
+endif()
+
+set(_python "@SPECTRAL_PYTHON@")
+set(_resource_hash_script "@SPECTRAL_RESOURCE_HASH_SCRIPT@")
+set(_resource_hash_output "@SPECTRAL_RESOURCE_HASH_OUTPUT@")
+set(_resource_dir "@SPECTRAL_REPO_ROOT@/resources")
+
+if(NOT EXISTS "${_python}")
+    message(FATAL_ERROR
+        "Configured Python interpreter does not exist: ${_python}. "
+        "Run target 'prepare_python_tools' and re-run the build.")
+endif()
+
+execute_process(
+    COMMAND "${_python}" "${_resource_hash_script}"
+            --resources-dir "${_resource_dir}"
+            --output "${_resource_hash_output}"
+            --mode "${SPECTRAL_HASH_MODE}"
+    RESULT_VARIABLE _hash_result)
+
+if(NOT _hash_result EQUAL 0)
+    message(FATAL_ERROR
+        "gen_resource_hashes.py failed in mode '${SPECTRAL_HASH_MODE}' "
+        "(exit=${_hash_result}, python=${_python})")
+endif()
