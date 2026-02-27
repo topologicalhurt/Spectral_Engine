@@ -330,6 +330,18 @@ else
 fuzzer: this_target_requires_clang # intentional fail
 endif
 
+.PHONY: test-seed
+test-seed:
+	echo -n "test1234" > .test.input
+
+	@echo ---- test all algorithms with seed ----
+	xxhsum -H0 --seed 1234 .test.input | grep -q "c2002a7a" && echo "XXH32: OK" || echo "XXH32: FAIL"
+	xxhsum -H1 --seed 1234 .test.input | grep -q "9d23d128b345c34d" && echo "XXH64: OK" || echo "XXH64: FAIL"
+	xxhsum -H2 --seed 1234 .test.input | grep -q "9bdd89fa9bd1965abe0c0d13a6b8164d" && echo "XXH3_128: OK" || echo "XXH3_128: FAIL"
+	xxhsum -H3 --seed 1234 .test.input | grep -q "652aa233139ae947" && echo "XXH3_64: OK" || echo "XXH3_64: FAIL"
+
+	@$(RM) .test.*
+
 .PHONY: test-filename-escape
 test-filename-escape:
 	$(MAKE) -C tests test_filename_escape

@@ -23,7 +23,7 @@ endif()
 
 message(STATUS "Installing Python tooling dependencies from ${_requirements}")
 execute_process(
-    COMMAND "${_venv_python}" -m pip install --disable-pip-version-check -r "${_requirements}"
+    COMMAND "${_venv_python}" -m pip install --disable-pip-version-check --quiet -r "${_requirements}"
     RESULT_VARIABLE _pip_result)
 if(NOT _pip_result EQUAL 0)
     message(FATAL_ERROR "pip install failed (exit=${_pip_result}).")

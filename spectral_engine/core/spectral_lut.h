@@ -19,7 +19,8 @@ extern "C" {
 
 /*
  * Flash-resident LUT: when SPECTRAL_LUT_IN_FLASH is defined, the LUT is
- * pre-computed at build time (tools/gen_lut.py) and stored in flash.
+ * pre-computed at build time (tools/spectral_tools/generators/lut_generator.py)
+ * and stored in flash.
  * Use SPECTRAL_DEFAULT_LUT to get a pointer to the appropriate table.
  */
 #ifndef SPECTRAL_LUT_IN_FLASH

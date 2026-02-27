@@ -50,21 +50,29 @@
  * Memory Prefetch Hints
  */
 #if defined(__GNUC__) || defined(__clang__)
-#define PREFETCH_READ(addr)     __builtin_prefetch((addr), 0, 3)
-#define PREFETCH_WRITE(addr)    __builtin_prefetch((addr), 1, 3)
+#define SPECTRAL_PREFETCH_READ_LOCALITY(addr, locality)  __builtin_prefetch((addr), 0, (locality))
+#define SPECTRAL_PREFETCH_WRITE_LOCALITY(addr, locality) __builtin_prefetch((addr), 1, (locality))
+#define SPECTRAL_PREFETCH_READ(addr)                     SPECTRAL_PREFETCH_READ_LOCALITY((addr), 3)
+#define SPECTRAL_PREFETCH_WRITE(addr)                    SPECTRAL_PREFETCH_WRITE_LOCALITY((addr), 3)
 #else
-#define PREFETCH_READ(addr)     ((void)0)
-#define PREFETCH_WRITE(addr)    ((void)0)
+#define SPECTRAL_PREFETCH_READ_LOCALITY(addr, locality)  ((void)0)
+#define SPECTRAL_PREFETCH_WRITE_LOCALITY(addr, locality) ((void)0)
+#define SPECTRAL_PREFETCH_READ(addr)                     ((void)0)
+#define SPECTRAL_PREFETCH_WRITE(addr)                    ((void)0)
 #endif
 
 /*
  * Force Inline Hint
  */
 #ifndef SPECTRAL_FORCEINLINE
-  #if defined(__GNUC__) || defined(__clang__)
-    #define SPECTRAL_FORCEINLINE __attribute__((always_inline)) inline
-  #elif defined(_MSC_VER)
-    #define SPECTRAL_FORCEINLINE __forceinline
+  #if SPECTRAL_EMBEDDED
+    #if defined(__GNUC__) || defined(__clang__)
+      #define SPECTRAL_FORCEINLINE __attribute__((always_inline)) inline
+    #elif defined(_MSC_VER)
+      #define SPECTRAL_FORCEINLINE __forceinline
+    #else
+      #define SPECTRAL_FORCEINLINE inline
+    #endif
   #else
     #define SPECTRAL_FORCEINLINE inline
   #endif

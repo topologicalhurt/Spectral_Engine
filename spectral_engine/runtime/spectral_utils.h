@@ -33,6 +33,11 @@ extern "C" {
 #define BYTES_TO_MB(b)  ((double)(b) / (double)SPECTRAL_BYTES_PER_MIB)
 #define BYTES_TO_GB(b)  ((double)(b) / (double)SPECTRAL_BYTES_PER_GIB)
 
+static inline double spectral_bandwidth_gibps(size_t bytes, double elapsed_sec) {
+    if (elapsed_sec <= 0.0) return 0.0;
+    return BYTES_TO_GB(bytes) / elapsed_sec;
+}
+
 #define SPECTRAL_MILLIS_PER_SECOND_F 1000.0f
 #define SPECTRAL_MILLIS_PER_SECOND_D 1000.0
 #define SPECTRAL_MICROS_PER_MILLI_D  1000.0
