@@ -6035,7 +6035,7 @@ XXH3_accumulate_512_scalar(void* XXH_RESTRICT acc,
 {
     size_t i;
     /* ARM GCC refuses to unroll this loop, resulting in a 24% slowdown on ARMv6. */
-#if defined(__GNUC__) && !defined(__clang__) \
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 8 \
   && (defined(__arm__) || defined(__thumb2__)) \
   && defined(__ARM_FEATURE_UNALIGNED) /* no unaligned access just wastes bytes */ \
   && XXH_SIZE_OPT <= 0
