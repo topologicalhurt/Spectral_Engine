@@ -65,7 +65,7 @@ Much of the architecture is memory-bandwidth limited & prefers being resident in
 > ```shell
 > make clean && make clean-output && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPECTRAL_PRODUCTION_BUILD=OFF -DSPECTRAL_REPRO_BUILD=OFF && cmake --build build/ --target desktop --parallel
 > ./build/bin/spectral_x86_64_cuda_desktop ./resources/testing/shakespeare_he_saw_the_cat.wav 0 1 0 4096 128 -85 20 0 # Short-run result
-> python3 tools/benchmark_spectral.py bench -b build/bin/spectral_x86_64_cuda_desktop -i resources/testing/shakespeare_he_saw_the_cat.wav -P -- 0 1 0 4096 128 # Benchmark result
+> PYTHONPATH=tools python3 -m spectral_tools.testing.benchmark_workflow bench -b build/bin/spectral_x86_64_cuda_desktop -i resources/testing/shakespeare_he_saw_the_cat.wav -P -- 0 1 0 4096 128 # Benchmark result
 > ```
 
 *The following is a dump from the benchmark tool for the hop size 128 case:*

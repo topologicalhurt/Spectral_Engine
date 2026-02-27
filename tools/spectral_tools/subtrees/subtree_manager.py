@@ -282,7 +282,7 @@ class SubtreeManager(SubtreeOpsBase):
         remote_lookup_map = self._prefetch_remote_lookup(**prefetch_kwargs)
 
         if not dry_run:
-            self._prepare_subtree_clean_tree()
+            self._prepare_subtree_clean_tree(allow_tools_dirty_without_stash=True)
 
         restore_ok = True
         try:

@@ -210,8 +210,8 @@ static int XSUM_algoBitmask_Accepts(XSUM_U32 algoBitmask, AlgoSelected parsedLin
 *  File Hashing
 **********************************************************/
 
-#define XXHSUM32_DEFAULT_SEED 0                   /* Default seed for algo_xxh32 */
-#define XXHSUM64_DEFAULT_SEED 0                   /* Default seed for algo_xxh64 */
+static XSUM_U32 g_default_seed_u32 = 0;                   /* Default seed for algo_xxh32 */
+static XSUM_U64 g_default_seed_u64 = 0;                   /* Default seed for algo_xxh64, algo_xxh3 and algo_xxh128 */
 
 /* for support of --little-endian display mode */
 static void XSUM_display_LittleEndian(const void* ptr, size_t length)
@@ -249,11 +249,12 @@ XSUM_hashStream(FILE* inFile,
     XXH32_state_t state32;
     XXH64_state_t state64;
     XXH3_state_t  state3;
+    memset( &state3, 0, sizeof(state3) );
 
     /* Init */
-    (void)XXH32_reset(&state32, XXHSUM32_DEFAULT_SEED);
-    (void)XXH64_reset(&state64, XXHSUM64_DEFAULT_SEED);
-    (void)XXH3_128bits_reset(&state3);
+    (void)XXH32_reset(&state32, g_default_seed_u32);
+    (void)XXH64_reset(&state64, g_default_seed_u64);
+    (void)XXH3_128bits_reset_withSeed(&state3, g_default_seed_u64);
 
     /* Load file & update hash */
     {   size_t readSize;
@@ -1395,7 +1396,7 @@ static int XSUM_usage(const char* exename)
     XSUM_log( "                       0: XXH32 \n");
     XSUM_log( "                       1: XXH64 \n");
     XSUM_log( "                       2: XXH128 (also called XXH3_128bits) \n");
-    XSUM_log( "                       3: XXH3 (also called XXH3_64bits) \n");
+    XSUM_log( "                       3: XXH3   (also called XXH3_64bits) \n");
     XSUM_log( "  -c, --check          read xxHash checksum from [files] and check them \n");
     XSUM_log( "      --files-from     generate hashes for files listed in [files] \n");
     XSUM_log( "      --filelist       generate hashes for files listed in [files] \n");
@@ -1412,6 +1413,7 @@ static int XSUM_usage_advanced(const char* exename)
     XSUM_log( "      --tag            Produce BSD-style checksum lines \n");
     XSUM_log( "      --little-endian  Checksum values use little endian convention (default: big endian) \n");
     XSUM_log( "      --binary         Read in binary mode \n");
+    XSUM_log( "      --seed #         Set seed (default: 0) \n");
     XSUM_log( "  -b                   Run benchmark \n");
     XSUM_log( "  -b#                  Bench only algorithm variant # \n");
     XSUM_log( "  -i#                  Number of times to run the benchmark (default: %i) \n", NBLOOPS_DEFAULT);
@@ -1499,6 +1501,28 @@ static XSUM_U32 XSUM_readU32FromChar(const char** stringPtr) {
     return result;
 }
 
+/* Similar to XSUM_readU32FromCharChecked but for XSUM_U64 */
+static XSUM_U64 XSUM_readU64FromChar( const char** number_str ){
+
+    static const XSUM_U64 max = (((XSUM_U64)(-1)) / 10) - 1;
+    XSUM_U64 res = 0;
+
+    if ( **number_str == '-' ) /* check negative value */
+        errorOut("Error: numeric value cannot be negative");
+
+    if ((**number_str < '0') || (**number_str > '9'))
+        errorOut("Error: invalid numeric value");
+
+    while ( **number_str >= '0' && **number_str <= '9' ){
+        if ( res > max ) errorOut("Error: numeric value too large"); /* overflow */
+        res *= 10;
+        res += (XSUM_U64)(**number_str - '0');
+        (*number_str)++;
+    }
+
+    return res;
+}
+
 XSUM_API int XSUM_main(int argc, const char* argv[])
 {
     int i, filenamesStart = 0;
@@ -1545,6 +1569,20 @@ XSUM_API int XSUM_main(int argc, const char* argv[])
         if (!strcmp(argument, "--help")) { return XSUM_usage_advanced(exename); }
         if (!strcmp(argument, "--version")) { XSUM_log(FULL_WELCOME_MESSAGE(exename)); XSUM_sanityCheck(); return 0; }
         if (!strcmp(argument, "--tag")) { convention = display_bsd; continue; }
+        if (!strcmp(argument, "--seed") ){
+            const char* seed_str;
+            i++;
+            seed_str = argv[i];
+            switch( algo ){
+                    case algo_xxh32  : g_default_seed_u32 = XSUM_readU32FromChar(&seed_str); break;
+                    case algo_xxh64  :
+                    case algo_xxh3   :
+                    case algo_xxh128 : g_default_seed_u64 = XSUM_readU64FromChar(&seed_str); break;
+                    default:
+                        return XSUM_usage_advanced(exename);
+                }
+            continue;
+        }
 
         if (!strcmp(argument, "--")) {
             if (filenamesStart==0 && i!=argc-1) filenamesStart=i+1; /* only supports a continuous list of filenames */

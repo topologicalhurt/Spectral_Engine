@@ -20,6 +20,8 @@ extern "C" {
 #endif
 
 FAST_MATH_HOT float fast_sin(float x);
+FAST_MATH_HOT float fast_inv_sqrt(float x);
+FAST_MATH_HOT float fast_sqrt(float x);
 float fast_atan2(float y, float x);
 float phase_to_rads(float p);
 

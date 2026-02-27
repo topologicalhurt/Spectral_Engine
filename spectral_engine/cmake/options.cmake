@@ -15,6 +15,17 @@ option(SPECTRAL_SKIP_VERSION_CHECK "Skip minimum compiler version checks" OFF)
 option(SPECTRAL_PRODUCTION_BUILD
     "Enable production build defaults (release-oriented + reproducible profile)"
     OFF)
+option(SPECTRAL_DEBUG_LOGGING
+    "Enable SPECTRAL_DBG/SPECTRAL_DBG_TRACE logging (active when NDEBUG is not defined)"
+    OFF)
+set(SPECTRAL_TRACK_PAIR_OMP_CHUNK "0" CACHE STRING
+    "OpenMP static chunk for tracker pair loop (0 keeps default static scheduling)")
+if(NOT SPECTRAL_TRACK_PAIR_OMP_CHUNK MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "SPECTRAL_TRACK_PAIR_OMP_CHUNK must be a non-negative integer.")
+endif()
+math(EXPR SPECTRAL_TRACK_PAIR_OMP_CHUNK_CANONICAL "${SPECTRAL_TRACK_PAIR_OMP_CHUNK}")
+set(SPECTRAL_TRACK_PAIR_OMP_CHUNK "${SPECTRAL_TRACK_PAIR_OMP_CHUNK_CANONICAL}" CACHE STRING
+    "OpenMP static chunk for tracker pair loop (0 keeps default static scheduling)" FORCE)
 
 if(SPECTRAL_PRODUCTION_BUILD
    AND NOT CMAKE_CONFIGURATION_TYPES
@@ -53,7 +64,17 @@ if(NOT SPECTRAL_SIMULATION_BOARD IN_LIST SPECTRAL_VALID_SIMULATION_BOARDS)
     message(FATAL_ERROR "Invalid SPECTRAL_SIMULATION_BOARD='${SPECTRAL_SIMULATION_BOARD}'. Use generic or daisy.")
 endif()
 
-set(SPECTRAL_BENCH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/benchmark_spectral.sh" CACHE FILEPATH "Benchmark harness script")
+set(SPECTRAL_TOOLS_PYTHONPATH "${SPECTRAL_REPO_ROOT}/tools" CACHE PATH
+    "PYTHONPATH root for spectral_tools package modules.")
+unset(SPECTRAL_BENCH_SCRIPT CACHE)
+set(_SPECTRAL_BENCH_MODULE_DEFAULT "spectral_tools.testing.benchmark_workflow")
+set(SPECTRAL_BENCH_MODULE "${_SPECTRAL_BENCH_MODULE_DEFAULT}" CACHE STRING
+    "Benchmark harness module path used with python -m")
+if(SPECTRAL_BENCH_MODULE STREQUAL "")
+    set(SPECTRAL_BENCH_MODULE "${_SPECTRAL_BENCH_MODULE_DEFAULT}" CACHE STRING
+        "Benchmark harness module path used with python -m" FORCE)
+endif()
+unset(_SPECTRAL_BENCH_MODULE_DEFAULT)
 set(SPECTRAL_BENCH_INPUT "${SPECTRAL_REPO_ROOT}/resources/testing/shakespeare_he_saw_the_cat.wav" CACHE FILEPATH "Benchmark input file")
 set(SPECTRAL_BENCH_RUNS "6" CACHE STRING "Benchmark run count")
 set(SPECTRAL_BENCH_ARGS "0 1.0 0 4096 128 -90 8 1" CACHE STRING "Benchmark CLI arguments")

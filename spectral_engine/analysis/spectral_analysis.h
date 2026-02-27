@@ -5,12 +5,9 @@
  * to create "segments" representing individual sinusoidal components.
  * 
  * The output SegmentArray can be used directly for resynthesis or saved
- * to a binary file for later use (including on embedded targets).
- * 
- * Uses vDSP (macOS) or FFTW (Linux) for FFT computation.
- * Multi-threaded with OpenMP.
  */
 
+/* Internal chunks for large file STFT analysis to preserve memory */
 #ifndef SPECTRAL_ANALYSIS_H
 #define SPECTRAL_ANALYSIS_H
 

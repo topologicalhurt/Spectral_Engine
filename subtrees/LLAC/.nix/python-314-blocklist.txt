@@ -1,5 +1,0 @@
-^html5lib(==.*)?$
-^ipython(==.*)?$
-^matplotlib(==.*)?$
-^traitlets(==.*)?$
-^jupyter(==.*)?$

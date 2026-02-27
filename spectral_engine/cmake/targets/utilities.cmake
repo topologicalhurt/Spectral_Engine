@@ -2,7 +2,7 @@
 
 include("${SPECTRAL_ENGINE_ROOT}/cmake/python_env.cmake")
 
-set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/gen_resource_hashes.py")
+set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/spectral_tools/generators/resource_hashes.py")
 set(SPECTRAL_RESOURCE_HASH_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_hash_resources_xx32_xx3.c")
 set(SPECTRAL_RESOURCE_HASH_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_resource_hashes.cmake")
 configure_file(
@@ -26,7 +26,7 @@ add_custom_command(
 
 add_custom_target(generate_resource_hashes
     DEPENDS "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
-add_dependencies(generate_resource_hashes prepare_python_tools)
+add_dependencies(generate_resource_hashes prepare_python_tools spectral_resource_bridge)
 
 set_source_files_properties(
     "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
@@ -38,6 +38,7 @@ add_custom_target(verify_resource_hashes
             -P "${SPECTRAL_RESOURCE_HASH_RUNNER}"
     DEPENDS
         prepare_python_tools
+        spectral_resource_bridge
         generate_resource_hashes
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
         "${SPECTRAL_RESOURCE_HASH_RUNNER}"
@@ -109,7 +110,10 @@ endif()
 add_custom_target(syntax_test DEPENDS desktop embedded_arm embedded_arm_restricted)
 
 add_custom_target(bench
-    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C "${SPECTRAL_PYTHON}" "${SPECTRAL_BENCH_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -E env
+            LC_ALL=C
+            "PYTHONPATH=${SPECTRAL_TOOLS_PYTHONPATH}"
+            "${SPECTRAL_PYTHON}" -m "${SPECTRAL_BENCH_MODULE}"
             bench
             --binary "${SPECTRAL_BIN_DIR}/${TARGET_DESKTOP}"
             --input "${SPECTRAL_BENCH_INPUT}"
@@ -120,7 +124,10 @@ add_custom_target(bench
     WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
 
 add_custom_target(bench_cache
-    COMMAND ${CMAKE_COMMAND} -E env LC_ALL=C "${SPECTRAL_PYTHON}" "${SPECTRAL_BENCH_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -E env
+            LC_ALL=C
+            "PYTHONPATH=${SPECTRAL_TOOLS_PYTHONPATH}"
+            "${SPECTRAL_PYTHON}" -m "${SPECTRAL_BENCH_MODULE}"
             bench
             --binary "${SPECTRAL_BIN_DIR}/${TARGET_DESKTOP}"
             --input "${SPECTRAL_BENCH_INPUT}"

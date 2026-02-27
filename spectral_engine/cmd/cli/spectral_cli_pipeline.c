@@ -341,6 +341,7 @@ static PipelineError pipeline_render_and_write(
     pipeline_resources_track_render(resources, resources->segments.count, out_bytes);
 #endif
 
+    SPECTRAL_STAGE_BEGIN("synth");
     {
         SpectralError synth_err = run_synthesis(opts, resources->segments, resources->output,
                                                 out_len, wt_bank, &timing->t_synth);
@@ -354,12 +355,15 @@ static PipelineError pipeline_render_and_write(
             return PIPELINE_ERR_SYNTHESIS;
         }
     }
+    SPECTRAL_STAGE_END("synth");
 
+    SPECTRAL_STAGE_BEGIN("norm");
     {
         double norm_start = omp_get_wtime();
         spectral_normalize_float(resources->output, out_len, SPECTRAL_NORMALIZE_HEADROOM);
         timing->t_norm = omp_get_wtime() - norm_start;
     }
+    SPECTRAL_STAGE_END("norm");
 
     if (ensure_output_dir_exists() != PIPELINE_OK) {
         SPECTRAL_LOG_ERROR("Failed to create output directory (path=%s)",
@@ -367,6 +371,7 @@ static PipelineError pipeline_render_and_write(
         return PIPELINE_ERR_OUTPUT;
     }
 
+    SPECTRAL_STAGE_BEGIN("write");
     {
         double write_start = omp_get_wtime();
         SpectralError write_err = spectral_audio_write(
@@ -379,6 +384,7 @@ static PipelineError pipeline_render_and_write(
             return PIPELINE_ERR_OUTPUT;
         }
     }
+    SPECTRAL_STAGE_END("write");
     SPECTRAL_LOG_INFO("Wrote output: %s", g_paths.output_wav);
 
     return PIPELINE_OK;
@@ -406,6 +412,57 @@ static PipelineAnalyzeRequest pipeline_make_cache_analyze_request(void)
     return request;
 }
 
+static int pipeline_split_analysis_markers_enabled(void) {
+    static int initialized = 0;
+    static int enabled = 0;
+
+    if (!initialized) {
+        int parsed = 0;
+        if (spectral_getenv_bool(SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS, &parsed)) {
+            enabled = parsed ? 1 : 0;
+        } else {
+            enabled = 0;
+        }
+        initialized = 1;
+    }
+
+    return enabled;
+}
+
+static void pipeline_emit_split_analysis_markers(
+    uint64_t analysis_begin_ns,
+    uint64_t analysis_end_ns,
+    const SpectralTimingResults* timing)
+{
+    uint64_t analysis_span_ns = 0;
+    double fft_sec = 0.0;
+    double track_sec = 0.0;
+    double total_sec = 0.0;
+    uint64_t fft_span_ns = 0;
+    uint64_t fft_end_ns = 0;
+
+    if (!timing || analysis_end_ns <= analysis_begin_ns) return;
+
+    analysis_span_ns = analysis_end_ns - analysis_begin_ns;
+    fft_sec = timing->t_fft;
+    track_sec = timing->t_track;
+
+    if (!spectral_is_finite_f64(fft_sec) || fft_sec < 0.0) fft_sec = 0.0;
+    if (!spectral_is_finite_f64(track_sec) || track_sec < 0.0) track_sec = 0.0;
+
+    total_sec = fft_sec + track_sec;
+    if (total_sec <= 0.0) return;
+
+    fft_span_ns = (uint64_t)((double)analysis_span_ns * (fft_sec / total_sec));
+    if (fft_span_ns > analysis_span_ns) fft_span_ns = analysis_span_ns;
+    fft_end_ns = analysis_begin_ns + fft_span_ns;
+
+    SPECTRAL_STAGE_BEGIN_AT("fft", analysis_begin_ns);
+    SPECTRAL_STAGE_END_AT("fft", fft_end_ns);
+    SPECTRAL_STAGE_BEGIN_AT("track", fft_end_ns);
+    SPECTRAL_STAGE_END_AT("track", analysis_end_ns);
+}
+
 static PipelineError pipeline_analyze_input_to_segments(
     const SpectralCliOptions* opts,
     PipelineRunResources* resources,
@@ -419,6 +476,9 @@ static PipelineError pipeline_analyze_input_to_segments(
     int use_cache_labels = 0;
     int print_window_range = 0;
     int release_input_buffer_after_analysis = 0;
+    uint64_t analysis_begin_ns = 0;
+    uint64_t analysis_end_ns = 0;
+    int emit_split_analysis_markers = 0;
 
     if (request) {
         use_cache_labels = request->use_cache_labels;
@@ -478,9 +538,18 @@ static PipelineError pipeline_analyze_input_to_segments(
                           *out_n_samples, opts->n_fft, opts->hop, opts->db_thresh, opts->n_threads);
     }
 
+    emit_split_analysis_markers = pipeline_split_analysis_markers_enabled();
+
+    analysis_begin_ns = spectral_log_get_monotonic_ns();
+    SPECTRAL_STAGE_BEGIN_AT("analysis", analysis_begin_ns);
     resources->segments = analyze_audio(windowed_audio, *out_n_samples, *out_sample_rate,
                                         opts->n_fft, opts->hop, opts->db_thresh,
                                         &timing->t_fft, &timing->t_track);
+    analysis_end_ns = spectral_log_get_monotonic_ns();
+    SPECTRAL_STAGE_END_AT("analysis", analysis_end_ns);
+    if (emit_split_analysis_markers) {
+        pipeline_emit_split_analysis_markers(analysis_begin_ns, analysis_end_ns, timing);
+    }
     if (use_cache_labels) {
         SPECTRAL_LOG_INFO("Cache build: found %u segments", resources->segments.count);
     } else {

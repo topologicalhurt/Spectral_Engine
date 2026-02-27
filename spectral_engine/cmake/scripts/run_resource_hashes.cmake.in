@@ -3,7 +3,8 @@ if(NOT DEFINED SPECTRAL_HASH_MODE)
 endif()
 
 set(_python "@SPECTRAL_PYTHON@")
-set(_resource_hash_script "@SPECTRAL_RESOURCE_HASH_SCRIPT@")
+set(_resource_hash_module "spectral_tools.generators.resource_hashes")
+set(_tools_pythonpath "@SPECTRAL_TOOLS_PYTHONPATH@")
 set(_resource_hash_output "@SPECTRAL_RESOURCE_HASH_OUTPUT@")
 set(_resource_dir "@SPECTRAL_REPO_ROOT@/resources")
 
@@ -14,7 +15,9 @@ if(NOT EXISTS "${_python}")
 endif()
 
 execute_process(
-    COMMAND "${_python}" "${_resource_hash_script}"
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "PYTHONPATH=${_tools_pythonpath}"
+            "${_python}" -m "${_resource_hash_module}"
             --resources-dir "${_resource_dir}"
             --output "${_resource_hash_output}"
             --mode "${SPECTRAL_HASH_MODE}"
@@ -22,6 +25,6 @@ execute_process(
 
 if(NOT _hash_result EQUAL 0)
     message(FATAL_ERROR
-        "gen_resource_hashes.py failed in mode '${SPECTRAL_HASH_MODE}' "
+        "resource hash module '${_resource_hash_module}' failed in mode '${SPECTRAL_HASH_MODE}' "
         "(exit=${_hash_result}, python=${_python})")
 endif()

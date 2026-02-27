@@ -149,13 +149,20 @@ class GitOps:
         return self.run(["rev-parse", "--git-dir"]).returncode == 0
 
     def find_stash_ref_by_marker(self, marker: str) -> str:
-        """Return stash ref whose message exactly matches ``marker``."""
+        """Return stash ref whose subject carries ``marker`` as the message tail.
+
+        ``git stash push -m <marker>`` typically stores a subject like:
+        ``On <branch>: <marker>`` (or ``WIP on <branch>: <marker>``),
+        so exact equality with ``marker`` is not reliable.
+        """
         result = self.run(["stash", "list", "--format=%gd%x00%gs"])
         if result.returncode != 0:
             return ""
         for raw in result.stdout.splitlines():
             ref, _, message = raw.partition("\x00")
-            if ref and message.strip() == marker:
+            subject = message.strip()
+            tail = subject.rsplit(": ", 1)[-1]
+            if ref and (subject == marker or tail == marker):
                 return ref.strip()
         return ""
 

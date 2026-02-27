@@ -14,6 +14,26 @@ float fast_atan2(float y, float x) {
     return r;
 }
 
+/* fast_inv_sqrt: Classic fast inverse square root (Quake III style).
+ * Provides ~1% precision with a single Newton-Raphson iteration.
+ * Much faster than 1.0f / sqrtf(x) on hardware without native rsqrtss. */
+float fast_inv_sqrt(float x) {
+    if (x <= 0.0f) return 0.0f;
+    union { float f; uint32_t i; } conv;
+    float x2 = x * 0.5f, y = x;
+    conv.f = y;
+    conv.i = 0x5f3759df - (conv.i >> 1);
+    y = conv.f;
+    y = y * (1.5f - (x2 * y * y));
+    return y;
+}
+
+/* fast_sqrt: Fast square root via fast_inv_sqrt */
+float fast_sqrt(float x) {
+    if (x <= 0.0f) return 0.0f;
+    return x * fast_inv_sqrt(x);
+}
+
 /* fast_sin: Canonical sine for all oscillators. GPU shaders must match.
  * Pade [5/4] approximation (~1e-5 max error) — delegates to spectral_osc_formulas.h */
 float fast_sin(float x) {

@@ -303,7 +303,7 @@ static inline void spectral_accum_batch4(q31_t* accum,
 #if SPECTRAL_ARM_M7 && defined(__GNUC__)
 
 static SPECTRAL_MAYBE_UNUSED inline void prefetch_segment(const SpectralSegmentQ15* seg) {
-    PREFETCH_READ(seg);
+    SPECTRAL_PREFETCH_READ(seg);
 }
 
 static inline void spectral_data_sync_barrier(void) {
@@ -447,7 +447,7 @@ static inline void synth_core_m7(
 
     SPECTRAL_UNROLL_4
     for (; j < end4; j += 4) {
-        PREFETCH_WRITE(&accum[j + 8]);
+        SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
 
         q31_t p0, p1, p2, p3;
         spectral_phase_batch4(*phase, freq_inc, &p0, &p1, &p2, &p3);

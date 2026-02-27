@@ -1,5 +1,0 @@
-ipython==9.5.0
-matplotlib==3.10.6
-numpy==2.3.3
-pylatex==1.4.2
-scipy==1.16.2
