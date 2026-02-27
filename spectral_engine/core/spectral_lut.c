@@ -5,8 +5,9 @@
 
 /*
  * Flash-resident LUT option: when SPECTRAL_LUT_IN_FLASH is set,
- * the LUT is pre-computed at build time (by tools/gen_lut.py) and
- * placed in flash via linker section, saving ~8KB of SRAM.
+ * the LUT is pre-computed at build time
+ * (by tools/spectral_tools/generators/lut_generator.py) and placed in flash
+ * via linker section, saving ~8KB of SRAM.
  *
  * When not set, spectral_lut_init_sine() computes the table at runtime.
  */

@@ -19,6 +19,7 @@ if(NOT SPECTRAL_REPRO_BUILD)
         -ffp-contract=fast
         -march=native
         -mtune=native
+        -mavx2
         -mno-avx512f)
 endif()
 

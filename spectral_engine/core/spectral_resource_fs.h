@@ -58,27 +58,41 @@ extern const SpectralResourceFsEntry spectral_resource_hashes[];
 extern const size_t                  spectral_resource_hashes_count;
 
 /* FNV-1a 32-bit algorithm constants used by spectral_resource_file_id_from_path().
- * MUST match the constants used in gen_resource_hashes.py::file_id_from_path()
+ * MUST match the constants used in
+ * tools/spectral_tools/generators/resource_hashes.py::file_id_from_path()
  * — any divergence causes silent ID mismatches on embedded targets. */
 #define SPECTRAL_FNV1A_32_OFFSET_BASIS  UINT32_C(2166136261)
 #define SPECTRAL_FNV1A_32_PRIME         UINT32_C(16777619)
 
+/* Maximum output size for a canonicalized path (after all 5 phases).
+ * Worst-case RLE expansion is 2x; a 512-byte normalized path produces
+ * at most a 1024-byte canonical form. */
+#define SPECTRAL_CANONICAL_PATH_SIZE    1024u
+
 /* Compute the FNV-1a file ID for an arbitrary path string.
  * The path is canonicalized before hashing (lowercase, control-strip, path
- * normalization, generalized RLE) — see compress_path() in gen_resource_hashes.py
- * for the byte-identical transform.  Returns 0 for NULL. */
+ * normalization, generalized RLE) — see compress_path() in
+ * tools/spectral_tools/generators/resource_hashes.py for the byte-identical
+ * transform.  Returns 0 for NULL. */
 SpectralResourceFileId spectral_resource_file_id_from_path(const char* path);
+
+/* Canonicalize a resource-relative path through all five phases (lowercase,
+ * control-strip, separator normalize, component resolution, RLE) and write
+ * the result into *out*.  Returns the number of bytes written (excluding the
+ * NUL terminator).  out_size must be >= SPECTRAL_CANONICAL_PATH_SIZE. */
+size_t spectral_resource_path_canonical(
+    const char* path, char* out, size_t out_size);
 
 /* Look up a resource entry by path (host) or pre-computed ID (embedded).
  * Returns NULL if not found.
  *
  * spectral_resource_fs_find_by_path(): performs an exact strcmp against the
  * stored path strings — which are the raw POSIX-relative paths as emitted by
- * gen_resource_hashes.py (e.g. "sounds/click.wav").  The path argument must
- * match byte-for-byte; no canonicalization is applied at lookup time.  If you
- * only have a user-supplied path that may differ in case or separators, derive
- * the file ID first with spectral_resource_file_id_from_path() and use the
- * embedded-style lookup instead. */
+ * tools/spectral_tools/generators/resource_hashes.py (e.g.
+ * "sounds/click.wav").  The path argument must match byte-for-byte; no
+ * canonicalization is applied at lookup time.  If you only have a user-supplied
+ * path that may differ in case or separators, derive the file ID first with
+ * spectral_resource_file_id_from_path() and use the embedded-style lookup instead. */
 #if SPECTRAL_HASH_HAS_HOST_FILE_API
 const SpectralResourceFsEntry* spectral_resource_fs_find_by_path(const char* path);
 #else

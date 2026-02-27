@@ -23,7 +23,8 @@ static inline char spectral_hex_nibble(unsigned n)
 }
 
 /* ---------------------------------------------------------------------------
- * Path canonicalization — must match compress_path() in gen_resource_hashes.py.
+ * Path canonicalization — must match compress_path() in
+ * tools/spectral_tools/generators/resource_hashes.py.
  *
  * Five transforms in order:
  *   (1) Lowercase
@@ -160,7 +161,7 @@ static size_t spectral_path_p3(
     return w;
 }
 
-static size_t spectral_resource_path_canonical(
+size_t spectral_resource_path_canonical(
     const char* path, char* out, size_t out_size)
 {
     char scratch[SPECTRAL_CANONICAL_PATH_SIZE];
@@ -180,7 +181,8 @@ static size_t spectral_resource_path_canonical(
 /* FNV-1a (32-bit) over the canonicalized path.
  *
  * The same FNV constants and the same canonicalization (compress_path) are
- * used by gen_resource_hashes.py so IDs are identical across host and embedded
+ * used by tools/spectral_tools/generators/resource_hashes.py so IDs are
+ * identical across host and embedded
  * builds.  Returns 0 for a NULL path. */
 SpectralResourceFileId spectral_resource_file_id_from_path(const char* path)
 {

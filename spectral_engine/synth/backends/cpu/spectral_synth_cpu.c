@@ -145,7 +145,7 @@ static SpectralError synth_cpu_driver(
         char* dst_base = (char*)tb.bufs[p];
 
         for (size_t i = seg_start; i < seg_end; i++) {
-            if (i + 4 < seg_end) PREFETCH_READ(&sa.segs[i + 4]);
+            if (i + 4 < seg_end) SPECTRAL_PREFETCH_READ(&sa.segs[i + 4]);
 
             SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
             if (!lp.valid) continue;

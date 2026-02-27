@@ -33,6 +33,10 @@
 #ifndef SPECTRAL_NO_PERF
 #define SPECTRAL_NO_PERF        0
 #endif
+/* Project-level unsafe fast-math profile (set by CMake in non-repro host builds). */
+#ifndef SPECTRAL_CUSTOM_FAST_MATH_MODE
+#define SPECTRAL_CUSTOM_FAST_MATH_MODE 0
+#endif
 /* Restricted profiling gate (single ownership).
  * Enabled only when restricted mode is active and restricted debug profiling
  * has been explicitly enabled by the build. */
@@ -246,6 +250,10 @@ typedef enum SpectralTimbre {
 #ifndef SPECTRAL_ENV_SIM_PERF_COLD
 #define SPECTRAL_ENV_SIM_PERF_COLD "SPECTRAL_SIM_PERF_COLD"
 #endif
+/* Emit split analysis stage markers (fft/track) in addition to aggregate analysis markers. */
+#ifndef SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS
+#define SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS "SPECTRAL_STAGE_SPLIT_ANALYSIS"
+#endif
 
 /* Shared execution mode helper to avoid drift across modules. */
 static inline const char* spectral_exec_mode_name(void) {
@@ -315,14 +323,49 @@ static inline const char* spectral_exec_mode_name(void) {
 #endif
 
 /* Canonical analysis/tracker defaults */
-#ifndef SPECTRAL_TRACK_BLOCK_SEGS
-#define SPECTRAL_TRACK_BLOCK_SEGS       16384u
-#endif
+
 #ifndef SPECTRAL_TRACK_DEFAULT_WIDTH
 #define SPECTRAL_TRACK_DEFAULT_WIDTH    0.5f
 #endif
+#ifndef SPECTRAL_TRACK_INTERP_LOG_DOMAIN
+#if SPECTRAL_CUSTOM_FAST_MATH_MODE
+#define SPECTRAL_TRACK_INTERP_LOG_DOMAIN 0
+#else
+#define SPECTRAL_TRACK_INTERP_LOG_DOMAIN 1
+#endif
+#endif
+#ifndef SPECTRAL_TRACK_CANDIDATE_BATCH
+#define SPECTRAL_TRACK_CANDIDATE_BATCH  128u
+#endif
+#ifndef SPECTRAL_TRACK_PREFETCH_LOOKAHEAD
+#define SPECTRAL_TRACK_PREFETCH_LOOKAHEAD 12u
+#endif
+#ifndef SPECTRAL_TRACK_SCAN_PREFETCH_DISTANCE
+#define SPECTRAL_TRACK_SCAN_PREFETCH_DISTANCE 48u
+#endif
+#ifndef SPECTRAL_TRACK_PREFETCH_READ_LOCALITY
+#define SPECTRAL_TRACK_PREFETCH_READ_LOCALITY 2
+#endif
+#ifndef SPECTRAL_TRACK_PREFETCH_PHASE
+#define SPECTRAL_TRACK_PREFETCH_PHASE 1
+#endif
+#ifndef SPECTRAL_TRACK_PREFETCH_WRITE_LOCALITY
+#define SPECTRAL_TRACK_PREFETCH_WRITE_LOCALITY 2
+#endif
+#ifndef SPECTRAL_TRACK_ALLOC_FAILED_POLL_STRIDE
+#define SPECTRAL_TRACK_ALLOC_FAILED_POLL_STRIDE 16u
+#endif
+#ifndef SPECTRAL_TRACK_PAIR_OMP_CHUNK
+#define SPECTRAL_TRACK_PAIR_OMP_CHUNK 0u
+#endif
+#ifndef SPECTRAL_TRACK_SEG_PREFETCH_DISTANCE
+#define SPECTRAL_TRACK_SEG_PREFETCH_DISTANCE 16u
+#endif
+#ifndef SPECTRAL_TRACK_DEBUG_TIMING
+#define SPECTRAL_TRACK_DEBUG_TIMING 0
+#endif
 #ifndef SPECTRAL_STFT_CHUNK_FRAMES
-#define SPECTRAL_STFT_CHUNK_FRAMES      4096u
+#define SPECTRAL_STFT_CHUNK_FRAMES      512u
 #endif
 #ifndef SPECTRAL_STFT_CHUNK_THRESHOLD
 #define SPECTRAL_STFT_CHUNK_THRESHOLD   (32ul * 1024ul * 1024ul)
@@ -490,6 +533,11 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 /* Fallback defaults for non-ARM platforms */
 #ifndef SPECTRAL_CACHE_LINE
 #define SPECTRAL_CACHE_LINE     64
+#endif
+#define SPECTRAL_CACHE_LINE_STRIDE (SPECTRAL_CACHE_LINE / sizeof(size_t))
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
+               "cache line must be multiple of size_t");
 #endif
 #ifndef SPECTRAL_ARM32_MAX_ACTIVE
 #define SPECTRAL_ARM32_MAX_ACTIVE    512

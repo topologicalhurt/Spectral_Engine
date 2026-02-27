@@ -87,6 +87,16 @@ void spectral_window_generate(float* window, size_t length, SpectralWindowType t
  */
 const char* spectral_window_name(SpectralWindowType type);
 
+/*
+ * Computes the sub-bin frequency offset for a detected peak based on the
+ * power spectrum (magnitude squared), adapted for the window function.
+ *
+ * For a Hann window, using parabolic interpolation directly on power bins 
+ * heavily biases the shift towards 0. A near-exact estimator without logarithms
+ * is given by Candan (2011) or a modified Jacobsen estimator.
+ */
+float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq);
+
 #ifdef __cplusplus
 }
 #endif

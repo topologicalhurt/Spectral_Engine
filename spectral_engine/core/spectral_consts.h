@@ -26,6 +26,10 @@
 #define SPECTRAL_ATAN2_A2       (-0.327622764f)
 #define SPECTRAL_ATAN2_EPS      1e-10f
 
+/* Peak-tracker interpolation constants */
+#define SPECTRAL_TRACK_LOG_FLOOR            1e-30f
+#define SPECTRAL_TRACK_PARABOLIC_DENOM_EPS  1e-20f
+
 /* Q30 scale (2^30) for Q15*Q15 accumulator conversion */
 #define SPECTRAL_Q30_SCALE      1073741824.0
 #define SPECTRAL_INV_Q30_SCALE  (1.0 / SPECTRAL_Q30_SCALE)
