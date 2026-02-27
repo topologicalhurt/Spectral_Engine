@@ -1,0 +1,7 @@
+https://github.com/topologicalhurt/thesis, subtrees/LLAC, research, none
+https://github.com/simd-everywhere/simde, third_party/simde, master
+https://github.com/ARM-software/CMSIS_6, third_party/cmsis_6, main
+https://github.com/qemu/qemu, third_party/qemu, master
+https://github.com/Cyan4973/xxHash, third_party/xxHash, dev
+https://github.com/electro-smith/libDaisy, third_party/libDaisy, master
+https://github.com/electro-smith/DaisySP, third_party/daisySP, master

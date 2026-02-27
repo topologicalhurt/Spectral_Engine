@@ -1,0 +1,22 @@
+
+(1) At build time, create a small shared component library (E.g. testing) that we create a python binding for.
+This way, we don't have to reproduce / seperately maintain code which can create hidden regressions
+(E.g. in generate_hashes.) Preferably, we would feed this back into the main build. If we are verifying behaviour
+independently, then we may want to keep a seperate verification implementation (E.g. FNV-1A decoder) under a testing
+subfolder, the verification algorithm we could itself check against the main c testing harness. The idea is we then
+keep the python toolchain as thin as possible and in lockstep with the main codebase.
+
+(2) Lut generator should defer to LLAC which will require us to begin contributing upstream again. For now, we have a simple
+naive sin LUT.
+
+(3) Do step-by-step code review starting from subtrees --> performance --> core --> generators --> testing.
+We want to harden this toolchain quickly, as I don't want to really worry about devops stuff and just 'have it work.' That said,
+parts of the toolchain, E.g. generators especially, are much more a part of the active codebase being more dynamic by design.
+
+(4) We have standard CLI options like --dry-run, -P and --skip Etc. that we should uncouple into one class.
+
+(5) We also want a standard design pattern for outputing raw json versus pretty printed output as per above ^^^.
+
+(6) Tool to reduce repo size but only pulling what we use from third_party/ folders.
+
+(7) Tool to reduce repo size but making the default resources/ files opt-in only (extra download.)
