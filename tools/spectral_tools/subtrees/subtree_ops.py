@@ -797,13 +797,22 @@ class SubtreeOpsBase(GitSubtreeOps):
         if self.has_changes(ignored_rel=self._ignored_rel):
             self.die("Working tree is not clean. Commit or stash your changes first.\n  git stash push --include-untracked")
 
-    def _prepare_subtree_clean_tree(self) -> None:
+    @staticmethod
+    def _is_tools_path(path: str) -> bool:
+        return path == "tools" or path.startswith("tools/")
+
+    def _prepare_subtree_clean_tree(self, *, allow_tools_dirty_without_stash: bool = False) -> None:
         dirty = self.collect_dirty_paths()
         if not dirty:
             return
 
         allowed = set(self._ignored_rel)
-        if disallowed := next((path for path in dirty if path not in allowed), ""):
+        if allow_tools_dirty_without_stash:
+            disallowed = next((path for path in dirty if path not in allowed and not self._is_tools_path(path)), "")
+        else:
+            disallowed = next((path for path in dirty if path not in allowed), "")
+
+        if disallowed:
             self.die(f"Working tree has modifications in '{disallowed}'. Commit or stash before running subtree.")
         allowed_dirty = sorted(set(dirty) & allowed)
         if not allowed_dirty:

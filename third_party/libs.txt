@@ -5,3 +5,5 @@ https://github.com/qemu/qemu, third_party/qemu, master
 https://github.com/Cyan4973/xxHash, third_party/xxHash, dev
 https://github.com/electro-smith/libDaisy, third_party/libDaisy, master
 https://github.com/electro-smith/DaisySP, third_party/daisySP, master
+https://github.com/ashvardanian/SimSIMD, third_party/SimSIMD, main
+https://github.com/ashvardanian/StringZilla, third_party/StringZilla, main
