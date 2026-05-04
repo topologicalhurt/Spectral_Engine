@@ -1,3 +1,7 @@
+> [!CAUTION]
+> This codebase is still in **PRE_ALPHA** release.
+> It is entirely a WIP, many features are not yet implemented. Build & Run with caution.
+
 # What Is It?
 
 **Spectral_Engine** performs **spectral synthesis** on audio signals, either **offline** or in **realtime**. My goal is a **"synthesis from first principles"** engine, where **Additive**, **Subtractive**, and **Wavelett** (and most other synthesis forms) can be derived directly in the **spectral / STFT domain**. The core bet is simple: if we keep sound design in one coherent DSP domain, the whole system becomes easier to reason about, optimize, and extend.
@@ -18,17 +22,17 @@ Much of the architecture is memory-bandwidth limited & prefers being resident in
 | Memory Bandwidth | **Dual-channel DDR5-5200+** or strong DDR4 | **Dual-channel DDR4-2666+** | Reduces stalls in bandwidth-heavy stages |
 | Storage | **NVMe SSD** | **SATA SSD** | Speeds up build/cache/output workflow |
 
-> [!INFO]
-> **Minimum** means the smallest practical host to **render a segment binary offline and upload it to an embedded target**.  
+> [!NOTE]
+> **Minimum** means the smallest practical host to *render a segment binary offline and upload it to an embedded target*.  
 > It is **not** intended for aggressive desktop runs with extreme segment density.  
-> **Recommended** is a respectable **middle-ground desktop target** for high-throughput experimentation.
+> **Recommended** is a respectable *middle-ground desktop target* for high-throughput experimentation.
 > This repository explicitly tries to keep the minimum spec in lockstep with an **RP4**, which would be a good choice of device to pair with an embedded target for offline segment processing.
 > The repository reccomends using an **RP5** to get closer to the recommended spec.
 
 <details>
 <summary><strong>Info: Example Intensive Desktop Run</strong></summary>
 
-> [!INFO]
+> [!NOTE]
 > On one high-end desktop a very intensive configuration used  
 > $N=4096$, $H=8$, and $\frac{N}{H}=512$ on a $\sim 40\,\mathrm{s}$ WAV containing complex speech.
 >
@@ -59,7 +63,7 @@ Much of the architecture is memory-bandwidth limited & prefers being resident in
 <details>
 <summary><strong>Info: Full Benchmark Report (Example)</strong></summary>
 
-> [!INFO]
+> [!NOTE]
 > 4070ti, i5-13600k, 32GB DDR5 @ 5600MHz
 > Example of full run:
 > ```shell
@@ -201,10 +205,6 @@ The engine has advanced control options for experimental design. Master partials
 - [ ] O.S. functionality or bare metal for embedded targets
 
 ## Warnings & Disclaimers
-
-> [!CAUTION]
-> This codebase is still in **PRE_ALPHA** release.
-> It is entirely a WIP, many features are not yet implemented. Build & Run with caution.
 
 <details>
 <summary><strong>Warning: Transform choices have large compute tradeoffs</strong></summary>

@@ -1,0 +1,193 @@
+%------------------------ Preamble and bibliography resources
+\documentclass[12pt,oneside]{book}
+\input{frontmatter/preamble}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{amsthm}
+\usepackage{thmtools}
+\usepackage[framemethod=TikZ]{mdframed}
+\usepackage{nomencl}
+\usepackage[utf8]{inputenc}
+\usepackage[PhD,nologo]{style/title}
+
+
+\DeclareMathOperator{\sgn}{sgn}
+
+% Define styles for boxed theorem environments
+\mdfdefinestyle{theoremstyle}{
+	linecolor=black!30,
+	linewidth=0.5pt,
+	innertopmargin=8pt,
+	innerbottommargin=8pt,
+	innerrightmargin=10pt,
+	innerleftmargin=10pt,
+	roundcorner=2pt,
+	backgroundcolor=black!2,
+	skipabove=10pt,
+	skipbelow=10pt
+}
+
+\mdfdefinestyle{remarkstyle}{
+	linecolor=black!20,
+	linewidth=0.5pt,
+	innertopmargin=6pt,
+	innerbottommargin=6pt,
+	innerrightmargin=10pt,
+	innerleftmargin=10pt,
+	roundcorner=2pt,
+	backgroundcolor=black!1,
+	skipabove=8pt,
+	skipbelow=8pt
+}
+
+% Theorem-like environments (stronger boxes)
+\declaretheoremstyle[
+	mdframed={style=theoremstyle},
+	headfont=\bfseries,
+	bodyfont=\normalfont
+]{boxedtheorem}
+
+% Remark-like environments (lighter boxes)
+\declaretheoremstyle[
+	mdframed={style=remarkstyle},
+	headfont=\bfseries,
+	bodyfont=\normalfont
+]{boxedremark}
+
+% Define environments
+\declaretheorem[style=boxedtheorem, numberwithin=section, name=Lemma]{lemma}
+\declaretheorem[style=boxedtheorem, numbered=no, name=Theorem]{theorem}
+\declaretheorem[style=boxedtheorem, numbered=no, name=Corollary]{corollary}
+\declaretheorem[style=boxedremark, numberwithin=section, name=Remark]{remark}
+\declaretheorem[style=boxedremark, numberwithin=section, name=Note]{note}
+
+% Proof environment (no box, but with spacing)
+\renewcommand{\qedsymbol}{$\blacksquare$}
+
+\DeclareFixedFont{\ttb}{T1}{txtt}{bx}{n}{12}
+\DeclareFixedFont{\ttm}{T1}{txtt}{m}{n}{12}
+\usepackage{color}
+\definecolor{deepblue}{rgb}{0,0,0.5}
+\definecolor{deepred}{rgb}{0.6,0,0}
+\definecolor{deepgreen}{rgb}{0,0.5,0}
+
+\usepackage{listings}
+
+% Python style for highlighting
+\newcommand\pythonstyle{\lstset{
+language=Python,
+basicstyle=\ttm,
+morekeywords={self},
+keywordstyle=\ttb\color{deepblue},
+emphstyle=\ttb\color{deepred},
+stringstyle=\color{deepgreen},
+frame=tb,
+showstringspaces=false
+}}
+
+\newcommand\cstyle{\lstset{
+language=C,
+basicstyle=\ttm,
+morekeywords={self},
+keywordstyle=\ttb\color{deepblue},
+emphstyle=\ttb\color{deepred},
+stringstyle=\color{deepgreen},
+frame=tb,
+showstringspaces=false
+}}
+
+\newcommand\verilogstyle{\lstset{
+language=Verilog,
+basicstyle=\ttm,
+morekeywords={self},
+keywordstyle=\ttb\color{deepblue},
+emphstyle=\ttb\color{deepred},
+stringstyle=\color{deepgreen},
+frame=tb,
+showstringspaces=false
+}}
+
+
+% Python environment
+\lstnewenvironment{python}[1][]
+{
+\pythonstyle
+\lstset{#1}
+}
+{}
+
+\lstnewenvironment{clang}[1][]
+{
+\cstyle
+\lstset{#1}
+}
+{}
+
+\lstnewenvironment{verilog}[1][]
+{
+\verilogstyle
+\lstset{#1}
+}
+{}
+
+
+
+\makenomenclature
+
+\addbibresource{bibliography.bib}
+
+%------------------------ Main Document --------------------------
+\begin{document}
+
+	%-------------- Information For The Title Page
+	\title{Efficient Hardware Scheduling approach on FPGA's for optimising DSP based workflows}
+	\author{Connor Sinclair}
+	\date{2025}
+	\degree{Bachelor of Software Engineering (Hons.)}
+	\supervisor[1]{Dr. Philip Leong}
+	\school{Engineering}
+
+	%-------------- Front Matter
+	\frontmatter
+	\maketitle
+	\declaration
+
+	\include{frontmatter/abstract}
+	\include{frontmatter/acknowledgments}
+
+	%-------------- Table of contents
+	\cleardoublepage
+	\phantomsection \pdfbookmark[0]{Contents}{Contents}
+	\tableofcontents
+	\addcontentsline{toc}{chapter}{\listfigurename}
+	\listoffigures
+	\addcontentsline{toc}{chapter}{\listtablename}
+	\listoftables
+
+	%\include{frontmatter/nomenclature}
+	%\printnomenclature
+
+	%-------------- Chapters
+	\cleardoublepage
+	\mainmatter
+	\include{chapters/chapter1}
+	\include{chapters/chapter2}
+	\include{chapters/chapter3}
+	\include{chapters/chapter4}
+	\include{chapters/chapter5}
+	\include{chapters/chapter6}
+
+	%-------------- Appendices
+	\cleardoublepage
+	\appendix
+	\include{appendices/appendix1}
+
+	%-------------- Bibliography
+	\cleardoublepage
+	\phantomsection
+	\addcontentsline{toc}{chapter}{Bibliography}
+	\printbibliography
+
+\end{document}
