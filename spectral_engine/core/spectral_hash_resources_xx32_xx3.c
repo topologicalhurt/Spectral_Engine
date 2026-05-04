@@ -14,9 +14,9 @@
 
 const SpectralResourceFsEntry spectral_resource_hashes[] = {
 #if SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-    { UINT32_C(0x07fabc2b), UINT64_C(0x00000000f591d7d7), (size_t)27530578u },
+    { UINT32_C(0x21ceaaae), UINT64_C(0x00000000f591d7d7), (size_t)27530578u },
     { UINT32_C(0x4489d2ed), UINT64_C(0x000000009dcc81d2), (size_t)6901838u },
-    { UINT32_C(0xda2414be), UINT64_C(0x000000009a9c4bc1), (size_t)176444u },
+    { UINT32_C(0x112bbc43), UINT64_C(0x000000009a9c4bc1), (size_t)176444u },
 #else
     {"testing/motormouth_test1_uncompressed_spear.txt", UINT64_C(0x9ee48db333f894d6), (size_t)27530578u},
     {"testing/shakespeare_he_saw_the_cat.wav", UINT64_C(0x89a01685e30b16b8), (size_t)6901838u},
