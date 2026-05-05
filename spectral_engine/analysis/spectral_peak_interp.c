@@ -65,6 +65,7 @@ int spectral_tracker_emit_segment(
     SpectralTracker* tracker,
     int tid,
     const float* __restrict__ row,
+    const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
     size_t cf,
     float t_hop,
@@ -98,6 +99,7 @@ int spectral_tracker_emit_segment(
 
     estimate_input.magsq_row = row;
     estimate_input.phase_row = phase_row;
+    estimate_input.next_magsq_row = next_row;
     estimate_input.n_freqs = tracker->n_freqs;
     estimate_input.bin = cf;
     estimate_input.curr_magsq = curr;

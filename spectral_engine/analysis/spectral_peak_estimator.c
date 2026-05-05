@@ -416,6 +416,48 @@ static int spectral_peak_offset_quinn_second(const SpectralPeakEstimateInput* in
     return 1;
 }
 
+static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateInput* input,
+                                                   float* out_next_offset) {
+    size_t next_bin = 0u;
+    float left = 0.0f;
+    float center = 0.0f;
+    float right = 0.0f;
+    float raw_offset = 0.0f;
+    SpectralWindowInterpMagsqFn interp = NULL;
+
+    if (!input || !input->next_magsq_row || !out_next_offset) return 0;
+    if (input->best_next_bin < 0) return 0;
+
+    next_bin = (size_t)input->best_next_bin;
+    if (next_bin == 0u || next_bin + 1u >= input->n_freqs) return 0;
+
+    left = input->next_magsq_row[next_bin - 1u];
+    center = input->next_magsq_row[next_bin];
+    right = input->next_magsq_row[next_bin + 1u];
+
+    if (!spectral_peak_finite_nonnegative(left) ||
+        !spectral_peak_finite_nonnegative(center) ||
+        !spectral_peak_finite_nonnegative(right)) {
+        return 0;
+    }
+
+    /* The best-next bin was selected from the candidate's local +/-1 search.
+     * For a sub-bin temporal slope, require it to also be a local maximum in
+     * its own next-frame neighborhood. Otherwise keep the old coarse df. */
+    if (center < left || center < right) {
+        return 0;
+    }
+
+    interp = input->interp_magsq ? input->interp_magsq
+                                 : spectral_window_interp_magsq_parabolic;
+    raw_offset = interp(left, center, right);
+    if (!isfinite(raw_offset)) return 0;
+
+    *out_next_offset = spectral_peak_clamp_offset(raw_offset);
+    return 1;
+}
+
+
 static int spectral_peak_estimate_offset(const SpectralPeakEstimateInput* input,
                                          SpectralPeakEstimatorType type,
                                          int neighborhood_validated,
@@ -481,9 +523,11 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     SpectralPeakEstimatorType resolved_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
     SpectralPeakEstimatorType used_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
     float offset = 0.0f;
+    float next_offset = 0.0f;
     float center_mag = -1.0f;
     float amp = 0.0f;
     float next_amp = 0.0f;
+    float bin_delta = 0.0f;
     unsigned flags = 0u;
 
     if (!input || !out || !input->magsq_row || input->n_freqs < 3u ||
@@ -521,12 +565,33 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     next_amp = fast_sqrt(input->next_max_magsq);
     if (!isfinite(amp) || !isfinite(next_amp)) return 0;
 
+    /* Temporal slope contract:
+     *
+     * omega is already sub-bin accurate for the current frame. df should be
+     * based on the change from current sub-bin peak to next-frame sub-bin peak
+     * when the next frame has a valid local maximum around best_next_bin.
+     *
+     * If the next-frame sub-bin estimate is not valid (boundary bin, non-local
+     * max, non-finite values, custom callback failure), preserve the previous
+     * coarse-bin behavior rather than inventing slope from only the current
+     * offset. */
+    bin_delta = (float)(input->best_next_bin - (int)input->bin);
+    if (spectral_peak_estimate_next_offset_magsq(input, &next_offset)) {
+        bin_delta = ((float)input->best_next_bin + next_offset) -
+                    ((float)input->bin + offset);
+        flags |= SPECTRAL_PEAK_ESTIMATE_NEXT_BIN_OFFSET_VALID |
+                 SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED;
+    } else {
+        next_offset = 0.0f;
+    }
+
     out->bin_offset = offset;
+    out->next_bin_offset = next_offset;
     out->amp = amp;
     out->next_amp = next_amp;
     out->da = (next_amp - amp) * input->inv_hop;
     out->omega = ((float)input->bin + offset) * input->freq_step_omega;
-    out->df = (float)(input->best_next_bin - (int)input->bin) * input->freq_step_df;
+    out->df = bin_delta * input->freq_step_df;
     out->flags = flags | SPECTRAL_PEAK_ESTIMATE_AMP_VALID |
                  SPECTRAL_PEAK_ESTIMATE_OMEGA_VALID |
                  SPECTRAL_PEAK_ESTIMATE_DF_VALID;
@@ -538,6 +603,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     return 1;
 }
+
 
 
 int spectral_peak_estimate(const SpectralPeakEstimateInput* input,

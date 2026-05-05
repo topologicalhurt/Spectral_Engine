@@ -178,7 +178,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
 #if SPECTRAL_TRACK_DEBUG_TIMING
     phase_start = omp_get_wtime();
 #endif
-    if (!spectral_tracker_emit_segment(tracker, tid, row, phase_row, cf, t_hop,
+    if (!spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row, cf, t_hop,
                                        freq_step_omega, freq_step_df,
                                        inv_hop, hop_float,
                                        curr, max_vsq, best_next,

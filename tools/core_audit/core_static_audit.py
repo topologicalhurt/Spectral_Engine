@@ -454,6 +454,26 @@ def main() -> int:
     require("hann_log[\"max\"] <= 0.035" in pass13_test,
             "pass 13 test must protect Hann/log-parabolic high-SNR ground-truth accuracy")
 
+
+    estimator_h_pass14 = read("spectral_engine/analysis/spectral_peak_estimator.h")
+    estimator_c_pass14 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    interp_h_pass14 = read("spectral_engine/analysis/spectral_peak_interp.h")
+    interp_c_pass14 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    track_c_pass14 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("const float* next_magsq_row;" in estimator_h_pass14 and
+            "float next_bin_offset;" in estimator_h_pass14,
+            "pass 14 estimator API must expose next-frame row and next sub-bin offset")
+    require("SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED" in estimator_h_pass14,
+            "pass 14 estimator flags must report refined temporal df")
+    require("spectral_peak_estimate_next_offset_magsq" in estimator_c_pass14 and
+            "bin_delta = ((float)input->best_next_bin + next_offset)" in estimator_c_pass14,
+            "pass 14 estimator must refine df from next-frame sub-bin offset")
+    require("const float* __restrict__ next_row" in interp_h_pass14 and
+            "estimate_input.next_magsq_row = next_row;" in interp_c_pass14,
+            "pass 14 tracker emission must pass next-row magnitudes into estimator")
+    require("spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row" in track_c_pass14,
+            "pass 14 tracker must wire next_row into segment emission")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)
