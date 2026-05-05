@@ -39,13 +39,16 @@ typedef enum SpectralPeakEstimateFlags {
     SPECTRAL_PEAK_ESTIMATE_USED_FALLBACK    = 1u << 4,
     SPECTRAL_PEAK_ESTIMATE_COMPLEX_USED     = 1u << 5,
     SPECTRAL_PEAK_ESTIMATE_NEXT_BIN_OFFSET_VALID = 1u << 6,
-    SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED    = 1u << 7
+    SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED    = 1u << 7,
+    SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID    = 1u << 8,
+    SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT = 1u << 9
 } SpectralPeakEstimateFlags;
 
 typedef struct SpectralPeakEstimateInput {
     const float* magsq_row;
     const float* phase_row;
     const float* next_magsq_row;
+    const float* next_phase_row;
     size_t n_freqs;
     size_t bin;
 
@@ -70,6 +73,9 @@ typedef struct SpectralPeakEstimateInput {
 typedef struct SpectralPeakEstimate {
     float bin_offset;
     float next_bin_offset;
+    float phase_bin_offset;
+    float phase_omega;
+    float phase_error;
     float amp;
     float next_amp;
     float da;

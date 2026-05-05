@@ -416,6 +416,73 @@ static int spectral_peak_offset_quinn_second(const SpectralPeakEstimateInput* in
     return 1;
 }
 
+static float spectral_peak_wrap_phase_pi(float x) {
+    if (!isfinite(x)) return 0.0f;
+    return x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
+}
+
+static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput* input,
+                                                float model_omega,
+                                                float* out_phase_bin_offset,
+                                                float* out_phase_omega,
+                                                float* out_phase_error) {
+    float phase0 = 0.0f;
+    float phase1 = 0.0f;
+    float phase_delta = 0.0f;
+    float expected_center = 0.0f;
+    float residual = 0.0f;
+    float denom = 0.0f;
+    float phase_bin_offset = 0.0f;
+    float phase_omega = 0.0f;
+    float phase_error = 0.0f;
+
+    if (!input || !input->phase_row || !input->next_phase_row ||
+        !out_phase_bin_offset || !out_phase_omega || !out_phase_error) {
+        return 0;
+    }
+    if (input->bin >= input->n_freqs ||
+        !isfinite(input->hop_float) || input->hop_float <= 0.0f ||
+        !isfinite(input->freq_step_omega) || input->freq_step_omega <= 0.0f ||
+        !isfinite(model_omega)) {
+        return 0;
+    }
+
+    phase0 = input->phase_row[input->bin];
+    phase1 = input->next_phase_row[input->bin];
+    if (!isfinite(phase0) || !isfinite(phase1)) {
+        return 0;
+    }
+
+    /* Phase-vocoder instantaneous-frequency relation:
+     *
+     *   residual = princarg(phi[t+1,k] - phi[t,k] - omega_bin_center * hop)
+     *   bin_offset_from_phase = residual / (bin_step_omega * hop)
+     *
+     * This is diagnostic here. It tells us whether the magnitude-derived
+     * oscillator model agrees with adjacent-frame phase advance, but it does
+     * not yet override the emitted omega/df fields. */
+    phase_delta = phase1 - phase0;
+    expected_center = (float)input->bin * input->freq_step_omega * input->hop_float;
+    residual = spectral_peak_wrap_phase_pi(phase_delta - expected_center);
+    denom = input->freq_step_omega * input->hop_float;
+    if (!isfinite(denom) || fabsf(denom) < 1.0e-12f) {
+        return 0;
+    }
+
+    phase_bin_offset = residual / denom;
+    phase_omega = ((float)input->bin + phase_bin_offset) * input->freq_step_omega;
+    phase_error = spectral_peak_wrap_phase_pi(phase_delta - model_omega * input->hop_float);
+    if (!isfinite(phase_bin_offset) || !isfinite(phase_omega) || !isfinite(phase_error)) {
+        return 0;
+    }
+
+    *out_phase_bin_offset = phase_bin_offset;
+    *out_phase_omega = phase_omega;
+    *out_phase_error = phase_error;
+    return 1;
+}
+
+
 static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateInput* input,
                                                    float* out_next_offset) {
     size_t next_bin = 0u;
@@ -528,6 +595,9 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     float amp = 0.0f;
     float next_amp = 0.0f;
     float bin_delta = 0.0f;
+    float phase_bin_offset = 0.0f;
+    float phase_omega = 0.0f;
+    float phase_error = 0.0f;
     unsigned flags = 0u;
 
     if (!input || !out || !input->magsq_row || input->n_freqs < 3u ||
@@ -541,9 +611,9 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     if (!spectral_peak_best_next_valid(input)) return 0;
 
     /* The validated entry point means the tracker has already accepted the
-     * local magnitude neighborhood and next-frame triplet.  It does NOT prove
+     * local magnitude neighborhood and next-frame triplet. It does NOT prove
      * that caller-provided frequency-step fields, hop reciprocal, or stored
-     * magnitudes are finite.  Keep these scalar-contract checks unconditional
+     * magnitudes are finite. Keep these scalar-contract checks unconditional
      * so the hot path remains safe if a future caller bypasses the tracker. */
     if (!spectral_peak_finite_nonnegative(input->curr_magsq) ||
         !spectral_peak_finite_nonnegative(input->next_max_magsq) ||
@@ -592,6 +662,20 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     out->da = (next_amp - amp) * input->inv_hop;
     out->omega = ((float)input->bin + offset) * input->freq_step_omega;
     out->df = bin_delta * input->freq_step_df;
+
+    if (spectral_peak_estimate_phase_advance(input, out->omega,
+                                             &phase_bin_offset,
+                                             &phase_omega,
+                                             &phase_error)) {
+        out->phase_bin_offset = phase_bin_offset;
+        out->phase_omega = phase_omega;
+        out->phase_error = phase_error;
+        flags |= SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID;
+        if (fabsf(phase_error) <= SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS) {
+            flags |= SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT;
+        }
+    }
+
     out->flags = flags | SPECTRAL_PEAK_ESTIMATE_AMP_VALID |
                  SPECTRAL_PEAK_ESTIMATE_OMEGA_VALID |
                  SPECTRAL_PEAK_ESTIMATE_DF_VALID;
@@ -603,6 +687,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     return 1;
 }
+
 
 
 

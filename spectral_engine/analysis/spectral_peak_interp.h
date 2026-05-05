@@ -46,6 +46,7 @@ int spectral_tracker_emit_segment(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     size_t cf,
     float t_hop,
     float freq_step_omega,

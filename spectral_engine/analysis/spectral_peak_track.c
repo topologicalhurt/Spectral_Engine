@@ -47,6 +47,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(
     SpectralTracker* tracker, int tid,
     uint32_t* __restrict__ candidate_batch, size_t* candidate_batch_count,
     const float* __restrict__ row, const float* __restrict__ next_row, const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     size_t f, int bits, float t_hop, float threshsq,
     float freq_step_omega, float freq_step_df, float inv_hop, float hop_float,
     uint64_t* local_candidates, uint64_t* local_segments
@@ -143,6 +144,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     size_t cf,
     float t_hop,
     float threshsq,
@@ -178,7 +180,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
 #if SPECTRAL_TRACK_DEBUG_TIMING
     phase_start = omp_get_wtime();
 #endif
-    if (!spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row, cf, t_hop,
+    if (!spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row, next_phase_row, cf, t_hop,
                                        freq_step_omega, freq_step_df,
                                        inv_hop, hop_float,
                                        curr, max_vsq, best_next,
@@ -208,6 +210,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     float t_hop,
     float threshsq,
     float freq_step_omega,
@@ -236,7 +239,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
 #endif
         }
 
-        if (!spectral_tracker_handle_candidate(tracker, tid, row, next_row, phase_row, (size_t)candidates[i],
+        if (!spectral_tracker_handle_candidate(tracker, tid, row, next_row, phase_row, next_phase_row, (size_t)candidates[i],
                                                t_hop, threshsq,
                                                freq_step_omega, freq_step_df,
                                                inv_hop, hop_float,
@@ -263,6 +266,7 @@ int spectral_tracker_flush_candidate_batch(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     float t_hop,
     float threshsq,
     float freq_step_omega,
@@ -289,6 +293,7 @@ int spectral_tracker_flush_candidate_batch(
             row,
             next_row,
             phase_row,
+            next_phase_row,
             t_hop,
             threshsq,
             freq_step_omega,
@@ -320,6 +325,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     float t_hop,
     float threshsq,
     float freq_step_omega,
@@ -347,6 +353,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
         row,
         next_row,
         phase_row,
+        next_phase_row,
         t_hop,
         threshsq,
         freq_step_omega,
@@ -580,9 +587,11 @@ void spectral_tracker_process(SpectralTracker* tracker,
             const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
             const float* __restrict__ next_row;
+            const float* __restrict__ next_phase_row = NULL;
 
             if (t + 1 < chunk_n_frames) {
                 next_row = chunk_magsq + (t + 1) * n_freqs;
+                next_phase_row = chunk_phases + (t + 1) * n_freqs;
             } else {
                 /* Last frame: use overlap row from next chunk */
                 next_row = overlap_magsq_row;
@@ -639,7 +648,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                     
                     if (!spectral_tracker_process_bitmask(
                             tracker, tid, candidate_batch, &candidate_batch_count,
-                            row, next_row, phase_row, f, bits, t_hop, threshsq,
+                            row, next_row, phase_row, next_phase_row, f, bits, t_hop, threshsq,
                             freq_step_omega, freq_step_df, inv_hop, hop_float,
                             &local_candidates, &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -672,7 +681,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                     
                     if (!spectral_tracker_process_bitmask(
                             tracker, tid, candidate_batch, &candidate_batch_count,
-                            row, next_row, phase_row, f, bits, t_hop, threshsq,
+                            row, next_row, phase_row, next_phase_row, f, bits, t_hop, threshsq,
                             freq_step_omega, freq_step_df, inv_hop, hop_float,
                             &local_candidates, &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -701,6 +710,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                             row,
                             next_row,
                             phase_row,
+                            next_phase_row,
                             t_hop,
                             threshsq,
                             freq_step_omega,
@@ -731,6 +741,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                     row,
                     next_row,
                     phase_row,
+                    next_phase_row,
                     t_hop,
                     threshsq,
                     freq_step_omega,
@@ -1088,6 +1099,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(
     SpectralTracker* tracker, int tid,
     uint32_t* __restrict__ candidate_batch, size_t* candidate_batch_count,
     const float* __restrict__ row, const float* __restrict__ next_row, const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     size_t f, int bits, float t_hop, float threshsq,
     float freq_step_omega, float freq_step_df, float inv_hop, float hop_float,
     uint64_t* local_candidates, uint64_t* local_segments
@@ -1172,7 +1184,7 @@ int spectral_tracker_run_fused_frame(
                         simde_mm256_cmp_ps(window_center, window_right, SIMDE_CMP_GT_OQ))));
                 if (!spectral_tracker_process_bitmask(
                         tracker, tid, candidate_batch, candidate_batch_count,
-                        row, next_row, phase_row, f, bits, t_hop, threshsq,
+                        row, next_row, phase_row, next_phase_row, f, bits, t_hop, threshsq,
                         freq_step_omega, freq_step_df, inv_hop, hop_float,
                         local_candidates, local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -1206,7 +1218,7 @@ int spectral_tracker_run_fused_frame(
                 
                 if (!spectral_tracker_process_bitmask(
                         tracker, tid, candidate_batch, candidate_batch_count,
-                        row, next_row, phase_row, f, bits, t_hop, threshsq,
+                        row, next_row, phase_row, next_phase_row, f, bits, t_hop, threshsq,
                         freq_step_omega, freq_step_df, inv_hop, hop_float,
                         local_candidates, local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING

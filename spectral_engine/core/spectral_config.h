@@ -386,6 +386,9 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_DEBUG_TIMING
 #define SPECTRAL_TRACK_DEBUG_TIMING 0
 #endif
+#ifndef SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS
+#define SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS 0.39269908169872414f /* pi/8 */
+#endif
 #ifndef SPECTRAL_STFT_CHUNK_FRAMES
 #define SPECTRAL_STFT_CHUNK_FRAMES      512u
 #endif

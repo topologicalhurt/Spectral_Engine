@@ -162,6 +162,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                         fctx.row = row_curr;
                         fctx.next_row = row_next;
                         fctx.phase_row = phase_curr;
+                        fctx.next_phase_row = phase_next;
                         fctx.t_hop = t_hop;
                         fctx.threshsq = threshsq;
                         fctx.can_start_new = 1;

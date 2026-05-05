@@ -474,6 +474,35 @@ def main() -> int:
     require("spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row" in track_c_pass14,
             "pass 14 tracker must wire next_row into segment emission")
 
+
+    estimator_h_pass15 = read("spectral_engine/analysis/spectral_peak_estimator.h")
+    estimator_c_pass15 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    config_pass15 = read("spectral_engine/core/spectral_config.h")
+    track_h_pass15 = read("spectral_engine/analysis/spectral_peak_track.h")
+    interp_c_pass15 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    track_c_pass15 = read("spectral_engine/analysis/spectral_peak_track.c")
+    fused_c_pass15 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS" in config_pass15,
+            "pass 15 must define explicit phase-consistency tolerance")
+    require("const float* next_phase_row;" in estimator_h_pass15 and
+            "float phase_bin_offset;" in estimator_h_pass15 and
+            "float phase_omega;" in estimator_h_pass15 and
+            "float phase_error;" in estimator_h_pass15,
+            "pass 15 estimator API must expose phase-advance diagnostics")
+    require("SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID" in estimator_h_pass15 and
+            "SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT" in estimator_h_pass15,
+            "pass 15 estimator flags must expose phase diagnostic state")
+    require("spectral_peak_estimate_phase_advance" in estimator_c_pass15 and
+            "phase_delta - model_omega * input->hop_float" in estimator_c_pass15,
+            "pass 15 estimator must compute phase-advance model error")
+    require("next_phase_row" in track_h_pass15 and
+            "estimate_input.next_phase_row = next_phase_row;" in interp_c_pass15,
+            "pass 15 tracker emission must pass next-frame phase into estimator")
+    require("spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row, next_phase_row" in track_c_pass15,
+            "pass 15 tracker must wire next_phase_row through segment emission")
+    require("fctx.next_phase_row = phase_next;" in fused_c_pass15,
+            "pass 15 fused analysis must supply next-frame phase row")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)
