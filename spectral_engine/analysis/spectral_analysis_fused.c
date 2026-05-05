@@ -93,6 +93,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
     tracker = spectral_tracker_create(actual_threads, n_freqs, sr, n_fft, hop, db_thresh, global_max_magsq);
     if (!tracker) goto fail;
+    spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 
     {
         const size_t pair_count = n_frames - 1u;

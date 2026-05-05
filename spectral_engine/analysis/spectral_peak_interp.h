@@ -25,9 +25,9 @@ extern "C" {
  * 
  * 1. Validation: Ensures a candidate peak is a true local maximum comparing
  *    its magnitude against immediately adjacent frequency bins.
- * 2. Emission: Calculates the exact frequency (omega), delta frequency (df),
- *    and amplitude (amp/da) using rational mathematical approximations
- *    that avoid costly transcendental functions like log() or sqrt() when possible.
+ * 2. Emission: Estimates sub-bin frequency (omega), delta frequency (df),
+ *    and amplitude slope (amp/da). The sub-bin estimator is window-aware:
+ *    the active SpectralWindowDescriptor supplies the interpolation rule.
  */
 
 int spectral_tracker_validate_candidate(

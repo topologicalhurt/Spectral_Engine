@@ -70,6 +70,14 @@ void spectral_tracker_set_failed(SpectralTracker* tracker) {
     atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
 }
 
+
+void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc) {
+    if (!tracker) return;
+    tracker->interp_magsq = (desc && desc->interp_magsq)
+        ? desc->interp_magsq
+        : spectral_window_interp_magsq_parabolic;
+}
+
 float spectral_tracker_get_threshsq(const SpectralTracker* tracker) {
     return tracker ? tracker->threshsq : 0.0f;
 }
@@ -456,6 +464,8 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->freq_step_omega = freq_step * two_pi_ts;
     tracker->freq_step_df = 0.5f * freq_step * tracker->inv_hop * two_pi_ts;
     tracker->hop_float = (float)hop;
+    tracker->interp_magsq = spectral_window_interp_magsq_parabolic;
+    spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 
     /* Start with a bounded per-thread segment capacity and grow on demand.
      * The previous 16M-per-thread virtual allocation depended on Linux

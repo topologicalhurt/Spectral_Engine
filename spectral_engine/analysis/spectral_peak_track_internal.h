@@ -7,6 +7,7 @@
 #define SPECTRAL_PEAK_TRACK_INTERNAL_H
 
 #include "spectral_peak_track.h"
+#include "spectral_windows.h"
 
 #include <limits.h>
 #include <stdatomic.h>
@@ -62,6 +63,7 @@ struct SpectralTracker {
     float freq_step_df;
     float inv_hop;
     float hop_float;
+    SpectralWindowInterpMagsqFn interp_magsq;
 
     double process_time_total;
     uint64_t total_pairs;

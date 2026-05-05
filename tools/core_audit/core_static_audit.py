@@ -112,8 +112,8 @@ def main() -> int:
             "GPU tile preprocessing must reject invalid stretch before tile math")
     require("spectral_gpu_segment_tile_span" in synth_internal,
             "GPU tile preprocessing must use a single canonical segment-to-tile helper")
-    require("ceil(start)" in synth_internal and "ceil(end)" in synth_internal,
-            "GPU tile span helper must use integer sample-domain tile bounds")
+    require("floor(start / tile_size_d)" in synth_internal and "ceil(end / tile_size_d)" in synth_internal,
+            "GPU tile span helper must use canonical half-open interval tile bounds")
     require("int start_tile = (int)(start / tile_size)" not in synth_internal and
             "int end_tile = (int)(end / tile_size)" not in synth_internal,
             "GPU tile preprocessing must not cast unbounded float tile indices to int")
@@ -274,6 +274,32 @@ def main() -> int:
             "pass 8 contract must document endpoint-bin calibration")
     require("(2 / sum(window))^2" in pass8_contract,
             "pass 8 contract must document interior positive-bin calibration")
+
+
+    track_h = read("spectral_engine/analysis/spectral_peak_track.h")
+    track_internal_h = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    track_c = read("spectral_engine/analysis/spectral_peak_track.c")
+    interp_c = read("spectral_engine/analysis/spectral_peak_interp.c")
+    fused_src = read("spectral_engine/analysis/spectral_analysis_fused.c")
+
+    require("spectral_tracker_set_window_descriptor" in track_h,
+            "peak tracker public API must allow analysis code to bind the active window descriptor")
+    require("SpectralWindowInterpMagsqFn interp_magsq;" in track_internal_h,
+            "peak tracker internals must store the active window interpolation callback")
+    require("tracker->interp_magsq = spectral_window_interp_magsq_parabolic;" in track_c,
+            "peak tracker must initialize a safe default interpolation callback")
+    require("spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));" in track_c,
+            "single-shot tracker creation must bind the default Hann descriptor")
+    require("spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));" in fused_src,
+            "fused tracker creation must bind the default Hann descriptor")
+    require("SpectralWindowInterpMagsqFn interp_magsq = tracker->interp_magsq" in interp_c,
+            "peak emission must use the active window descriptor interpolation callback")
+    require("spectral_window_interp_magsq_parabolic(left, curr, right)" not in interp_c,
+            "peak emission must not hard-code the global parabolic interpolation helper")
+    require("if (!isfinite(p)) p = 0.0f;" in interp_c,
+            "peak interpolation output must be finite-guarded before segment frequency emission")
+    require("!isfinite(curr) || !isfinite(m0)" in interp_c,
+            "candidate validation must reject non-finite magnitude-squared neighborhoods")
 
     if FAILURES:
         for f in FAILURES:

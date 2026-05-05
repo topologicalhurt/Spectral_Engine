@@ -34,8 +34,13 @@ int spectral_tracker_validate_candidate(
     int best_idx = 0;
     const float curr = row[cf];
 
+    if (!isfinite(curr) || !isfinite(m0) || !isfinite(m1) || !isfinite(m2) ||
+        curr < 0.0f || m0 < 0.0f || m1 < 0.0f || m2 < 0.0f) {
+        return 0;
+    }
+
     max_vsq = (max_vsq > m2) ? max_vsq : m2;
-    if (max_vsq < threshsq) return 0;
+    if (!isfinite(max_vsq) || max_vsq < threshsq) return 0;
 
     best_idx = (m0 >= m1) ? 0 : 1;
     best_idx = (m2 > ((best_idx == 0) ? m0 : m1)) ? 2 : best_idx;
@@ -114,10 +119,24 @@ int spectral_tracker_emit_segment(
     phase_start = omp_get_wtime();
 #endif
 
-    /* Zero-cost rational approximation for exact sub-bin frequency on power spectrum */
+    /* Window-aware three-bin interpolation.
+     *
+     * The local peak shape is determined by the analysis window, so the
+     * interpolation rule is part of the window descriptor rather than a fixed
+     * global formula. The default descriptor still uses log-power parabolic
+     * interpolation, but future windows can supply a better matched estimator.
+     */
     left = row[cf - 1];
     right = row[cf + 1];
-    p = spectral_window_interp_magsq_parabolic(left, curr, right);
+    {
+        SpectralWindowInterpMagsqFn interp_magsq = tracker->interp_magsq
+            ? tracker->interp_magsq
+            : spectral_window_interp_magsq_parabolic;
+        p = interp_magsq(left, curr, right);
+    }
+    if (!isfinite(p)) p = 0.0f;
+    if (p > 0.5f) p = 0.5f;
+    if (p < -0.5f) p = -0.5f;
     
     seg->omega = ((float)cf + p) * freq_step_omega;
     seg->df = (best_next - (int)cf) * freq_step_df;

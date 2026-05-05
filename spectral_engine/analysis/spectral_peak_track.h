@@ -13,6 +13,7 @@
 #define SPECTRAL_PEAK_TRACK_H
 
 #include "spectral_common.h"
+#include "spectral_windows.h"
 
 
 
@@ -58,6 +59,8 @@ int spectral_tracker_run_fused_frame(
     , double* pair_emit_amp_time
 #endif
 );
+
+void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc);
 
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,
