@@ -3,18 +3,22 @@
  * Shared FFT resource management and frame transform helpers.
  */
 #include "spectral_analysis_internal.h"
+#include <limits.h>
 
 int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
                                  size_t n_fft, size_t n_freqs)
 {
-    if (!res || n_threads < 1 ||
+    if (!res) return 0;
+    memset(res, 0, sizeof(*res));
+
+    if (n_threads < 1 ||
         n_fft < (size_t)SPECTRAL_MIN_FFT_SIZE ||
+        n_fft > (size_t)INT_MAX ||
         (n_fft & (n_fft - 1u)) != 0u ||
         n_freqs != (n_fft / 2u + 1u)) {
         return 0;
     }
 
-    memset(res, 0, sizeof(*res));
     res->n_threads = n_threads;
     res->n_fft = n_fft;
     res->n_freqs = n_freqs;

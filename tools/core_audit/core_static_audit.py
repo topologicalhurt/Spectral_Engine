@@ -149,6 +149,19 @@ def main() -> int:
             "FFT resource free must be null-safe and zero released state")
 
 
+
+    fft_src = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("#include <limits.h>" in fft_src, "FFT resource allocator must include limits.h for INT_MAX guard")
+    require("if (!res) return 0;" in fft_src, "FFT allocator must handle NULL before zeroing")
+    require("memset(res, 0, sizeof(*res));\n\n    if (n_threads < 1" in fft_src,
+            "FFT allocator must zero resource state before any shape-failure return")
+    require("n_fft > (size_t)INT_MAX" in fft_src,
+            "FFT allocator must reject FFT sizes that cannot be passed to FFTW int APIs")
+
+    full_src = read("spectral_engine/analysis/spectral_analysis_full.c")
+    require("SpectralFftResources res = {0};" in full_src,
+            "full analysis path must initialize FFT resources before allocation attempts")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

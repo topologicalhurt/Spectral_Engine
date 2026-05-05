@@ -17,7 +17,7 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     float* magsq = NULL;
     float* phases = NULL;
     float max_magsq = 0.0f;
-    SpectralFftResources res;
+    SpectralFftResources res = {0};
     int n_threads = omp_get_max_threads();
 
     (void)n_samples;
