@@ -197,14 +197,13 @@ static inline simde__m128 simde_floor_ps_portable(simde__m128 x) {
 
 /* Canonical SIMD phase normalization:
  * mirrors spectral_normalize_phase() in spectral_osc_formulas.h exactly. */
-
 static inline simde__m128 simde_normalize_phase_ps(simde__m128 phase) {
     const simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
     const simde__m128 v_2pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
     const simde__m128 v_half = simde_mm_set1_ps(0.5f);
-    simde__m128 cycles = simde_mm_add_ps(simde_mm_mul_ps(phase, v_inv_2pi), v_half);
-    simde__m128 n = simde_floor_ps_portable(cycles);
-    return simde_mm_sub_ps(phase, simde_mm_mul_ps(v_2pi, n));
+    simde__m128 norm = simde_mm_mul_ps(phase, v_inv_2pi);
+    simde__m128 floored = simde_floor_ps_portable(norm);
+    return simde_mm_mul_ps(v_2pi, simde_mm_sub_ps(simde_mm_sub_ps(norm, floored), v_half));
 }
 
 /* Vectorized Padé [5/4] sine approximation — matches fast_sin() but 4-wide */

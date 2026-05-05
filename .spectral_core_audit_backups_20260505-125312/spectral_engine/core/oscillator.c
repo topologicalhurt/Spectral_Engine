@@ -139,7 +139,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
 /* All constants injected from spectral_consts.h via METAL_CONST_* macros
  * defined in spectral_osc_formulas.h. Formulas must match the canonical
  * C implementations in spectral_osc_formulas.h exactly. */
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 2,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 1,
     "oscillator_metal_source MSL strings are stale — mirror formula changes and bump version");
 const char* oscillator_metal_source =
 "#define TIMBRE_SINE     0\n"
@@ -167,7 +167,7 @@ const char* oscillator_metal_source =
 "/* Must match spectral_normalize_phase() in spectral_osc_formulas.h */\n"
 "inline float oscillator_normalize_phase(float p) {\n"
 "    float norm = p * INV_TWO_PI;\n"
-"    return p - TWO_PI * floor(p * INV_TWO_PI + 0.5f);\n"
+"    return TWO_PI * (norm - floor(norm) - 0.5f);\n"
 "}\n"
 "\n"
 "#define FADE_SAMPLES " SPECTRAL_STR(SPECTRAL_FADE_SAMPLES_DESKTOP) "\n"
@@ -178,11 +178,11 @@ const char* oscillator_metal_source =
 "    if (fade_len < 1.0f) fade_len = 1.0f;\n"
 "    float inv_fade = 1.0f / fade_len;\n"
 "    if (j < fade_len) {\n"
-"        return 0.5f * (1.0f + oscillator_fast_sin((j * inv_fade - 0.5f) * PI));\n"
+"        return 0.5f * (1.0f - oscillator_fast_sin((j * inv_fade - 0.5f) * PI));\n"
 "    }\n"
 "    float from_end = seg_len - 1.0f - j;\n"
 "    if (from_end < fade_len) {\n"
-"        return 0.5f * (1.0f + oscillator_fast_sin((from_end * inv_fade - 0.5f) * PI));\n"
+"        return 0.5f * (1.0f - oscillator_fast_sin((from_end * inv_fade - 0.5f) * PI));\n"
 "    }\n"
 "    return 1.0f;\n"
 "}\n"

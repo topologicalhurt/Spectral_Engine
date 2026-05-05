@@ -457,10 +457,9 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->freq_step_df = 0.5f * freq_step * tracker->inv_hop * two_pi_ts;
     tracker->hop_float = (float)hop;
 
-    /* Start with a bounded per-thread segment capacity and grow on demand.
-     * The previous 16M-per-thread virtual allocation depended on Linux
-     * overcommit behavior and is not a portable real-time contract. */
-    size_t init_cap = (size_t)SPECTRAL_TRACK_INITIAL_SEG_CAP;
+    /* Overallocate enormous virtual capacity to completely avoid hot-loop memcpy resizing.
+     * Linux overcommit guarantees physical pages are only faulted upon writing. */
+    size_t init_cap = 16777216; /* 16M segments = 512MB VM per thread */
     tracker->seg_arrays = (TrackSegment**)spectral_malloc_array((size_t)n_threads, sizeof(TrackSegment*));
     /* Pad heavily to 64-byte cache line stride to eliminate catastrophic False Sharing. */
     tracker->seg_counts = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));

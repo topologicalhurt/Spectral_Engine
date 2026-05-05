@@ -1,9 +1,8 @@
 /* spectral_windows.h - Window Functions for Spectral Analysis
  * 
  * Provides common window functions for FFT analysis and synthesis.
- * These functions generate conventional, unnormalized sample-domain
- * window shapes. Apply coherent-gain or RMS normalization explicitly at
- * the call site when amplitude calibration requires it.
+ * All windows are normalized such that their sum equals 1.0 (for analysis)
+ * or their RMS equals 1.0 (for synthesis), depending on the function used.
  * 
  * Supported Windows:
  *   - Hann (raised cosine): Good frequency resolution, moderate leakage
@@ -92,10 +91,9 @@ const char* spectral_window_name(SpectralWindowType type);
  * Computes the sub-bin frequency offset for a detected peak based on the
  * power spectrum (magnitude squared), adapted for the window function.
  *
- * Default implementation uses parabolic interpolation on log-power bins,
- * clamped to the physically valid local-maximum interval [-0.5, 0.5].
- * Non-log rational estimators must be separately derived and validated for
- * the exact window and spectrum representation used here.
+ * For a Hann window, using parabolic interpolation directly on power bins 
+ * heavily biases the shift towards 0. A near-exact estimator without logarithms
+ * is given by Candan (2011) or a modified Jacobsen estimator.
  */
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq);
 

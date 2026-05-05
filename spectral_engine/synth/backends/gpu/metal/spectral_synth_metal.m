@@ -20,7 +20,7 @@
  * here means the Metal shader is out of sync with CPU/CUDA backends. */
 _Static_assert(SPECTRAL_SEGMENT_MATH_VERSION == 1,
     "Metal segment_math MSL strings are stale — update metalKernelCode and bump version");
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 1,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 2,
     "Metal oscillator MSL strings are stale — update oscillator_metal_source and bump version");
 
 /* Metal kernel source - struct definitions and synthesis kernel.
@@ -239,6 +239,18 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
                           float stretch, float pitch, SpectralTimbre timbre, double* t_synth) {
     @autoreleasepool {
         size_t output_size = 0;
+        SpectralError return_err = SPECTRAL_OK;
+        size_t gpu_seg_size = 0;
+        id<MTLBuffer> segBufForDispatch = nil;
+        int seg_buf_is_nocopy = 0;
+        GpuTileData td = {0};
+        int owns_tile_data = 0;
+        GpuSynthParams params = {0};
+        size_t tile_ids_size = 0;
+        size_t tile_ranges_size = 0;
+        id<MTLBuffer> paramsBuffer = nil;
+        id<MTLCommandBuffer> cmdBuffer = nil;
+        id<MTLComputeCommandEncoder> encoder = nil;
 
         /* Shared preflight: validate + params + timing */
         SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
@@ -262,19 +274,14 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             }
         }
 
-        SpectralError return_err = SPECTRAL_OK;
-
         /* ── Segment upload ─────────────────────────────────────────────
          * Prefer pre-packed SegmentGpu from cache (zero-copy via UMA),
          * fall back to packing from the 64-byte Segment array. */
-        size_t gpu_seg_size = 0;
         if (!spectral_array_bytes((size_t)sa.count, sizeof(SegmentGpu), &gpu_seg_size)) {
             return_err = SPECTRAL_ERR_OVERFLOW;
             goto cleanup;
         }
 
-        id<MTLBuffer> segBufForDispatch = nil;
-        int seg_buf_is_nocopy = 0;
         {
             const SegmentGpu* cached_gpu_segs = NULL;
             if (gpu_seg_cache_try_get(sa.count, &cached_gpu_segs)) {
@@ -302,8 +309,6 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         }
 
         /* ── Tile preprocessing (or cache) ──────────────────────────── */
-        GpuTileData td = {0};
-        int owns_tile_data = 0;
         SpectralError tile_err = gpu_tile_preprocess_cached(sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len, &td, &owns_tile_data);
         if (tile_err != SPECTRAL_OK) {
             return_err = tile_err;
@@ -314,10 +319,8 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         float avg_segs = (float)td.total_refs / td.num_tiles;
 #endif
         
-        GpuSynthParams params = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
+        params = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
         
-        size_t tile_ids_size = 0;
-        size_t tile_ranges_size = 0;
         if (!spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
             !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {
             return_err = SPECTRAL_ERR_OVERFLOW;
@@ -343,12 +346,12 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         memcpy([g_mtl.tileRangesBuf contents], td.ranges, tile_ranges_size);
 
         /* Params buffer: small (36 bytes), allocated per-call */
-        id<MTLBuffer> paramsBuffer = [metalDevice newBufferWithBytes:&params
-                                                              length:sizeof(params)
-                                                             options:MTLResourceStorageModeShared];
+        paramsBuffer = [metalDevice newBufferWithBytes:&params
+                                                length:sizeof(params)
+                                               options:MTLResourceStorageModeShared];
         
-        id<MTLCommandBuffer> cmdBuffer = [metalQueue commandBuffer];
-        id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+        cmdBuffer = [metalQueue commandBuffer];
+        encoder = [cmdBuffer computeCommandEncoder];
         
         [encoder setComputePipelineState:metalSynthPipeline];
         [encoder setBuffer:segBufForDispatch offset:0 atIndex:0];

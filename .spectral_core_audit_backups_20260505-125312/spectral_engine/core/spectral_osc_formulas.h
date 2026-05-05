@@ -21,7 +21,7 @@
 /* Bump when any oscillator formula, fast_sin, normalize_phase, or
  * fade_envelope changes.  Metal shader (oscillator.c) duplicates these
  * as MSL strings and checks this version at compile time. */
-#define SPECTRAL_OSC_FORMULAS_VERSION 2
+#define SPECTRAL_OSC_FORMULAS_VERSION 1
 #include <math.h>
 
 /* Dual-compile: C inline or CUDA device inline */
@@ -32,13 +32,12 @@
 #endif
 
 /* Phase normalization (canonical formula; all backends must match).
- * Maps arbitrary phase to [-pi, pi), preserving phase 0 as 0:
- *   result = p - 2*pi * floor(p/(2*pi) + 0.5)
- * This convention keeps sine/saw/square/triangle phase semantics aligned
- * across scalar, SIMD, CUDA and Metal implementations. */
+ * Maps arbitrary phase to [-pi, pi):
+ *   norm = p / (2*pi)
+ *   result = 2*pi * (norm - floor(norm) - 0.5) */
 OSC_FORMULA_FUNC float spectral_normalize_phase(float p) {
     float norm = p * SPECTRAL_INV_TWO_PI;
-    return p - SPECTRAL_TWO_PI * floorf(norm + 0.5f);
+    return SPECTRAL_TWO_PI * (norm - floorf(norm) - 0.5f);
 }
 
 /* Padé [5/4] sine approximation (canonical fast sine).
@@ -101,12 +100,12 @@ OSC_FORMULA_FUNC float spectral_osc_pwm(float rads, float width) {
  * fade_out: 0.5 * (1 - fast_sin((from_end * inv_fade - 0.5) * pi)) */
 
 OSC_FORMULA_FUNC float spectral_fade_envelope_in(float j, float inv_fade) {
-    return 0.5f * (1.0f + spectral_fast_sin_inline((j * inv_fade - 0.5f) * SPECTRAL_PI));
+    return 0.5f * (1.0f - spectral_fast_sin_inline((j * inv_fade - 0.5f) * SPECTRAL_PI));
 }
 
 OSC_FORMULA_FUNC float spectral_fade_envelope_out(float j, float seg_len, float inv_fade) {
     float from_end = seg_len - 1.0f - j;
-    return 0.5f * (1.0f + spectral_fast_sin_inline((from_end * inv_fade - 0.5f) * SPECTRAL_PI));
+    return 0.5f * (1.0f - spectral_fast_sin_inline((from_end * inv_fade - 0.5f) * SPECTRAL_PI));
 }
 
 /* Combined fade envelope for GPU kernels (single function, float indices) */

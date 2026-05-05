@@ -34,7 +34,7 @@ if(SPECTRAL_PYTHON_AUTO_INSTALL_DEPS)
         DEPENDS
             "${SPECTRAL_PYTHON_ENV_SCRIPT}"
             "${SPECTRAL_PYTHON_REQUIREMENTS_FILE}"
-            "${SPECTRAL_PYTHON}"
+            "${SPECTRAL_PYTHON_SYSTEM}"
         VERBATIM)
 
     add_custom_target(prepare_python_tools

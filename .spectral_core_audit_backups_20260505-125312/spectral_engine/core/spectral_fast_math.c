@@ -17,40 +17,21 @@ float fast_atan2(float y, float x) {
 /* fast_inv_sqrt: Classic fast inverse square root (Quake III style).
  * Provides ~1% precision with a single Newton-Raphson iteration.
  * Much faster than 1.0f / sqrtf(x) on hardware without native rsqrtss. */
-
-/* fast_inv_sqrt: exact by default.
- *
- * The historical Quake-style approximation is intentionally gated behind
- * SPECTRAL_ENABLE_APPROX_INV_SQRT. It is not an acceptable default for analysis
- * or resynthesis amplitude math because its error is signal-dependent and can
- * be audible when propagated across many emitted segments.
- */
 float fast_inv_sqrt(float x) {
     if (x <= 0.0f) return 0.0f;
-#if defined(SPECTRAL_ENABLE_APPROX_INV_SQRT) && SPECTRAL_ENABLE_APPROX_INV_SQRT
     union { float f; uint32_t i; } conv;
     float x2 = x * 0.5f, y = x;
     conv.f = y;
     conv.i = 0x5f3759df - (conv.i >> 1);
     y = conv.f;
     y = y * (1.5f - (x2 * y * y));
-    y = y * (1.5f - (x2 * y * y));
     return y;
-#else
-    return 1.0f / sqrtf(x);
-#endif
 }
 
 /* fast_sqrt: Fast square root via fast_inv_sqrt */
-
-/* fast_sqrt: exact by default; approximate only when explicitly requested. */
 float fast_sqrt(float x) {
     if (x <= 0.0f) return 0.0f;
-#if defined(SPECTRAL_ENABLE_APPROX_INV_SQRT) && SPECTRAL_ENABLE_APPROX_INV_SQRT
     return x * fast_inv_sqrt(x);
-#else
-    return sqrtf(x);
-#endif
 }
 
 /* fast_sin: Canonical sine for all oscillators. GPU shaders must match.
