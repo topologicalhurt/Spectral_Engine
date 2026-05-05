@@ -432,6 +432,15 @@ def main() -> int:
             "fallback_rate=" in estimator_bench,
             "peak estimator benchmark must time estimator path separately from emitted-field error and fallback reporting")
 
+
+    estimator_c_pass12 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("Keep these scalar-contract checks unconditional" in estimator_c_pass12,
+            "validated peak estimator path must keep scalar-context finite checks")
+    require("custom descriptor callback" in estimator_c_pass12,
+            "descriptor interpolation callbacks must not receive NaN/negative magnitudes")
+    require("if (!spectral_peak_finite_nonnegative(magsq) || !isfinite(phase))" in estimator_c_pass12,
+            "complex coefficient reconstruction must always validate magnitude and phase")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

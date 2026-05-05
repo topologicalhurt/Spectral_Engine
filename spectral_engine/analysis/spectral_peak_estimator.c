@@ -153,13 +153,21 @@ static int spectral_peak_reconstruct_complex(const SpectralPeakEstimateInput* in
     float sin_phase = 0.0f;
     float cos_phase = 0.0f;
 
+    (void)neighborhood_validated;
+
     if (!input || !input->magsq_row || !input->phase_row || !out) return 0;
     if (idx >= input->n_freqs) return 0;
 
     magsq = input->magsq_row[idx];
     phase = input->phase_row[idx];
-    if ((!neighborhood_validated && !spectral_peak_finite_nonnegative(magsq)) ||
-        !isfinite(phase)) {
+
+    /* Even the tracker-validated hot path must keep this check.  The tracker
+     * proves the local candidate neighborhood when called through
+     * spectral_tracker_emit_segment(), but spectral_peak_estimate_validated()
+     * is still a separately callable internal API.  Keeping finite/nonnegative
+     * guards here prevents NaN/negative magnitudes from being converted into
+     * complex coefficients when a future caller misuses the fast path. */
+    if (!spectral_peak_finite_nonnegative(magsq) || !isfinite(phase)) {
         return 0;
     }
 
@@ -174,6 +182,7 @@ static int spectral_peak_reconstruct_complex(const SpectralPeakEstimateInput* in
     out->im = mag * sin_phase;
     return isfinite(out->re) && isfinite(out->im);
 }
+
 
 static int spectral_peak_reconstruct_triplet(const SpectralPeakEstimateInput* input,
                                              int neighborhood_validated,
@@ -237,6 +246,8 @@ static int spectral_peak_offset_log_parabolic(const SpectralPeakEstimateInput* i
     float raw_offset = 0.0f;
     SpectralWindowInterpMagsqFn interp = NULL;
 
+    (void)neighborhood_validated;
+
     if (!input || !out_offset || input->bin == 0u || input->bin + 1u >= input->n_freqs ||
         !input->magsq_row) {
         return 0;
@@ -246,10 +257,12 @@ static int spectral_peak_offset_log_parabolic(const SpectralPeakEstimateInput* i
     center = input->curr_magsq;
     right = input->magsq_row[input->bin + 1u];
 
-    if (!neighborhood_validated &&
-        (!spectral_peak_finite_nonnegative(left) ||
-         !spectral_peak_finite_nonnegative(center) ||
-         !spectral_peak_finite_nonnegative(right))) {
+    /* Keep the finite/nonnegative guard even for the validated hot path.  A
+     * custom descriptor callback is allowed here; do not pass NaN/negative
+     * magnitudes into arbitrary window-specific interpolation code. */
+    if (!spectral_peak_finite_nonnegative(left) ||
+        !spectral_peak_finite_nonnegative(center) ||
+        !spectral_peak_finite_nonnegative(right)) {
         return 0;
     }
 
@@ -268,6 +281,7 @@ static int spectral_peak_offset_log_parabolic(const SpectralPeakEstimateInput* i
     return 1;
 }
 
+
 static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* input,
                                               int neighborhood_validated,
                                               float* out_offset,
@@ -276,14 +290,15 @@ static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* i
     float denom = 0.0f;
     float offset = 0.0f;
 
+    (void)neighborhood_validated;
+
     if (!input || !out_offset || input->bin == 0u || input->bin + 1u >= input->n_freqs ||
         !input->magsq_row) {
         return 0;
     }
-    if (!neighborhood_validated &&
-        (!spectral_peak_finite_nonnegative(input->magsq_row[input->bin - 1u]) ||
-         !spectral_peak_finite_nonnegative(input->curr_magsq) ||
-         !spectral_peak_finite_nonnegative(input->magsq_row[input->bin + 1u]))) {
+    if (!spectral_peak_finite_nonnegative(input->magsq_row[input->bin - 1u]) ||
+        !spectral_peak_finite_nonnegative(input->curr_magsq) ||
+        !spectral_peak_finite_nonnegative(input->magsq_row[input->bin + 1u])) {
         return 0;
     }
 
@@ -307,6 +322,7 @@ static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* i
     *out_offset = spectral_peak_clamp_offset(offset);
     return 1;
 }
+
 
 static int spectral_peak_offset_candan(const SpectralPeakEstimateInput* input,
                                        int neighborhood_validated,
@@ -477,18 +493,19 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     memset(out, 0, sizeof(*out));
     out->requested_type = input->type;
+
     if (!spectral_peak_best_next_valid(input)) return 0;
 
-    /* Public calls use the full checks. The tracker-validated entrypoint only
-     * skips checks that spectral_tracker_validate_candidate() just performed
-     * on the current triplet and next-frame triplet; it still validates phases,
-     * denominators, callback outputs and emitted fields. */
-    if (!neighborhood_validated &&
-        (!spectral_peak_finite_nonnegative(input->curr_magsq) ||
-         !spectral_peak_finite_nonnegative(input->next_max_magsq) ||
-         !isfinite(input->freq_step_omega) ||
-         !isfinite(input->freq_step_df) ||
-         !isfinite(input->inv_hop))) {
+    /* The validated entry point means the tracker has already accepted the
+     * local magnitude neighborhood and next-frame triplet.  It does NOT prove
+     * that caller-provided frequency-step fields, hop reciprocal, or stored
+     * magnitudes are finite.  Keep these scalar-contract checks unconditional
+     * so the hot path remains safe if a future caller bypasses the tracker. */
+    if (!spectral_peak_finite_nonnegative(input->curr_magsq) ||
+        !spectral_peak_finite_nonnegative(input->next_max_magsq) ||
+        !isfinite(input->freq_step_omega) ||
+        !isfinite(input->freq_step_df) ||
+        !isfinite(input->inv_hop)) {
         return 0;
     }
 
@@ -521,6 +538,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     return 1;
 }
+
 
 int spectral_peak_estimate(const SpectralPeakEstimateInput* input,
                            SpectralPeakEstimate* out) {
