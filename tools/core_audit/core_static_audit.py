@@ -441,6 +441,19 @@ def main() -> int:
     require("if (!spectral_peak_finite_nonnegative(magsq) || !isfinite(phase))" in estimator_c_pass12,
             "complex coefficient reconstruction must always validate magnitude and phase")
 
+
+    pass13_sweep = read("tools/core_audit/peak_estimator_sweep.c")
+    require("SPECTRAL_PEAK_ESTIMATOR_QUINN_SECOND" in pass13_sweep and
+            "max_abs_err" in pass13_sweep and
+            "fallback_rate" in pass13_sweep,
+            "pass 13 estimator sweep must report all estimator candidates and error/fallback metrics")
+    require("sweep_dft_triplet" in pass13_sweep and
+            "spectral_window_generate" in pass13_sweep,
+            "pass 13 estimator sweep must generate windowed DFT triplets from synthetic tones")
+    pass13_test = read("tests/core_math/test_core_pass13_peak_estimator_sweep.py")
+    require("hann_log[\"max\"] <= 0.035" in pass13_test,
+            "pass 13 test must protect Hann/log-parabolic high-SNR ground-truth accuracy")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)
