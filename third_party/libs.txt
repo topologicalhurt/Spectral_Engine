@@ -7,4 +7,3 @@ https://github.com/electro-smith/libDaisy, third_party/libDaisy, master
 https://github.com/electro-smith/DaisySP, third_party/daisySP, master
 https://github.com/ashvardanian/SimSIMD, third_party/SimSIMD, main
 https://github.com/ashvardanian/StringZilla, third_party/StringZilla, main
-https://github.com/cimgui/cimgui, third_party/cimgui, master
