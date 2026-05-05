@@ -20,16 +20,16 @@ int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
     res->n_freqs = n_freqs;
 
 #if SPECTRAL_USE_VDSP
-    res->log2n = (vDSP_Length)log2(n_fft);
-    res->fft_setups = spectral_malloc_array((size_t)n_threads, sizeof(FFTSetup));
-    res->thread_real = spectral_malloc_array((size_t)n_threads, sizeof(float*));
-    res->thread_imag = spectral_malloc_array((size_t)n_threads, sizeof(float*));
-    res->thread_windowed = spectral_malloc_array((size_t)n_threads, sizeof(float*));
-    res->thread_imag_sq = spectral_malloc_array((size_t)n_threads, sizeof(float*));
+    res->log2n = (vDSP_Length)log2((double)n_fft);
+    res->fft_setups = spectral_calloc_array((size_t)n_threads, sizeof(FFTSetup));
+    res->thread_real = spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_imag = spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_windowed = spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_imag_sq = spectral_calloc_array((size_t)n_threads, sizeof(float*));
 
     if (!res->fft_setups || !res->thread_real || !res->thread_imag ||
         !res->thread_windowed || !res->thread_imag_sq) {
-        return 0;
+        goto fail;
     }
 
     {
@@ -37,15 +37,7 @@ int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
         size_t n_freqs_f32_bytes = 0;
         if (!spectral_array_bytes(n_fft, sizeof(float), &n_fft_f32_bytes) ||
             !spectral_array_bytes(n_freqs, sizeof(float), &n_freqs_f32_bytes)) {
-            return 0;
-        }
-
-        for (int t = 0; t < n_threads; t++) {
-            res->fft_setups[t] = NULL;
-            res->thread_real[t] = NULL;
-            res->thread_imag[t] = NULL;
-            res->thread_windowed[t] = NULL;
-            res->thread_imag_sq[t] = NULL;
+            goto fail;
         }
 
         for (int t = 0; t < n_threads; t++) {
@@ -56,41 +48,41 @@ int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
             res->thread_imag_sq[t] = spectral_aligned_alloc(n_freqs_f32_bytes);
             if (!res->fft_setups[t] || !res->thread_real[t] || !res->thread_imag[t] ||
                 !res->thread_windowed[t] || !res->thread_imag_sq[t]) {
-                return 0;
+                goto fail;
             }
         }
     }
 #else
-    res->fft_plans = spectral_malloc_array((size_t)n_threads, sizeof(fftwf_plan));
-    res->thread_in = spectral_malloc_array((size_t)n_threads, sizeof(float*));
-    res->thread_out = spectral_malloc_array((size_t)n_threads, sizeof(fftwf_complex*));
+    res->fft_plans = spectral_calloc_array((size_t)n_threads, sizeof(fftwf_plan));
+    res->thread_in = spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    res->thread_out = spectral_calloc_array((size_t)n_threads, sizeof(fftwf_complex*));
 
     if (!res->fft_plans || !res->thread_in || !res->thread_out) {
-        return 0;
-    }
-
-    for (int t = 0; t < n_threads; t++) {
-        res->fft_plans[t] = NULL;
-        res->thread_in[t] = NULL;
-        res->thread_out[t] = NULL;
+        goto fail;
     }
 
     for (int t = 0; t < n_threads; t++) {
         res->thread_in[t] = fftwf_alloc_real(n_fft);
         res->thread_out[t] = fftwf_alloc_complex(n_freqs);
         if (!res->thread_in[t] || !res->thread_out[t]) {
-            return 0;
+            goto fail;
         }
         res->fft_plans[t] = fftwf_plan_dft_r2c_1d((int)n_fft, res->thread_in[t],
                                                   res->thread_out[t], FFTW_ESTIMATE);
-        if (!res->fft_plans[t]) return 0;
+        if (!res->fft_plans[t]) goto fail;
     }
 #endif
     return 1;
+
+fail:
+    spectral_fft_resources_free(res);
+    return 0;
 }
 
 void spectral_fft_resources_free(SpectralFftResources* res)
 {
+    if (!res) return;
+
 #if SPECTRAL_USE_VDSP
     if (res->fft_setups) {
         for (int t = 0; t < res->n_threads; t++) {
@@ -130,7 +122,10 @@ void spectral_fft_resources_free(SpectralFftResources* res)
         free(res->thread_out);
     }
 #endif
+
+    memset(res, 0, sizeof(*res));
 }
+
 
 #if SPECTRAL_USE_VDSP
 

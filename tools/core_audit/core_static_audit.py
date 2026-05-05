@@ -139,6 +139,16 @@ def main() -> int:
     fft = read("spectral_engine/analysis/spectral_analysis_fft.c")
     require("n_freqs != (n_fft / 2u + 1u)" in fft and "SPECTRAL_MIN_FFT_SIZE" in fft, "FFT resource allocation must validate size, power-of-two shape, and frequency-bin shape")
 
+    fft_owner = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("res->fft_setups = spectral_calloc_array" in fft_owner and
+            "res->fft_plans = spectral_calloc_array" in fft_owner,
+            "FFT resource pointer arrays must be zero-initialized for partial-failure cleanup")
+    require("fail:\n    spectral_fft_resources_free(res);\n    return 0;" in fft_owner,
+            "FFT resource allocation must use a local cleanup path")
+    require("if (!res) return;" in fft_owner and "memset(res, 0, sizeof(*res));" in fft_owner,
+            "FFT resource free must be null-safe and zero released state")
+
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)
