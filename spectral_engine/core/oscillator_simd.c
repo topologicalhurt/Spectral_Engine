@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if SPECTRAL_EMBEDDED
+#define SPECTRAL_OSC_SIMD_FADE_SAMPLES SPECTRAL_FADE_SAMPLES_EMBEDDED
+#else
+#define SPECTRAL_OSC_SIMD_FADE_SAMPLES SPECTRAL_FADE_SAMPLES_DESKTOP
+#endif
+
 #if defined(OSC_SIMD_CMSIS)
 
 /* CMSIS path: ARM Cortex-M embedded (DSP intrinsics, integer fixed-point) */
@@ -22,7 +28,7 @@ void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_OSC_SIMD_FADE_SAMPLES);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -54,7 +60,7 @@ void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_OSC_SIMD_FADE_SAMPLES);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -86,7 +92,7 @@ void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_OSC_SIMD_FADE_SAMPLES);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -105,7 +111,7 @@ void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_OSC_SIMD_FADE_SAMPLES);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -139,7 +145,7 @@ void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_OSC_SIMD_FADE_SAMPLES);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -174,7 +180,8 @@ void osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) { (void
 void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) { (void)dst; (void)lp; }
 
 int osc_simd_available(SpectralTimbre timbre) {
-    return (timbre <= TIMBRE_PARABOLA && timbre != TIMBRE_SQUARE);
+    return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW ||
+           timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
 }
 
 #elif defined(OSC_SIMD_GENERIC)
@@ -209,29 +216,42 @@ static inline simde__m128 simde_normalize_phase_ps(simde__m128 phase) {
 
 /* Vectorized Padé [5/4] sine approximation — matches fast_sin() but 4-wide */
 static inline simde__m128 simde_fast_sin_ps(simde__m128 x) {
+#if SPECTRAL_ENABLE_APPROX_TRIG
     const simde__m128 inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
     const simde__m128 two_pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
     const simde__m128 half = simde_mm_set1_ps(0.5f);
-
-    /* Canonical range reduction:
-     * x = x - 2pi * floor(x * inv_2pi + 0.5) */
     simde__m128 n = simde_floor_ps_portable(
         simde_mm_add_ps(simde_mm_mul_ps(x, inv_2pi), half));
     x = simde_mm_sub_ps(x, simde_mm_mul_ps(n, two_pi));
 
-    /* Padé [5/4]: num = x * (1 - x2*(0.16605 - x2*0.00761))
-     *             den = 1 + x2*0.00766 */
     simde__m128 x2 = simde_mm_mul_ps(x, x);
-    simde__m128 c1 = simde_mm_set1_ps(SPECTRAL_PADE_SIN_C2);
-    simde__m128 c2 = simde_mm_set1_ps(SPECTRAL_PADE_SIN_C1);
-    simde__m128 c3 = simde_mm_set1_ps(SPECTRAL_PADE_SIN_C3);
+    simde__m128 c15 = simde_mm_set1_ps(-0.0000000000007647163731819816f);
+    simde__m128 c13 = simde_mm_set1_ps( 0.00000000016059043836821613f);
+    simde__m128 c11 = simde_mm_set1_ps(-0.00000002505210838544172f);
+    simde__m128 c9  = simde_mm_set1_ps( 0.0000027557319223985893f);
+    simde__m128 c7  = simde_mm_set1_ps(-0.0001984126984126984f);
+    simde__m128 c5  = simde_mm_set1_ps( 0.008333333333333333f);
+    simde__m128 c3  = simde_mm_set1_ps(-0.16666666666666666f);
     simde__m128 one = simde_mm_set1_ps(1.0f);
 
-    simde__m128 num_inner = simde_mm_sub_ps(c2, simde_mm_mul_ps(x2, c1));
-    simde__m128 num = simde_mm_mul_ps(x, simde_mm_sub_ps(one, simde_mm_mul_ps(x2, num_inner)));
-    simde__m128 den = simde_mm_add_ps(one, simde_mm_mul_ps(x2, c3));
-
-    return simde_mm_div_ps(num, den);
+    simde__m128 p = c15;
+    p = simde_mm_add_ps(c13, simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(c11, simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(c9,  simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(c7,  simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(c5,  simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(c3,  simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(one, simde_mm_mul_ps(x2, p));
+    return simde_mm_mul_ps(x, p);
+#else
+    simde_float32 lanes[4];
+    simde_mm_storeu_ps(lanes, x);
+    lanes[0] = sinf(lanes[0]);
+    lanes[1] = sinf(lanes[1]);
+    lanes[2] = sinf(lanes[2]);
+    lanes[3] = sinf(lanes[3]);
+    return simde_mm_loadu_ps(lanes);
+#endif
 }
 
 /* Scalar waveform functions for fade regions (avoids wasteful SIMD broadcast) */
@@ -337,7 +357,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
     const size_t len = lp->length;
     if (len == 0) return;
 
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_OSC_SIMD_FADE_SAMPLES);
     const float phase0 = lp->phase;
     const float alpha = lp->alpha;
     const float beta = lp->beta;
@@ -431,7 +451,10 @@ void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) {
 }
 
 int osc_simd_available(SpectralTimbre timbre) {
-    return (timbre <= TIMBRE_PWM);
+    return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW ||
+           timbre == TIMBRE_SQUARE || timbre == TIMBRE_TRIANGLE ||
+           timbre == TIMBRE_PARABOLA || timbre == TIMBRE_QUANTIZED ||
+           timbre == TIMBRE_PWM;
 }
 
 #endif /* OSC_SIMD_GENERIC */

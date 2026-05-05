@@ -20,7 +20,7 @@
  * here means the Metal shader is out of sync with CPU/CUDA backends. */
 _Static_assert(SPECTRAL_SEGMENT_MATH_VERSION == 1,
     "Metal segment_math MSL strings are stale — update metalKernelCode and bump version");
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 2,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 3,
     "Metal oscillator MSL strings are stale — update oscillator_metal_source and bump version");
 
 /* Metal kernel source - struct definitions and synthesis kernel.
@@ -201,7 +201,11 @@ void metal_init(void) {
         
         NSError* error = nil;
         MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
+#if defined(SPECTRAL_METAL_FAST_MATH) && SPECTRAL_METAL_FAST_MATH
         options.fastMathEnabled = YES;
+#else
+        options.fastMathEnabled = NO;
+#endif
         options.languageVersion = MTLLanguageVersion2_4;
         
         if (!oscillator_metal_source) {

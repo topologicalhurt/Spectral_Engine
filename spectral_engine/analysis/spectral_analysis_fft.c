@@ -7,6 +7,7 @@
 int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
                                  size_t n_fft, size_t n_freqs)
 {
+    if (!res || n_threads < 1 || n_fft < 2u || n_freqs < 2u) return 0;
     memset(res, 0, sizeof(*res));
     res->n_threads = n_threads;
     res->n_fft = n_fft;

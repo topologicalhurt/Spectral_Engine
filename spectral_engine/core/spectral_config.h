@@ -37,6 +37,23 @@
 #ifndef SPECTRAL_CUSTOM_FAST_MATH_MODE
 #define SPECTRAL_CUSTOM_FAST_MATH_MODE 0
 #endif
+
+/* Correctness-first approximation gates.
+ * Keep these disabled by default. Enable them only with dedicated error-bound
+ * and perceptual-regression tests for the target backend.
+ */
+#ifndef SPECTRAL_ENABLE_APPROX_TRIG
+#define SPECTRAL_ENABLE_APPROX_TRIG 0
+#endif
+#ifndef SPECTRAL_ENABLE_APPROX_ATAN2
+#define SPECTRAL_ENABLE_APPROX_ATAN2 0
+#endif
+#ifndef SPECTRAL_ENABLE_APPROX_INV_SQRT
+#define SPECTRAL_ENABLE_APPROX_INV_SQRT 0
+#endif
+#ifndef SPECTRAL_METAL_FAST_MATH
+#define SPECTRAL_METAL_FAST_MATH 0
+#endif
 /* Restricted profiling gate (single ownership).
  * Enabled only when restricted mode is active and restricted debug profiling
  * has been explicitly enabled by the build. */

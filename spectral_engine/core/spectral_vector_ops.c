@@ -166,6 +166,13 @@ void spectral_vsmul(const float* src, float scalar, float* dst, size_t len) {
 void spectral_vatan2(const float* y, const float* x, float* dst, size_t len) {
     size_t i = 0;
 
+#if !SPECTRAL_ENABLE_APPROX_ATAN2
+    for (; i < len; i++) {
+        dst[i] = atan2f(y[i], x[i]);
+    }
+    return;
+#endif
+
 #ifdef __AVX2__
     {
         const simde__m256 eps8   = simde_mm256_set1_ps(SPECTRAL_ATAN2_EPS);
@@ -307,6 +314,19 @@ void spectral_magsq_phase(const float* interleaved,
                            float* max_magsq, size_t count) {
     size_t i = 0;
     float m = 0.0f;
+
+#if !SPECTRAL_ENABLE_APPROX_ATAN2
+    for (; i < count; i++) {
+        float re = interleaved[i * 2];
+        float im = interleaved[i * 2 + 1];
+        float msq = re * re + im * im;
+        magsq[i] = msq;
+        if (msq > m) m = msq;
+        phase[i] = atan2f(im, re);
+    }
+    *max_magsq = m;
+    return;
+#endif
 
 #ifdef __AVX2__
     {

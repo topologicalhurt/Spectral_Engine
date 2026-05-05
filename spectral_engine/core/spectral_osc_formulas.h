@@ -21,7 +21,7 @@
 /* Bump when any oscillator formula, fast_sin, normalize_phase, or
  * fade_envelope changes.  Metal shader (oscillator.c) duplicates these
  * as MSL strings and checks this version at compile time. */
-#define SPECTRAL_OSC_FORMULAS_VERSION 2
+#define SPECTRAL_OSC_FORMULAS_VERSION 3
 #include <math.h>
 
 /* Dual-compile: C inline or CUDA device inline */
@@ -41,15 +41,29 @@ OSC_FORMULA_FUNC float spectral_normalize_phase(float p) {
     return p - SPECTRAL_TWO_PI * floorf(norm + 0.5f);
 }
 
-/* Padé [5/4] sine approximation (canonical fast sine).
- * Max error ~1e-5 vs sinf(). Single divide, no branch.
- * Input: any float (range-reduced internally to [-pi, pi]). */
+/* Canonical sine.
+ *
+ * Default: libm/CUDA sinf for correctness. The previous Padé [5/4]
+ * coefficients had large endpoint error near +/-pi and were not an acceptable
+ * kernel contract. SPECTRAL_ENABLE_APPROX_TRIG enables a bounded odd Taylor
+ * polynomial on the reduced interval [-pi, pi]; keep it disabled unless the
+ * target backend has passed numerical and perceptual regression tests.
+ */
 OSC_FORMULA_FUNC float spectral_fast_sin_inline(float x) {
+#if SPECTRAL_ENABLE_APPROX_TRIG
     x = x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
     float x2 = x * x;
-    float num = x * (1.0f - x2 * (SPECTRAL_PADE_SIN_C1 - x2 * SPECTRAL_PADE_SIN_C2));
-    float den = 1.0f + x2 * SPECTRAL_PADE_SIN_C3;
-    return num / den;
+    return x * (1.0f + x2 *
+        (-0.16666666666666666f + x2 *
+        ( 0.008333333333333333f + x2 *
+        (-0.0001984126984126984f + x2 *
+        ( 0.0000027557319223985893f + x2 *
+        (-0.00000002505210838544172f + x2 *
+        ( 0.00000000016059043836821613f + x2 *
+        (-0.0000000000007647163731819816f))))))));
+#else
+    return sinf(x);
+#endif
 }
 
 /* Waveform generators.
@@ -97,8 +111,8 @@ OSC_FORMULA_FUNC float spectral_osc_pwm(float rads, float width) {
 }
 
 /* Fade envelope (Hann-window ramp for segment boundaries).
- * fade_in:  0.5 * (1 - fast_sin((j * inv_fade - 0.5) * pi))
- * fade_out: 0.5 * (1 - fast_sin((from_end * inv_fade - 0.5) * pi)) */
+ * fade_in:  0.5 * (1 + fast_sin((j * inv_fade - 0.5) * pi))
+ * fade_out: 0.5 * (1 + fast_sin((from_end * inv_fade - 0.5) * pi)) */
 
 OSC_FORMULA_FUNC float spectral_fade_envelope_in(float j, float inv_fade) {
     return 0.5f * (1.0f + spectral_fast_sin_inline((j * inv_fade - 0.5f) * SPECTRAL_PI));

@@ -17,6 +17,7 @@
  */
 #include "spectral_wavetable.h"
 #include "spectral_utils.h"
+#include "spectral_osc_formulas.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -39,50 +40,40 @@ void spectral_wavetable_init(SpectralWavetableBank* bank) {
     bank->default_timbre = TIMBRE_SINE;
 }
 
+static spectral_sample_t spectral_wavetable_builtin_sample(uint8_t timbre_id, size_t i) {
+    float phase = SPECTRAL_TWO_PI * (float)i / (float)SPECTRAL_WAVETABLE_SIZE;
+    float rads = spectral_normalize_phase(phase);
+    float value = 0.0f;
+    switch ((SpectralTimbre)timbre_id) {
+        case TIMBRE_SINE:     value = spectral_osc_sine(rads, 0.0f); break;
+        case TIMBRE_SAW:      value = spectral_osc_saw(rads, 0.0f); break;
+        case TIMBRE_SQUARE:   value = spectral_osc_square(rads, 0.0f); break;
+        case TIMBRE_TRIANGLE: value = spectral_osc_triangle(rads, 0.0f); break;
+        default:              value = 0.0f; break;
+    }
+    return FLOAT_TO_SPECTRAL_SAMPLE(value);
+}
+
 void spectral_wavetable_generate_builtins(SpectralWavetableBank* bank) {
     if (!bank) return;
-    
-    /* Sine */
-    SpectralWavetable* sine = &bank->tables[TIMBRE_SINE];
-    for (size_t i = 0; i < SPECTRAL_WAVETABLE_SIZE; i++) {
-        double phase = 2.0 * SPECTRAL_PI * (double)i / (double)SPECTRAL_WAVETABLE_SIZE;
-        double val = sin(phase);
-        sine->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE((float)val);
+
+    const uint8_t builtins[] = {
+        (uint8_t)TIMBRE_SINE,
+        (uint8_t)TIMBRE_SAW,
+        (uint8_t)TIMBRE_SQUARE,
+        (uint8_t)TIMBRE_TRIANGLE
+    };
+
+    for (size_t b = 0; b < sizeof(builtins) / sizeof(builtins[0]); b++) {
+        uint8_t timbre_id = builtins[b];
+        if (timbre_id >= SPECTRAL_MAX_WAVETABLES) continue;
+        SpectralWavetable* table = &bank->tables[timbre_id];
+        for (size_t i = 0; i < SPECTRAL_WAVETABLE_SIZE; i++) {
+            table->samples[i] = spectral_wavetable_builtin_sample(timbre_id, i);
+        }
+        table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
+        wavetable_mark_loaded(bank, table, timbre_id);
     }
-    sine->samples[SPECTRAL_WAVETABLE_SIZE] = sine->samples[0];
-    wavetable_mark_loaded(bank, sine, TIMBRE_SINE);
-    
-    /* Sawtooth */
-    SpectralWavetable* saw = &bank->tables[TIMBRE_SAW];
-    for (size_t i = 0; i < SPECTRAL_WAVETABLE_SIZE; i++) {
-        double t = (double)i / (double)SPECTRAL_WAVETABLE_SIZE;
-        double val = 2.0 * t - 1.0;
-        saw->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE((float)val);
-    }
-    saw->samples[SPECTRAL_WAVETABLE_SIZE] = saw->samples[0];
-    wavetable_mark_loaded(bank, saw, TIMBRE_SAW);
-    
-    /* Square */
-    SpectralWavetable* square = &bank->tables[TIMBRE_SQUARE];
-    for (size_t i = 0; i < SPECTRAL_WAVETABLE_SIZE; i++) {
-        float val = (i < SPECTRAL_WAVETABLE_SIZE / 2) ? 1.0f : -1.0f;
-        square->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE(val);
-    }
-    square->samples[SPECTRAL_WAVETABLE_SIZE] = square->samples[0];
-    wavetable_mark_loaded(bank, square, TIMBRE_SQUARE);
-    
-    /* Triangle */
-    SpectralWavetable* tri = &bank->tables[TIMBRE_TRIANGLE];
-    for (size_t i = 0; i < SPECTRAL_WAVETABLE_SIZE; i++) {
-        double t = (double)i / (double)SPECTRAL_WAVETABLE_SIZE;
-        double val;
-        if (t < 0.25) val = 4.0 * t;
-        else if (t < 0.75) val = 2.0 - 4.0 * t;
-        else val = 4.0 * t - 4.0;
-        tri->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE((float)val);
-    }
-    tri->samples[SPECTRAL_WAVETABLE_SIZE] = tri->samples[0];
-    wavetable_mark_loaded(bank, tri, TIMBRE_TRIANGLE);
 }
 
 
@@ -477,19 +468,33 @@ spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
 spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      float phase_norm) {
+    if (!bank) return SPECTRAL_SAMPLE_ZERO;
+    uint8_t fallback = bank->default_timbre;
+    if (fallback >= SPECTRAL_MAX_WAVETABLES || !bank->tables[fallback].valid) {
+        fallback = (uint8_t)TIMBRE_SINE;
+    }
     const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES &&
                                       bank->tables[timbre_id].valid)
         ? &bank->tables[timbre_id]
-        : &bank->tables[bank->default_timbre];
+        : ((fallback < SPECTRAL_MAX_WAVETABLES && bank->tables[fallback].valid)
+            ? &bank->tables[fallback]
+            : NULL);
     return spectral_wavetable_lookup_f(table, phase_norm);
 }
 
 spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank* bank,
                                                      uint8_t timbre_id,
                                                      uint16_t phase_u16) {
+    if (!bank) return SPECTRAL_SAMPLE_ZERO;
+    uint8_t fallback = bank->default_timbre;
+    if (fallback >= SPECTRAL_MAX_WAVETABLES || !bank->tables[fallback].valid) {
+        fallback = (uint8_t)TIMBRE_SINE;
+    }
     const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES &&
                                       bank->tables[timbre_id].valid)
         ? &bank->tables[timbre_id]
-        : &bank->tables[bank->default_timbre];
+        : ((fallback < SPECTRAL_MAX_WAVETABLES && bank->tables[fallback].valid)
+            ? &bank->tables[fallback]
+            : NULL);
     return spectral_wavetable_lookup_q(table, phase_u16);
 }

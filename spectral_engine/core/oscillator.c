@@ -139,7 +139,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
 /* All constants injected from spectral_consts.h via METAL_CONST_* macros
  * defined in spectral_osc_formulas.h. Formulas must match the canonical
  * C implementations in spectral_osc_formulas.h exactly. */
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 2,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 3,
     "oscillator_metal_source MSL strings are stale — mirror formula changes and bump version");
 const char* oscillator_metal_source =
 "#define TIMBRE_SINE     0\n"
@@ -157,11 +157,7 @@ const char* oscillator_metal_source =
 "\n"
 "/* Must match spectral_fast_sin_inline() in spectral_osc_formulas.h */\n"
 "inline float oscillator_fast_sin(float x) {\n"
-"    x = x - TWO_PI * floor(x * INV_TWO_PI + 0.5f);\n"
-"    float x2 = x * x;\n"
-"    float num = x * (1.0f - x2 * (" SPECTRAL_STR(SPECTRAL_PADE_SIN_C1) " - x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C2) "));\n"
-"    float den = 1.0f + x2 * " SPECTRAL_STR(SPECTRAL_PADE_SIN_C3) ";\n"
-"    return num / den;\n"
+"    return sin(x);\n"
 "}\n"
 "\n"
 "/* Must match spectral_normalize_phase() in spectral_osc_formulas.h */\n"

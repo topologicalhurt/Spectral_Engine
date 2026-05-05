@@ -58,14 +58,21 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
     size_t n_frames = 0;
     size_t n_freqs = 0;
     size_t total_bins = 0;
+    size_t n_fft_size = 0;
     int use_fused_path = 0;
     SegmentArray result = (SegmentArray)SEGMENT_ARRAY_EMPTY;
 
-    if (!audio || !t_fft || !t_track || n_fft <= 0 || hop <= 0 || n_samples < (size_t)n_fft) {
+    if (!audio || !t_fft || !t_track || sr <= 0 || n_fft <= 0 || hop <= 0 ||
+        !isfinite(db_thresh) || n_samples < (size_t)n_fft) {
         return spectral_analysis_return_empty(t_fft, t_track);
     }
 
-    n_frames = (n_samples - (size_t)n_fft) / (size_t)hop + 1;
+    n_fft_size = (size_t)n_fft;
+    if ((n_fft_size & (n_fft_size - 1u)) != 0u) {
+        return spectral_analysis_return_empty(t_fft, t_track);
+    }
+
+    n_frames = (n_samples - n_fft_size) / (size_t)hop + 1;
     n_freqs = (size_t)n_fft / 2u + 1u;
     if (n_freqs < 3u || !spectral_size_mul(n_frames, n_freqs, &total_bins)) {
         return spectral_analysis_return_empty(t_fft, t_track);

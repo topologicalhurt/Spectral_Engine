@@ -3,7 +3,7 @@
  * Extracts spectral peaks above a threshold from magnitude-squared and phase
  * matrices, creating Segment objects for resynthesis. Multi-threaded via OpenMP.
  *
- * Pre-allocates per-thread contiguous segment arrays with VM overcommit.
+ * Uses bounded per-thread segment buffers that grow on demand.
  *
  * Two modes of operation:
  *   1. spectral_track_peaks() — single-shot, processes entire STFT at once

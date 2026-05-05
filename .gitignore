@@ -54,3 +54,4 @@ __pycache__/
 !resources/testing/shakespeare_he_saw_the_cat.wav
 !resources/testing/motormouth_test1_uncompressed_spear.txt
 !resources/testing/sin_440hz.wav
+/.spectral_core_audit_backups_*/

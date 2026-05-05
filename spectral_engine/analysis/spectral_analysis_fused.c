@@ -34,9 +34,8 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
     if (!spectral_fft_resources_alloc(&res, actual_threads, (size_t)n_fft, n_freqs)) goto fail;
 
-#if !SPECTRAL_CUSTOM_FAST_MATH_MODE
     {
-        /* Pass 1: Global Maximum Discovery (Strict Reproducibility) */
+        /* Pass 1: Global Maximum Discovery (required for a stable dB threshold) */
         float pass1_max = 0.0f;
         double p1_start = omp_get_wtime();
         
@@ -63,7 +62,6 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                           global_max_magsq,
                           (omp_get_wtime() - p1_start) * SPECTRAL_MILLIS_PER_SECOND_D);
     }
-#endif
 
     tracker = spectral_tracker_create(actual_threads, n_freqs, sr, n_fft, hop, db_thresh, global_max_magsq);
     if (!tracker) goto fail;
@@ -78,9 +76,11 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         float* row_prev = spectral_aligned_alloc(n_freqs * sizeof(float));
         float* row_curr = spectral_aligned_alloc(n_freqs * sizeof(float));
         float* row_next = spectral_aligned_alloc(n_freqs * sizeof(float));
+        float* phase_prev = spectral_aligned_alloc(n_freqs * sizeof(float));
         float* phase_curr = spectral_aligned_alloc(n_freqs * sizeof(float));
+        float* phase_next = spectral_aligned_alloc(n_freqs * sizeof(float));
         
-        if (!row_prev || !row_curr || !row_next || !phase_curr) {
+        if (!row_prev || !row_curr || !row_next || !phase_prev || !phase_curr || !phase_next) {
             spectral_tracker_set_failed(tracker);
         }
 
@@ -119,7 +119,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                 double fft_start = omp_get_wtime();
                 float max0 = 0.0f;
                 spectral_fft_single_frame(&res, tid, audio, hop, window_func, start_frame,
-                                          row_prev, phase_curr, &max0);
+                                          row_prev, phase_prev, &max0);
                 local_fft_time += (omp_get_wtime() - fft_start);
                 
                 if (fft_end > start_frame + 1) {
@@ -134,17 +134,19 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                     for (size_t t = start_frame + 1; t < fft_end && !spectral_tracker_has_failed(tracker); t++) {
                         float frame_max = 0.0f;
                         float* target_row = row_next;
+                        float* target_phase = phase_next;
                         float t_hop = (t - 1) * (float)hop;
                         int can_start_new = (t - 1 < end_frame);
                         
                         if (t + 1 < n_frames) {
                             fft_start = omp_get_wtime();
                             spectral_fft_single_frame(&res, tid, audio, hop, window_func, t + 1,
-                                                      target_row, phase_curr, &frame_max);
+                                                      target_row, target_phase, &frame_max);
                             local_fft_time += (omp_get_wtime() - fft_start);
                         } else {
                             /* Pad zeros for absolute last frame */
                             memset(target_row, 0, n_freqs * sizeof(float));
+                            memset(target_phase, 0, n_freqs * sizeof(float));
                         }
 
                         double track_start = omp_get_wtime();
@@ -174,10 +176,15 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                         max1 = frame_max;
 
                         /* Pointer rotation (zero-copy swap) */
-                        float* temp = row_prev;
+                        float* temp_row = row_prev;
                         row_prev = row_curr;
                         row_curr = row_next;
-                        row_next = temp;
+                        row_next = temp_row;
+
+                        float* temp_phase = phase_prev;
+                        phase_prev = phase_curr;
+                        phase_curr = phase_next;
+                        phase_next = temp_phase;
                     }
                     
                 }
@@ -202,7 +209,9 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         free(row_prev);
         free(row_curr);
         free(row_next);
+        free(phase_prev);
         free(phase_curr);
+        free(phase_next);
     }
     
     double parallel_wall_time = omp_get_wtime() - parallel_start;
