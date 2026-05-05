@@ -267,6 +267,57 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 /* GPU tile preprocessing - maps segments to tiles for Metal/CUDA dispatch */
 #if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
 
+typedef struct SpectralGpuTileSpan {
+    uint32_t start_tile;
+    uint32_t end_tile;
+    int valid;
+} SpectralGpuTileSpan;
+
+static int spectral_gpu_segment_tile_span(const Segment* seg,
+                                          float stretch,
+                                          uint32_t tile_size,
+                                          uint32_t num_tiles,
+                                          SpectralGpuTileSpan* out)
+{
+    double start = 0.0;
+    double end = 0.0;
+    double tile_size_d = 0.0;
+    double output_span = 0.0;
+    double start_tile_d = 0.0;
+    double end_tile_d = 0.0;
+
+    if (!out) return 0;
+    *out = (SpectralGpuTileSpan){0};
+    if (!seg || tile_size == 0u || num_tiles == 0u) return 0;
+    if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) return 0;
+    if (!spectral_is_finite_f32(seg->start) || !spectral_is_finite_f32(seg->length)) return 0;
+    if (seg->length <= 0.0f) return 0;
+
+    start = (double)seg->start * (double)stretch;
+    end = start + (double)seg->length * (double)stretch;
+    if (!spectral_is_finite_f64(start) || !spectral_is_finite_f64(end) || end <= start) return 0;
+
+    tile_size_d = (double)tile_size;
+    output_span = (double)num_tiles * tile_size_d;
+    if (end <= 0.0 || start >= output_span) return 0;
+
+    if (start < 0.0) start = 0.0;
+    if (end > output_span) end = output_span;
+
+    start_tile_d = floor(start / tile_size_d);
+    end_tile_d = ceil(end / tile_size_d) - 1.0;
+    if (!spectral_is_finite_f64(start_tile_d) || !spectral_is_finite_f64(end_tile_d)) return 0;
+    if (start_tile_d < 0.0) start_tile_d = 0.0;
+    if (end_tile_d < start_tile_d) return 0;
+    if (start_tile_d >= (double)num_tiles) return 0;
+    if (end_tile_d >= (double)num_tiles) end_tile_d = (double)(num_tiles - 1u);
+
+    out->start_tile = (uint32_t)start_tile_d;
+    out->end_tile = (uint32_t)end_tile_d;
+    out->valid = 1;
+    return 1;
+}
+
 SpectralError gpu_tile_preprocess(
     SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
     GpuTileData* out
@@ -336,17 +387,12 @@ SpectralError gpu_tile_preprocess(
 
         #pragma omp for schedule(static)
         for (size_t i = 0; i < sa.count; i++) {
-            float start = sa.segs[i].start * stretch;
-            float end = start + sa.segs[i].length * stretch;
-            if (!spectral_is_finite_f32(start) || !spectral_is_finite_f32(end) || end <= start) continue;
+            SpectralGpuTileSpan span = {0};
+            if (!spectral_gpu_segment_tile_span(&sa.segs[i], stretch, tile_size, num_tiles, &span)) {
+                continue;
+            }
 
-            int start_tile = (int)(start / tile_size);
-            int end_tile = (int)(end / tile_size);
-            if (start_tile < 0) start_tile = 0;
-            if (start_tile >= (int)num_tiles) continue;
-            if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
-
-            for (int tt = start_tile; tt <= end_tile; tt++) {
+            for (uint32_t tt = span.start_tile; tt <= span.end_tile; tt++) {
                 my_counts[tt]++;
             }
         }
@@ -390,36 +436,40 @@ SpectralError gpu_tile_preprocess(
         total_refs += tile_counts[t];
     }
 
-    if (!spectral_size_mul((size_t)total_refs, sizeof(uint32_t), &ids_bytes) ||
-        !spectral_size_mul((size_t)num_tiles, sizeof(uint32_t), &cursors_bytes)) {
+    if (!spectral_size_mul((size_t)num_tiles, sizeof(uint32_t), &cursors_bytes)) {
         return_err = SPECTRAL_ERR_OVERFLOW;
         goto cleanup;
     }
-
-    tile_segment_ids = spectral_malloc_array((size_t)total_refs, sizeof(uint32_t));
     tile_cursors = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
-    if (!tile_segment_ids || !tile_cursors) {
+    if (!tile_cursors) {
         return_err = SPECTRAL_ERR_MEMORY;
         goto cleanup;
     }
 
-    #pragma omp parallel for schedule(static)
-    for (size_t i = 0; i < sa.count; i++) {
-        float start = sa.segs[i].start * stretch;
-        float end = start + sa.segs[i].length * stretch;
-        if (!spectral_is_finite_f32(start) || !spectral_is_finite_f32(end) || end <= start) continue;
+    if (total_refs > 0u) {
+        if (!spectral_size_mul((size_t)total_refs, sizeof(uint32_t), &ids_bytes)) {
+            return_err = SPECTRAL_ERR_OVERFLOW;
+            goto cleanup;
+        }
+        tile_segment_ids = spectral_malloc_array((size_t)total_refs, sizeof(uint32_t));
+        if (!tile_segment_ids) {
+            return_err = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
+        }
 
-        int start_tile = (int)(start / tile_size);
-        int end_tile = (int)(end / tile_size);
-        if (start_tile < 0) start_tile = 0;
-        if (start_tile >= (int)num_tiles) continue;
-        if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < sa.count; i++) {
+            SpectralGpuTileSpan span = {0};
+            if (!spectral_gpu_segment_tile_span(&sa.segs[i], stretch, tile_size, num_tiles, &span)) {
+                continue;
+            }
 
-        for (int tt = start_tile; tt <= end_tile; tt++) {
-            uint32_t pos;
-            #pragma omp atomic capture
-            pos = tile_cursors[tt]++;
-            tile_segment_ids[tile_ranges[tt].start + pos] = (uint32_t)i;
+            for (uint32_t tt = span.start_tile; tt <= span.end_tile; tt++) {
+                uint32_t pos;
+                #pragma omp atomic capture
+                pos = tile_cursors[tt]++;
+                tile_segment_ids[tile_ranges[tt].start + pos] = (uint32_t)i;
+            }
         }
     }
 
@@ -460,6 +510,7 @@ static SPECTRAL_THREAD_LOCAL struct {
     uint32_t*   segment_ids;
     uint32_t    num_tiles;
     uint32_t    total_refs;
+    uint32_t    tile_size;
     float       stretch;
     size_t      out_len;
     int         valid;
@@ -473,6 +524,7 @@ void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
     g_gpu_tile_cache.segment_ids = (uint32_t*)segment_ids;
     g_gpu_tile_cache.num_tiles   = num_tiles;
     g_gpu_tile_cache.total_refs  = total_refs;
+    g_gpu_tile_cache.tile_size   = (uint32_t)SPECTRAL_GPU_TILE_SIZE;
     g_gpu_tile_cache.stretch     = stretch;
     g_gpu_tile_cache.out_len     = out_len;
     g_gpu_tile_cache.valid       = 1;
@@ -481,6 +533,7 @@ void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
 int gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out)
 {
     if (!g_gpu_tile_cache.valid || !out) return 0;
+    if (g_gpu_tile_cache.tile_size != (uint32_t)SPECTRAL_GPU_TILE_SIZE) return 0;
     if (g_gpu_tile_cache.stretch != stretch || g_gpu_tile_cache.out_len != out_len) return 0;
     out->ranges      = g_gpu_tile_cache.ranges;
     out->segment_ids = g_gpu_tile_cache.segment_ids;
@@ -496,6 +549,7 @@ void gpu_tile_cache_clear(void)
     g_gpu_tile_cache.segment_ids = NULL;
     g_gpu_tile_cache.num_tiles = 0;
     g_gpu_tile_cache.total_refs = 0;
+    g_gpu_tile_cache.tile_size = 0;
 }
 
 SpectralError gpu_tile_preprocess_cached(
@@ -504,7 +558,8 @@ SpectralError gpu_tile_preprocess_cached(
 {
     if (!out_td || !out_owns_data) return SPECTRAL_ERR_PARAM;
     *out_owns_data = 0;
-    if (gpu_tile_cache_try_get(stretch, out_len, out_td)) {
+    if (tile_size == (uint32_t)SPECTRAL_GPU_TILE_SIZE &&
+        gpu_tile_cache_try_get(stretch, out_len, out_td)) {
         return SPECTRAL_OK;
     }
 #if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE

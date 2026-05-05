@@ -110,6 +110,17 @@ def main() -> int:
             "segment loop params must reject non-finite segment fields")
     require("stretch > SPECTRAL_MAX_STRETCH" in synth_internal[synth_internal.find("gpu_tile_preprocess"):],
             "GPU tile preprocessing must reject invalid stretch before tile math")
+    require("spectral_gpu_segment_tile_span" in synth_internal,
+            "GPU tile preprocessing must use a single canonical segment-to-tile helper")
+    require("ceil(start)" in synth_internal and "ceil(end)" in synth_internal,
+            "GPU tile span helper must use integer sample-domain tile bounds")
+    require("int start_tile = (int)(start / tile_size)" not in synth_internal and
+            "int end_tile = (int)(end / tile_size)" not in synth_internal,
+            "GPU tile preprocessing must not cast unbounded float tile indices to int")
+    require("if (total_refs > 0u)" in synth_internal,
+            "GPU tile preprocessing must allow zero active references without malloc(0) failure")
+    require("tile_size == (uint32_t)SPECTRAL_GPU_TILE_SIZE" in synth_internal,
+            "GPU tile cache reuse must be gated to the canonical cache tile size")
 
     synth_header = read("spectral_engine/core/spectral_synth_internal.h")
     require("SpectralError error" in synth_header and "synth_preflight_native" in synth_header,
