@@ -18,8 +18,8 @@ def test_gpu_tile_preprocess_has_single_span_helper() -> None:
 
 def test_gpu_tile_span_uses_sample_domain_bounds() -> None:
     src = read("spectral_engine/core/spectral_synth_internal.c")
-    assert "first_sample_d = ceil(start);" in src
-    assert "end_exclusive_d = ceil(end);" in src
+    assert "floor(start / tile_size_d)" in src
+    assert "ceil(end / tile_size_d)" in src
     assert "int start_tile = (int)(start / tile_size)" not in src
     assert "int end_tile = (int)(end / tile_size)" not in src
 

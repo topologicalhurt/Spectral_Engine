@@ -56,6 +56,67 @@ float fast_sqrt(float x) {
 #endif
 }
 
+/* fast_peak_log: exact by default.
+ *
+ * Peak interpolation uses logarithms in two places: the log-power parabolic
+ * window callback and Quinn's tau correction. If a target profile decides to
+ * trade tiny emitted-field error for speed, the approximation must be enabled
+ * through SPECTRAL_ENABLE_APPROX_PEAK_LOG and verified against the reference
+ * tests. Keep this helper shared; do not paste the polynomial into estimator
+ * modules.
+ *
+ * Approximation source/derivation when enabled:
+ *   1. Use IEEE-754 binary32 layout to split x into x = 2^e * m with
+ *      m in [1, 2). Source for the floating-point format assumption:
+ *      https://standards.ieee.org/standard/754-2019.html
+ *   2. ln(x) = e*ln(2) + ln(m).
+ *   3. Let z = (m - 1) / (m + 1). Then ln(m) = 2*atanh(z).
+ *      This follows from the inverse-hyperbolic-tangent logarithmic form
+ *      in NIST DLMF 4.37.25:
+ *      https://dlmf.nist.gov/4.37.E25
+ *   4. Approximate atanh(z) with the odd power series
+ *      atanh(z) = z + z^3/3 + z^5/5 + ...
+ *      truncated here after z^11/11. Series source: NIST DLMF 4.37.31:
+ *      https://dlmf.nist.gov/4.37.E31
+ *
+ * Because m in [1, 2), z is in [0, 1/3), so the series converges quickly.
+ * It is still an approximation and must remain behind
+ * SPECTRAL_ENABLE_APPROX_PEAK_LOG.
+ */
+float fast_peak_log(float x) {
+#if defined(SPECTRAL_ENABLE_APPROX_PEAK_LOG) && SPECTRAL_ENABLE_APPROX_PEAK_LOG
+    union { float f; uint32_t u; } in;
+    union { float f; uint32_t u; } mant;
+    uint32_t exp_bits = 0u;
+    int exponent = 0;
+    float m = 0.0f;
+    float z = 0.0f;
+    float z2 = 0.0f;
+    float series = 0.0f;
+
+    if (!(x > 0.0f) || !isfinite(x)) return logf(x);
+
+    in.f = x;
+    exp_bits = (in.u >> 23u) & 0xffu;
+    if (exp_bits == 0u || exp_bits == 0xffu) return logf(x);
+
+    exponent = (int)exp_bits - 127;
+    mant.u = (in.u & 0x007fffffu) | 0x3f800000u;
+    m = mant.f;
+    z = (m - 1.0f) / (m + 1.0f);
+    z2 = z * z;
+    series = z * (2.0f + z2 *
+        (0.6666666666666666f + z2 *
+        (0.4f + z2 *
+        (0.2857142857142857f + z2 *
+        (0.2222222222222222f + z2 *
+         0.1818181818181818f)))));
+    return (float)exponent * 0.6931471805599453f + series;
+#else
+    return logf(x);
+#endif
+}
+
 /* fast_sin: Canonical sine for all oscillators; delegates to spectral_osc_formulas.h. */
 float fast_sin(float x) {
     return spectral_fast_sin_inline(x);

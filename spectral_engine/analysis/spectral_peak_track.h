@@ -6,14 +6,16 @@
  * Uses bounded per-thread segment buffers that grow on demand.
  *
  * Two modes of operation:
- *   1. spectral_track_peaks() — single-shot, processes entire STFT at once
- *   2. SpectralTracker API    — incremental, processes chunks for large datasets
+ *   1. spectral_track_peaks_with_window_descriptor() — single-shot with an
+ *      explicit analysis-window/interpolation contract
+ *   2. SpectralTracker API — incremental, processes chunks for large datasets
  */
 #ifndef SPECTRAL_PEAK_TRACK_H
 #define SPECTRAL_PEAK_TRACK_H
 
 #include "spectral_common.h"
 #include "spectral_windows.h"
+#include "spectral_peak_estimator.h"
 
 
 
@@ -21,12 +23,29 @@
 extern "C" {
 #endif
 
-/* Single-shot API: processes entire STFT matrices at once */
+/* Compatibility wrapper for the engine default Hann/AUTO analysis contract.
+ * Call spectral_track_peaks_with_window_descriptor() for raw STFT matrices
+ * produced with any other window or estimator policy. */
 SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
                                   float max_magsq,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,
                                   float db_thresh, double* t_track);
+
+/* Single-shot API: processes entire STFT matrices at once.
+ * `window_desc` must describe the analysis window used to create `magsq`.
+ * If NULL, the tracker falls back to the current Hann-compatible default.
+ * `estimator` selects the sub-bin estimator policy; AUTO resolves to the
+ * conservative log-power parabolic baseline. */
+SegmentArray spectral_track_peaks_with_window_descriptor(
+    const float* magsq, const float* phases,
+    float max_magsq,
+    size_t n_frames, size_t n_freqs,
+    int sr, int n_fft, int hop,
+    float db_thresh,
+    const SpectralWindowDescriptor* window_desc,
+    SpectralPeakEstimatorType estimator,
+    double* t_track);
 
 /* Incremental tracker API for chunked STFT processing */
 typedef struct SpectralTracker SpectralTracker;
@@ -61,6 +80,7 @@ int spectral_tracker_run_fused_frame(
 );
 
 void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc);
+void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type);
 
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,

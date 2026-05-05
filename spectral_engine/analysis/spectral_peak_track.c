@@ -78,6 +78,11 @@ void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const Spec
         : spectral_window_interp_magsq_parabolic;
 }
 
+void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type) {
+    if (!tracker) return;
+    tracker->peak_estimator = spectral_peak_estimator_resolve_default(type);
+}
+
 float spectral_tracker_get_threshsq(const SpectralTracker* tracker) {
     return tracker ? tracker->threshsq : 0.0f;
 }
@@ -464,7 +469,9 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->freq_step_omega = freq_step * two_pi_ts;
     tracker->freq_step_df = 0.5f * freq_step * tracker->inv_hop * two_pi_ts;
     tracker->hop_float = (float)hop;
+    tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);
     tracker->interp_magsq = spectral_window_interp_magsq_parabolic;
+    tracker->peak_estimator = SPECTRAL_PEAK_ESTIMATOR_DEFAULT;
     spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 
     /* Start with a bounded per-thread segment capacity and grow on demand.
@@ -1017,13 +1024,18 @@ void spectral_tracker_destroy(SpectralTracker* tracker) {
     free(tracker);
 }
 
-/* spectral_track_peaks — single-shot wrapper around SpectralTracker */
+/* spectral_track_peaks_with_window_descriptor — single-shot wrapper around
+ * SpectralTracker with an explicit analysis-window/estimator contract. */
 
-SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
-                                  float max_magsq,
-                                  size_t n_frames, size_t n_freqs,
-                                  int sr, int n_fft, int hop,
-                                  float db_thresh, double* t_track) {
+SegmentArray spectral_track_peaks_with_window_descriptor(
+    const float* magsq, const float* phases,
+    float max_magsq,
+    size_t n_frames, size_t n_freqs,
+    int sr, int n_fft, int hop,
+    float db_thresh,
+    const SpectralWindowDescriptor* window_desc,
+    SpectralPeakEstimatorType estimator,
+    double* t_track) {
     if (!magsq || !phases || !t_track || n_frames < 2 || n_freqs < 3) {
         return peak_track_return_empty(t_track);
     }
@@ -1042,6 +1054,8 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
     if (!tracker) {
         return peak_track_return_empty(t_track);
     }
+    spectral_tracker_set_window_descriptor(tracker, window_desc);
+    spectral_tracker_set_peak_estimator(tracker, estimator);
 
     /* Process all frames in one shot — no overlap row (NULL for final chunk) */
     spectral_tracker_process(tracker, magsq, phases,
@@ -1050,6 +1064,24 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
     SegmentArray result = spectral_tracker_finalize(tracker, t_track, 0.0);
     spectral_tracker_destroy(tracker);
     return result;
+}
+
+/* spectral_track_peaks — compatibility wrapper for the engine default
+ * Hann-windowed analysis path and AUTO estimator policy. */
+
+SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
+                                  float max_magsq,
+                                  size_t n_frames, size_t n_freqs,
+                                  int sr, int n_fft, int hop,
+                                  float db_thresh, double* t_track) {
+    return spectral_track_peaks_with_window_descriptor(
+        magsq, phases, max_magsq,
+        n_frames, n_freqs,
+        sr, n_fft, hop,
+        db_thresh,
+        spectral_window_descriptor(SPECTRAL_WINDOW_HANN),
+        SPECTRAL_PEAK_ESTIMATOR_AUTO,
+        t_track);
 }
 
 static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(

@@ -260,20 +260,30 @@ def main() -> int:
     require("Named techniques and paper-backed claims need sources" in ai_canon and
             "source link" in ai_canon and "technical explanation" in ai_canon,
             "AI canon must require links or technical explanations for named techniques and paper-backed claims")
+    require("Reuse existing core math utilities before adding formulas" in ai_canon and
+            "fast_sqrt" in ai_canon and
+            "comparison test between approximate and canonical outputs" in ai_canon,
+            "AI canon must require utility reuse and approximation/reference comparison tests")
 
 
     pass8_notes = read("docs/core_audit/PATCH_NOTES_PASS8.md")
-    pass8_contract = read("docs/core_audit/PASS8_STFT_WINDOW_CONTRACT.md")
     require("FFT resources now carry an explicit `magsq_scale`" not in pass8_notes,
             "pass 8 notes must not describe stale single-scale FFT resource contract")
     require("applies the scale to every magnitude-squared row" not in pass8_notes,
             "pass 8 notes must not describe stale uniform all-bin scaling")
     require("endpoint/interior-bin" in pass8_notes and "trackable interior bins" in pass8_notes,
             "pass 8 notes must document endpoint-aware scaling and trackable-bin maxima")
-    require("DC/Nyquist" in pass8_contract and "(1 / sum(window))^2" in pass8_contract,
-            "pass 8 contract must document endpoint-bin calibration")
-    require("(2 / sum(window))^2" in pass8_contract,
-            "pass 8 contract must document interior positive-bin calibration")
+    require("raw_endpoint_magnitude = sinusoid_peak_amplitude * sum(window)" in pass8_notes and
+            "DC and Nyquist" in pass8_notes,
+            "pass 8 notes must document endpoint-bin calibration")
+    require("raw_positive_bin_magnitude = sinusoid_peak_amplitude * sum(window) / 2" in pass8_notes,
+            "pass 8 notes must document interior positive-bin calibration")
+    require("endpoint_amp_scale_d = 1.0 / (double)metrics.sum" in windows_c and
+            "endpoint_magsq_scale_d = endpoint_amp_scale_d * endpoint_amp_scale_d" in windows_c,
+            "pass 8 implementation must preserve endpoint magnitude-squared scale")
+    require("positive_amp_scale_d = 2.0 / (double)metrics.sum" in windows_c and
+            "positive_magsq_scale_d = positive_amp_scale_d * positive_amp_scale_d" in windows_c,
+            "pass 8 implementation must preserve interior positive-bin magnitude-squared scale")
 
 
     track_h = read("spectral_engine/analysis/spectral_peak_track.h")
@@ -281,25 +291,146 @@ def main() -> int:
     track_c = read("spectral_engine/analysis/spectral_peak_track.c")
     interp_c = read("spectral_engine/analysis/spectral_peak_interp.c")
     fused_src = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    pass10_notes = read("docs/core_audit/PATCH_NOTES_PASS10.md")
 
     require("spectral_tracker_set_window_descriptor" in track_h,
             "peak tracker public API must allow analysis code to bind the active window descriptor")
+    require("spectral_track_peaks_with_window_descriptor" in track_h,
+            "raw single-shot tracking API must expose explicit window descriptor binding")
     require("SpectralWindowInterpMagsqFn interp_magsq;" in track_internal_h,
             "peak tracker internals must store the active window interpolation callback")
     require("tracker->interp_magsq = spectral_window_interp_magsq_parabolic;" in track_c,
             "peak tracker must initialize a safe default interpolation callback")
-    require("spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));" in track_c,
-            "single-shot tracker creation must bind the default Hann descriptor")
+    require("spectral_tracker_set_window_descriptor(tracker, window_desc);" in track_c,
+            "explicit single-shot tracking API must bind the caller-provided window descriptor")
+    require("spectral_track_peaks_with_window_descriptor" in full_src and
+            "spectral_window_descriptor(SPECTRAL_WINDOW_HANN)" in full_src,
+            "full-matrix analysis must call explicit single-shot tracking with the default Hann descriptor")
     require("spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));" in fused_src,
             "fused tracker creation must bind the default Hann descriptor")
-    require("SpectralWindowInterpMagsqFn interp_magsq = tracker->interp_magsq" in interp_c,
-            "peak emission must use the active window descriptor interpolation callback")
+    require("left = row[cf - 1u];" in interp_c and
+            "right = row[cf + 1u];" in interp_c and
+            "!isfinite(left) || !isfinite(curr) || !isfinite(right)" in interp_c,
+            "candidate validation must reject non-finite current-frame interpolation neighborhoods")
     require("spectral_window_interp_magsq_parabolic(left, curr, right)" not in interp_c,
             "peak emission must not hard-code the global parabolic interpolation helper")
-    require("if (!isfinite(p)) p = 0.0f;" in interp_c,
-            "peak interpolation output must be finite-guarded before segment frequency emission")
-    require("!isfinite(curr) || !isfinite(m0)" in interp_c,
-            "candidate validation must reject non-finite magnitude-squared neighborhoods")
+    require("!isfinite(threshsq) || threshsq < 0.0f" in interp_c,
+            "candidate validation must reject invalid power thresholds")
+    require("0.5 * (log(left) - log(right))" in pass10_notes and
+            "https://doi.org/10.1109/PROC.1978.10837" in pass10_notes and
+            "https://www.dsprelated.com/freebooks/sasp/quadratic_interpolation_spectral_peaks.html" in pass10_notes and
+            "https://doi.org/10.1109/78.295186" in pass10_notes and
+            "https://doi.org/10.1109/MSP.2007.361611" in pass10_notes and
+            "https://doi.org/10.1109/LSP.2011.2136378" in pass10_notes,
+            "pass 10 notes must document and cite the estimator contract")
+
+
+    estimator_h = read("spectral_engine/analysis/spectral_peak_estimator.h")
+    estimator_c = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    config_h = read("spectral_engine/core/spectral_config.h")
+    windows_c = read("spectral_engine/core/spectral_windows.c")
+    fast_math_h = read("spectral_engine/core/spectral_fast_math.h")
+    fast_math_c = read("spectral_engine/core/spectral_fast_math.c")
+    manifest = read("spectral_engine/cmake/source-manifest.cmake")
+    track_h = read("spectral_engine/analysis/spectral_peak_track.h")
+    track_internal_h = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    track_c = read("spectral_engine/analysis/spectral_peak_track.c")
+    interp_c = read("spectral_engine/analysis/spectral_peak_interp.c")
+    pass11_notes = read("docs/core_audit/PATCH_NOTES_PASS11.md")
+    estimator_contract_test = read("tests/core_math/test_core_pass11_peak_estimator_contract.py")
+    estimator_bench = read("tools/core_audit/peak_estimator_bench.c")
+
+    require("spectral_peak_estimator.c" in manifest,
+            "peak estimator module must be compiled through source manifest")
+    require("SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC" in estimator_h and
+            "SPECTRAL_PEAK_ESTIMATOR_JACOBSEN_COMPLEX" in estimator_h and
+            "SPECTRAL_PEAK_ESTIMATOR_CANDAN_COMPLEX" in estimator_h and
+            "SPECTRAL_PEAK_ESTIMATOR_QUINN_SECOND" in estimator_h,
+            "peak estimator API must expose baseline and advanced estimator candidates")
+    require("spectral_peak_estimate_validated" in estimator_h and
+            "spectral_peak_candan_correction_for_n_freqs" in estimator_h and
+            "float candan_correction;" in estimator_h,
+            "peak estimator API must expose tracker-only validated path and Candan precompute")
+    require("SPECTRAL_ENABLE_APPROX_PEAK_LOG" in config_h,
+            "peak log approximation must be gated behind an explicit opt-in flag")
+    require("spectral_peak_complex_offset_jacobsen" in estimator_c and
+            "spectral_peak_offset_candan" in estimator_c and
+            "spectral_peak_offset_quinn_second" in estimator_c,
+            "peak estimator implementation must include Jacobsen, Candan and Quinn candidates")
+    require("spectral_peak_reconstruct_triplet" in estimator_c and
+            "spectral_peak_sincosf" in estimator_c and
+            "SPECTRAL_ENABLE_APPROX_TRIG" in estimator_c and
+            "fast_sqrt(" in estimator_c and
+            "fast_peak_log(" in estimator_c and
+            "0x5f3759df" not in estimator_c,
+            "peak estimator performance paths must share triplet reconstruction and reuse central fast math")
+    require("#include <limits.h>" in estimator_c and
+            "spectral_peak_best_next_valid" in estimator_c and
+            "input->best_next_bin < 0" in estimator_c and
+            "best_next + 1u < input->bin" in estimator_c,
+            "peak estimator must validate best_next_bin before df arithmetic")
+    require("FAST_MATH_HOT float fast_peak_log(float x);" in fast_math_h and
+            "float fast_peak_log(float x)" in fast_math_c and
+            "SPECTRAL_ENABLE_APPROX_PEAK_LOG" in fast_math_c and
+            "https://standards.ieee.org/standard/754-2019.html" in fast_math_c and
+            "https://dlmf.nist.gov/4.37.E25" in fast_math_c and
+            "https://dlmf.nist.gov/4.37.E31" in fast_math_c and
+            "0x5f3759df" in fast_math_c,
+            "approximate peak log and inverse sqrt implementations must live in central fast_math utilities with source citations")
+    require("log_lc = fast_peak_log(left / center)" in windows_c and
+            "log_rc = fast_peak_log(right / center)" in windows_c and
+            "spectral_window_peak_logf" not in windows_c,
+            "log-power parabolic interpolation must use the two-log ratio form")
+    require("https://doi.org/10.1109/PROC.1978.10837" in estimator_c and
+            "https://doi.org/10.1109/78.295186" in estimator_c and
+            "https://doi.org/10.1109/MSP.2007.361611" in estimator_c and
+            "https://doi.org/10.1109/LSP.2011.2136378" in estimator_c,
+            "peak estimator implementation must cite estimator source basis")
+    require("return SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;" in estimator_c,
+            "AUTO estimator must preserve the conservative log-parabolic default")
+    require("raw_offset = interp(left, center, right);" in estimator_c and
+            "if (!isfinite(raw_offset)) return 0;" in estimator_c,
+            "custom interpolation callbacks must fail on non-finite output")
+    require("SPECTRAL_PEAK_ESTIMATE_USED_FALLBACK" in estimator_c,
+            "advanced estimators must have explicit fallback reporting")
+    require("spectral_tracker_set_peak_estimator" in track_h and
+            "SpectralPeakEstimatorType peak_estimator;" in track_internal_h,
+            "tracker must expose and store the active peak estimator policy")
+    require("float peak_candan_correction;" in track_internal_h and
+            "tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);" in track_c and
+            "estimate_input.candan_correction = tracker->peak_candan_correction;" in interp_c,
+            "tracker must precompute and pass Candan correction instead of recomputing it per peak")
+    require("tracker->peak_estimator = SPECTRAL_PEAK_ESTIMATOR_DEFAULT;" in track_c,
+            "tracker must initialize estimator policy from canonical default")
+    require("SpectralPeakEstimateInput estimate_input" in interp_c and
+            "spectral_peak_estimate_validated(&estimate_input, &estimate)" in interp_c,
+            "segment emission must delegate to the tracker-validated estimator hot path")
+    require("spectral_window_interp_magsq_parabolic(left, curr, right)" not in interp_c,
+            "segment emission must not hard-code the old parabolic helper")
+    require("0.02` bins" in pass11_notes and
+            "https://doi.org/10.1109/MSP.2007.361611" in pass11_notes and
+            "spectral_track_peaks_with_window_descriptor" in pass11_notes and
+            "SPECTRAL_ENABLE_APPROX_PEAK_LOG" in pass11_notes and
+            "two-log" in pass11_notes,
+            "pass 11 notes must document estimator tolerance, citations, explicit raw tracking API and performance flags")
+    require("HANN_LOG_PARABOLIC_MAX_ERROR_BINS = 0.02" in estimator_contract_test and
+            "spectral_peak_estimate(&input, &out)" in estimator_contract_test and
+            "nan_offset" in estimator_contract_test and
+            "INT_MIN" in estimator_contract_test and
+            "test_raw_tracker_descriptor_changes_single_shot_omega" in estimator_contract_test and
+            "spectral_track_peaks_with_window_descriptor" in estimator_contract_test and
+            "test_two_log_ratio_matches_three_log_formula" in estimator_contract_test and
+            "test_approximation_flags_stay_within_peak_error_contract" in estimator_contract_test and
+            "test_peak_estimator_benchmark_harness_reports_all_methods" in estimator_contract_test,
+            "peak estimator contract tests must cover Hann bias, callback binding, raw tracker descriptor binding, malformed neighborhoods, exact reduction, approximation flags and bench harness")
+    require("BenchExpected" in estimator_bench and
+            "Correctness accounting is intentionally outside the timed loop" in estimator_bench and
+            "spectral_peak_estimate_validated(&inputs[case_idx], &out)" in estimator_bench and
+            "p50_ns=" in estimator_bench and
+            "p95_ns=" in estimator_bench and
+            "max_offset_err=" in estimator_bench and
+            "fallback_rate=" in estimator_bench,
+            "peak estimator benchmark must time estimator path separately from emitted-field error and fallback reporting")
 
     if FAILURES:
         for f in FAILURES:

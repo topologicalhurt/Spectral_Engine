@@ -156,10 +156,17 @@ float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t lengt
  * Computes the sub-bin frequency offset for a detected peak based on the
  * power spectrum (magnitude squared), adapted for the window function.
  *
- * Default implementation uses parabolic interpolation on log-power bins,
- * clamped to the physically valid local-maximum interval [-0.5, 0.5].
- * Non-log rational estimators must be separately derived and validated for
- * the exact window and spectrum representation used here.
+ * Default implementation uses parabolic interpolation on log-power bins:
+ *   p = 0.5 * (log(left) - log(right)) /
+ *       (log(left) - 2*log(center) + log(right))
+ * The output is a dimensionless bin offset clamped to [-0.5, 0.5].
+ * This follows the local quadratic spectral-peak model documented by
+ * J. O. Smith, Spectral Audio Signal Processing:
+ *   https://www.dsprelated.com/freebooks/sasp/quadratic_interpolation_spectral_peaks.html
+ * Window-shape assumptions follow Harris 1978:
+ *   https://doi.org/10.1109/PROC.1978.10837
+ * Non-log rational estimators must be separately derived and validated for the
+ * exact window and spectrum representation used here.
  */
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq);
 

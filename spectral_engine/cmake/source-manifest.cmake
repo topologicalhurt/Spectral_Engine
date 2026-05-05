@@ -74,6 +74,7 @@ set(SPECTRAL_SOURCES_ANALYSIS
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_fft.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_full.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_fused.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_estimator.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_interp.c"
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
     "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_track.c")

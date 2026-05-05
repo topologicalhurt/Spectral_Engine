@@ -5,6 +5,7 @@
  */
 #include "spectral_windows.h"
 #include "spectral_config.h"
+#include "spectral_fast_math.h"
 #include <math.h>
 #include <string.h>
 
@@ -234,10 +235,12 @@ float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t lengt
 }
 
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq) {
-    /* Correctness-first estimator: parabolic interpolation in the log-power
-     * domain. This is the standard three-bin estimator used when only local
-     * magnitudes are available. It avoids the previous empirically boosted
-     * power-domain formula, which had no explicit validity contract.
+    /* Correctness-first estimator: log-power quadratic interpolation over
+     * adjacent magnitude-squared bins. This is a local spectral-peak model,
+     * not an exact MLE; see Smith's spectral-peak interpolation derivation and
+     * Harris's window-analysis treatment:
+     *   https://www.dsprelated.com/freebooks/sasp/quadratic_interpolation_spectral_peaks.html
+     *   https://doi.org/10.1109/PROC.1978.10837
      */
 #if defined(SPECTRAL_TRACK_INTERP_POWER_RATIONAL) && SPECTRAL_TRACK_INTERP_POWER_RATIONAL
     float denom = left_sq + right_sq + 2.0f * center_sq;
@@ -245,13 +248,30 @@ float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, flo
     float p = (right_sq - left_sq) / denom;
     p *= 1.5f;
 #else
-    float log_l = logf(fmaxf(left_sq, SPECTRAL_TRACK_LOG_FLOOR));
-    float log_c = logf(fmaxf(center_sq, SPECTRAL_TRACK_LOG_FLOOR));
-    float log_r = logf(fmaxf(right_sq, SPECTRAL_TRACK_LOG_FLOOR));
-    float denom = log_l - 2.0f * log_c + log_r;
-    if (fabsf(denom) < SPECTRAL_TRACK_PARABOLIC_DENOM_EPS) return 0.0f;
-    float p = 0.5f * (log_l - log_r) / denom;
+    float left = fmaxf(left_sq, SPECTRAL_TRACK_LOG_FLOOR);
+    float center = fmaxf(center_sq, SPECTRAL_TRACK_LOG_FLOOR);
+    float right = fmaxf(right_sq, SPECTRAL_TRACK_LOG_FLOOR);
+    float log_lc = fast_peak_log(left / center);
+    float log_rc = fast_peak_log(right / center);
+    float denom = log_lc + log_rc;
+    float p = 0.0f;
+
+    /* Exact algebraic reduction of Smith's three-log quadratic formula:
+     * a = log(left/center), b = log(right/center),
+     * p = 0.5 * (a - b) / (a + b). The fallback handles extreme finite
+     * power ratios where left/center or right/center overflows to Inf. */
+    if (!isfinite(denom) || fabsf(denom) < SPECTRAL_TRACK_PARABOLIC_DENOM_EPS) {
+        float log_l = fast_peak_log(left);
+        float log_c = fast_peak_log(center);
+        float log_r = fast_peak_log(right);
+        denom = log_l - 2.0f * log_c + log_r;
+        if (!isfinite(denom) || fabsf(denom) < SPECTRAL_TRACK_PARABOLIC_DENOM_EPS) return 0.0f;
+        p = 0.5f * (log_l - log_r) / denom;
+    } else {
+        p = 0.5f * (log_lc - log_rc) / denom;
+    }
 #endif
+    if (!isfinite(p)) return 0.0f;
     if (p > 0.5f) return 0.5f;
     if (p < -0.5f) return -0.5f;
     return p;

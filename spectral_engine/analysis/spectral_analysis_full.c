@@ -78,10 +78,14 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     free(window_func);
 
     {
-        SegmentArray result = spectral_track_peaks(magsq, phases, max_magsq,
-                                                   n_frames, n_freqs,
-                                                   sr, n_fft, hop,
-                                                   db_thresh, t_track);
+        SegmentArray result = spectral_track_peaks_with_window_descriptor(
+            magsq, phases, max_magsq,
+            n_frames, n_freqs,
+            sr, n_fft, hop,
+            db_thresh,
+            spectral_window_descriptor(SPECTRAL_WINDOW_HANN),
+            SPECTRAL_PEAK_ESTIMATOR_AUTO,
+            t_track);
         free(phases);
         free(magsq);
         return result;

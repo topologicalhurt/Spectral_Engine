@@ -157,3 +157,20 @@ Can this change be tested against a mathematically clear reference implementatio
 ## 16. Named techniques and paper-backed claims need sources
 
 Any named estimator, DSP technique, numerical method, or paper-backed claim must include a source link or an in-depth technical explanation in code comments or adjacent docs. A bare phrase like “standard estimator,” “from the literature,” or “periodogram convention” is not enough. If a link is unavailable, document the derivation, assumptions, input domain, output units, and why those assumptions match this implementation.
+
+## 17. Reuse existing core math utilities before adding formulas
+
+Before adding a new helper, search the repository for an existing utility,
+formula, approximation gate, or backend parity implementation. Duplicating a
+bit hack or polynomial under a new name is a correctness risk, not harmless
+locality. In particular:
+
+- use `fast_sqrt` / `fast_inv_sqrt` instead of reimplementing inverse-square-root tricks;
+- put any new approximation behind a single named gate in `spectral_config.h`;
+- keep the exact/reference path as the default;
+- add a comparison test between approximate and canonical outputs before
+  accepting the approximation;
+- update the audit when a helper is intentionally centralized.
+
+If a duplicate formula is unavoidable, document why a shared utility is not
+usable and add a parity test that would fail if the copies drift.

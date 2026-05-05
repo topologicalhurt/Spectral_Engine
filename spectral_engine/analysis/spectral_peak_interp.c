@@ -1,5 +1,6 @@
 /* spectral_peak_interp.c - Sub-bin Frequency Interpolation */
 #include "spectral_peak_interp.h"
+#include "spectral_peak_estimator.h"
 #include "spectral_log.h"
 #include "spectral_windows.h"
 #include "spectral_omp.h"
@@ -11,13 +12,6 @@
 #include "simde/x86/avx2.h"
 #endif
 
-#if SPECTRAL_CUSTOM_FAST_MATH_MODE
-#include "spectral_fast_math.h"
-#define SPECTRAL_LOCAL_SQRT(x) fast_sqrt(x)
-#else
-#define SPECTRAL_LOCAL_SQRT(x) sqrtf(x)
-#endif
-
 int spectral_tracker_validate_candidate(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
@@ -27,15 +21,32 @@ int spectral_tracker_validate_candidate(
     float* out_max_vsq,
     int* out_best_next)
 {
-    const float m0 = next_row[cf - 1];
-    const float m1 = next_row[cf];
-    const float m2 = next_row[cf + 1];
-    float max_vsq = (m0 > m1) ? m0 : m1;
+    float left = 0.0f;
+    float curr = 0.0f;
+    float right = 0.0f;
+    float m0 = 0.0f;
+    float m1 = 0.0f;
+    float m2 = 0.0f;
+    float max_vsq = 0.0f;
     int best_idx = 0;
-    const float curr = row[cf];
 
-    if (!isfinite(curr) || !isfinite(m0) || !isfinite(m1) || !isfinite(m2) ||
-        curr < 0.0f || m0 < 0.0f || m1 < 0.0f || m2 < 0.0f) {
+    if (!row || !next_row || !out_curr || !out_max_vsq || !out_best_next ||
+        cf == 0u || !isfinite(threshsq) || threshsq < 0.0f) {
+        return 0;
+    }
+
+    left = row[cf - 1u];
+    curr = row[cf];
+    right = row[cf + 1u];
+    m0 = next_row[cf - 1u];
+    m1 = next_row[cf];
+    m2 = next_row[cf + 1u];
+    max_vsq = (m0 > m1) ? m0 : m1;
+
+    if (!isfinite(left) || !isfinite(curr) || !isfinite(right) ||
+        !isfinite(m0) || !isfinite(m1) || !isfinite(m2) ||
+        left < 0.0f || curr < 0.0f || right < 0.0f ||
+        m0 < 0.0f || m1 < 0.0f || m2 < 0.0f) {
         return 0;
     }
 
@@ -72,18 +83,60 @@ int spectral_tracker_emit_segment(
 #endif
 )
 {
-    float m = 0.0f;
-    float da = 0.0f;
-    float max_v = 0.0f;
-    float left = 0.0f;
-    float right = 0.0f;
-    float p = 0.0f;
+    SpectralPeakEstimateInput estimate_input = {0};
+    SpectralPeakEstimate estimate = {0};
+    size_t count = 0;
+    TrackSegment* seg = NULL;
 
-    size_t count = tracker->seg_counts[tid * SPECTRAL_CACHE_LINE_STRIDE];
+#if SPECTRAL_TRACK_DEBUG_TIMING
+    double phase_start = omp_get_wtime();
+#endif
+
+    if (!tracker || !row || !phase_row || !local_segments || cf == 0u || cf + 1u >= tracker->n_freqs) {
+        return 1;
+    }
+
+    estimate_input.magsq_row = row;
+    estimate_input.phase_row = phase_row;
+    estimate_input.n_freqs = tracker->n_freqs;
+    estimate_input.bin = cf;
+    estimate_input.curr_magsq = curr;
+    estimate_input.next_max_magsq = max_vsq;
+    estimate_input.best_next_bin = best_next;
+    estimate_input.freq_step_omega = freq_step_omega;
+    estimate_input.freq_step_df = freq_step_df;
+    estimate_input.inv_hop = inv_hop;
+    estimate_input.hop_float = hop_float;
+    estimate_input.candan_correction = tracker->peak_candan_correction;
+    estimate_input.interp_magsq = tracker->interp_magsq;
+    estimate_input.type = tracker->peak_estimator;
+
+    if (!spectral_peak_estimate_validated(&estimate_input, &estimate)) {
+#if SPECTRAL_TRACK_DEBUG_TIMING
+        *local_emit_interp_time += omp_get_wtime() - phase_start;
+        *local_emit_amp_time += 0.0;
+#endif
+        return 1;
+    }
+
+#if SPECTRAL_TRACK_DEBUG_TIMING
+    *local_emit_interp_time += omp_get_wtime() - phase_start;
+    phase_start = omp_get_wtime();
+#endif
+
+    count = tracker->seg_counts[tid * SPECTRAL_CACHE_LINE_STRIDE];
     if (SPECTRAL_UNLIKELY(count >= tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE])) {
-        size_t new_cap = tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE] * 2;
+        size_t old_cap = tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE];
+        size_t new_cap = old_cap * 2u;
+        TrackSegment* new_arr = NULL;
+
+        if (old_cap == 0u || new_cap < old_cap) {
+            atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_OVERFLOW, memory_order_relaxed);
+            return 0;
+        }
+
         SPECTRAL_LOG_WARN("Track segment realloc: tid=%d cap=%zu->%zu (unexpected)", tid, count, new_cap);
-        TrackSegment* new_arr = (TrackSegment*)spectral_aligned_alloc(new_cap * sizeof(TrackSegment));
+        new_arr = (TrackSegment*)spectral_aligned_alloc(new_cap * sizeof(TrackSegment));
         if (!new_arr) {
             atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
             return 0;
@@ -94,54 +147,20 @@ int spectral_tracker_emit_segment(
         tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE] = new_cap;
     }
 
-    TrackSegment* seg = &tracker->seg_arrays[tid][count];
-
-#if SPECTRAL_TRACK_DEBUG_TIMING
-    double phase_start = omp_get_wtime();
-#endif
+    seg = &tracker->seg_arrays[tid][count];
 
     seg->start = t_hop;
     seg->length = hop_float;
     seg->phase = phase_row[cf];
     seg->width = SPECTRAL_TRACK_DEFAULT_WIDTH;
+    seg->amp = estimate.amp;
+    seg->da = estimate.da;
+    seg->omega = estimate.omega;
+    seg->df = estimate.df;
+
 #if SPECTRAL_TRACK_DEBUG_TIMING
     *local_emit_alloc_time += omp_get_wtime() - phase_start;
-    phase_start = omp_get_wtime();
-#endif
-
-    m = SPECTRAL_LOCAL_SQRT(curr);
-    max_v = SPECTRAL_LOCAL_SQRT(max_vsq);
-    da = (max_v - m) * inv_hop;
-    seg->amp = m;
-    seg->da = da;
-#if SPECTRAL_TRACK_DEBUG_TIMING
-    *local_emit_amp_time += omp_get_wtime() - phase_start;
-    phase_start = omp_get_wtime();
-#endif
-
-    /* Window-aware three-bin interpolation.
-     *
-     * The local peak shape is determined by the analysis window, so the
-     * interpolation rule is part of the window descriptor rather than a fixed
-     * global formula. The default descriptor still uses log-power parabolic
-     * interpolation, but future windows can supply a better matched estimator.
-     */
-    left = row[cf - 1];
-    right = row[cf + 1];
-    {
-        SpectralWindowInterpMagsqFn interp_magsq = tracker->interp_magsq
-            ? tracker->interp_magsq
-            : spectral_window_interp_magsq_parabolic;
-        p = interp_magsq(left, curr, right);
-    }
-    if (!isfinite(p)) p = 0.0f;
-    if (p > 0.5f) p = 0.5f;
-    if (p < -0.5f) p = -0.5f;
-    
-    seg->omega = ((float)cf + p) * freq_step_omega;
-    seg->df = (best_next - (int)cf) * freq_step_df;
-#if SPECTRAL_TRACK_DEBUG_TIMING
-    *local_emit_interp_time += omp_get_wtime() - phase_start;
+    *local_emit_amp_time += 0.0;
 #endif
 
     tracker->seg_counts[tid * SPECTRAL_CACHE_LINE_STRIDE] = count + 1;

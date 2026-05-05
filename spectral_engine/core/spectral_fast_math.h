@@ -1,7 +1,9 @@
 /* spectral_fast_math.h - Fast Math Approximations
  *
- * Provides fast_sin, fast_atan2, and phase_to_rads for use by
- * oscillator and analysis modules. GPU shaders must match fast_sin.
+ * Provides shared exact-by-default math wrappers for oscillator and analysis
+ * modules. Approximation flags are intentionally centralized here so peak,
+ * vector and synth code do not grow local copies of the same bit hacks.
+ * GPU shaders must match fast_sin.
  */
 #ifndef SPECTRAL_FAST_MATH_H
 #define SPECTRAL_FAST_MATH_H
@@ -22,6 +24,7 @@ extern "C" {
 FAST_MATH_HOT float fast_sin(float x);
 FAST_MATH_HOT float fast_inv_sqrt(float x);
 FAST_MATH_HOT float fast_sqrt(float x);
+FAST_MATH_HOT float fast_peak_log(float x);
 float fast_atan2(float y, float x);
 float phase_to_rads(float p);
 

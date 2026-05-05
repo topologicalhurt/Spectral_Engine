@@ -5,7 +5,6 @@ ROOT = Path(__file__).resolve().parents[2]
 
 windows_c = (ROOT / "spectral_engine/core/spectral_windows.c").read_text()
 notes8 = (ROOT / "docs/core_audit/PATCH_NOTES_PASS8.md").read_text()
-contract8 = (ROOT / "docs/core_audit/PASS8_STFT_WINDOW_CONTRACT.md").read_text()
 
 assert "positive_amp_scale_d = 2.0 / (double)metrics.sum" in windows_c
 assert "positive_magsq_scale_d = positive_amp_scale_d * positive_amp_scale_d" in windows_c
@@ -26,8 +25,8 @@ assert "returned frame maximum" not in notes8 or "recomputed from scaled interio
 
 assert "endpoint/interior-bin" in notes8
 assert "trackable interior bins" in notes8
-assert "DC/Nyquist" in contract8
-assert "(1 / sum(window))^2" in contract8
-assert "(2 / sum(window))^2" in contract8
+assert "raw_endpoint_magnitude = sinusoid_peak_amplitude * sum(window)" in notes8
+assert "raw_positive_bin_magnitude = sinusoid_peak_amplitude * sum(window) / 2" in notes8
+assert "DC and Nyquist" in notes8
 
 print("pass9 static checks passed")

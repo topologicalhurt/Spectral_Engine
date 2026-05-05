@@ -63,7 +63,9 @@ struct SpectralTracker {
     float freq_step_df;
     float inv_hop;
     float hop_float;
+    float peak_candan_correction;
     SpectralWindowInterpMagsqFn interp_magsq;
+    SpectralPeakEstimatorType peak_estimator;
 
     double process_time_total;
     uint64_t total_pairs;
