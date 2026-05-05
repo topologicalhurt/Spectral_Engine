@@ -84,6 +84,20 @@ void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakE
     tracker->peak_estimator = spectral_peak_estimator_resolve_default(type);
 }
 
+void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy) {
+    if (!tracker) return;
+    switch (policy) {
+        case SPECTRAL_PEAK_PHASE_POLICY_IGNORE:
+        case SPECTRAL_PEAK_PHASE_POLICY_OBSERVE:
+        case SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT:
+            tracker->phase_policy = policy;
+            break;
+        default:
+            tracker->phase_policy = SPECTRAL_PEAK_PHASE_POLICY_DEFAULT;
+            break;
+    }
+}
+
 float spectral_tracker_get_threshsq(const SpectralTracker* tracker) {
     return tracker ? tracker->threshsq : 0.0f;
 }

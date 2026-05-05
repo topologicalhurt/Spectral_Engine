@@ -589,6 +589,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
                                        int neighborhood_validated) {
     SpectralPeakEstimatorType resolved_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
     SpectralPeakEstimatorType used_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+    SpectralPeakPhasePolicy phase_policy = SPECTRAL_PEAK_PHASE_POLICY_IGNORE;
     float offset = 0.0f;
     float next_offset = 0.0f;
     float center_mag = -1.0f;
@@ -598,6 +599,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     float phase_bin_offset = 0.0f;
     float phase_omega = 0.0f;
     float phase_error = 0.0f;
+    int phase_consistent = 0;
     unsigned flags = 0u;
 
     if (!input || !out || !input->magsq_row || input->n_freqs < 3u ||
@@ -610,11 +612,6 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     if (!spectral_peak_best_next_valid(input)) return 0;
 
-    /* The validated entry point means the tracker has already accepted the
-     * local magnitude neighborhood and next-frame triplet. It does NOT prove
-     * that caller-provided frequency-step fields, hop reciprocal, or stored
-     * magnitudes are finite. Keep these scalar-contract checks unconditional
-     * so the hot path remains safe if a future caller bypasses the tracker. */
     if (!spectral_peak_finite_nonnegative(input->curr_magsq) ||
         !spectral_peak_finite_nonnegative(input->next_max_magsq) ||
         !isfinite(input->freq_step_omega) ||
@@ -635,16 +632,6 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     next_amp = fast_sqrt(input->next_max_magsq);
     if (!isfinite(amp) || !isfinite(next_amp)) return 0;
 
-    /* Temporal slope contract:
-     *
-     * omega is already sub-bin accurate for the current frame. df should be
-     * based on the change from current sub-bin peak to next-frame sub-bin peak
-     * when the next frame has a valid local maximum around best_next_bin.
-     *
-     * If the next-frame sub-bin estimate is not valid (boundary bin, non-local
-     * max, non-finite values, custom callback failure), preserve the previous
-     * coarse-bin behavior rather than inventing slope from only the current
-     * offset. */
     bin_delta = (float)(input->best_next_bin - (int)input->bin);
     if (spectral_peak_estimate_next_offset_magsq(input, &next_offset)) {
         bin_delta = ((float)input->best_next_bin + next_offset) -
@@ -663,7 +650,9 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     out->omega = ((float)input->bin + offset) * input->freq_step_omega;
     out->df = bin_delta * input->freq_step_df;
 
-    if (spectral_peak_estimate_phase_advance(input, out->omega,
+    phase_policy = input->phase_policy;
+    if (phase_policy != SPECTRAL_PEAK_PHASE_POLICY_IGNORE &&
+        spectral_peak_estimate_phase_advance(input, out->omega,
                                              &phase_bin_offset,
                                              &phase_omega,
                                              &phase_error)) {
@@ -671,8 +660,12 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
         out->phase_omega = phase_omega;
         out->phase_error = phase_error;
         flags |= SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID;
-        if (fabsf(phase_error) <= SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS) {
+
+        phase_consistent = fabsf(phase_error) <= SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS;
+        if (phase_consistent) {
             flags |= SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT;
+        } else if (phase_policy == SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT) {
+            return 0;
         }
     }
 
@@ -687,6 +680,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     return 1;
 }
+
 
 
 

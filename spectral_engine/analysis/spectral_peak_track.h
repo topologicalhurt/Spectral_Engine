@@ -82,6 +82,7 @@ int spectral_tracker_run_fused_frame(
 
 void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc);
 void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type);
+void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy);
 
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,

@@ -503,6 +503,26 @@ def main() -> int:
     require("fctx.next_phase_row = phase_next;" in fused_c_pass15,
             "pass 15 fused analysis must supply next-frame phase row")
 
+
+    estimator_h_pass16 = read("spectral_engine/analysis/spectral_peak_estimator.h")
+    estimator_c_pass16 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    track_h_pass16 = read("spectral_engine/analysis/spectral_peak_track.h")
+    track_i_pass16 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    interp_c_pass16 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    track_c_pass16 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("SpectralPeakPhasePolicy" in estimator_h_pass16 and
+            "SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT" in estimator_h_pass16,
+            "pass 16 estimator API must expose phase policy")
+    require("phase_policy == SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT" in estimator_c_pass16,
+            "pass 16 estimator must implement opt-in phase inconsistency rejection")
+    require("spectral_tracker_set_phase_policy" in track_h_pass16 and
+            "SpectralPeakPhasePolicy phase_policy;" in track_i_pass16,
+            "pass 16 tracker must expose and store phase policy")
+    require("tracker->phase_policy = SPECTRAL_PEAK_PHASE_POLICY_DEFAULT;" in track_c_pass16,
+            "pass 16 tracker must initialize phase policy from canonical default")
+    require("estimate_input.phase_policy = tracker->phase_policy;" in interp_c_pass16,
+            "pass 16 tracker emission must pass phase policy into estimator")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

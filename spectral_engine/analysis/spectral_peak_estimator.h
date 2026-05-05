@@ -31,6 +31,12 @@ typedef enum SpectralPeakEstimatorType {
 #define SPECTRAL_PEAK_ESTIMATOR_DEFAULT SPECTRAL_PEAK_ESTIMATOR_AUTO
 #endif
 
+typedef enum SpectralPeakPhasePolicy {
+    SPECTRAL_PEAK_PHASE_POLICY_IGNORE = 0,
+    SPECTRAL_PEAK_PHASE_POLICY_OBSERVE = 1,
+    SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT = 2
+} SpectralPeakPhasePolicy;
+
 typedef enum SpectralPeakEstimateFlags {
     SPECTRAL_PEAK_ESTIMATE_BIN_OFFSET_VALID = 1u << 0,
     SPECTRAL_PEAK_ESTIMATE_AMP_VALID        = 1u << 1,
@@ -68,6 +74,7 @@ typedef struct SpectralPeakEstimateInput {
 
     SpectralWindowInterpMagsqFn interp_magsq;
     SpectralPeakEstimatorType type;
+    SpectralPeakPhasePolicy phase_policy;
 } SpectralPeakEstimateInput;
 
 typedef struct SpectralPeakEstimate {
