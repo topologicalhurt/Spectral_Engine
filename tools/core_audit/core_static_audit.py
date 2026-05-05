@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
-
 FAILURES: list[str] = []
 
 
@@ -23,23 +22,55 @@ def require(cond: bool, msg: str) -> None:
         FAILURES.append(msg)
 
 
+def body_of(src: str, fn: str) -> str:
+    start = src.find(f"static void {fn}")
+    if start < 0:
+        start = src.find(f"void {fn}")
+    if start < 0:
+        return ""
+    brace = src.find("{", start)
+    if brace < 0:
+        return src[start:]
+    depth = 0
+    for i in range(brace, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start:i + 1]
+    return src[start:]
+
+
 def main() -> int:
     require(not any(ROOT.glob(".spectral_core_audit_backups_*")), "audit backup directories must not be committed")
 
+    gitignore = read(".gitignore")
+    require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
+
     osc = read("spectral_engine/core/spectral_osc_formulas.h")
-    require("#define SPECTRAL_OSC_FORMULAS_VERSION 3" in osc, "oscillator formula version must be 3 after pass 2")
+    require("#define SPECTRAL_OSC_FORMULAS_VERSION 3" in osc, "oscillator formula version must be 3")
     require("return sinf(x);" in osc, "spectral_fast_sin_inline must use exact sinf by default")
     require("SPECTRAL_ENABLE_APPROX_TRIG" in osc, "approx trig must be explicitly gated")
+    require("Run `make parity-test`" not in osc, "do not reference nonexistent parity-test make target")
 
     fm = read("spectral_engine/core/spectral_fast_math.c")
     require("return atan2f(y, x);" in fm, "fast_atan2 must be exact by default")
+    require("SPECTRAL_ENABLE_APPROX_INV_SQRT" in fm, "approx inverse sqrt must be explicitly gated")
 
     vo = read("spectral_engine/core/spectral_vector_ops.c")
     require("#if !SPECTRAL_ENABLE_APPROX_ATAN2" in vo, "vector phase extraction must gate approximate atan2")
+    require("phase[i] = atan2f(im, re);" in vo, "magsq+phase extraction must use exact atan2f by default")
 
     fused = read("spectral_engine/analysis/spectral_analysis_fused.c")
-    require("float* phase_prev" in fused and "float* phase_next" in fused, "fused analysis must rotate separate phase rows")
-    region_start = fused.find("Global Maximum Discovery")
+    require("const size_t pair_count = n_frames - 1u" in fused, "fused path must iterate explicit adjacent frame pairs")
+    require("pair_start" in fused and "pair_end" in fused, "fused path must process explicit pair ranges")
+    require("fctx.row = row_curr" in fused and "fctx.next_row = row_next" in fused and "fctx.phase_row = phase_curr" in fused,
+            "fused path must track current row against next row with current phase row")
+    require("float t_hop = (float)pair * (float)hop" in fused, "fused t_hop must be based on the actual pair index")
+    require("t - 1" not in fused, "fused path must not use stale t-1 indexing")
+    require("row_prev" not in fused and "phase_prev" not in fused, "fused path should not keep ambiguous prev/current row names")
+    region_start = fused.find("Global maximum discovery")
     region_end = fused.find("tracker = spectral_tracker_create")
     if region_start >= 0 and region_end >= 0:
         require("SPECTRAL_CUSTOM_FAST_MATH_MODE" not in fused[region_start:region_end],
@@ -49,9 +80,8 @@ def main() -> int:
 
     synth = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
     for fn in ["segment_fn_wavetable_float", "segment_fn_native_timbre", "segment_fn_native_wavetable"]:
-        pos = synth.find(f"static void {fn}")
-        require(pos >= 0, f"missing {fn}")
-        body = synth[pos:synth.find("}\n", pos) + 2] if pos >= 0 else ""
+        body = body_of(synth, fn)
+        require(body, f"missing {fn}")
         require("fade_envelope" in body, f"{fn} must apply segment fade envelope")
 
     wavetable = read("spectral_engine/core/spectral_wavetable.c")
@@ -62,6 +92,11 @@ def main() -> int:
     metal = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
     require("SPECTRAL_OSC_FORMULAS_VERSION == 3" in metal, "Metal oscillator formula guard must be version 3")
     require("SPECTRAL_METAL_FAST_MATH" in metal, "Metal fast math must be explicitly gated")
+
+    metal_src_owner = read("spectral_engine/core/oscillator.c")
+    require("float norm = p * INV_TWO_PI" not in metal_src_owner, "Metal normalize string must not contain unused norm variable")
+    require("return p - TWO_PI * floor(p * INV_TWO_PI + 0.5f);" in metal_src_owner,
+            "Metal normalize string must preserve zero phase")
 
     header = read("spectral_engine/analysis/spectral_peak_track.h")
     require("VM overcommit" not in header, "peak tracker public comment must not advertise VM overcommit")

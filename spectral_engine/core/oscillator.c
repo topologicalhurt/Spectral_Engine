@@ -162,7 +162,6 @@ const char* oscillator_metal_source =
 "\n"
 "/* Must match spectral_normalize_phase() in spectral_osc_formulas.h */\n"
 "inline float oscillator_normalize_phase(float p) {\n"
-"    float norm = p * INV_TWO_PI;\n"
 "    return p - TWO_PI * floor(p * INV_TWO_PI + 0.5f);\n"
 "}\n"
 "\n"

@@ -32,10 +32,14 @@ def test_old_pade_endpoint_error_would_have_failed_contract() -> None:
 
 def test_fused_analysis_has_distinct_phase_rows() -> None:
     src = text("spectral_engine/analysis/spectral_analysis_fused.c")
-    assert "float* phase_prev" in src
+    assert "float* row_curr" in src
+    assert "float* row_next" in src
     assert "float* phase_curr" in src
     assert "float* phase_next" in src
-    assert "target_row, target_phase" in src
+    assert "fctx.row = row_curr" in src
+    assert "fctx.next_row = row_next" in src
+    assert "fctx.phase_row = phase_curr" in src
+    assert "row_curr = row_next" in src
     assert "phase_curr = phase_next" in src
 
 

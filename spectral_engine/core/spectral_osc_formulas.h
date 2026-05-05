@@ -2,7 +2,7 @@
  *
  * Single source of truth for all oscillator math:
  *   - Phase normalization
- *   - Pade [5/4] sine approximation
+ *   - Canonical sine implementation
  *   - 8 waveform generators (sine, saw, square, triangle, asin, parabola, quantized, pwm)
  *   - Fade envelope (Hann-window ramp)
  *
@@ -11,7 +11,7 @@
  * with SPECTRAL_STR(...) in oscillator.c.
  *
  * IMPORTANT: Any formula change here MUST be mirrored in the Metal shader string
- * in oscillator.c. Run `make parity-test` to verify cross-backend consistency.
+ * in oscillator.c. Run the core math/static tests to verify cross-backend consistency.
  */
 #ifndef SPECTRAL_OSC_FORMULAS_H
 #define SPECTRAL_OSC_FORMULAS_H
