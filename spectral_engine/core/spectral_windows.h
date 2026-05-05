@@ -34,6 +34,36 @@ typedef enum {
     SPECTRAL_WINDOW_COUNT
 } SpectralWindowType;
 
+typedef enum {
+    SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID = 1u << 0,
+    SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID = 1u << 1,
+    SPECTRAL_WINDOW_METRIC_ENBW_VALID = 1u << 2
+} SpectralWindowMetricFlags;
+
+typedef void (*SpectralWindowGenerateFn)(float* window, size_t length);
+typedef float (*SpectralWindowInterpMagsqFn)(float left_sq, float center_sq, float right_sq);
+
+typedef struct {
+    SpectralWindowType type;
+    const char* id;
+    const char* display_name;
+    SpectralWindowGenerateFn generate;
+    SpectralWindowInterpMagsqFn interp_magsq;
+} SpectralWindowDescriptor;
+
+typedef struct {
+    float sum;
+    float energy;
+    float coherent_gain;
+    float rms_gain;
+    float enbw_bins;
+    float positive_bin_amp_scale;
+    float positive_bin_magsq_scale;
+    float endpoint_bin_amp_scale;
+    float endpoint_bin_magsq_scale;
+    unsigned flags;
+} SpectralWindowMetrics;
+
 /*
  * spectral_window_hann: Generate a Hann (raised cosine) window
  * 
@@ -76,6 +106,11 @@ void spectral_window_blackman(float* window, size_t length);
  */
 void spectral_window_rectangular(float* window, size_t length);
 
+const SpectralWindowDescriptor* spectral_window_descriptor(SpectralWindowType type);
+const SpectralWindowDescriptor* spectral_window_descriptor_at(size_t index);
+size_t spectral_window_descriptor_count(void);
+const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id);
+
 /*
  * spectral_window_generate: Generate window by type
  * 
@@ -87,6 +122,35 @@ void spectral_window_generate(float* window, size_t length, SpectralWindowType t
  * spectral_window_name: Get human-readable window name
  */
 const char* spectral_window_name(SpectralWindowType type);
+
+/*
+ * Window calibration helpers.
+ *
+ * coherent_gain = sum(window) / length
+ * rms_gain      = sqrt(sum(window^2) / length)
+ *
+ * For real-valued STFT analysis, a bin-centered sinusoid of peak amplitude A
+ * appears in an interior positive-frequency DFT bin with magnitude
+ * approximately A * sum(window) / 2. DC and Nyquist are unpaired one-sided
+ * endpoints and use A * sum(window) instead. This follows the one-sided
+ * spectrum convention used by periodogram implementations and real-DFT
+ * endpoint packing:
+ *   https://scipy.github.io/devdocs/reference/generated/scipy.signal.periodogram.html
+ *   https://www.fftw.org/doc/The-1d-Real_002ddata-DFT.html
+ *
+ * Window coherent-gain and ENBW definitions follow the conventional window
+ * metric treatment summarized by Harris 1978:
+ *   https://www.site2241.net/sdr/Use-of-Windows-for-Harmonic-Analysis-Harris-1978.pdf
+ */
+float spectral_window_sum(const float* window, size_t length);
+float spectral_window_energy(const float* window, size_t length);
+SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length);
+float spectral_window_coherent_gain(const float* window, size_t length);
+float spectral_window_rms_gain(const float* window, size_t length);
+float spectral_window_positive_bin_amp_scale(const float* window, size_t length);
+float spectral_window_positive_bin_magsq_scale(const float* window, size_t length);
+float spectral_window_endpoint_bin_amp_scale(const float* window, size_t length);
+float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t length);
 
 /*
  * Computes the sub-bin frequency offset for a detected peak based on the

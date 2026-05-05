@@ -30,6 +30,8 @@ typedef struct {
     int n_threads;
     size_t n_fft;
     size_t n_freqs;
+    float endpoint_bin_magsq_scale;
+    float positive_bin_magsq_scale;
 #if SPECTRAL_USE_VDSP
     vDSP_Length log2n;
     FFTSetup* fft_setups;
@@ -54,6 +56,9 @@ int spectral_analysis_estimate_fft_bytes(size_t frame_count,
 int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
                                  size_t n_fft, size_t n_freqs);
 void spectral_fft_resources_free(SpectralFftResources* res);
+void spectral_fft_resources_set_magsq_scales(SpectralFftResources* res,
+                                             float endpoint_bin_magsq_scale,
+                                             float positive_bin_magsq_scale);
 float spectral_fft_frames(const SpectralFftResources* res,
                           const float* audio, int hop,
                           const float* window_func,

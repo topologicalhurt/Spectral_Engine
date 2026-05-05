@@ -153,3 +153,7 @@ For every exported core function, define:
 ## 15. Required review question before any core patch
 
 Can this change be tested against a mathematically clear reference implementation? If not, the change is not ready for core.
+
+## 16. Named techniques and paper-backed claims need sources
+
+Any named estimator, DSP technique, numerical method, or paper-backed claim must include a source link or an in-depth technical explanation in code comments or adjacent docs. A bare phrase like “standard estimator,” “from the literature,” or “periodogram convention” is not enough. If a link is unavailable, document the derivation, assumptions, input domain, output units, and why those assumptions match this implementation.

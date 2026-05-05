@@ -6,6 +6,7 @@
 #include "spectral_windows.h"
 #include "spectral_config.h"
 #include <math.h>
+#include <string.h>
 
 #if SPECTRAL_USE_VDSP
 #include <Accelerate/Accelerate.h>
@@ -16,7 +17,7 @@ void spectral_window_hann(float* window, size_t length) {
     if (length == 1) { window[0] = 1.0f; return; }
     
 #if SPECTRAL_USE_VDSP
-    vDSP_hann_window(window, (vDSP_Length)length, vDSP_HANN_NORM);
+    vDSP_hann_window(window, (vDSP_Length)length, vDSP_HANN_DENORM);
 #else
     /* Portable implementation: w[n] = 0.5 * (1 - cos(2*pi*n / (N-1))) */
     const float scale = (float)(2.0 * SPECTRAL_PI / (length - 1));
@@ -65,37 +66,149 @@ void spectral_window_rectangular(float* window, size_t length) {
     }
 }
 
+static const SpectralWindowDescriptor spectral_window_descriptors[] = {
+    { SPECTRAL_WINDOW_HANN, "hann", "Hann", spectral_window_hann, spectral_window_interp_magsq_parabolic },
+    { SPECTRAL_WINDOW_HAMMING, "hamming", "Hamming", spectral_window_hamming, spectral_window_interp_magsq_parabolic },
+    { SPECTRAL_WINDOW_BLACKMAN, "blackman", "Blackman", spectral_window_blackman, spectral_window_interp_magsq_parabolic },
+    { SPECTRAL_WINDOW_RECTANGULAR, "rectangular", "Rectangular", spectral_window_rectangular, spectral_window_interp_magsq_parabolic }
+};
+
+const SpectralWindowDescriptor* spectral_window_descriptor(SpectralWindowType type) {
+    size_t count = spectral_window_descriptor_count();
+    for (size_t i = 0; i < count; i++) {
+        if (spectral_window_descriptors[i].type == type) {
+            return &spectral_window_descriptors[i];
+        }
+    }
+    return NULL;
+}
+
+const SpectralWindowDescriptor* spectral_window_descriptor_at(size_t index) {
+    if (index >= spectral_window_descriptor_count()) return NULL;
+    return &spectral_window_descriptors[index];
+}
+
+size_t spectral_window_descriptor_count(void) {
+    return sizeof(spectral_window_descriptors) / sizeof(spectral_window_descriptors[0]);
+}
+
+const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id) {
+    size_t count = spectral_window_descriptor_count();
+    if (!id) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        if (spectral_window_descriptors[i].id &&
+            strcmp(spectral_window_descriptors[i].id, id) == 0) {
+            return &spectral_window_descriptors[i];
+        }
+    }
+    return NULL;
+}
+
 void spectral_window_generate(float* window, size_t length, SpectralWindowType type) {
-    switch (type) {
-        case SPECTRAL_WINDOW_HANN:
-            spectral_window_hann(window, length);
-            break;
-        case SPECTRAL_WINDOW_HAMMING:
-            spectral_window_hamming(window, length);
-            break;
-        case SPECTRAL_WINDOW_BLACKMAN:
-            spectral_window_blackman(window, length);
-            break;
-        case SPECTRAL_WINDOW_RECTANGULAR:
-        default:
-            spectral_window_rectangular(window, length);
-            break;
+    const SpectralWindowDescriptor* desc = spectral_window_descriptor(type);
+    if (!desc || !desc->generate) {
+        desc = spectral_window_descriptor(SPECTRAL_WINDOW_RECTANGULAR);
+    }
+    if (desc && desc->generate) {
+        desc->generate(window, length);
     }
 }
 
 const char* spectral_window_name(SpectralWindowType type) {
-    static const char* names[] = {
-        "Hann",
-        "Hamming", 
-        "Blackman",
-        "Rectangular"
-    };
-    if (type < SPECTRAL_WINDOW_COUNT) {
-        return names[type];
-    }
-    return "Unknown";
+    const SpectralWindowDescriptor* desc = spectral_window_descriptor(type);
+    return desc ? desc->display_name : "Unknown";
 }
 
+float spectral_window_sum(const float* window, size_t length) {
+    if (!window || length == 0) return 0.0f;
+
+    double sum = 0.0;
+    for (size_t i = 0; i < length; i++) {
+        sum += (double)window[i];
+    }
+    return (float)sum;
+}
+
+float spectral_window_energy(const float* window, size_t length) {
+    if (!window || length == 0) return 0.0f;
+
+    double energy = 0.0;
+    for (size_t i = 0; i < length; i++) {
+        double v = (double)window[i];
+        energy += v * v;
+    }
+    return (float)energy;
+}
+
+SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length) {
+    SpectralWindowMetrics metrics = {0};
+
+    metrics.positive_bin_amp_scale = 1.0f;
+    metrics.positive_bin_magsq_scale = 1.0f;
+    metrics.endpoint_bin_amp_scale = 1.0f;
+    metrics.endpoint_bin_magsq_scale = 1.0f;
+
+    if (!window || length == 0u) {
+        return metrics;
+    }
+
+    metrics.sum = spectral_window_sum(window, length);
+    metrics.energy = spectral_window_energy(window, length);
+
+    if (isfinite(metrics.sum)) {
+        metrics.coherent_gain = metrics.sum / (float)length;
+    }
+    if (isfinite(metrics.energy) && metrics.energy >= 0.0f) {
+        metrics.rms_gain = sqrtf(metrics.energy / (float)length);
+    }
+
+    if (isfinite(metrics.sum) && metrics.sum > 0.0f) {
+        metrics.positive_bin_amp_scale = 2.0f / metrics.sum;
+        metrics.positive_bin_magsq_scale =
+            metrics.positive_bin_amp_scale * metrics.positive_bin_amp_scale;
+        metrics.endpoint_bin_amp_scale = 1.0f / metrics.sum;
+        metrics.endpoint_bin_magsq_scale =
+            metrics.endpoint_bin_amp_scale * metrics.endpoint_bin_amp_scale;
+        metrics.flags |= SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID |
+                         SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID;
+    }
+
+    if (isfinite(metrics.sum) && isfinite(metrics.energy) &&
+        metrics.sum > 0.0f && metrics.energy > 0.0f) {
+        metrics.enbw_bins = ((float)length * metrics.energy) / (metrics.sum * metrics.sum);
+        if (isfinite(metrics.enbw_bins) && metrics.enbw_bins > 0.0f) {
+            metrics.flags |= SPECTRAL_WINDOW_METRIC_ENBW_VALID;
+        } else {
+            metrics.enbw_bins = 0.0f;
+        }
+    }
+
+    return metrics;
+}
+
+float spectral_window_coherent_gain(const float* window, size_t length) {
+    return spectral_window_metrics(window, length).coherent_gain;
+}
+
+float spectral_window_rms_gain(const float* window, size_t length) {
+    return spectral_window_metrics(window, length).rms_gain;
+}
+
+float spectral_window_positive_bin_amp_scale(const float* window, size_t length) {
+    return spectral_window_metrics(window, length).positive_bin_amp_scale;
+}
+
+float spectral_window_positive_bin_magsq_scale(const float* window, size_t length) {
+    return spectral_window_metrics(window, length).positive_bin_magsq_scale;
+}
+
+float spectral_window_endpoint_bin_amp_scale(const float* window, size_t length) {
+    return spectral_window_metrics(window, length).endpoint_bin_amp_scale;
+}
+
+float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t length) {
+    return spectral_window_metrics(window, length).endpoint_bin_magsq_scale;
+}
 
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq) {
     /* Correctness-first estimator: parabolic interpolation in the log-power

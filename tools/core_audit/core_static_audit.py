@@ -162,6 +162,100 @@ def main() -> int:
     require("SpectralFftResources res = {0};" in full_src,
             "full analysis path must initialize FFT resources before allocation attempts")
 
+
+    windows_h = read("spectral_engine/core/spectral_windows.h")
+    windows_c = read("spectral_engine/core/spectral_windows.c")
+    require("typedef void (*SpectralWindowGenerateFn)" in windows_h and
+            "typedef float (*SpectralWindowInterpMagsqFn)" in windows_h,
+            "window API must expose descriptor callback types")
+    require("SpectralWindowDescriptor" in windows_h and
+            "SpectralWindowMetrics" in windows_h,
+            "window API must expose descriptor registry and metrics structs")
+    require("SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID" in windows_h and
+            "SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID" in windows_h and
+            "SPECTRAL_WINDOW_METRIC_ENBW_VALID" in windows_h,
+            "window metrics must expose validity flags for conditional metrics")
+    require("spectral_window_descriptor(SpectralWindowType type)" in windows_h and
+            "spectral_window_descriptor_at(size_t index)" in windows_h and
+            "spectral_window_descriptor_count(void)" in windows_h and
+            "spectral_window_find_by_id" in windows_h,
+            "window API must expose static descriptor registry lookup helpers")
+    require("spectral_window_metrics" in windows_h,
+            "window API must expose universal sample-derived metrics")
+    require("static const SpectralWindowDescriptor spectral_window_descriptors[]" in windows_c and
+            '"hann"' in windows_c and '"hamming"' in windows_c and
+            '"blackman"' in windows_c and '"rectangular"' in windows_c,
+            "window implementation must register built-ins through descriptor table")
+    require("desc->generate(window, length)" in windows_c,
+            "spectral_window_generate must delegate through the descriptor registry")
+    require("spectral_window_positive_bin_magsq_scale" in windows_h,
+            "window API must expose positive-bin magnitude-squared calibration")
+    require("spectral_window_endpoint_bin_magsq_scale" in windows_h and
+            "endpoint_bin_magsq_scale" in windows_h,
+            "window API must expose endpoint magnitude-squared calibration")
+    require("vDSP_HANN_NORM" not in windows_c,
+            "vDSP Hann path must not request normalized window when API promises conventional windows")
+    require("vDSP_HANN_DENORM" in windows_c,
+            "vDSP Hann path must use conventional unnormalized Hann")
+    require("2.0f / metrics.sum" in windows_c,
+            "positive-bin amplitude calibration must use the real-sinusoid 2/sum(window) scale")
+    require("1.0f / metrics.sum" in windows_c,
+            "endpoint amplitude calibration must use the real-sinusoid 1/sum(window) scale")
+    require("metrics.flags |= SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID" in windows_c and
+            "SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID" in windows_c and
+            "metrics.flags |= SPECTRAL_WINDOW_METRIC_ENBW_VALID" in windows_c,
+            "window metrics must set validity flags when derived metrics are usable")
+
+    internal_h = read("spectral_engine/analysis/spectral_analysis_internal.h")
+    require("float endpoint_bin_magsq_scale;" in internal_h and
+            "float positive_bin_magsq_scale;" in internal_h,
+            "FFT resources must carry endpoint and positive-bin scale state")
+    require("spectral_fft_resources_set_magsq_scales" in internal_h,
+            "FFT resources must expose explicit endpoint-aware magnitude-squared scale setter")
+
+    fft_scale_src = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("res->endpoint_bin_magsq_scale = 1.0f;" in fft_scale_src and
+            "res->positive_bin_magsq_scale = 1.0f;" in fft_scale_src,
+            "FFT resources must default endpoint and positive-bin scales to raw magnitude-squared values")
+    require("spectral_fft_apply_magsq_scales" in fft_scale_src and
+            "spectral_fft_trackable_magsq_max" in fft_scale_src,
+            "FFT frame extraction must apply endpoint-aware scales and compute trackable-bin maxima")
+    require("magsq[0] *= endpoint_scale" in fft_scale_src and
+            "magsq[n_freqs - 1u] *= endpoint_scale" in fft_scale_src and
+            "magsq[i] *= positive_scale" in fft_scale_src,
+            "FFT scaling must treat DC/Nyquist endpoints separately from interior positive bins")
+    require("*frame_max = spectral_fft_trackable_magsq_max(magsq, n_freqs)" in fft_scale_src and
+            "*frame_max *= scale" not in fft_scale_src,
+            "FFT frame maximum must be recomputed from scaled trackable bins, not uniformly scaled")
+    require("void spectral_fft_resources_set_magsq_scales" in
+            fft_scale_src[:fft_scale_src.find("int spectral_fft_resources_alloc")],
+            "FFT magnitude scale setter must not be nested inside resource allocation")
+    require("static void spectral_fft_apply_magsq_scales" in
+            fft_scale_src[:fft_scale_src.find("int spectral_fft_resources_alloc")],
+            "FFT magnitude scale helper must not be nested inside resource allocation")
+
+    full_src = read("spectral_engine/analysis/spectral_analysis_full.c")
+    fused_src = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("spectral_window_hann(window_func" not in full_src and
+            "spectral_window_hann(window_func" not in fused_src,
+            "analysis paths must not hard-code Hann generation directly")
+    require("spectral_window_generate(window_func, (size_t)n_fft, SPECTRAL_WINDOW_HANN)" in full_src and
+            "spectral_window_generate(window_func, (size_t)n_fft, SPECTRAL_WINDOW_HANN)" in fused_src,
+            "analysis paths must route default Hann generation through registry wrapper")
+    require("window_metrics = spectral_window_metrics(window_func, (size_t)n_fft)" in full_src and
+            "window_metrics.endpoint_bin_magsq_scale" in full_src and
+            "window_metrics.positive_bin_magsq_scale" in full_src,
+            "full-matrix analysis must calibrate endpoint and positive-bin magnitudes from window metrics")
+    require("window_metrics = spectral_window_metrics(window_func, (size_t)n_fft)" in fused_src and
+            "window_metrics.endpoint_bin_magsq_scale" in fused_src and
+            "window_metrics.positive_bin_magsq_scale" in fused_src,
+            "fused analysis must calibrate endpoint and positive-bin magnitudes from window metrics")
+
+    ai_canon = read("docs/core_audit/AI_CANON.md")
+    require("Named techniques and paper-backed claims need sources" in ai_canon and
+            "source link" in ai_canon and "technical explanation" in ai_canon,
+            "AI canon must require links or technical explanations for named techniques and paper-backed claims")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

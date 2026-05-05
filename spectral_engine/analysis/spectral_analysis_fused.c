@@ -27,6 +27,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 {
     size_t n_fft_f32_bytes = 0;
     float* window_func = NULL;
+    SpectralWindowMetrics window_metrics = {0};
     SpectralFftResources res = {0};
     int n_threads = omp_get_max_threads();
     int actual_threads = n_threads;
@@ -43,9 +44,13 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
     window_func = spectral_aligned_alloc(n_fft_f32_bytes);
     if (!window_func) goto fail;
-    spectral_window_hann(window_func, n_fft);
+    spectral_window_generate(window_func, (size_t)n_fft, SPECTRAL_WINDOW_HANN);
+    window_metrics = spectral_window_metrics(window_func, (size_t)n_fft);
 
     if (!spectral_fft_resources_alloc(&res, actual_threads, (size_t)n_fft, n_freqs)) goto fail;
+    spectral_fft_resources_set_magsq_scales(&res,
+        window_metrics.endpoint_bin_magsq_scale,
+        window_metrics.positive_bin_magsq_scale);
 
     {
         /* Pass 1: Global maximum discovery is required for stable dB thresholding.
