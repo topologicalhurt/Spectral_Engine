@@ -156,21 +156,44 @@ SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length
     metrics.energy = spectral_window_energy(window, length);
 
     if (isfinite(metrics.sum)) {
-        metrics.coherent_gain = metrics.sum / (float)length;
+        float coherent_gain = metrics.sum / (float)length;
+        if (isfinite(coherent_gain)) {
+            metrics.coherent_gain = coherent_gain;
+        }
     }
     if (isfinite(metrics.energy) && metrics.energy >= 0.0f) {
-        metrics.rms_gain = sqrtf(metrics.energy / (float)length);
+        float rms_gain = sqrtf(metrics.energy / (float)length);
+        if (isfinite(rms_gain)) {
+            metrics.rms_gain = rms_gain;
+        }
     }
 
     if (isfinite(metrics.sum) && metrics.sum > 0.0f) {
-        metrics.positive_bin_amp_scale = 2.0f / metrics.sum;
-        metrics.positive_bin_magsq_scale =
-            metrics.positive_bin_amp_scale * metrics.positive_bin_amp_scale;
-        metrics.endpoint_bin_amp_scale = 1.0f / metrics.sum;
-        metrics.endpoint_bin_magsq_scale =
-            metrics.endpoint_bin_amp_scale * metrics.endpoint_bin_amp_scale;
-        metrics.flags |= SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID |
-                         SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID;
+        double positive_amp_scale_d = 2.0 / (double)metrics.sum;
+        double positive_magsq_scale_d = positive_amp_scale_d * positive_amp_scale_d;
+        float positive_amp_scale = (float)positive_amp_scale_d;
+        float positive_magsq_scale = (float)positive_magsq_scale_d;
+
+        if (isfinite(positive_amp_scale) && positive_amp_scale > 0.0f &&
+            isfinite(positive_magsq_scale) && positive_magsq_scale > 0.0f) {
+            metrics.positive_bin_amp_scale = positive_amp_scale;
+            metrics.positive_bin_magsq_scale = positive_magsq_scale;
+            metrics.flags |= SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID;
+        }
+
+        {
+            double endpoint_amp_scale_d = 1.0 / (double)metrics.sum;
+            double endpoint_magsq_scale_d = endpoint_amp_scale_d * endpoint_amp_scale_d;
+            float endpoint_amp_scale = (float)endpoint_amp_scale_d;
+            float endpoint_magsq_scale = (float)endpoint_magsq_scale_d;
+
+            if (isfinite(endpoint_amp_scale) && endpoint_amp_scale > 0.0f &&
+                isfinite(endpoint_magsq_scale) && endpoint_magsq_scale > 0.0f) {
+                metrics.endpoint_bin_amp_scale = endpoint_amp_scale;
+                metrics.endpoint_bin_magsq_scale = endpoint_magsq_scale;
+                metrics.flags |= SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID;
+            }
+        }
     }
 
     if (isfinite(metrics.sum) && isfinite(metrics.energy) &&

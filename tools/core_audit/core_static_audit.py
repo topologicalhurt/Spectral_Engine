@@ -197,10 +197,15 @@ def main() -> int:
             "vDSP Hann path must not request normalized window when API promises conventional windows")
     require("vDSP_HANN_DENORM" in windows_c,
             "vDSP Hann path must use conventional unnormalized Hann")
-    require("2.0f / metrics.sum" in windows_c,
-            "positive-bin amplitude calibration must use the real-sinusoid 2/sum(window) scale")
-    require("1.0f / metrics.sum" in windows_c,
-            "endpoint amplitude calibration must use the real-sinusoid 1/sum(window) scale")
+    require("positive_amp_scale_d = 2.0 / (double)metrics.sum" in windows_c,
+            "positive-bin amplitude calibration must derive from the real-sinusoid 2/sum(window) scale")
+    require("endpoint_amp_scale_d = 1.0 / (double)metrics.sum" in windows_c,
+            "endpoint amplitude calibration must derive from the real-sinusoid 1/sum(window) scale")
+    require("isfinite(positive_amp_scale)" in windows_c and
+            "isfinite(positive_magsq_scale)" in windows_c and
+            "isfinite(endpoint_amp_scale)" in windows_c and
+            "isfinite(endpoint_magsq_scale)" in windows_c,
+            "window scale validity flags must be gated on finite derived scales, not only finite window sum")
     require("metrics.flags |= SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID" in windows_c and
             "SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID" in windows_c and
             "metrics.flags |= SPECTRAL_WINDOW_METRIC_ENBW_VALID" in windows_c,
@@ -255,6 +260,20 @@ def main() -> int:
     require("Named techniques and paper-backed claims need sources" in ai_canon and
             "source link" in ai_canon and "technical explanation" in ai_canon,
             "AI canon must require links or technical explanations for named techniques and paper-backed claims")
+
+
+    pass8_notes = read("docs/core_audit/PATCH_NOTES_PASS8.md")
+    pass8_contract = read("docs/core_audit/PASS8_STFT_WINDOW_CONTRACT.md")
+    require("FFT resources now carry an explicit `magsq_scale`" not in pass8_notes,
+            "pass 8 notes must not describe stale single-scale FFT resource contract")
+    require("applies the scale to every magnitude-squared row" not in pass8_notes,
+            "pass 8 notes must not describe stale uniform all-bin scaling")
+    require("endpoint/interior-bin" in pass8_notes and "trackable interior bins" in pass8_notes,
+            "pass 8 notes must document endpoint-aware scaling and trackable-bin maxima")
+    require("DC/Nyquist" in pass8_contract and "(1 / sum(window))^2" in pass8_contract,
+            "pass 8 contract must document endpoint-bin calibration")
+    require("(2 / sum(window))^2" in pass8_contract,
+            "pass 8 contract must document interior positive-bin calibration")
 
     if FAILURES:
         for f in FAILURES:
