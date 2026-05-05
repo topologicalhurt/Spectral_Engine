@@ -101,6 +101,33 @@ def main() -> int:
     header = read("spectral_engine/analysis/spectral_peak_track.h")
     require("VM overcommit" not in header, "peak tracker public comment must not advertise VM overcommit")
 
+
+    synth_internal = read("spectral_engine/core/spectral_synth_internal.c")
+    require("SpectralError synth_validate_params" in synth_internal, "synthesis must validate public stretch/pitch params centrally")
+    require("SPECTRAL_MAX_STRETCH" in synth_internal and "SPECTRAL_MIN_PITCH" in synth_internal,
+            "synthesis param validation must use canonical configured bounds")
+    require("!spectral_is_finite_f32(s->omega)" in synth_internal and "!spectral_is_finite_f32(s->amp)" in synth_internal,
+            "segment loop params must reject non-finite segment fields")
+    require("stretch > SPECTRAL_MAX_STRETCH" in synth_internal[synth_internal.find("gpu_tile_preprocess"):],
+            "GPU tile preprocessing must reject invalid stretch before tile math")
+
+    synth_header = read("spectral_engine/core/spectral_synth_internal.h")
+    require("SpectralError error" in synth_header and "synth_preflight_native" in synth_header,
+            "SynthPreflight must carry error status and native preflight")
+
+    cuda = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("if (!pf.ok) return pf.error;" in cuda, "CUDA preflight must propagate parameter errors")
+
+    metal_src = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
+    require("if (!pf.ok) return pf.error;" in metal_src, "Metal preflight must propagate parameter errors")
+
+    analysis = read("spectral_engine/analysis/spectral_analysis.c")
+    require("SPECTRAL_MIN_SAMPLE_RATE" in analysis and "SPECTRAL_MIN_FFT_SIZE" in analysis,
+            "analysis input validation must use canonical sample-rate and FFT-size bounds")
+
+    fft = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("n_freqs != (n_fft / 2u + 1u)" in fft and "SPECTRAL_MIN_FFT_SIZE" in fft, "FFT resource allocation must validate size, power-of-two shape, and frequency-bin shape")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

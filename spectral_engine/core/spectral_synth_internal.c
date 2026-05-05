@@ -9,7 +9,21 @@
 
 #include "spectral_omp.h"
 
+SpectralError synth_validate_params(float stretch, float pitch) {
+    if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (!spectral_is_finite_f32(pitch) ||
+        pitch < SPECTRAL_MIN_PITCH || pitch > SPECTRAL_MAX_PITCH) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    return SPECTRAL_OK;
+}
+
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs) {
+    if (synth_validate_params(stretch, pitch) != SPECTRAL_OK || num_segs > (size_t)UINT32_MAX) {
+        return (SynthParams){0};
+    }
     return (SynthParams){
         .stretch = stretch,
         .inv_stretch = 1.0f / stretch,
@@ -18,6 +32,13 @@ SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t
         .out_len = out_len,
         .num_segments = (uint32_t)num_segs
     };
+}
+
+static void synth_zero_output_if_valid(void* out_buffer, size_t out_len, size_t elem_size) {
+    size_t out_bytes = 0;
+    if (out_buffer && elem_size != 0 && spectral_size_mul(out_len, elem_size, &out_bytes)) {
+        memset(out_buffer, 0, out_bytes);
+    }
 }
 
 static double g_synth_timing_dummy = 0;
@@ -68,16 +89,51 @@ SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size
     return SYNTH_VALIDATE_OK;
 }
 
-SynthPreflight synth_preflight_float(
-    float* out_buffer, size_t out_len, SegmentArray sa,
+static SynthPreflight synth_preflight_common(
+    void* out_buffer, size_t out_len, size_t elem_size, SegmentArray sa,
     float stretch, float pitch, double** t_synth)
 {
     SynthPreflight pf = {0};
-    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, t_synth)) return pf;
+    pf.error = SPECTRAL_OK;
+
+    if (!synth_validate_inputs(out_buffer, out_len, elem_size, sa, t_synth)) {
+        return pf;
+    }
+
+    pf.error = synth_validate_params(stretch, pitch);
+    if (pf.error != SPECTRAL_OK) {
+        synth_zero_output_if_valid(out_buffer, out_len, elem_size);
+        if (t_synth && *t_synth) **t_synth = 0;
+        return pf;
+    }
+
+    if (sa.count > UINT32_MAX) {
+        pf.error = SPECTRAL_ERR_OVERFLOW;
+        synth_zero_output_if_valid(out_buffer, out_len, elem_size);
+        if (t_synth && *t_synth) **t_synth = 0;
+        return pf;
+    }
+
     pf.params = make_synth_params(stretch, pitch, out_len, sa.count);
     pf.start_time = omp_get_wtime();
     pf.ok = 1;
     return pf;
+}
+
+SynthPreflight synth_preflight_float(
+    float* out_buffer, size_t out_len, SegmentArray sa,
+    float stretch, float pitch, double** t_synth)
+{
+    return synth_preflight_common(out_buffer, out_len, sizeof(float),
+                                  sa, stretch, pitch, t_synth);
+}
+
+SynthPreflight synth_preflight_native(
+    spectral_sample_t* out_buffer, size_t out_len, SegmentArray sa,
+    float stretch, float pitch, double** t_synth)
+{
+    return synth_preflight_common(out_buffer, out_len, sizeof(spectral_sample_t),
+                                  sa, stretch, pitch, t_synth);
 }
 
 SpectralError spectral_handle_unsupported_timbre(
@@ -161,6 +217,18 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     SegmentLoopParams lp = {0};
     if (!s || !p || out_len == 0) return lp;
 
+    if (!spectral_is_finite_f32(s->start) ||
+        !spectral_is_finite_f32(s->length) ||
+        !spectral_is_finite_f32(s->phase) ||
+        !spectral_is_finite_f32(s->omega) ||
+        !spectral_is_finite_f32(s->df) ||
+        !spectral_is_finite_f32(s->amp) ||
+        !spectral_is_finite_f32(s->da) ||
+        !spectral_is_finite_f32(s->width)) {
+        lp.valid = 0;
+        return lp;
+    }
+
     /* Overflow-safe: clamp negative/huge float products before casting to size_t */
     double start_d = (double)s->start * (double)p->stretch;
     double length_d = (double)s->length * (double)p->stretch;
@@ -210,6 +278,9 @@ SpectralError gpu_tile_preprocess(
     size_t cursors_bytes = 0;
 
     if (!out || tile_size == 0 || out_len == 0) return SPECTRAL_ERR_PARAM;
+    if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) {
+        return SPECTRAL_ERR_PARAM;
+    }
     if (sa.count > 0 && !sa.segs) return SPECTRAL_ERR_PARAM;
 
     *out = (GpuTileData){0};

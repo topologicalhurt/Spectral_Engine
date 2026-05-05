@@ -201,7 +201,7 @@ extern "C" SpectralError synth_cuda(
 
     /* Shared preflight: validate + params + timing */
     SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
-    if (!pf.ok) return SPECTRAL_OK;
+    if (!pf.ok) return pf.error;
     if (!spectral_array_bytes(out_len, sizeof(float), &out_size)) {
         *t_synth = 0;
         return SPECTRAL_ERR_OVERFLOW;

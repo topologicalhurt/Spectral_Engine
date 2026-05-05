@@ -258,7 +258,7 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
 
         /* Shared preflight: validate + params + timing */
         SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
-        if (!pf.ok) return SPECTRAL_OK;
+        if (!pf.ok) return pf.error;
         if (!spectral_array_bytes(out_len, sizeof(float), &output_size)) {
             *t_synth = 0;
             return SPECTRAL_ERR_OVERFLOW;

@@ -25,6 +25,7 @@ typedef struct SegmentLoopParams {
 } SegmentLoopParams;
 
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs);
+SpectralError synth_validate_params(float stretch, float pitch);
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len);
 
 /* Compute instantaneous phase at sample j (quadratic phase model) */
@@ -55,13 +56,18 @@ SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size
 /* Shared preflight: validate + params + timing in one call.
  * ok==0 means early exit was already handled (zero-filled or dummy timing). */
 typedef struct {
-    SynthParams params;
-    double      start_time;   /* omp_get_wtime() captured after validation */
-    int         ok;           /* 0 = early exit, 1 = proceed */
+    SynthParams   params;
+    double        start_time;   /* omp_get_wtime() captured after validation */
+    SpectralError error;        /* SPECTRAL_OK for valid early exits */
+    int           ok;           /* 0 = early exit/error, 1 = proceed */
 } SynthPreflight;
 
 SynthPreflight synth_preflight_float(
     float* out_buffer, size_t out_len, SegmentArray sa,
+    float stretch, float pitch, double** t_synth);
+
+SynthPreflight synth_preflight_native(
+    spectral_sample_t* out_buffer, size_t out_len, SegmentArray sa,
     float stretch, float pitch, double** t_synth);
 
 /* Per-dispatch effective timbre tracking for logging/reporting. */
