@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 30):
+    for pass_num in range(1, 31):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -827,6 +827,27 @@ def main() -> int:
             seg_cache_pass29.index("err = seg_cache_validate_data_extent(cache_dir, e->data_offset, total_data_bytes);") <
             seg_cache_pass29.index("spectral_seg_cache_fs_data_map_ro("),
             "pass 29 segment cache lookup must validate data extent before mapping")
+
+
+    seg_cache_pass30 = read("spectral_engine/core/spectral_seg_cache.c")
+    require("seg_cache_scale_to_i32" in seg_cache_pass30 and
+            "scaled < (double)INT_MIN" in seg_cache_pass30 and
+            "scaled > (double)INT_MAX" in seg_cache_pass30,
+            "pass 30 segment cache key must guard float-to-int conversions")
+    require("(int)(db_thresh * 10.0f)" not in seg_cache_pass30 and
+            "(int)(start_sec * 1000.0f)" not in seg_cache_pass30 and
+            "(int)(end_sec * 1000.0f)" not in seg_cache_pass30 and
+            "(int)(stretch * 1000000.0f)" not in seg_cache_pass30,
+            "pass 30 segment cache key must not use raw float-to-int casts")
+    require("len <= 0 || (size_t)len >= sizeof(buf)" in seg_cache_pass30 and
+            "len = (int)(sizeof(buf) - 1)" not in seg_cache_pass30,
+            "pass 30 segment cache key must reject truncated parameter strings")
+    require("seg_cache_store_metadata_valid" in seg_cache_pass30 and
+            "sample_rate < SPECTRAL_MIN_SAMPLE_RATE" in seg_cache_pass30 and
+            "pitch > SPECTRAL_MAX_PITCH" in seg_cache_pass30,
+            "pass 30 segment cache store must validate scalar metadata before persistence")
+    require("if (!seg_cache_store_metadata_valid(key, sa, sample_rate, stretch, pitch, output_length))" in seg_cache_pass30,
+            "pass 30 segment cache store must fail closed before opening append writer")
 
     if FAILURES:
         for f in FAILURES:

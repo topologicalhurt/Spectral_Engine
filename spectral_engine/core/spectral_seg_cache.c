@@ -19,8 +19,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 /* --- Key computation ----------------------------------------------------- */
+
+static int seg_cache_scale_to_i32(float value, double scale, int* out)
+{
+    double scaled = 0.0;
+
+    if (!out || !spectral_is_finite_f32(value) || !isfinite(scale)) return 0;
+
+    scaled = (double)value * scale;
+    if (!isfinite(scaled) || scaled < (double)INT_MIN || scaled > (double)INT_MAX) {
+        return 0;
+    }
+
+    *out = (int)scaled;
+    return 1;
+}
 
 uint64_t spectral_seg_cache_key(const char* stem,
                                 int n_fft, int hop,
@@ -29,21 +45,42 @@ uint64_t spectral_seg_cache_key(const char* stem,
                                 float stretch,
                                 uint32_t tile_size)
 {
-    /* Hash text form of analysis/render params for deterministic keys. */
+    /* Hash text form of analysis/render params for deterministic keys.
+     * Every float-to-int conversion below is guarded.  Converting NaN, Inf, or
+     * an out-of-range finite value to int is undefined behavior in C, so the
+     * cache key must fail closed before formatting. */
     char buf[512];
-    int len = snprintf(buf, sizeof(buf),
-                       "%s|%d|%d|%d|%d|%d|%d|%u",
-                       stem ? stem : "",
-                       n_fft, hop,
-                       (int)(db_thresh * 10.0f),
-                       (int)(start_sec * 1000.0f),
-                       (int)(end_sec * 1000.0f),
-                       (int)(stretch * 1000000.0f),
-                       tile_size);
-    if (len <= 0) return 0;
-    if ((size_t)len >= sizeof(buf)) len = (int)(sizeof(buf) - 1);
+    int len = 0;
+    int db_thresh_i = 0;
+    int start_ms_i = 0;
+    int end_ms_i = 0;
+    int stretch_ppm_i = 0;
+
+    if (n_fft <= 0 || hop <= 0 || tile_size == 0u ||
+        !spectral_is_finite_positive_f32(stretch) ||
+        stretch > SPECTRAL_MAX_STRETCH ||
+        !seg_cache_scale_to_i32(db_thresh, 10.0, &db_thresh_i) ||
+        !seg_cache_scale_to_i32(start_sec, 1000.0, &start_ms_i) ||
+        !seg_cache_scale_to_i32(end_sec, 1000.0, &end_ms_i) ||
+        !seg_cache_scale_to_i32(stretch, 1000000.0, &stretch_ppm_i)) {
+        return 0;
+    }
+
+    len = snprintf(buf, sizeof(buf),
+                   "%s|%d|%d|%d|%d|%d|%d|%u",
+                   stem ? stem : "",
+                   n_fft, hop,
+                   db_thresh_i,
+                   start_ms_i,
+                   end_ms_i,
+                   stretch_ppm_i,
+                   tile_size);
+    if (len <= 0 || (size_t)len >= sizeof(buf)) {
+        return 0;
+    }
     return (uint64_t)spectral_hash_oneshot(buf, (size_t)len);
 }
+
 
 /* --- Binary search (Java binarySearch convention: ~insertion_point) ----- */
 
@@ -355,6 +392,33 @@ void spectral_seg_cache_result_free(SpectralSegCacheLookupResult* r)
     memset(r, 0, sizeof(*r));
 }
 
+static int seg_cache_store_metadata_valid(uint64_t key,
+                                          const SegmentArray* sa,
+                                          int sample_rate,
+                                          float stretch,
+                                          float pitch,
+                                          size_t output_length)
+{
+    uint64_t output_length_u64 = 0;
+
+    if (key == 0u || !sa) return 0;
+    if (sa->count > 0 && !sa->segs) return 0;
+    if (sample_rate < SPECTRAL_MIN_SAMPLE_RATE || sample_rate > SPECTRAL_MAX_SAMPLE_RATE) return 0;
+    if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) return 0;
+    if (!spectral_is_finite_f32(pitch) ||
+        pitch < SPECTRAL_MIN_PITCH ||
+        pitch > SPECTRAL_MAX_PITCH) {
+        return 0;
+    }
+
+    output_length_u64 = (uint64_t)output_length;
+    if ((size_t)output_length_u64 != output_length) {
+        return 0;
+    }
+
+    return 1;
+}
+
 SpectralError spectral_seg_cache_store(const char* cache_dir,
                                        uint64_t key,
                                        const SegmentArray* sa,
@@ -375,7 +439,9 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                          tile_ranges && tile_segment_ids);
 
     if (!cache_dir || !sa) return SPECTRAL_ERR_PARAM;
-    if (sa->count > 0 && !sa->segs) return SPECTRAL_ERR_PARAM;
+    if (!seg_cache_store_metadata_valid(key, sa, sample_rate, stretch, pitch, output_length)) {
+        return SPECTRAL_ERR_PARAM;
+    }
 
     /* 1. Append segment data (+ optional tile data) to data file. */
     {
