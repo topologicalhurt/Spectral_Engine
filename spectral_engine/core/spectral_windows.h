@@ -42,6 +42,8 @@ typedef enum {
 
 typedef void (*SpectralWindowGenerateFn)(float* window, size_t length);
 typedef float (*SpectralWindowInterpMagsqFn)(float left_sq, float center_sq, float right_sq);
+typedef int (*SpectralWindowPeakMagsqFn)(float left_sq, float center_sq, float right_sq,
+                                           float bin_offset, float* out_peak_magsq);
 
 typedef struct {
     SpectralWindowType type;
@@ -49,6 +51,7 @@ typedef struct {
     const char* display_name;
     SpectralWindowGenerateFn generate;
     SpectralWindowInterpMagsqFn interp_magsq;
+    SpectralWindowPeakMagsqFn peak_magsq;
 } SpectralWindowDescriptor;
 
 typedef struct {
@@ -169,6 +172,10 @@ float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t lengt
  * exact window and spectrum representation used here.
  */
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq);
+int spectral_window_peak_magsq_center(float left_sq, float center_sq, float right_sq,
+                                      float bin_offset, float* out_peak_magsq);
+int spectral_window_peak_magsq_log_parabolic(float left_sq, float center_sq, float right_sq,
+                                             float bin_offset, float* out_peak_magsq);
 
 #ifdef __cplusplus
 }

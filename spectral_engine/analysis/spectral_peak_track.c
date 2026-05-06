@@ -77,6 +77,9 @@ void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const Spec
     tracker->interp_magsq = (desc && desc->interp_magsq)
         ? desc->interp_magsq
         : spectral_window_interp_magsq_parabolic;
+    tracker->peak_magsq = (desc && desc->peak_magsq)
+        ? desc->peak_magsq
+        : spectral_window_peak_magsq_center;
 }
 
 void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type) {
@@ -94,6 +97,19 @@ void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPha
             break;
         default:
             tracker->phase_policy = SPECTRAL_PEAK_PHASE_POLICY_DEFAULT;
+            break;
+    }
+}
+
+void spectral_tracker_set_amplitude_policy(SpectralTracker* tracker, SpectralPeakAmplitudePolicy policy) {
+    if (!tracker) return;
+    switch (policy) {
+        case SPECTRAL_PEAK_AMP_POLICY_CENTER:
+        case SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED:
+            tracker->amplitude_policy = policy;
+            break;
+        default:
+            tracker->amplitude_policy = SPECTRAL_PEAK_AMP_POLICY_DEFAULT;
             break;
     }
 }
@@ -492,6 +508,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->hop_float = (float)hop;
     tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);
     tracker->interp_magsq = spectral_window_interp_magsq_parabolic;
+    tracker->peak_magsq = spectral_window_peak_magsq_center;
     tracker->peak_estimator = SPECTRAL_PEAK_ESTIMATOR_DEFAULT;
     spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 

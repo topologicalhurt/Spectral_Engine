@@ -525,6 +525,97 @@ static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateIn
 }
 
 
+static int spectral_peak_bounded_magsq_gain_ok(float center_magsq, float peak_magsq) {
+    float max_gain = SPECTRAL_PEAK_AMP_MAX_GAIN;
+    if (!spectral_peak_finite_positive(center_magsq) ||
+        !spectral_peak_finite_positive(peak_magsq)) {
+        return 0;
+    }
+    if (!isfinite(max_gain) || max_gain < 1.0f) {
+        max_gain = 1.0f;
+    }
+    return peak_magsq <= center_magsq * max_gain;
+}
+
+static int spectral_peak_window_peak_magsq(const SpectralPeakEstimateInput* input,
+                                           size_t center_bin,
+                                           float offset,
+                                           float center_magsq,
+                                           float* out_peak_magsq) {
+    float candidate = 0.0f;
+    SpectralWindowPeakMagsqFn peak_magsq = NULL;
+
+    if (!input || !input->magsq_row || !out_peak_magsq ||
+        center_bin == 0u || center_bin + 1u >= input->n_freqs ||
+        !spectral_peak_finite_positive(center_magsq) || !isfinite(offset)) {
+        return 0;
+    }
+
+    peak_magsq = input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
+    if (!peak_magsq(input->magsq_row[center_bin - 1u],
+                    center_magsq,
+                    input->magsq_row[center_bin + 1u],
+                    offset,
+                    &candidate)) {
+        return 0;
+    }
+
+    if (!spectral_peak_bounded_magsq_gain_ok(center_magsq, candidate)) {
+        return 0;
+    }
+
+    *out_peak_magsq = candidate;
+    return 1;
+}
+
+static int spectral_peak_current_window_magsq(const SpectralPeakEstimateInput* input,
+                                              float offset,
+                                              float* out_peak_magsq) {
+    if (!input || !out_peak_magsq) return 0;
+    return spectral_peak_window_peak_magsq(input, input->bin, offset,
+                                          input->curr_magsq, out_peak_magsq);
+}
+
+static int spectral_peak_next_window_magsq(const SpectralPeakEstimateInput* input,
+                                           float next_offset,
+                                           float* out_peak_magsq) {
+    size_t next_bin = 0u;
+
+    if (!input || !out_peak_magsq || input->best_next_bin < 0) {
+        return 0;
+    }
+    next_bin = (size_t)input->best_next_bin;
+    if (next_bin == 0u || next_bin + 1u >= input->n_freqs ||
+        !input->next_magsq_row) {
+        return 0;
+    }
+
+    /* Temporarily evaluate against next_magsq_row by using the supplied
+     * callback directly. Keep the same estimator-level gain bound here so a
+     * custom window callback cannot bypass safety. */
+    {
+        float center = input->next_magsq_row[next_bin];
+        float candidate = 0.0f;
+        SpectralWindowPeakMagsqFn peak_magsq =
+            input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
+
+        if (!spectral_peak_finite_positive(center) ||
+            !peak_magsq(input->next_magsq_row[next_bin - 1u],
+                        center,
+                        input->next_magsq_row[next_bin + 1u],
+                        next_offset,
+                        &candidate)) {
+            return 0;
+        }
+        if (!spectral_peak_bounded_magsq_gain_ok(center, candidate)) {
+            return 0;
+        }
+        *out_peak_magsq = candidate;
+        return 1;
+    }
+}
+
+
 static int spectral_peak_estimate_offset(const SpectralPeakEstimateInput* input,
                                          SpectralPeakEstimatorType type,
                                          int neighborhood_validated,
@@ -590,9 +681,12 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
     SpectralPeakEstimatorType resolved_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
     SpectralPeakEstimatorType used_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
     SpectralPeakPhasePolicy phase_policy = SPECTRAL_PEAK_PHASE_POLICY_IGNORE;
+    SpectralPeakAmplitudePolicy amplitude_policy = SPECTRAL_PEAK_AMP_POLICY_CENTER;
     float offset = 0.0f;
     float next_offset = 0.0f;
     float center_mag = -1.0f;
+    float amp_magsq = 0.0f;
+    float next_amp_magsq = 0.0f;
     float amp = 0.0f;
     float next_amp = 0.0f;
     float bin_delta = 0.0f;
@@ -626,11 +720,24 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
         return 0;
     }
 
-    amp = (center_mag >= 0.0f && isfinite(center_mag))
-        ? center_mag
-        : fast_sqrt(input->curr_magsq);
-    next_amp = fast_sqrt(input->next_max_magsq);
-    if (!isfinite(amp) || !isfinite(next_amp)) return 0;
+    amp_magsq = input->curr_magsq;
+    next_amp_magsq = input->next_max_magsq;
+    amplitude_policy = input->amplitude_policy;
+
+    /* Window-aware amplitude contract:
+     *
+     * The peak-height model belongs to the analysis window descriptor. Hann,
+     * Hamming and Blackman can use a log-parabolic local model; rectangular
+     * uses center-bin amplitude by default because its sinc main lobe is not a
+     * log parabola. Unknown/custom windows must provide their own callback or
+     * fall back to center-bin power. */
+    if (amplitude_policy == SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED) {
+        float corrected = 0.0f;
+        if (spectral_peak_current_window_magsq(input, offset, &corrected)) {
+            amp_magsq = corrected;
+            flags |= SPECTRAL_PEAK_ESTIMATE_AMP_INTERP_VALID;
+        }
+    }
 
     bin_delta = (float)(input->best_next_bin - (int)input->bin);
     if (spectral_peak_estimate_next_offset_magsq(input, &next_offset)) {
@@ -638,12 +745,29 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
                     ((float)input->bin + offset);
         flags |= SPECTRAL_PEAK_ESTIMATE_NEXT_BIN_OFFSET_VALID |
                  SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED;
+
+        if (amplitude_policy == SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED) {
+            float corrected_next = 0.0f;
+            if (spectral_peak_next_window_magsq(input, next_offset, &corrected_next)) {
+                next_amp_magsq = corrected_next;
+                flags |= SPECTRAL_PEAK_ESTIMATE_NEXT_AMP_INTERP_VALID;
+            }
+        }
     } else {
         next_offset = 0.0f;
     }
 
+    amp = (center_mag >= 0.0f && isfinite(center_mag) &&
+           !(flags & SPECTRAL_PEAK_ESTIMATE_AMP_INTERP_VALID))
+        ? center_mag
+        : fast_sqrt(amp_magsq);
+    next_amp = fast_sqrt(next_amp_magsq);
+    if (!isfinite(amp) || !isfinite(next_amp)) return 0;
+
     out->bin_offset = offset;
     out->next_bin_offset = next_offset;
+    out->peak_magsq = amp_magsq;
+    out->next_peak_magsq = next_amp_magsq;
     out->amp = amp;
     out->next_amp = next_amp;
     out->da = (next_amp - amp) * input->inv_hop;
@@ -680,6 +804,7 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
 
     return 1;
 }
+
 
 
 

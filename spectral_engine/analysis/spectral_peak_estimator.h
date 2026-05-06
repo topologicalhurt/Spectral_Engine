@@ -37,6 +37,11 @@ typedef enum SpectralPeakPhasePolicy {
     SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT = 2
 } SpectralPeakPhasePolicy;
 
+typedef enum SpectralPeakAmplitudePolicy {
+    SPECTRAL_PEAK_AMP_POLICY_CENTER = 0,
+    SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED = 1
+} SpectralPeakAmplitudePolicy;
+
 typedef enum SpectralPeakEstimateFlags {
     SPECTRAL_PEAK_ESTIMATE_BIN_OFFSET_VALID = 1u << 0,
     SPECTRAL_PEAK_ESTIMATE_AMP_VALID        = 1u << 1,
@@ -47,7 +52,9 @@ typedef enum SpectralPeakEstimateFlags {
     SPECTRAL_PEAK_ESTIMATE_NEXT_BIN_OFFSET_VALID = 1u << 6,
     SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED    = 1u << 7,
     SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID    = 1u << 8,
-    SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT = 1u << 9
+    SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT = 1u << 9,
+    SPECTRAL_PEAK_ESTIMATE_AMP_INTERP_VALID       = 1u << 10,
+    SPECTRAL_PEAK_ESTIMATE_NEXT_AMP_INTERP_VALID  = 1u << 11
 } SpectralPeakEstimateFlags;
 
 typedef struct SpectralPeakEstimateInput {
@@ -73,13 +80,17 @@ typedef struct SpectralPeakEstimateInput {
     float candan_correction;
 
     SpectralWindowInterpMagsqFn interp_magsq;
+    SpectralWindowPeakMagsqFn peak_magsq;
     SpectralPeakEstimatorType type;
     SpectralPeakPhasePolicy phase_policy;
+    SpectralPeakAmplitudePolicy amplitude_policy;
 } SpectralPeakEstimateInput;
 
 typedef struct SpectralPeakEstimate {
     float bin_offset;
     float next_bin_offset;
+    float peak_magsq;
+    float next_peak_magsq;
     float phase_bin_offset;
     float phase_omega;
     float phase_error;

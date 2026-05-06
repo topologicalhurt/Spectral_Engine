@@ -523,6 +523,27 @@ def main() -> int:
     require("estimate_input.phase_policy = tracker->phase_policy;" in interp_c_pass16,
             "pass 16 tracker emission must pass phase policy into estimator")
 
+
+    windows_h_pass17b = read("spectral_engine/core/spectral_windows.h")
+    windows_c_pass17b = read("spectral_engine/core/spectral_windows.c")
+    estimator_h_pass17b = read("spectral_engine/analysis/spectral_peak_estimator.h")
+    estimator_c_pass17b = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    track_c_pass17b = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("SpectralWindowPeakMagsqFn" in windows_h_pass17b and
+            "SpectralWindowPeakMagsqFn peak_magsq;" in windows_h_pass17b,
+            "pass 17b window descriptor must own peak-height estimation policy")
+    require("spectral_window_peak_magsq_log_parabolic" in windows_c_pass17b and
+            "spectral_window_peak_magsq_center" in windows_c_pass17b,
+            "pass 17b must provide log-parabolic and center-bin peak-height callbacks")
+    require("SPECTRAL_WINDOW_RECTANGULAR" in windows_c_pass17b and
+            "spectral_window_peak_magsq_center" in windows_c_pass17b,
+            "pass 17b rectangular window must not force log-parabolic amplitude correction")
+    require("SpectralWindowPeakMagsqFn peak_magsq;" in estimator_h_pass17b and
+            "spectral_peak_window_peak_magsq" in estimator_c_pass17b,
+            "pass 17b estimator must consume window peak-height callback")
+    require("tracker->peak_magsq" in track_c_pass17b,
+            "pass 17b tracker must bind active window peak-height callback")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

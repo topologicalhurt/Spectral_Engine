@@ -67,11 +67,61 @@ void spectral_window_rectangular(float* window, size_t length) {
     }
 }
 
+
+int spectral_window_peak_magsq_center(float left_sq, float center_sq, float right_sq,
+                                      float bin_offset, float* out_peak_magsq) {
+    (void)left_sq;
+    (void)right_sq;
+    (void)bin_offset;
+    if (!out_peak_magsq || !isfinite(center_sq) || center_sq <= 0.0f) return 0;
+    *out_peak_magsq = center_sq;
+    return 1;
+}
+
+int spectral_window_peak_magsq_log_parabolic(float left_sq, float center_sq, float right_sq,
+                                             float bin_offset, float* out_peak_magsq) {
+    float left = 0.0f;
+    float center = 0.0f;
+    float right = 0.0f;
+    float log_l = 0.0f;
+    float log_c = 0.0f;
+    float log_r = 0.0f;
+    float log_peak = 0.0f;
+    float peak = 0.0f;
+
+    if (!out_peak_magsq || !isfinite(bin_offset) ||
+        !isfinite(left_sq) || !isfinite(center_sq) || !isfinite(right_sq) ||
+        left_sq < 0.0f || center_sq <= 0.0f || right_sq < 0.0f) {
+        return 0;
+    }
+
+    /* Once a log-power parabola is chosen, the fitted peak height is:
+     *   y_peak = y[0] - 0.25 * (y[-1] - y[1]) * p
+     * where y = log(power). Whether this model is appropriate is selected by
+     * the window descriptor, not by the tracker. */
+    left = fmaxf(left_sq, SPECTRAL_TRACK_LOG_FLOOR);
+    center = fmaxf(center_sq, SPECTRAL_TRACK_LOG_FLOOR);
+    right = fmaxf(right_sq, SPECTRAL_TRACK_LOG_FLOOR);
+    log_l = fast_peak_log(left);
+    log_c = fast_peak_log(center);
+    log_r = fast_peak_log(right);
+    log_peak = log_c - 0.25f * (log_l - log_r) * bin_offset;
+    if (!isfinite(log_peak)) return 0;
+
+    peak = expf(log_peak);
+    if (!isfinite(peak) || peak <= 0.0f) return 0;
+    if (peak < center_sq) peak = center_sq;
+
+    *out_peak_magsq = peak;
+    return 1;
+}
+
+
 static const SpectralWindowDescriptor spectral_window_descriptors[] = {
-    { SPECTRAL_WINDOW_HANN, "hann", "Hann", spectral_window_hann, spectral_window_interp_magsq_parabolic },
-    { SPECTRAL_WINDOW_HAMMING, "hamming", "Hamming", spectral_window_hamming, spectral_window_interp_magsq_parabolic },
-    { SPECTRAL_WINDOW_BLACKMAN, "blackman", "Blackman", spectral_window_blackman, spectral_window_interp_magsq_parabolic },
-    { SPECTRAL_WINDOW_RECTANGULAR, "rectangular", "Rectangular", spectral_window_rectangular, spectral_window_interp_magsq_parabolic }
+    { SPECTRAL_WINDOW_HANN, "hann", "Hann", spectral_window_hann, spectral_window_interp_magsq_parabolic, spectral_window_peak_magsq_log_parabolic },
+    { SPECTRAL_WINDOW_HAMMING, "hamming", "Hamming", spectral_window_hamming, spectral_window_interp_magsq_parabolic, spectral_window_peak_magsq_log_parabolic },
+    { SPECTRAL_WINDOW_BLACKMAN, "blackman", "Blackman", spectral_window_blackman, spectral_window_interp_magsq_parabolic, spectral_window_peak_magsq_log_parabolic },
+    { SPECTRAL_WINDOW_RECTANGULAR, "rectangular", "Rectangular", spectral_window_rectangular, spectral_window_interp_magsq_parabolic, spectral_window_peak_magsq_center }
 };
 
 const SpectralWindowDescriptor* spectral_window_descriptor(SpectralWindowType type) {

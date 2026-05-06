@@ -65,8 +65,10 @@ struct SpectralTracker {
     float hop_float;
     float peak_candan_correction;
     SpectralWindowInterpMagsqFn interp_magsq;
+    SpectralWindowPeakMagsqFn peak_magsq;
     SpectralPeakEstimatorType peak_estimator;
     SpectralPeakPhasePolicy phase_policy;
+    SpectralPeakAmplitudePolicy amplitude_policy;
 
     double process_time_total;
     uint64_t total_pairs;

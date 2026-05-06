@@ -113,8 +113,10 @@ int spectral_tracker_emit_segment(
     estimate_input.hop_float = hop_float;
     estimate_input.candan_correction = tracker->peak_candan_correction;
     estimate_input.interp_magsq = tracker->interp_magsq;
+    estimate_input.peak_magsq = tracker->peak_magsq;
     estimate_input.type = tracker->peak_estimator;
     estimate_input.phase_policy = tracker->phase_policy;
+    estimate_input.amplitude_policy = tracker->amplitude_policy;
 
     if (!spectral_peak_estimate_validated(&estimate_input, &estimate)) {
 #if SPECTRAL_TRACK_DEBUG_TIMING
