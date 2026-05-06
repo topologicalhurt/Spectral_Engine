@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 24):
+    for pass_num in range(1, 25):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -726,6 +726,25 @@ def main() -> int:
             "SPECTRAL_ERR_OVERFLOW" in pass23_notes and
             "SPECTRAL_ERR_MEMORY" in pass23_notes,
             "pass 23 walkthrough must document overflow-vs-memory failure and the guarded arithmetic sequence")
+
+
+    track_c_pass24 = read("spectral_engine/analysis/spectral_peak_track.c")
+    interp_c_pass24 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    require("spectral_size_mul((size_t)n_threads, (size_t)SPECTRAL_CACHE_LINE_STRIDE, &thread_slots)" in track_c_pass24 and
+            "spectral_size_mul(thread_slots, sizeof(size_t), &thread_slots_bytes)" in track_c_pass24,
+            "pass 24 tracker create segment storage must check padded counter byte counts")
+    require("spectral_size_mul(init_cap, sizeof(TrackSegment), &init_seg_bytes)" in track_c_pass24 and
+            "spectral_aligned_alloc(init_seg_bytes)" in track_c_pass24,
+            "pass 24 tracker create segment arrays must use checked TrackSegment byte counts")
+    require("(size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t)" not in track_c_pass24 and
+            "init_cap * sizeof(TrackSegment)" not in track_c_pass24,
+            "pass 24 tracker create must not use raw segment-storage allocation products")
+    require("spectral_size_mul(new_cap, sizeof(TrackSegment), &new_bytes)" in interp_c_pass24 and
+            "spectral_size_mul(count, sizeof(TrackSegment), &copy_bytes)" in interp_c_pass24,
+            "pass 24 tracker segment growth must check allocation and copy byte counts")
+    require("spectral_aligned_alloc(new_bytes)" in interp_c_pass24 and
+            "memcpy(new_arr, tracker->seg_arrays[tid], copy_bytes)" in interp_c_pass24,
+            "pass 24 tracker segment growth must use checked byte counts")
 
     if FAILURES:
         for f in FAILURES:

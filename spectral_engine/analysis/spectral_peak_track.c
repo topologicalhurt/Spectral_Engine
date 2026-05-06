@@ -572,17 +572,30 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
      * The previous 16M-per-thread virtual allocation depended on Linux
      * overcommit behavior and is not a portable real-time contract. */
     size_t init_cap = (size_t)SPECTRAL_TRACK_INITIAL_SEG_CAP;
+    size_t thread_slots = 0;
+    size_t thread_slots_bytes = 0;
+    size_t init_seg_bytes = 0;
+
+    if (init_cap == 0u ||
+        !spectral_size_mul((size_t)n_threads, (size_t)SPECTRAL_CACHE_LINE_STRIDE, &thread_slots) ||
+        !spectral_size_mul(thread_slots, sizeof(size_t), &thread_slots_bytes) ||
+        !spectral_size_mul(init_cap, sizeof(TrackSegment), &init_seg_bytes)) {
+        goto fail;
+    }
+
     tracker->seg_arrays = (TrackSegment**)spectral_calloc_array((size_t)n_threads, sizeof(TrackSegment*));
-    /* Pad heavily to 64-byte cache line stride to eliminate catastrophic False Sharing. */
-    tracker->seg_counts = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
-    tracker->seg_capacities = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
+    /* Padded per-thread counters: only slot [tid * SPECTRAL_CACHE_LINE_STRIDE]
+     * is live, but the full padded allocation must be overflow-checked. */
+    tracker->seg_counts = (size_t*)spectral_aligned_alloc(thread_slots_bytes);
+    tracker->seg_capacities = (size_t*)spectral_aligned_alloc(thread_slots_bytes);
     if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities) {
         goto fail;
     }
-    memset(tracker->seg_counts, 0, (size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
+    memset(tracker->seg_counts, 0, thread_slots_bytes);
+    memset(tracker->seg_capacities, 0, thread_slots_bytes);
     for (t = 0; t < n_threads; t++) {
         tracker->seg_capacities[t * SPECTRAL_CACHE_LINE_STRIDE] = init_cap;
-        tracker->seg_arrays[t] = (TrackSegment*)spectral_aligned_alloc(init_cap * sizeof(TrackSegment));
+        tracker->seg_arrays[t] = (TrackSegment*)spectral_aligned_alloc(init_seg_bytes);
         if (!tracker->seg_arrays[t]) {
             goto fail;
         }

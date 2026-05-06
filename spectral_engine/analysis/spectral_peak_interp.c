@@ -2,6 +2,7 @@
 #include "spectral_peak_interp.h"
 #include "spectral_peak_estimator.h"
 #include "spectral_log.h"
+#include "spectral_utils.h"
 #include "spectral_windows.h"
 #include "spectral_omp.h"
 #include <math.h>
@@ -135,20 +136,24 @@ int spectral_tracker_emit_segment(
     if (SPECTRAL_UNLIKELY(count >= tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE])) {
         size_t old_cap = tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE];
         size_t new_cap = old_cap * 2u;
+        size_t new_bytes = 0;
+        size_t copy_bytes = 0;
         TrackSegment* new_arr = NULL;
 
-        if (old_cap == 0u || new_cap < old_cap) {
+        if (old_cap == 0u || new_cap < old_cap ||
+            !spectral_size_mul(new_cap, sizeof(TrackSegment), &new_bytes) ||
+            !spectral_size_mul(count, sizeof(TrackSegment), &copy_bytes)) {
             atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_OVERFLOW, memory_order_relaxed);
             return 0;
         }
 
         SPECTRAL_LOG_WARN("Track segment realloc: tid=%d cap=%zu->%zu (unexpected)", tid, count, new_cap);
-        new_arr = (TrackSegment*)spectral_aligned_alloc(new_cap * sizeof(TrackSegment));
+        new_arr = (TrackSegment*)spectral_aligned_alloc(new_bytes);
         if (!new_arr) {
             atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
             return 0;
         }
-        memcpy(new_arr, tracker->seg_arrays[tid], count * sizeof(TrackSegment));
+        memcpy(new_arr, tracker->seg_arrays[tid], copy_bytes);
         free(tracker->seg_arrays[tid]);
         tracker->seg_arrays[tid] = new_arr;
         tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE] = new_cap;
