@@ -85,6 +85,65 @@ static int seg_cache_tile_blob_bytes(uint32_t tile_count,
     return 1;
 }
 
+static int seg_cache_entry_metadata_valid(const SpectralSegCacheEntry* e)
+{
+    if (!e) return 0;
+
+    /* All fields below come from disk.  Validate before narrowing uint32_t to
+     * int, uint64_t to size_t, or trusting tile metadata to describe a blob. */
+    if (e->sample_rate < (uint32_t)SPECTRAL_MIN_SAMPLE_RATE ||
+        e->sample_rate > (uint32_t)SPECTRAL_MAX_SAMPLE_RATE) {
+        return 0;
+    }
+    if (!spectral_is_finite_positive_f32(e->stretch) ||
+        e->stretch > SPECTRAL_MAX_STRETCH) {
+        return 0;
+    }
+    if (!spectral_is_finite_f32(e->pitch) ||
+        e->pitch < SPECTRAL_MIN_PITCH ||
+        e->pitch > SPECTRAL_MAX_PITCH) {
+        return 0;
+    }
+    if ((uint64_t)(size_t)e->output_length != e->output_length) {
+        return 0;
+    }
+    if (e->seg_count == 0 && (e->tile_count != 0 || e->tile_total_refs != 0)) {
+        return 0;
+    }
+    if ((e->tile_count == 0) != (e->tile_total_refs == 0)) {
+        return 0;
+    }
+    return 1;
+}
+
+static SpectralError seg_cache_validate_data_extent(const char* cache_dir,
+                                                    uint64_t data_offset,
+                                                    size_t total_data_bytes)
+{
+    uint64_t data_file_size = 0;
+    uint64_t total_data_bytes_u64 = 0;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!cache_dir) return SPECTRAL_ERR_PARAM;
+    if (total_data_bytes == 0u) return SPECTRAL_OK;
+
+    total_data_bytes_u64 = (uint64_t)total_data_bytes;
+    if ((size_t)total_data_bytes_u64 != total_data_bytes) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    err = spectral_seg_cache_fs_data_file_size(cache_dir, &data_file_size);
+    if (err != SPECTRAL_OK) return err;
+
+    if (total_data_bytes_u64 > UINT64_MAX - data_offset ||
+        data_file_size < data_offset + total_data_bytes_u64) {
+        return SPECTRAL_ERR_FILE_CORRUPT;
+    }
+
+    return SPECTRAL_OK;
+}
+
+
 static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
                                         const char* tile_base,
                                         size_t tile_data_bytes,
@@ -159,6 +218,11 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
         size_t tile_data_bytes = 0;
         size_t total_data_bytes = 0;
 
+        if (!seg_cache_entry_metadata_valid(e)) {
+            free(entries);
+            return SPECTRAL_ERR_FILE_CORRUPT;
+        }
+
         result->sample_rate = (int)e->sample_rate;
         result->stretch = e->stretch;
         result->pitch = e->pitch;
@@ -178,6 +242,12 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
             !spectral_size_add(total_data_bytes, tile_data_bytes, &total_data_bytes)) {
             free(entries);
             return SPECTRAL_ERR_OVERFLOW;
+        }
+
+        err = seg_cache_validate_data_extent(cache_dir, e->data_offset, total_data_bytes);
+        if (err != SPECTRAL_OK) {
+            free(entries);
+            return err;
         }
 
         /* Fast path: mmap the data region read-only (little-endian hosts). */

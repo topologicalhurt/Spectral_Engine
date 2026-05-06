@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 29):
+    for pass_num in range(1, 30):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -809,6 +809,24 @@ def main() -> int:
     require(seg_cache_fs_pass28.index("file_size != (uint64_t)expected_index_bytes") <
             seg_cache_fs_pass28.index("entries = (SpectralSegCacheEntry*)spectral_malloc_array("),
             "pass 28 segment cache index load must not allocate before validating file shape")
+
+
+    seg_cache_pass29 = read("spectral_engine/core/spectral_seg_cache.c")
+    require("seg_cache_entry_metadata_valid" in seg_cache_pass29 and
+            "e->sample_rate < (uint32_t)SPECTRAL_MIN_SAMPLE_RATE" in seg_cache_pass29 and
+            "(uint64_t)(size_t)e->output_length != e->output_length" in seg_cache_pass29,
+            "pass 29 segment cache lookup must validate scalar metadata before narrowing")
+    require("if (!seg_cache_entry_metadata_valid(e))" in seg_cache_pass29 and
+            seg_cache_pass29.index("if (!seg_cache_entry_metadata_valid(e))") <
+            seg_cache_pass29.index("result->sample_rate = (int)e->sample_rate;"),
+            "pass 29 segment cache lookup must validate metadata before writing public result")
+    require("seg_cache_validate_data_extent" in seg_cache_pass29 and
+            "spectral_seg_cache_fs_data_file_size(cache_dir, &data_file_size)" in seg_cache_pass29,
+            "pass 29 segment cache lookup must validate declared data extent")
+    require("err = seg_cache_validate_data_extent(cache_dir, e->data_offset, total_data_bytes);" in seg_cache_pass29 and
+            seg_cache_pass29.index("err = seg_cache_validate_data_extent(cache_dir, e->data_offset, total_data_bytes);") <
+            seg_cache_pass29.index("spectral_seg_cache_fs_data_map_ro("),
+            "pass 29 segment cache lookup must validate data extent before mapping")
 
     if FAILURES:
         for f in FAILURES:
