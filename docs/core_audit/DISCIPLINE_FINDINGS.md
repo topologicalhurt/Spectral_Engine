@@ -25,6 +25,11 @@ The previously observed wrap formula violated the elementary invariant `wrap(0) 
 
 Three-bin interpolation is not interchangeable across magnitude, power, log magnitude and complex spectra. Estimators from Quinn, Jacobsen/Kootsookos and Candan have assumptions. A correct implementation must encode those assumptions in function names and tests.
 
+The safe public estimator path must validate the selected next-frame bin before
+computing temporal slope. The expression `best_next_bin - bin` is only defined
+after proving that `best_next_bin` is non-negative, in range, and inside the
+tracker's local `[bin - 1, bin + 1]` search contract.
+
 ### Numerical approximations
 
 Approximate `sqrt`, `atan2`, and sine must be treated as approximations with error budgets, not drop-in replacements. For synthesis, local errors can become systematic timbral artifacts.
@@ -71,6 +76,10 @@ The code includes prefetches, SIMD scans, batch queues, overallocated arrays, an
 - a benchmark showing benefit on target hardware;
 - a fallback for small sizes;
 - a documented error budget if numerical.
+
+Benchmark timing must exclude reference/error bookkeeping. A benchmark that
+computes canonical answers inside the timed loop is measuring the harness, not
+the estimator or kernel path being optimized.
 
 ### Memory layout
 
@@ -124,6 +133,17 @@ A future `spectral_kernel.h` should expose only:
 - synthesis entry point;
 - free/destroy functions;
 - error/status codes.
+
+Raw analysis/tracking APIs that accept already-computed magnitude/phase rows
+must expose the active window/estimator profile. A compatibility wrapper may
+default to Hann, but explicit APIs must fail closed when a caller-provided
+descriptor is invalid.
+
+### Audit docs
+
+Patch notes are the durable review record. Per-pass validation matrices and
+contract explanations should live inside the matching `PATCH_NOTES_PASS<N>.md`
+file so tests, audits and reviewers do not depend on stale sidecar files.
 
 ### Global state
 

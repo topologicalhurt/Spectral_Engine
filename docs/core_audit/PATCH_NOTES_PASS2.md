@@ -1,6 +1,10 @@
-# Patch notes: core audit pass 2
+# Core audit pass 2: approximation gates and validation workflow
+
+## Summary
 
 This patch is intentionally correctness-first. Some exact default paths may be slower than the previous approximate paths. That is deliberate: this engine is intended as a reusable kernel, so approximations must be opt-in, named, benchmarked and bounded.
+
+## Changes
 
 New approximation gates:
 

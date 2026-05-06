@@ -1,4 +1,4 @@
-# Core audit pass 5 — GPU tile-span canonicalization
+# Core audit pass 5: GPU tile-span canonicalization
 
 ## Scope
 

@@ -63,10 +63,10 @@ int main(void) {
 }
 '''
 
-    with tempfile.TemporaryDirectory(prefix="spectral-pass17b-window-amp-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="spectral-pass17-window-amp-") as tmp:
         tmp_path = Path(tmp)
-        harness_c = tmp_path / "pass17b_window_amp.c"
-        exe = tmp_path / "pass17b_window_amp"
+        harness_c = tmp_path / "pass17_window_amp.c"
+        exe = tmp_path / "pass17_window_amp"
         harness_c.write_text(harness, encoding="utf-8")
         link_flags = ["-framework", "Accelerate"] if sys.platform == "darwin" else []
         subprocess.run(
@@ -92,7 +92,7 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass17b_static_window_amplitude_policy_present() -> None:
+def test_pass17_static_window_amplitude_policy_present() -> None:
     windows_h = (ROOT / "spectral_engine/core/spectral_windows.h").read_text()
     windows_c = (ROOT / "spectral_engine/core/spectral_windows.c").read_text()
     est_h = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.h").read_text()

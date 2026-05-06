@@ -174,3 +174,27 @@ locality. In particular:
 
 If a duplicate formula is unavoidable, document why a shared utility is not
 usable and add a parity test that would fail if the copies drift.
+
+## 18. Patch notes are the canonical pass record
+
+Patch audit notes must use one numeric filename per pass:
+
+```text
+docs/core_audit/PATCH_NOTES_PASS<N>.md
+```
+
+Do not create letter-suffixed pass numbers such as `PASS17B`, interim pass-note
+names, or sidecar validation files that duplicate the pass note. If a pass has
+a validation matrix, source table, benchmark interpretation, or failure
+contract, put it in that pass note unless it is a long-lived cross-pass
+reference such as `AI_CANON.md` or `ACADEMIC_SOURCES.md`.
+
+Expected invariants:
+
+- pass-note filenames are numeric and monotonic;
+- the H1 is `# Core audit pass <N>: ...`;
+- tests and audit scripts read the pass note directly;
+- deleting a sidecar file cannot break core tests;
+- docs updates that change the contract update `AI_CANON.md`,
+  `ACADEMIC_SOURCES.md`, and `DISCIPLINE_FINDINGS.md` when those documents are
+  affected.

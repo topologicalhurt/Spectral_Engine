@@ -1,6 +1,6 @@
-# Patch Notes
+# Core audit pass 1: foundational math and fast-math cleanup
 
-## Source patch summary
+## Summary
 
 This bundle's apply script performs targeted edits only.
 
@@ -51,7 +51,7 @@ This bundle's apply script performs targeted edits only.
 
 - Replaces Linux-overcommit initial segment capacity with bounded macro.
 
-## Required validation after apply
+## Validation
 
 ```sh
 python3 tests/core_math/test_core_math_contract.py

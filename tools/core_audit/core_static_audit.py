@@ -48,6 +48,18 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
+    for pass_num in range(1, 20):
+        require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
+                f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
+    require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
+            "base PATCH_NOTES.md must be normalized to PATCH_NOTES_PASS1.md")
+    require(not (ROOT / "docs/core_audit/PATCH_NOTES_INTERIM_PASS3.md").exists(),
+            "interim pass 3 notes must be normalized to PATCH_NOTES_PASS3.md")
+    require(not (ROOT / "docs/core_audit/PATCH_NOTES_PASS17B.md").exists(),
+            "letter-suffixed pass 17 notes must be normalized to PATCH_NOTES_PASS17.md")
+    require(not (ROOT / "docs/core_audit/PASS13_ESTIMATOR_VALIDATION_MATRIX.md").exists(),
+            "pass 13 validation matrix must live inside PATCH_NOTES_PASS13.md")
+
     osc = read("spectral_engine/core/spectral_osc_formulas.h")
     require("#define SPECTRAL_OSC_FORMULAS_VERSION 3" in osc, "oscillator formula version must be 3")
     require("return sinf(x);" in osc, "spectral_fast_sin_inline must use exact sinf by default")
@@ -264,6 +276,22 @@ def main() -> int:
             "fast_sqrt" in ai_canon and
             "comparison test between approximate and canonical outputs" in ai_canon,
             "AI canon must require utility reuse and approximation/reference comparison tests")
+    require("Patch notes are the canonical pass record" in ai_canon and
+            "PATCH_NOTES_PASS<N>.md" in ai_canon and
+            "deleting a sidecar file cannot break core tests" in ai_canon,
+            "AI canon must require numeric pass-note names and inline pass artifacts")
+
+    academic_sources = read("docs/core_audit/ACADEMIC_SOURCES.md")
+    require("https://doi.org/10.1109/TIT.1974.1055282" in academic_sources and
+            "https://standards.ieee.org/standard/754-2019.html" in academic_sources and
+            "https://dlmf.nist.gov/4.37.E25" in academic_sources,
+            "academic sources must cite estimator and fast-log source basis")
+
+    discipline_findings = read("docs/core_audit/DISCIPLINE_FINDINGS.md")
+    require("best_next_bin" in discipline_findings and
+            "Benchmark timing must exclude reference/error bookkeeping" in discipline_findings and
+            "Patch notes are the durable review record" in discipline_findings,
+            "discipline findings must cover estimator safety, benchmark timing and audit-doc hygiene")
 
 
     pass8_notes = read("docs/core_audit/PATCH_NOTES_PASS8.md")
@@ -301,8 +329,10 @@ def main() -> int:
             "peak tracker internals must store the active window interpolation callback")
     require("tracker->interp_magsq = spectral_window_interp_magsq_parabolic;" in track_c,
             "peak tracker must initialize a safe default interpolation callback")
-    require("spectral_tracker_set_window_descriptor(tracker, window_desc);" in track_c,
-            "explicit single-shot tracking API must bind the caller-provided window descriptor")
+    require("spectral_peak_model_for_window(" in track_c and
+            "peak_model.estimator = estimator;" in track_c and
+            "spectral_tracker_set_peak_model(tracker, &peak_model)" in track_c,
+            "explicit single-shot tracking API must bind the caller-provided window descriptor through a resolved model")
     require("spectral_track_peaks_with_window_descriptor" in full_src and
             "spectral_window_descriptor(SPECTRAL_WINDOW_HANN)" in full_src,
             "full-matrix analysis must call explicit single-shot tracking with the default Hann descriptor")
@@ -453,6 +483,12 @@ def main() -> int:
     pass13_test = read("tests/core_math/test_core_pass13_peak_estimator_sweep.py")
     require("hann_log[\"max\"] <= 0.035" in pass13_test,
             "pass 13 test must protect Hann/log-parabolic high-SNR ground-truth accuracy")
+    pass13_notes = read("docs/core_audit/PATCH_NOTES_PASS13.md")
+    require("Validation matrix" in pass13_notes and
+            "Offset sweep" in pass13_notes and
+            "Hann + log-parabolic + 120 dB SNR" in pass13_notes and
+            "PASS13_ESTIMATOR_VALIDATION_MATRIX" not in pass13_notes,
+            "pass 13 notes must inline the estimator validation matrix")
 
 
     estimator_h_pass14 = read("spectral_engine/analysis/spectral_peak_estimator.h")
@@ -518,31 +554,33 @@ def main() -> int:
     require("spectral_tracker_set_phase_policy" in track_h_pass16 and
             "SpectralPeakPhasePolicy phase_policy;" in track_i_pass16,
             "pass 16 tracker must expose and store phase policy")
-    require("tracker->phase_policy = SPECTRAL_PEAK_PHASE_POLICY_DEFAULT;" in track_c_pass16,
-            "pass 16 tracker must initialize phase policy from canonical default")
+    require("SpectralPeakModel default_peak_model = spectral_peak_model_default();" in track_c_pass16 and
+            "spectral_tracker_set_peak_model(tracker, &default_peak_model)" in track_c_pass16 and
+            "model.phase_policy = policy;" in track_c_pass16,
+            "pass 16 tracker must initialize phase policy through the resolved peak model")
     require("estimate_input.phase_policy = tracker->phase_policy;" in interp_c_pass16,
             "pass 16 tracker emission must pass phase policy into estimator")
 
 
-    windows_h_pass17b = read("spectral_engine/core/spectral_windows.h")
-    windows_c_pass17b = read("spectral_engine/core/spectral_windows.c")
-    estimator_h_pass17b = read("spectral_engine/analysis/spectral_peak_estimator.h")
-    estimator_c_pass17b = read("spectral_engine/analysis/spectral_peak_estimator.c")
-    track_c_pass17b = read("spectral_engine/analysis/spectral_peak_track.c")
-    require("SpectralWindowPeakMagsqFn" in windows_h_pass17b and
-            "SpectralWindowPeakMagsqFn peak_magsq;" in windows_h_pass17b,
-            "pass 17b window descriptor must own peak-height estimation policy")
-    require("spectral_window_peak_magsq_log_parabolic" in windows_c_pass17b and
-            "spectral_window_peak_magsq_center" in windows_c_pass17b,
-            "pass 17b must provide log-parabolic and center-bin peak-height callbacks")
-    require("SPECTRAL_WINDOW_RECTANGULAR" in windows_c_pass17b and
-            "spectral_window_peak_magsq_center" in windows_c_pass17b,
-            "pass 17b rectangular window must not force log-parabolic amplitude correction")
-    require("SpectralWindowPeakMagsqFn peak_magsq;" in estimator_h_pass17b and
-            "spectral_peak_window_peak_magsq" in estimator_c_pass17b,
-            "pass 17b estimator must consume window peak-height callback")
-    require("tracker->peak_magsq" in track_c_pass17b,
-            "pass 17b tracker must bind active window peak-height callback")
+    windows_h_pass17 = read("spectral_engine/core/spectral_windows.h")
+    windows_c_pass17 = read("spectral_engine/core/spectral_windows.c")
+    estimator_h_pass17 = read("spectral_engine/analysis/spectral_peak_estimator.h")
+    estimator_c_pass17 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    track_c_pass17 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("SpectralWindowPeakMagsqFn" in windows_h_pass17 and
+            "SpectralWindowPeakMagsqFn peak_magsq;" in windows_h_pass17,
+            "pass 17 window descriptor must own peak-height estimation policy")
+    require("spectral_window_peak_magsq_log_parabolic" in windows_c_pass17 and
+            "spectral_window_peak_magsq_center" in windows_c_pass17,
+            "pass 17 must provide log-parabolic and center-bin peak-height callbacks")
+    require("SPECTRAL_WINDOW_RECTANGULAR" in windows_c_pass17 and
+            "spectral_window_peak_magsq_center" in windows_c_pass17,
+            "pass 17 rectangular window must not force log-parabolic amplitude correction")
+    require("SpectralWindowPeakMagsqFn peak_magsq;" in estimator_h_pass17 and
+            "spectral_peak_window_peak_magsq" in estimator_c_pass17,
+            "pass 17 estimator must consume window peak-height callback")
+    require("tracker->peak_magsq" in track_c_pass17,
+            "pass 17 tracker must bind active window peak-height callback")
 
 
     peak_model_h_pass18 = read("spectral_engine/analysis/spectral_peak_model.h")
@@ -569,8 +607,10 @@ def main() -> int:
     require("SpectralResolvedPeakModel peak_model;" in track_i_pass18,
             "pass 18 tracker internals must store one resolved peak model")
     require("spectral_tracker_apply_peak_model" in track_c_pass18 and
-            "tracker->peak_model = *resolved;" in track_c_pass18,
-            "pass 18 tracker setters must resolve and cache peak model atomically")
+            "tracker->peak_model = *resolved;" in track_c_pass18 and
+            "return spectral_tracker_apply_peak_model(tracker, model);" in track_c_pass18 and
+            "fallback = spectral_peak_model_default()" not in track_c_pass18,
+            "pass 18 tracker setters must resolve atomically and preserve prior models on failure")
 
     if FAILURES:
         for f in FAILURES:

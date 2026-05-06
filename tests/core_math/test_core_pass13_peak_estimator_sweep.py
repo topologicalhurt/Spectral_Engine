@@ -107,7 +107,6 @@ def test_peak_estimator_sweep_harness_compiles_and_reports_ground_truth_error() 
 def test_pass13_static_artifacts_present() -> None:
     sweep_c = (ROOT / "tools/core_audit/peak_estimator_sweep.c").read_text()
     notes = (ROOT / "docs/core_audit/PATCH_NOTES_PASS13.md").read_text()
-    plan = (ROOT / "docs/core_audit/PASS13_ESTIMATOR_VALIDATION_MATRIX.md").read_text()
     audit = (ROOT / "tools/core_audit/core_static_audit.py").read_text()
 
     assert "hann" in sweep_c
@@ -115,5 +114,6 @@ def test_pass13_static_artifacts_present() -> None:
     assert "fallback_rate" in sweep_c
     assert "SPECTRAL_PEAK_ESTIMATOR_QUINN_SECOND" in sweep_c
     assert "ground-truth" in notes.lower()
-    assert "offset sweep" in plan.lower()
+    assert "offset sweep" in notes.lower()
+    assert "validation matrix" in notes.lower()
     assert "peak_estimator_sweep.c" in audit

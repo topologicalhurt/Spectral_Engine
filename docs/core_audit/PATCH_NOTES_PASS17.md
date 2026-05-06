@@ -1,6 +1,11 @@
-# Core audit pass 17b: window-aware amplitude estimation
+# Core audit pass 17: window-aware amplitude estimation
 
-## Why this replaces the previous Pass 17 assumption
+## Summary
+
+Pass 17 makes amplitude peak-height estimation part of the active window
+profile instead of a hard-coded tracker formula.
+
+## Why this pass exists
 
 The fitted parabolic peak-height formula itself is a property of a parabola:
 
@@ -16,7 +21,7 @@ a bounded approximation. A rectangular window has a sinc-shaped main lobe, so
 the descriptor defaults to center-bin amplitude instead of pretending the same
 log-parabolic height model is canonical.
 
-## Change
+## Changes
 
 Window descriptors now own two policies:
 
