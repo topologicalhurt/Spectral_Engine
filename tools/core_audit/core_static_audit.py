@@ -544,6 +544,34 @@ def main() -> int:
     require("tracker->peak_magsq" in track_c_pass17b,
             "pass 17b tracker must bind active window peak-height callback")
 
+
+    peak_model_h_pass18 = read("spectral_engine/analysis/spectral_peak_model.h")
+    peak_model_c_pass18 = read("spectral_engine/analysis/spectral_peak_model.c")
+    manifest_pass18 = read("spectral_engine/cmake/source-manifest.cmake")
+    track_h_pass18 = read("spectral_engine/analysis/spectral_peak_track.h")
+    track_i_pass18 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    track_c_pass18 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_peak_model.c" in manifest_pass18,
+            "pass 18 peak model module must be compiled through source manifest")
+    require("SpectralPeakModel" in peak_model_h_pass18 and
+            "SpectralResolvedPeakModel" in peak_model_h_pass18 and
+            "spectral_peak_model_validate" in peak_model_h_pass18,
+            "pass 18 peak model API must expose validated and resolved model types")
+    require("SPECTRAL_PEAK_MODEL_CAP_COMPLEX_TRIPLET" in peak_model_h_pass18 and
+            "SPECTRAL_PEAK_MODEL_ASSUME_WINDOW_RECT_MAINLOBE" in peak_model_h_pass18,
+            "pass 18 peak model must expose capability/assumption masks")
+    require("spectral_peak_model_for_window_type" in peak_model_c_pass18 and
+            "spectral_window_peak_magsq_log_parabolic" in peak_model_c_pass18,
+            "pass 18 peak model implementation must validate window/amplitude coupling")
+    require('#include "spectral_peak_model.h"' in track_h_pass18 and
+            "spectral_tracker_set_peak_model" in track_h_pass18,
+            "pass 18 tracker API must expose coherent peak-model setter")
+    require("SpectralResolvedPeakModel peak_model;" in track_i_pass18,
+            "pass 18 tracker internals must store one resolved peak model")
+    require("spectral_tracker_apply_peak_model" in track_c_pass18 and
+            "tracker->peak_model = *resolved;" in track_c_pass18,
+            "pass 18 tracker setters must resolve and cache peak model atomically")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)

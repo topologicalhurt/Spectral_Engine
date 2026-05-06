@@ -72,46 +72,88 @@ void spectral_tracker_set_failed(SpectralTracker* tracker) {
 }
 
 
+static SpectralPeakModel spectral_tracker_current_peak_model(const SpectralTracker* tracker) {
+    if (!tracker || !tracker->peak_model.window) {
+        return spectral_peak_model_default();
+    }
+    return spectral_peak_model_from_resolved(&tracker->peak_model);
+}
+
+static void spectral_tracker_cache_resolved_peak_model(SpectralTracker* tracker,
+                                                       const SpectralResolvedPeakModel* resolved) {
+    if (!tracker || !resolved) return;
+
+    tracker->peak_model = *resolved;
+    tracker->interp_magsq = resolved->interp_magsq;
+    tracker->peak_magsq = resolved->peak_magsq;
+    tracker->peak_estimator = resolved->estimator;
+    tracker->phase_policy = resolved->phase_policy;
+    tracker->amplitude_policy = resolved->amplitude_policy;
+}
+
+static SpectralError spectral_tracker_apply_peak_model(SpectralTracker* tracker,
+                                                       const SpectralPeakModel* model) {
+    SpectralResolvedPeakModel resolved;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!tracker || !model) return SPECTRAL_ERR_PARAM;
+    err = spectral_peak_model_resolve(model, &resolved);
+    if (err != SPECTRAL_OK) return err;
+
+    spectral_tracker_cache_resolved_peak_model(tracker, &resolved);
+    return SPECTRAL_OK;
+}
+
+SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const SpectralPeakModel* model) {
+    SpectralPeakModel fallback;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!tracker || !model) return SPECTRAL_ERR_PARAM;
+    err = spectral_tracker_apply_peak_model(tracker, model);
+    if (err == SPECTRAL_OK) return SPECTRAL_OK;
+
+    /* Public setters cannot leave the tracker half-mutated. Fall back to a
+     * coherent default model and report the original error to the caller. */
+    fallback = spectral_peak_model_default();
+    (void)spectral_tracker_apply_peak_model(tracker, &fallback);
+    return err;
+}
+
 void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc) {
+    SpectralPeakModel model;
     if (!tracker) return;
-    tracker->interp_magsq = (desc && desc->interp_magsq)
-        ? desc->interp_magsq
-        : spectral_window_interp_magsq_parabolic;
-    tracker->peak_magsq = (desc && desc->peak_magsq)
-        ? desc->peak_magsq
-        : spectral_window_peak_magsq_center;
+
+    model = spectral_tracker_current_peak_model(tracker);
+    model.window = desc ? desc : spectral_window_descriptor(SPECTRAL_WINDOW_HANN);
+    model.amplitude_policy = spectral_peak_model_for_window(model.window).amplitude_policy;
+    (void)spectral_tracker_set_peak_model(tracker, &model);
 }
 
 void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type) {
+    SpectralPeakModel model;
     if (!tracker) return;
-    tracker->peak_estimator = spectral_peak_estimator_resolve_default(type);
+
+    model = spectral_tracker_current_peak_model(tracker);
+    model.estimator = type;
+    (void)spectral_tracker_set_peak_model(tracker, &model);
 }
 
 void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy) {
+    SpectralPeakModel model;
     if (!tracker) return;
-    switch (policy) {
-        case SPECTRAL_PEAK_PHASE_POLICY_IGNORE:
-        case SPECTRAL_PEAK_PHASE_POLICY_OBSERVE:
-        case SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT:
-            tracker->phase_policy = policy;
-            break;
-        default:
-            tracker->phase_policy = SPECTRAL_PEAK_PHASE_POLICY_DEFAULT;
-            break;
-    }
+
+    model = spectral_tracker_current_peak_model(tracker);
+    model.phase_policy = policy;
+    (void)spectral_tracker_set_peak_model(tracker, &model);
 }
 
 void spectral_tracker_set_amplitude_policy(SpectralTracker* tracker, SpectralPeakAmplitudePolicy policy) {
+    SpectralPeakModel model;
     if (!tracker) return;
-    switch (policy) {
-        case SPECTRAL_PEAK_AMP_POLICY_CENTER:
-        case SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED:
-            tracker->amplitude_policy = policy;
-            break;
-        default:
-            tracker->amplitude_policy = SPECTRAL_PEAK_AMP_POLICY_DEFAULT;
-            break;
-    }
+
+    model = spectral_tracker_current_peak_model(tracker);
+    model.amplitude_policy = policy;
+    (void)spectral_tracker_set_peak_model(tracker, &model);
 }
 
 float spectral_tracker_get_threshsq(const SpectralTracker* tracker) {
@@ -482,6 +524,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->seg_arrays = NULL;
     tracker->seg_counts = NULL;
     tracker->seg_capacities = NULL;
+    tracker->peak_model = (SpectralResolvedPeakModel){0};
     atomic_init(&tracker->last_error, SPECTRAL_OK);
     tracker->process_time_total = 0.0;
     tracker->total_pairs = 0;
@@ -510,7 +553,12 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->interp_magsq = spectral_window_interp_magsq_parabolic;
     tracker->peak_magsq = spectral_window_peak_magsq_center;
     tracker->peak_estimator = SPECTRAL_PEAK_ESTIMATOR_DEFAULT;
-    spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
+    {
+        SpectralPeakModel default_peak_model = spectral_peak_model_default();
+        if (spectral_tracker_set_peak_model(tracker, &default_peak_model) != SPECTRAL_OK) {
+            goto fail;
+        }
+    }
 
     /* Start with a bounded per-thread segment capacity and grow on demand.
      * The previous 16M-per-thread virtual allocation depended on Linux

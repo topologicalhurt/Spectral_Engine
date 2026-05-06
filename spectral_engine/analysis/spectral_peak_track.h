@@ -16,6 +16,7 @@
 #include "spectral_common.h"
 #include "spectral_windows.h"
 #include "spectral_peak_estimator.h"
+#include "spectral_peak_model.h"
 
 
 
@@ -80,6 +81,7 @@ int spectral_tracker_run_fused_frame(
 #endif
 );
 
+SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const SpectralPeakModel* model);
 void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc);
 void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type);
 void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy);

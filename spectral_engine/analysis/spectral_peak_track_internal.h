@@ -69,6 +69,7 @@ struct SpectralTracker {
     SpectralPeakEstimatorType peak_estimator;
     SpectralPeakPhasePolicy phase_policy;
     SpectralPeakAmplitudePolicy amplitude_policy;
+    SpectralResolvedPeakModel peak_model;
 
     double process_time_total;
     uint64_t total_pairs;
