@@ -4,6 +4,7 @@
 #include "spectral_synth.h"
 #include "spectral_segment_parser.h"
 #include "spectral_seg_cache.h"
+#include "spectral_hash_xx32_xx3.h"
 #include "spectral_synth_internal.h"
 #include "spectral_io.h"
 #include "spectral_utils.h"
@@ -219,13 +220,62 @@ static PipelineError ensure_output_dir_exists(void) {
 }
 
 #if !SPECTRAL_RESTRICTED_MODE
+static int pipeline_hash_input_file(const char* path, SpectralHashDigest* out_digest)
+{
+    FILE* f = NULL;
+    SpectralHashFileMethod method = SPECTRAL_HASH_FILE_METHOD_ZERO_INIT;
+    SpectralError err = SPECTRAL_OK;
+
+    if (spectral_is_empty_string(path) || !out_digest) return 0;
+    *out_digest = 0;
+
+    err = spectral_hash_file_method_init(&method, SPECTRAL_HASH_FILE_STREAM);
+    if (err != SPECTRAL_OK) {
+        return 0;
+    }
+
+    f = fopen(path, "rb");
+    if (!f) {
+        spectral_hash_file_method_destroy(&method);
+        return 0;
+    }
+
+    err = spectral_hash_file_method_consume_file(&method, f);
+    if (fclose(f) != 0 && err == SPECTRAL_OK) {
+        err = SPECTRAL_ERR_FILE_READ;
+    }
+    if (err == SPECTRAL_OK) {
+        err = spectral_hash_file_method_digest(&method, out_digest);
+    }
+
+    spectral_hash_file_method_destroy(&method);
+    return err == SPECTRAL_OK;
+}
+
 static uint64_t build_cache_key(const SpectralCliOptions* opts) {
     char stem[192] = {0};
+    char input_id[256] = {0};
+    SpectralHashDigest input_digest = 0;
+    int len = 0;
+
     if (!opts || !spectral_basename_no_ext(opts->input_path, stem, sizeof(stem))
         || spectral_is_empty_string(stem)) {
         return 0;
     }
-    return spectral_seg_cache_key(stem, opts->n_fft, opts->hop,
+    if (!pipeline_hash_input_file(opts->input_path, &input_digest)) {
+        return 0;
+    }
+
+    /* Basename is retained only as a readable namespace hint.  The digest is
+     * the cache identity.  Without content identity, two different inputs named
+     * "song.wav" collide when their analysis parameters match. */
+    len = snprintf(input_id, sizeof(input_id), "%s|xxh=%016llx",
+                   stem, (unsigned long long)input_digest);
+    if (len <= 0 || (size_t)len >= sizeof(input_id)) {
+        return 0;
+    }
+
+    return spectral_seg_cache_key(input_id, opts->n_fft, opts->hop,
                                   opts->db_thresh, opts->start_sec, opts->end_sec,
                                   opts->stretch, SPECTRAL_GPU_TILE_SIZE);
 }

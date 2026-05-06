@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 31):
+    for pass_num in range(1, 32):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -848,6 +848,23 @@ def main() -> int:
             "pass 30 segment cache store must validate scalar metadata before persistence")
     require("if (!seg_cache_store_metadata_valid(key, sa, sample_rate, stretch, pitch, output_length))" in seg_cache_pass30,
             "pass 30 segment cache store must fail closed before opening append writer")
+
+
+    pipeline_pass31 = read("spectral_engine/cmd/cli/spectral_cli_pipeline.c")
+    seg_cache_h_pass31 = read("spectral_engine/core/spectral_seg_cache.h")
+    seg_cache_c_pass31 = read("spectral_engine/core/spectral_seg_cache.c")
+    require("pipeline_hash_input_file" in pipeline_pass31 and
+            "spectral_hash_file_method_consume_file(&method, f)" in pipeline_pass31 and
+            "spectral_hash_file_method_digest(&method, out_digest)" in pipeline_pass31,
+            "pass 31 segment cache key must include input content digest")
+    require('snprintf(input_id, sizeof(input_id), "%s|xxh=%016llx"' in pipeline_pass31 and
+            "spectral_seg_cache_key(input_id, opts->n_fft, opts->hop" in pipeline_pass31,
+            "pass 31 pipeline cache key must pass content-derived input identity")
+    require("spectral_seg_cache_key(stem, opts->n_fft" not in pipeline_pass31,
+            "pass 31 pipeline cache key must not be basename-only")
+    require("const char* input_id" in seg_cache_h_pass31 and
+            "spectral_is_empty_string(input_id)" in seg_cache_c_pass31,
+            "pass 31 core segment cache key API must require non-empty input identity")
 
     if FAILURES:
         for f in FAILURES:

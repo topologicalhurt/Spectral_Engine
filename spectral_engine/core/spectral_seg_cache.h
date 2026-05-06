@@ -80,8 +80,8 @@ typedef struct {
     size_t       _mmap_len;
 } SpectralSegCacheLookupResult;
 
-/* Compute cache key from analysis/render parameters. */
-uint64_t spectral_seg_cache_key(const char* stem,
+/* Compute cache key from audio input identity string and analysis/render parameters. */
+uint64_t spectral_seg_cache_key(const char* input_id,
                                 int n_fft, int hop,
                                 float db_thresh,
                                 float start_sec, float end_sec,

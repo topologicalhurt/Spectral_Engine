@@ -38,17 +38,16 @@ static int seg_cache_scale_to_i32(float value, double scale, int* out)
     return 1;
 }
 
-uint64_t spectral_seg_cache_key(const char* stem,
+uint64_t spectral_seg_cache_key(const char* input_id,
                                 int n_fft, int hop,
                                 float db_thresh,
                                 float start_sec, float end_sec,
                                 float stretch,
                                 uint32_t tile_size)
 {
-    /* Hash text form of analysis/render params for deterministic keys.
-     * Every float-to-int conversion below is guarded.  Converting NaN, Inf, or
-     * an out-of-range finite value to int is undefined behavior in C, so the
-     * cache key must fail closed before formatting. */
+    /* Hash text form of input identity + analysis/render params for deterministic
+     * keys.  The caller-provided input_id must already identify the audio input
+     * content, not just its basename. */
     char buf[512];
     int len = 0;
     int db_thresh_i = 0;
@@ -56,7 +55,8 @@ uint64_t spectral_seg_cache_key(const char* stem,
     int end_ms_i = 0;
     int stretch_ppm_i = 0;
 
-    if (n_fft <= 0 || hop <= 0 || tile_size == 0u ||
+    if (spectral_is_empty_string(input_id) ||
+        n_fft <= 0 || hop <= 0 || tile_size == 0u ||
         !spectral_is_finite_positive_f32(stretch) ||
         stretch > SPECTRAL_MAX_STRETCH ||
         !seg_cache_scale_to_i32(db_thresh, 10.0, &db_thresh_i) ||
@@ -68,7 +68,7 @@ uint64_t spectral_seg_cache_key(const char* stem,
 
     len = snprintf(buf, sizeof(buf),
                    "%s|%d|%d|%d|%d|%d|%d|%u",
-                   stem ? stem : "",
+                   input_id,
                    n_fft, hop,
                    db_thresh_i,
                    start_ms_i,
@@ -80,6 +80,7 @@ uint64_t spectral_seg_cache_key(const char* stem,
     }
     return (uint64_t)spectral_hash_oneshot(buf, (size_t)len);
 }
+
 
 
 /* --- Binary search (Java binarySearch convention: ~insertion_point) ----- */
