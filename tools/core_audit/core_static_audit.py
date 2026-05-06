@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 33):
+    for pass_num in range(1, 34):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -879,6 +879,24 @@ def main() -> int:
     require("FULL_MMAP is registered for future support but is not advertised as available" in hash_c_pass32 and
             ".available = 0" in hash_c_pass32,
             "pass 32 unimplemented full_mmap hash method must not be advertised available")
+
+
+    parser_pass33 = read("spectral_engine/core/spectral_segment_parser.c")
+    require("segment_file_metadata_valid_u32" in parser_pass33 and
+            "SPECTRAL_MIN_SAMPLE_RATE" in parser_pass33 and
+            "SPECTRAL_MAX_STRETCH" in parser_pass33 and
+            "SPECTRAL_MAX_PITCH" in parser_pass33,
+            "pass 33 segment file parser must validate scalar metadata on save/load")
+    require("segment_file_expected_bytes" in parser_pass33 and
+            "spectral_fs_file_size(f, &file_size)" in parser_pass33 and
+            "file_size != (uint64_t)expected_file_bytes" in parser_pass33,
+            "pass 33 segment file parser must validate exact file shape before allocation")
+    require("spectral_malloc_array((size_t)hdr.count, sizeof(Segment))" in parser_pass33 and
+            "malloc(alloc_bytes)" not in parser_pass33,
+            "pass 33 segment file load must use checked array allocator after file-shape validation")
+    require("segments_validate_all(sa->segs, sa->count, &bad_idx)" in parser_pass33 and
+            "Refusing to save corrupt segment data" in parser_pass33,
+            "pass 33 segment file save must not persist corrupt segment arrays")
 
     if FAILURES:
         for f in FAILURES:
