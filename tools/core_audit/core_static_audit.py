@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 27):
+    for pass_num in range(1, 28):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -775,6 +775,27 @@ def main() -> int:
     require("(size_t)(count + 1)" not in seg_cache_pass26 and
             "count++;" not in seg_cache_pass26,
             "pass 26 segment cache index insertion must not use wrapping uint32_t count increment")
+
+
+    seg_cache_pass27 = read("spectral_engine/core/spectral_seg_cache.c")
+    require("size_t seg_bytes = 0;" in seg_cache_pass27 and
+            "size_t gpu_seg_bytes = 0;" in seg_cache_pass27 and
+            "size_t tile_ranges_bytes = 0;" in seg_cache_pass27 and
+            "size_t tile_refs_bytes = 0;" in seg_cache_pass27,
+            "pass 27 segment cache append must precompute checked blob byte counts")
+    require("spectral_seg_cache_fs_data_append_write(&w, scratch, seg_bytes)" in seg_cache_pass27 and
+            "spectral_seg_cache_fs_data_append_write(&w, scratch, gpu_seg_bytes)" in seg_cache_pass27,
+            "pass 27 segment cache append must use checked segment and GPU-segment byte counts")
+    require("spectral_seg_cache_fs_data_append_write(&w, ranges_scratch, tile_ranges_bytes)" in seg_cache_pass27 and
+            "spectral_seg_cache_fs_data_append_write(&w, refs_scratch, tile_refs_bytes)" in seg_cache_pass27,
+            "pass 27 segment cache append must use checked tile scratch byte counts")
+    require("(size_t)sa->count * sizeof(Segment)" not in seg_cache_pass27 and
+            "(size_t)sa->count * sizeof(SegmentGpu)" not in seg_cache_pass27 and
+            "(size_t)tile_count * sizeof(uint32_t) * 2u" not in seg_cache_pass27,
+            "pass 27 segment cache append must not use raw blob byte products")
+    require("uint32_t tc = has_tile_blob ? tile_count : 0;" in seg_cache_pass27 and
+            "uint32_t tr = has_tile_blob ? tile_total_refs : 0;" in seg_cache_pass27,
+            "pass 27 segment cache metadata must match whether tile bytes were written")
 
     if FAILURES:
         for f in FAILURES:
