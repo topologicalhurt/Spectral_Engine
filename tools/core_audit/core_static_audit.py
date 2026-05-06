@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 35):
+    for pass_num in range(1, 36):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -912,6 +912,23 @@ def main() -> int:
     require("spectral_fs_write_exact(f, &hdr, sizeof(hdr), SPECTRAL_ERR_FILE_WRITE)" in wavetable_pass34 and
             "spectral_fs_write_exact(f, table->samples, sample_bytes, SPECTRAL_ERR_FILE_WRITE)" in wavetable_pass34,
             "pass 34 wavetable save must use exact checked writes")
+
+
+    wavetable_pass35 = read("spectral_engine/core/spectral_wavetable.c")
+    require("file_size != (uint64_t)sample_bytes" in wavetable_pass35 and
+            "spectral_fs_read_exact(f, temp, sample_bytes, SPECTRAL_ERR_FILE_READ)" in wavetable_pass35,
+            "pass 35 wavetable raw loader must validate exact file size and use exact read")
+    require("int saw_eof = 0;" in wavetable_pass35 and
+            "if (!saw_eof)" in wavetable_pass35 and
+            "covered_bytes != expected_bytes" in wavetable_pass35,
+            "pass 35 wavetable HEX loader must require EOF record and full byte coverage")
+    require("data_len > expected_bytes - offset" in wavetable_pass35 and
+            "(size_t)address + data_len > expected_bytes" not in wavetable_pass35,
+            "pass 35 wavetable HEX loader must use subtractive bounds checking")
+    require("wavetable_runtime_samples_valid(temp, SPECTRAL_WAVETABLE_SIZE)" in wavetable_pass35 and
+            "wavetable_runtime_samples_valid(temp_table, SPECTRAL_WAVETABLE_SIZE)" in wavetable_pass35 and
+            "wavetable_runtime_samples_valid(data, SPECTRAL_WAVETABLE_SIZE)" in wavetable_pass35,
+            "pass 35 wavetable raw/hex/buffer ingress must validate runtime samples before publishing")
 
     if FAILURES:
         for f in FAILURES:
