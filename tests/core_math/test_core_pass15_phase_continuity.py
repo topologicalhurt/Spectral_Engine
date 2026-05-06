@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -19,7 +20,7 @@ def test_phase_advance_diagnostics_without_model_override() -> None:
 #include <math.h>
 #include <stdio.h>
 
-float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq) {
+static float quarter_offset(float left_sq, float center_sq, float right_sq) {
     (void)left_sq;
     (void)center_sq;
     (void)right_sq;
@@ -47,7 +48,9 @@ int main(void) {
     input.freq_step_df = 0.01f;
     input.inv_hop = 0.1f;
     input.hop_float = 10.0f;
+    input.interp_magsq = quarter_offset;
     input.type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+    input.phase_policy = SPECTRAL_PEAK_PHASE_POLICY_DEFAULT;
 
     if (!spectral_peak_estimate(&input, &out)) return 1;
     if (!(out.flags & SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID)) return 2;
@@ -74,6 +77,7 @@ int main(void) {
         harness_c = tmp_path / "pass15_phase_contract.c"
         exe = tmp_path / "pass15_phase_contract"
         harness_c.write_text(harness, encoding="utf-8")
+        link_flags = ["-framework", "Accelerate"] if sys.platform == "darwin" else []
         subprocess.run(
             [
                 cc,
@@ -84,8 +88,10 @@ int main(void) {
                 str(ROOT / "spectral_engine/analysis"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
+                str(ROOT / "spectral_engine/core/spectral_windows.c"),
                 str(harness_c),
                 "-lm",
+                *link_flags,
                 "-o",
                 str(exe),
             ],

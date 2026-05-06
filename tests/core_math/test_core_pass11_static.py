@@ -73,7 +73,8 @@ assert "SpectralPeakEstimatorType peak_estimator;" in track_internal_h
 assert "float peak_candan_correction;" in track_internal_h
 assert "tracker->peak_estimator = SPECTRAL_PEAK_ESTIMATOR_DEFAULT;" in track_c
 assert "tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);" in track_c
-assert "spectral_tracker_set_peak_estimator(tracker, estimator);" in track_c
+assert "peak_model.estimator = estimator;" in track_c
+assert "spectral_tracker_set_peak_model(tracker, &peak_model)" in track_c
 assert "spectral_track_peaks_with_window_descriptor(" in track_c
 
 assert '#include "spectral_peak_estimator.h"' in interp_c

@@ -83,10 +83,9 @@ int spectral_window_peak_magsq_log_parabolic(float left_sq, float center_sq, flo
     float left = 0.0f;
     float center = 0.0f;
     float right = 0.0f;
-    float log_l = 0.0f;
-    float log_c = 0.0f;
-    float log_r = 0.0f;
-    float log_peak = 0.0f;
+    float log_lc = 0.0f;
+    float log_rc = 0.0f;
+    float log_gain = 0.0f;
     float peak = 0.0f;
 
     if (!out_peak_magsq || !isfinite(bin_offset) ||
@@ -95,20 +94,28 @@ int spectral_window_peak_magsq_log_parabolic(float left_sq, float center_sq, flo
         return 0;
     }
 
-    /* Once a log-power parabola is chosen, the fitted peak height is:
-     *   y_peak = y[0] - 0.25 * (y[-1] - y[1]) * p
-     * where y = log(power). Whether this model is appropriate is selected by
-     * the window descriptor, not by the tracker. */
+    /* Once a log-power parabola is chosen, Smith's local quadratic model gives
+     *   y_peak = y[0] - 0.25 * (y[-1] - y[1]) * p,  y = log(power).
+     * The implementation uses the equivalent centered-ratio form
+     *   peak = center * exp(-0.25 * (log(left/center) -
+     *                                log(right/center)) * p)
+     * so the peak-height callback shares the same two-log contract as the
+     * frequency-offset callback. Window descriptors decide whether this model is
+     * valid for their main-lobe shape; rectangular currently binds center power. */
     left = fmaxf(left_sq, SPECTRAL_TRACK_LOG_FLOOR);
     center = fmaxf(center_sq, SPECTRAL_TRACK_LOG_FLOOR);
     right = fmaxf(right_sq, SPECTRAL_TRACK_LOG_FLOOR);
-    log_l = fast_peak_log(left);
-    log_c = fast_peak_log(center);
-    log_r = fast_peak_log(right);
-    log_peak = log_c - 0.25f * (log_l - log_r) * bin_offset;
-    if (!isfinite(log_peak)) return 0;
+    log_lc = fast_peak_log(left / center);
+    log_rc = fast_peak_log(right / center);
+    if (!isfinite(log_lc) || !isfinite(log_rc)) {
+        float log_c = fast_peak_log(center);
+        log_lc = fast_peak_log(left) - log_c;
+        log_rc = fast_peak_log(right) - log_c;
+    }
+    log_gain = -0.25f * (log_lc - log_rc) * bin_offset;
+    if (!isfinite(log_gain)) return 0;
 
-    peak = expf(log_peak);
+    peak = center * expf(log_gain);
     if (!isfinite(peak) || peak <= 0.0f) return 0;
     if (peak < center_sq) peak = center_sq;
 

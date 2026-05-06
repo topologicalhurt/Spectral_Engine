@@ -19,7 +19,8 @@ assert "spectral_tracker_set_window_descriptor" in track_h
 assert "spectral_track_peaks_with_window_descriptor" in track_h
 assert "SpectralWindowInterpMagsqFn interp_magsq;" in track_internal_h
 assert "tracker->interp_magsq = spectral_window_interp_magsq_parabolic;" in track_c
-assert "spectral_tracker_set_window_descriptor(tracker, window_desc);" in track_c
+assert "spectral_peak_model_for_window(" in track_c
+assert "spectral_tracker_set_peak_model(tracker, &peak_model)" in track_c
 assert "spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));" in fused_c
 assert "spectral_track_peaks_with_window_descriptor" in full_c
 

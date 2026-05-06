@@ -71,7 +71,8 @@ static unsigned spectral_peak_model_window_assumptions(const SpectralWindowDescr
 static SpectralPeakAmplitudePolicy spectral_peak_model_default_amplitude_for_window(
     const SpectralWindowDescriptor* window)
 {
-    if (window && window->type == SPECTRAL_WINDOW_RECTANGULAR) {
+    if (!window || !window->peak_magsq ||
+        window->type == SPECTRAL_WINDOW_RECTANGULAR) {
         return SPECTRAL_PEAK_AMP_POLICY_CENTER;
     }
     return SPECTRAL_PEAK_AMP_POLICY_DEFAULT;
@@ -139,13 +140,17 @@ SpectralError spectral_peak_model_validate(const SpectralPeakModel* model) {
         return SPECTRAL_ERR_PARAM;
     }
 
+    /* INTERP_BOUNDED is a promise to evaluate a window-owned peak-height model.
+     * Custom descriptors that only provide frequency interpolation remain valid
+     * by defaulting to center amplitude, but an explicit bounded-interp request
+     * without a callback is a contract error. */
     if (model->amplitude_policy == SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED &&
         !model->window->peak_magsq) {
         return SPECTRAL_ERR_PARAM;
     }
 
     /* Rectangular's Dirichlet/sinc main lobe should not silently inherit the
-     * log-parabolic peak-height model.  Use center-bin height by default unless
+     * log-parabolic peak-height model. Use center-bin height by default unless
      * a future rectangular-specific callback is deliberately installed. */
     if (model->window->type == SPECTRAL_WINDOW_RECTANGULAR &&
         model->window->peak_magsq == spectral_window_peak_magsq_log_parabolic) {

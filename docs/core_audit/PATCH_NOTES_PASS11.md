@@ -91,6 +91,9 @@ Source basis:
 - Adds `spectral_track_peaks_with_window_descriptor` so raw STFT callers can
   bind the analysis window and estimator instead of inheriting Hann/AUTO
   silently.
+- Later peak-model validation resolves the window, estimator, phase policy and
+  amplitude policy as one contract; invalid explicit raw-tracker profiles fail
+  closed rather than falling back to Hann.
 - Adds exact-mode performance cleanup:
   - Candan's `tan(pi / n_fft) / (pi / n_fft)` correction is precomputed once
     per tracker;

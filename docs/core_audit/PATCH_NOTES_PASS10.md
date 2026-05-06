@@ -52,12 +52,16 @@ Source basis:
 - C. Candan, "A Method for Fine Resolution Frequency Estimation from Three DFT
   Samples," IEEE Signal Processing Letters, 2011.
   https://doi.org/10.1109/LSP.2011.2136378
+- D. C. Rife and R. R. Boorstyn, "Single Tone Parameter Estimation from
+  Discrete-Time Observations," IEEE Trans. Information Theory, 1974.
+  https://doi.org/10.1109/TIT.1974.1055282
 
 ## Changes
 
 - `SpectralTracker` now stores a `SpectralWindowInterpMagsqFn`.
 - The tracker initializes to the safe default parabolic interpolation callback.
-- Single-shot and fused tracking bind the default Hann descriptor.
+- Single-shot and fused tracking bind the default Hann descriptor; raw callers
+  use `spectral_track_peaks_with_window_descriptor()` to bind non-Hann STFT rows.
 - Segment emission calls the active callback instead of hard-coding
   `spectral_window_interp_magsq_parabolic`.
 - Candidate validation rejects non-finite or negative magnitude-squared

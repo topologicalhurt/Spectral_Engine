@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -18,15 +19,6 @@ def test_validated_estimator_rejects_invalid_scalar_context_and_nan_triplets() -
 #include "spectral_peak_estimator.h"
 #include <math.h>
 #include <stdio.h>
-
-float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq) {
-    float log_l = logf(fmaxf(left_sq, SPECTRAL_TRACK_LOG_FLOOR));
-    float log_c = logf(fmaxf(center_sq, SPECTRAL_TRACK_LOG_FLOOR));
-    float log_r = logf(fmaxf(right_sq, SPECTRAL_TRACK_LOG_FLOOR));
-    float denom = log_l - 2.0f * log_c + log_r;
-    if (fabsf(denom) < SPECTRAL_TRACK_PARABOLIC_DENOM_EPS) return 0.0f;
-    return 0.5f * (log_l - log_r) / denom;
-}
 
 static int run_case(float left, float center, float right,
                     float freq_step_omega, float freq_step_df, float inv_hop) {
@@ -69,6 +61,7 @@ int main(void) {
         harness_c = tmp_path / "pass12_estimator_contract.c"
         exe = tmp_path / "pass12_estimator_contract"
         harness_c.write_text(harness, encoding="utf-8")
+        link_flags = ["-framework", "Accelerate"] if sys.platform == "darwin" else []
         subprocess.run(
             [
                 cc,
@@ -79,8 +72,10 @@ int main(void) {
                 str(ROOT / "spectral_engine/analysis"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
+                str(ROOT / "spectral_engine/core/spectral_windows.c"),
                 str(harness_c),
                 "-lm",
+                *link_flags,
                 "-o",
                 str(exe),
             ],
@@ -92,7 +87,6 @@ int main(void) {
 
 def test_pass12_static_estimator_guards_present() -> None:
     src = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.c").read_text()
-    assert "The validated entry point means the tracker has already accepted" in src
     assert "Keep these scalar-contract checks unconditional" in src
     assert "(void)neighborhood_validated;" in src
     assert "if (!spectral_peak_finite_nonnegative(magsq) || !isfinite(phase))" in src

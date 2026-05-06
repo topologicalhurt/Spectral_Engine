@@ -105,18 +105,11 @@ static SpectralError spectral_tracker_apply_peak_model(SpectralTracker* tracker,
 }
 
 SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const SpectralPeakModel* model) {
-    SpectralPeakModel fallback;
-    SpectralError err = SPECTRAL_OK;
-
     if (!tracker || !model) return SPECTRAL_ERR_PARAM;
-    err = spectral_tracker_apply_peak_model(tracker, model);
-    if (err == SPECTRAL_OK) return SPECTRAL_OK;
-
-    /* Public setters cannot leave the tracker half-mutated. Fall back to a
-     * coherent default model and report the original error to the caller. */
-    fallback = spectral_peak_model_default();
-    (void)spectral_tracker_apply_peak_model(tracker, &fallback);
-    return err;
+    /* Apply only after the full model resolves. A failed mutation must not
+     * silently replace an existing Hamming/Blackman/rectangular/custom profile
+     * with the Hann compatibility default. */
+    return spectral_tracker_apply_peak_model(tracker, model);
 }
 
 void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc) {
@@ -1138,14 +1131,20 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
     }
 
     int n_threads = omp_get_max_threads();
+    SpectralPeakModel peak_model = spectral_peak_model_for_window(
+        window_desc ? window_desc : spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 
     SpectralTracker* tracker = spectral_tracker_create(
         n_threads, n_freqs, sr, n_fft, hop, db_thresh, max_magsq);
     if (!tracker) {
         return peak_track_return_empty(t_track);
     }
-    spectral_tracker_set_window_descriptor(tracker, window_desc);
-    spectral_tracker_set_peak_estimator(tracker, estimator);
+
+    peak_model.estimator = estimator;
+    if (spectral_tracker_set_peak_model(tracker, &peak_model) != SPECTRAL_OK) {
+        spectral_tracker_destroy(tracker);
+        return peak_track_return_empty(t_track);
+    }
 
     /* Process all frames in one shot — no overlap row (NULL for final chunk) */
     spectral_tracker_process(tracker, magsq, phases,
@@ -1201,7 +1200,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(
         (*local_candidates)++;
         if (!spectral_tracker_queue_candidate(
                 tracker, tid, candidate_batch, candidate_batch_count,
-                (uint32_t)cf, row, next_row, phase_row, t_hop, threshsq,
+                (uint32_t)cf, row, next_row, phase_row, next_phase_row, t_hop, threshsq,
                 freq_step_omega, freq_step_df, inv_hop, hop_float,
                 local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -1235,6 +1234,7 @@ int spectral_tracker_run_fused_frame(
     const float* __restrict__ row = ctx->row;
     const float* __restrict__ next_row = ctx->next_row;
     const float* __restrict__ phase_row = ctx->phase_row;
+    const float* __restrict__ next_phase_row = ctx->next_phase_row;
     float t_hop = ctx->t_hop;
     float threshsq = ctx->threshsq;
     int can_start_new = ctx->can_start_new;
@@ -1320,7 +1320,7 @@ int spectral_tracker_run_fused_frame(
                 (*local_candidates)++;
                 if (!spectral_tracker_queue_candidate(
                         tracker, tid, candidate_batch, candidate_batch_count,
-                        (uint32_t)f, row, next_row, phase_row, t_hop, threshsq,
+                        (uint32_t)f, row, next_row, phase_row, next_phase_row, t_hop, threshsq,
                         freq_step_omega, freq_step_df, inv_hop, hop_float,
                         local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -1337,7 +1337,7 @@ int spectral_tracker_run_fused_frame(
     if (!local_failed && *candidate_batch_count > 0) {
         if (!spectral_tracker_flush_candidate_batch(
                 tracker, tid, candidate_batch, candidate_batch_count,
-                row, next_row, phase_row, t_hop, threshsq,
+                row, next_row, phase_row, next_phase_row, t_hop, threshsq,
                 freq_step_omega, freq_step_df, inv_hop, hop_float,
                 local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING

@@ -93,6 +93,7 @@ int spectral_tracker_flush_candidate_batch(
     const float* __restrict__ row,
     const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     float t_hop,
     float threshsq,
     float freq_step_omega,

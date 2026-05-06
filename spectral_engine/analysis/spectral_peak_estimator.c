@@ -161,7 +161,7 @@ static int spectral_peak_reconstruct_complex(const SpectralPeakEstimateInput* in
     magsq = input->magsq_row[idx];
     phase = input->phase_row[idx];
 
-    /* Even the tracker-validated hot path must keep this check.  The tracker
+    /* Keep these scalar-contract checks unconditional. The tracker
      * proves the local candidate neighborhood when called through
      * spectral_tracker_emit_segment(), but spectral_peak_estimate_validated()
      * is still a separately callable internal API.  Keeping finite/nonnegative

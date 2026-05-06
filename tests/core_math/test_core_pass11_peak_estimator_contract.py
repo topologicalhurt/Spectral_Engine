@@ -94,13 +94,6 @@ def test_c_estimator_callback_and_malformed_triplet_contract() -> None:
 #include <math.h>
 #include <stdio.h>
 
-float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq) {
-    (void)left_sq;
-    (void)center_sq;
-    (void)right_sq;
-    return 0.0f;
-}
-
 static float quarter_offset(float left, float center, float right) {
     (void)left;
     (void)center;
@@ -162,6 +155,7 @@ int main(void) {
         harness_c = tmp_path / "peak_estimator_contract.c"
         exe = tmp_path / "peak_estimator_contract"
         harness_c.write_text(harness, encoding="utf-8")
+        link_flags = ["-framework", "Accelerate"] if sys.platform == "darwin" else []
         subprocess.run(
             [
                 cc,
@@ -172,8 +166,10 @@ int main(void) {
                 str(ROOT / "spectral_engine/analysis"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
+                str(ROOT / "spectral_engine/core/spectral_windows.c"),
                 str(harness_c),
                 "-lm",
+                *link_flags,
                 "-o",
                 str(exe),
             ],
@@ -204,27 +200,43 @@ int main(void) {
     float phase[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     double t_default = 0.0;
     double t_custom = 0.0;
+    double t_bad = 0.0;
     const float bin_step = SPECTRAL_PI * 0.5f;
     SpectralWindowDescriptor desc = {
         SPECTRAL_WINDOW_HANN,
         "test-quarter",
         "Test Quarter",
         0,
-        quarter_offset
+        quarter_offset,
+        0
+    };
+    SpectralWindowDescriptor bad_desc = {
+        SPECTRAL_WINDOW_HANN,
+        "bad",
+        "Bad",
+        0,
+        0,
+        0
     };
     SegmentArray default_segments = spectral_track_peaks(
         magsq, phase, 4.0f, 2u, 3u, 48000, 4, 1, -120.0f, &t_default);
     SegmentArray custom_segments = spectral_track_peaks_with_window_descriptor(
         magsq, phase, 4.0f, 2u, 3u, 48000, 4, 1, -120.0f,
         &desc, SPECTRAL_PEAK_ESTIMATOR_AUTO, &t_custom);
+    SegmentArray bad_segments = spectral_track_peaks_with_window_descriptor(
+        magsq, phase, 4.0f, 2u, 3u, 48000, 4, 1, -120.0f,
+        &bad_desc, SPECTRAL_PEAK_ESTIMATOR_AUTO, &t_bad);
 
     if (default_segments.count != 1u || !default_segments.segs) return 1;
     if (custom_segments.count != 1u || !custom_segments.segs) return 2;
     if (fabsf(default_segments.segs[0].omega - bin_step) > 1.0e-5f) return 3;
     if (fabsf(custom_segments.segs[0].omega - (1.25f * bin_step)) > 1.0e-5f) return 4;
+    if (fabsf(custom_segments.segs[0].amp - 2.0f) > 1.0e-5f) return 5;
+    if (bad_segments.count != 0u || bad_segments.segs) return 6;
 
     spectral_segment_array_free(&default_segments);
     spectral_segment_array_free(&custom_segments);
+    spectral_segment_array_free(&bad_segments);
     return 0;
 }
 '''
@@ -248,6 +260,7 @@ int main(void) {
                 "-I",
                 str(ROOT / "third_party/simde"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_track.c"),
+                str(ROOT / "spectral_engine/analysis/spectral_peak_model.c"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_interp.c"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
