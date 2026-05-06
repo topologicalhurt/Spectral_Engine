@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 32):
+    for pass_num in range(1, 33):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -865,6 +865,20 @@ def main() -> int:
     require("const char* input_id" in seg_cache_h_pass31 and
             "spectral_is_empty_string(input_id)" in seg_cache_c_pass31,
             "pass 31 core segment cache key API must require non-empty input identity")
+
+
+    hash_c_pass32 = read("spectral_engine/core/spectral_hash_xx32_xx3.c")
+    require("uint64_t total_len_u64 = 0;" in hash_c_pass32 and
+            "total_len_u64 > (uint64_t)SIZE_MAX" in hash_c_pass32 and
+            "total_len = (size_t)total_len_u64;" in hash_c_pass32,
+            "pass 32 hash full-direct must check uint64_t file length before narrowing to size_t")
+    require("total_len = (size_t)(end_pos - start_pos)" not in hash_c_pass32,
+            "pass 32 hash full-direct must not silently narrow file length")
+    require("start_pos > (uint64_t)INT64_MAX" in hash_c_pass32,
+            "pass 32 hash full-direct must guard uint64_t to int64_t seek position conversion")
+    require("FULL_MMAP is registered for future support but is not advertised as available" in hash_c_pass32 and
+            ".available = 0" in hash_c_pass32,
+            "pass 32 unimplemented full_mmap hash method must not be advertised available")
 
     if FAILURES:
         for f in FAILURES:

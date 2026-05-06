@@ -16,6 +16,7 @@
  */
 #include "spectral_hash_xx32_xx3.h"
 #include <stdlib.h>  /* free for full_direct host buffer */
+#include <stdint.h>
 #include "spectral_utils.h"
 
 /* ---------------------------------------------------------------------------
@@ -195,7 +196,8 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
 {
     uint64_t start_pos = 0;
     uint64_t end_pos = 0;
-    size_t total_len;
+    uint64_t total_len_u64 = 0;
+    size_t total_len = 0;
     unsigned char* data = NULL;
     SpectralError err;
 
@@ -218,11 +220,27 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
         return SPECTRAL_ERR_FILE_READ;
     }
 
+    /* Full-direct hashing reads the whole remaining file into one heap buffer.
+     * The file-position API reports uint64_t, but the allocation and update
+     * contract is size_t.  Never narrow silently: if the region cannot fit in a
+     * size_t buffer, seek back and use the streaming implementation instead. */
+    total_len_u64 = end_pos - start_pos;
+    if (start_pos > (uint64_t)INT64_MAX) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    if (total_len_u64 > (uint64_t)SIZE_MAX) {
+        if (spectral_fs_seek(file, (int64_t)start_pos, SEEK_SET, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
+            return SPECTRAL_ERR_FILE_READ;
+        }
+        return spectral_hash_method_consume_file_stream_impl(method, file);
+    }
+
     if (spectral_fs_seek(file, (int64_t)start_pos, SEEK_SET, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
         return SPECTRAL_ERR_FILE_READ;
     }
 
-    total_len = (size_t)(end_pos - start_pos);
+    total_len = (size_t)total_len_u64;
     if (total_len > 0u) {
         data = (unsigned char*)spectral_malloc_array(total_len, 1);
         if (!data) {
@@ -268,10 +286,12 @@ static const SpectralHashFileMethodDescriptor k_hash_file_method_desc[SPECTRAL_H
         .name      = "full_direct",
         .available = 1
     },
+    /* FULL_MMAP is registered for future support but is not advertised as available
+     * until consume_file_mmap_impl actually maps and hashes the file. */
     [SPECTRAL_HASH_FILE_FULL_MMAP] = {
         .type      = SPECTRAL_HASH_FILE_FULL_MMAP,
         .name      = "full_mmap",
-        .available = 1
+        .available = 0
     },
     /* STREAM is always available: callers feed data via update() directly.
      * consume_file() is not available on embedded (no file API), but the
