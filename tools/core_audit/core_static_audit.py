@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 34):
+    for pass_num in range(1, 35):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -897,6 +897,21 @@ def main() -> int:
     require("segments_validate_all(sa->segs, sa->count, &bad_idx)" in parser_pass33 and
             "Refusing to save corrupt segment data" in parser_pass33,
             "pass 33 segment file save must not persist corrupt segment arrays")
+
+
+    wavetable_pass34 = read("spectral_engine/core/spectral_wavetable.c")
+    require("wavetable_file_expected_bytes" in wavetable_pass34 and
+            "spectral_fs_file_size(f, &file_size)" in wavetable_pass34 and
+            "file_size != (uint64_t)expected_file_bytes" in wavetable_pass34,
+            "pass 34 wavetable parser must validate exact .spwt file shape before payload read")
+    require("wavetable_float_samples_finite" in wavetable_pass34 and
+            "!spectral_is_finite_f32(samples[i])" in wavetable_pass34,
+            "pass 34 wavetable parser must reject non-finite float samples")
+    require("spectral_fs_read_exact(f, temp, payload_bytes, SPECTRAL_ERR_FILE_READ)" in wavetable_pass34,
+            "pass 34 wavetable parser must use exact payload reads")
+    require("spectral_fs_write_exact(f, &hdr, sizeof(hdr), SPECTRAL_ERR_FILE_WRITE)" in wavetable_pass34 and
+            "spectral_fs_write_exact(f, table->samples, sample_bytes, SPECTRAL_ERR_FILE_WRITE)" in wavetable_pass34,
+            "pass 34 wavetable save must use exact checked writes")
 
     if FAILURES:
         for f in FAILURES:
