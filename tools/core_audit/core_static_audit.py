@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 28):
+    for pass_num in range(1, 29):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -796,6 +796,19 @@ def main() -> int:
     require("uint32_t tc = has_tile_blob ? tile_count : 0;" in seg_cache_pass27 and
             "uint32_t tr = has_tile_blob ? tile_total_refs : 0;" in seg_cache_pass27,
             "pass 27 segment cache metadata must match whether tile bytes were written")
+
+
+    seg_cache_fs_pass28 = read("spectral_engine/core/spectral_seg_cache_fs.c")
+    require("spectral_size_add(sizeof(SpectralSegCacheHeader), entries_bytes, &expected_index_bytes)" in seg_cache_fs_pass28,
+            "pass 28 segment cache index load must derive expected index file size with checked addition")
+    require("spectral_fs_file_size(f, &file_size)" in seg_cache_fs_pass28 and
+            "file_size != (uint64_t)expected_index_bytes" in seg_cache_fs_pass28,
+            "pass 28 segment cache index load must validate count-derived file size before allocation")
+    require("file_size != (uint64_t)sizeof(SpectralSegCacheHeader)" in seg_cache_fs_pass28,
+            "pass 28 zero-count segment cache index must have exact header size")
+    require(seg_cache_fs_pass28.index("file_size != (uint64_t)expected_index_bytes") <
+            seg_cache_fs_pass28.index("entries = (SpectralSegCacheEntry*)spectral_malloc_array("),
+            "pass 28 segment cache index load must not allocate before validating file shape")
 
     if FAILURES:
         for f in FAILURES:
