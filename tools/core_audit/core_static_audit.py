@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 26):
+    for pass_num in range(1, 27):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -761,6 +761,20 @@ def main() -> int:
     require("spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);" in interp_c_pass25 and
             "spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);" in interp_c_pass25,
             "pass 25 emit path must record overflow/memory through first-error setter")
+
+
+    seg_cache_pass26 = read("spectral_engine/core/spectral_seg_cache.c")
+    require("spectral_size_add((size_t)count, 1u, &new_count)" in seg_cache_pass26 and
+            "new_count > (size_t)UINT32_MAX" in seg_cache_pass26,
+            "pass 26 segment cache index insertion must check persistent entry-count overflow")
+    require("spectral_array_bytes(new_count, sizeof(SpectralSegCacheEntry), &new_entries_bytes)" in seg_cache_pass26,
+            "pass 26 segment cache index insertion must check full index allocation byte count")
+    require("spectral_array_bytes((size_t)ins, sizeof(SpectralSegCacheEntry), &prefix_bytes)" in seg_cache_pass26 and
+            "spectral_array_bytes(suffix_count, sizeof(SpectralSegCacheEntry), &suffix_bytes)" in seg_cache_pass26,
+            "pass 26 segment cache index insertion must check prefix/suffix copy byte counts")
+    require("(size_t)(count + 1)" not in seg_cache_pass26 and
+            "count++;" not in seg_cache_pass26,
+            "pass 26 segment cache index insertion must not use wrapping uint32_t count increment")
 
     if FAILURES:
         for f in FAILURES:

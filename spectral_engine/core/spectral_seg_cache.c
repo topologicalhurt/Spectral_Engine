@@ -476,15 +476,45 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
             entries[pos].tile_total_refs = tr;
         } else {
             uint32_t ins = (uint32_t)(~pos);
-            SpectralSegCacheEntry* new_entries = (SpectralSegCacheEntry*)spectral_malloc_array(
-                (size_t)(count + 1), sizeof(SpectralSegCacheEntry));
+            size_t new_count = 0;
+            size_t new_entries_bytes = 0;
+            size_t prefix_bytes = 0;
+            size_t suffix_count = 0;
+            size_t suffix_bytes = 0;
+            SpectralSegCacheEntry* new_entries = NULL;
+
+            if (ins > count) {
+                free(entries);
+                return SPECTRAL_ERR_FILE_CORRUPT;
+            }
+
+            /* Index insertion changes the persistent entry count.  This must be
+             * checked in size_t and against the uint32_t on-disk field before
+             * allocating or copying.  `(uint32_t)(count + 1)` would wrap at
+             * UINT32_MAX and create an undersized index buffer. */
+            if (!spectral_size_add((size_t)count, 1u, &new_count) ||
+                new_count > (size_t)UINT32_MAX ||
+                !spectral_array_bytes(new_count, sizeof(SpectralSegCacheEntry), &new_entries_bytes) ||
+                !spectral_array_bytes((size_t)ins, sizeof(SpectralSegCacheEntry), &prefix_bytes)) {
+                free(entries);
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+
+            suffix_count = (size_t)count - (size_t)ins;
+            if (!spectral_array_bytes(suffix_count, sizeof(SpectralSegCacheEntry), &suffix_bytes)) {
+                free(entries);
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+
+            new_entries = (SpectralSegCacheEntry*)spectral_malloc_array(
+                new_count, sizeof(SpectralSegCacheEntry));
             if (!new_entries) {
                 free(entries);
                 return SPECTRAL_ERR_MEMORY;
             }
 
-            if (ins > 0 && entries) {
-                memcpy(new_entries, entries, ins * sizeof(SpectralSegCacheEntry));
+            if (prefix_bytes > 0u && entries) {
+                memcpy(new_entries, entries, prefix_bytes);
             }
 
             new_entries[ins] = (SpectralSegCacheEntry){
@@ -499,14 +529,13 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                 .tile_total_refs = tr
             };
 
-            if (ins < count && entries) {
-                memcpy(&new_entries[ins + 1], &entries[ins],
-                       (count - ins) * sizeof(SpectralSegCacheEntry));
+            if (suffix_bytes > 0u && entries) {
+                memcpy(&new_entries[(size_t)ins + 1u], &entries[ins], suffix_bytes);
             }
 
             free(entries);
             entries = new_entries;
-            count++;
+            count = (uint32_t)new_count;
         }
     }
 
