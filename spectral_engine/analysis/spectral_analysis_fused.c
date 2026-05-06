@@ -169,7 +169,8 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
                         track_start = omp_get_wtime();
                         local_pairs++;
-                        if (spectral_tracker_run_fused_frame(
+                        /* spectral_tracker_run_fused_frame follows tracker helper polarity */
+                        if (!spectral_tracker_run_fused_frame(
                             tracker, tid, candidate_batch, &candidate_batch_count,
                             &fctx,
                             &local_candidates, &local_segments
