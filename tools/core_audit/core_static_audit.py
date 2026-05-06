@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 22):
+    for pass_num in range(1, 23):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -690,6 +690,18 @@ def main() -> int:
             "central cleanup helpers" in pass21_notes and
             "safe allocation helpers" in pass21_notes,
             "pass 21 docs must forbid low-value aliases, repeated cleanup and local allocation reinvention")
+
+
+    synth_internal_pass22 = read("spectral_engine/core/spectral_synth_internal.c")
+    synth_cpu_pass22 = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
+    require("out_len * elem_size overflow is a contract failure" in synth_internal_pass22,
+            "pass 22 synth preflight must treat output byte-count overflow as an error, not benign early exit")
+    require("pf.error = SPECTRAL_ERR_OVERFLOW;" in synth_internal_pass22 and
+            "!spectral_size_mul(out_len, elem_size, &preflight_out_bytes)" in synth_internal_pass22,
+            "pass 22 shared synth preflight must propagate SPECTRAL_ERR_OVERFLOW")
+    require("memset(out_buffer, 0, out_bytes);" in synth_cpu_pass22 and
+            "memset(out_buffer, 0, out_len * elem_size)" not in synth_cpu_pass22,
+            "pass 22 CPU synth allocation-failure zeroing must use validated byte count")
 
     if FAILURES:
         for f in FAILURES:

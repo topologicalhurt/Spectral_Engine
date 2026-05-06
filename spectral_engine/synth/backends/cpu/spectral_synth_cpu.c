@@ -135,10 +135,18 @@ static SpectralError synth_cpu_driver(
     ReduceFn reduce_fn
 ) {
     SynthParams params = *params_in;
+    size_t out_bytes = 0;
     int n_parts = synth_partition_count(sa.count, n_threads);
-    ThreadBuffers tb = thread_buffers_alloc(n_parts, out_len, elem_size);
+    ThreadBuffers tb = {0};
+
+    if (!spectral_size_mul(out_len, elem_size, &out_bytes)) {
+        *t_synth = 0;
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    tb = thread_buffers_alloc(n_parts, out_len, elem_size);
     if (!tb.bufs) {
-        memset(out_buffer, 0, out_len * elem_size);
+        memset(out_buffer, 0, out_bytes);
         *t_synth = 0;
         return SPECTRAL_ERR_MEMORY;
     }

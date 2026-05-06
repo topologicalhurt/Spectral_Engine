@@ -94,7 +94,29 @@ static SynthPreflight synth_preflight_common(
     float stretch, float pitch, double** t_synth)
 {
     SynthPreflight pf = {0};
+    size_t preflight_out_bytes = 0;
     pf.error = SPECTRAL_OK;
+
+    /* Error cases must not be collapsed into the benign early-exit path.
+     * In particular, out_len * elem_size overflow is a contract failure that
+     * every backend must see as SPECTRAL_ERR_OVERFLOW, not SPECTRAL_OK. */
+    if (!t_synth) {
+        pf.error = SPECTRAL_ERR_PARAM;
+        return pf;
+    }
+    if (!*t_synth) {
+        *t_synth = &g_synth_timing_dummy;
+    }
+    if (elem_size == 0) {
+        **t_synth = 0;
+        pf.error = SPECTRAL_ERR_PARAM;
+        return pf;
+    }
+    if (!spectral_size_mul(out_len, elem_size, &preflight_out_bytes)) {
+        **t_synth = 0;
+        pf.error = SPECTRAL_ERR_OVERFLOW;
+        return pf;
+    }
 
     if (!synth_validate_inputs(out_buffer, out_len, elem_size, sa, t_synth)) {
         return pf;
