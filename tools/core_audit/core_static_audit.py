@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 23):
+    for pass_num in range(1, 24):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -702,6 +702,30 @@ def main() -> int:
     require("memset(out_buffer, 0, out_bytes);" in synth_cpu_pass22 and
             "memset(out_buffer, 0, out_len * elem_size)" not in synth_cpu_pass22,
             "pass 22 CPU synth allocation-failure zeroing must use validated byte count")
+
+
+    synth_cpu_pass23 = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
+    require("spectral_size_add(tb.buf_size, align_mask, &stride_with_padding)" in synth_cpu_pass23 and
+            "tb.buf_stride = stride_with_padding & ~align_mask;" in synth_cpu_pass23,
+            "pass 23 CPU synth arena stride alignment must use checked arithmetic")
+    require("tb.buf_stride = (tb.buf_size + SPECTRAL_CACHE_ALIGN - 1)" not in synth_cpu_pass23,
+            "pass 23 CPU synth arena stride must not use raw potentially-overflowing addition")
+    require("base > UINTPTR_MAX - (uintptr_t)align_mask" in synth_cpu_pass23,
+            "pass 23 CPU synth aligned-base pointer arithmetic must be guarded")
+    require("thread_buffers_alloc(n_parts, out_len, elem_size, &tb_err)" in synth_cpu_pass23 and
+            "return tb_err != SPECTRAL_OK ? tb_err : SPECTRAL_ERR_MEMORY;" in synth_cpu_pass23,
+            "pass 23 CPU synth thread-buffer allocator must propagate overflow separately from memory failure")
+    require("Checked align-up" in synth_cpu_pass23 and
+            "Manual aligned-base adjustment" in synth_cpu_pass23 and
+            "Pointer-add guard" in synth_cpu_pass23,
+            "pass 23 source comments must explain checked align-up, arena padding and pointer-add guard")
+    pass23_notes = read("docs/core_audit/PATCH_NOTES_PASS23.md")
+    require("Reviewer Walkthrough" in pass23_notes and
+            "checked align-up" in pass23_notes and
+            "pointer-add guard" in pass23_notes and
+            "SPECTRAL_ERR_OVERFLOW" in pass23_notes and
+            "SPECTRAL_ERR_MEMORY" in pass23_notes,
+            "pass 23 walkthrough must document overflow-vs-memory failure and the guarded arithmetic sequence")
 
     if FAILURES:
         for f in FAILURES:

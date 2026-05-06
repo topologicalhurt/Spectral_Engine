@@ -44,37 +44,72 @@ static int synth_partition_count(size_t seg_count, int n_threads) {
     return (int)n;
 }
 
-static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t element_size) {
+static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t element_size,
+                                          SpectralError* out_error) {
     ThreadBuffers tb = {0};
     size_t arena_payload_size = 0;
     size_t arena_size = 0;
     size_t out_bytes = 0;
+    size_t stride_with_padding = 0;
+    size_t cache_align = (size_t)SPECTRAL_CACHE_ALIGN;
+    size_t align_mask = 0;
+
+    if (out_error) *out_error = SPECTRAL_OK;
+    if (!out_error) {
+        return tb;
+    }
 
     if (n_threads <= 0 || element_size == 0 || out_len == 0) {
+        *out_error = SPECTRAL_ERR_PARAM;
         return tb;
     }
+    if (cache_align == 0u || (cache_align & (cache_align - 1u)) != 0u) {
+        *out_error = SPECTRAL_ERR_PARAM;
+        return tb;
+    }
+    align_mask = cache_align - 1u;
+
     if (!spectral_size_mul(out_len, element_size, &out_bytes)) {
+        *out_error = SPECTRAL_ERR_OVERFLOW;
         return tb;
     }
 
-    /* Calculate buffer size and aligned stride */
+    /* Checked align-up: stride = align_up(out_bytes, SPECTRAL_CACHE_ALIGN).
+     * The power-of-two validation above makes the mask form valid; the
+     * spectral_size_add() guard proves the padding addition cannot wrap.
+     *
+     * Calculate buffer size and aligned stride without raw addition.
+     * Pass 22 proved out_len * element_size; this pass proves the cache-line
+     * padding arithmetic before allocating the per-thread arena. */
     tb.buf_size = out_bytes;
-    tb.buf_stride = (tb.buf_size + SPECTRAL_CACHE_ALIGN - 1) & ~(SPECTRAL_CACHE_ALIGN - 1);
+    if (!spectral_size_add(tb.buf_size, align_mask, &stride_with_padding)) {
+        *out_error = SPECTRAL_ERR_OVERFLOW;
+        return tb;
+    }
+    tb.buf_stride = stride_with_padding & ~align_mask;
+    if (tb.buf_stride < tb.buf_size) {
+        *out_error = SPECTRAL_ERR_OVERFLOW;
+        return tb;
+    }
     tb.n_threads = n_threads;
 
     /* Allocate pointer array */
     tb.bufs = spectral_malloc_array((size_t)n_threads, sizeof(void*));
     if (!tb.bufs) {
         tb.n_threads = 0;
+        *out_error = SPECTRAL_ERR_MEMORY;
         return tb;
     }
 
-    /* Single arena allocation for all thread buffers */
+    /* Manual aligned-base adjustment: calloc() does not promise cache-line
+     * alignment, so reserve up to align_mask bytes after the checked payload.
+     * That extra space is for moving the base forward, not for per-thread data. */
     if (!spectral_size_mul(tb.buf_stride, (size_t)n_threads, &arena_payload_size) ||
-        !spectral_size_add(arena_payload_size, SPECTRAL_CACHE_ALIGN, &arena_size)) {
+        !spectral_size_add(arena_payload_size, align_mask, &arena_size)) {
         free(tb.bufs);
         tb.bufs = NULL;
         tb.n_threads = 0;
+        *out_error = SPECTRAL_ERR_OVERFLOW;
         return tb;
     }
     tb.arena = spectral_calloc_array(arena_size, 1u);
@@ -82,17 +117,37 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
         free(tb.bufs);
         tb.bufs = NULL;
         tb.n_threads = 0;
+        *out_error = SPECTRAL_ERR_MEMORY;
         return tb;
     }
 
     /* Set up per-thread buffer pointers */
-    char* aligned_base = (char*)(((uintptr_t)tb.arena + SPECTRAL_CACHE_ALIGN - 1) & ~(SPECTRAL_CACHE_ALIGN - 1));
-    for (int t = 0; t < n_threads; t++) {
-        tb.bufs[t] = aligned_base + (t * tb.buf_stride);
+    {
+        uintptr_t base = (uintptr_t)tb.arena;
+        uintptr_t aligned_base_u = 0u;
+        char* aligned_base = NULL;
+
+        /* Pointer-add guard: the integer addition used to compute the aligned
+         * base is checked before forming `(base + align_mask)`. Without this,
+         * an address near UINTPTR_MAX could wrap before the mask is applied. */
+        if (base > UINTPTR_MAX - (uintptr_t)align_mask) {
+            free(tb.arena);
+            free(tb.bufs);
+            tb = (ThreadBuffers){0};
+            *out_error = SPECTRAL_ERR_OVERFLOW;
+            return tb;
+        }
+
+        aligned_base_u = (base + (uintptr_t)align_mask) & ~(uintptr_t)align_mask;
+        aligned_base = (char*)aligned_base_u;
+        for (int t = 0; t < n_threads; t++) {
+            tb.bufs[t] = aligned_base + ((size_t)t * tb.buf_stride);
+        }
     }
 
     return tb;
 }
+
 
 static void thread_buffers_free(ThreadBuffers* tb) {
     if (!tb) return;
@@ -136,6 +191,7 @@ static SpectralError synth_cpu_driver(
 ) {
     SynthParams params = *params_in;
     size_t out_bytes = 0;
+    SpectralError tb_err = SPECTRAL_OK;
     int n_parts = synth_partition_count(sa.count, n_threads);
     ThreadBuffers tb = {0};
 
@@ -144,11 +200,11 @@ static SpectralError synth_cpu_driver(
         return SPECTRAL_ERR_OVERFLOW;
     }
 
-    tb = thread_buffers_alloc(n_parts, out_len, elem_size);
+    tb = thread_buffers_alloc(n_parts, out_len, elem_size, &tb_err);
     if (!tb.bufs) {
         memset(out_buffer, 0, out_bytes);
         *t_synth = 0;
-        return SPECTRAL_ERR_MEMORY;
+        return tb_err != SPECTRAL_OK ? tb_err : SPECTRAL_ERR_MEMORY;
     }
 
     #pragma omp parallel for schedule(static) num_threads(n_parts)
