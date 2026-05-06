@@ -40,7 +40,7 @@ void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
 
     for (; j + 4 <= len; j += 4) {
         for (int k = 0; k < 4; k++) {
-            phases[k] = phase_to_rads(compute_phase(phase0, alpha, beta, j + k));
+            phases[k] = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)(j + k)));
             amps_v[k] = (amp0 + d_amp * (float)(j + k)) * fade_envelope(j + k, &fp, len);
         }
         for (int k = 0; k < 4; k++) sines[k] = arm_sin_f32(phases[k]);
@@ -49,7 +49,7 @@ void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
     }
 
     for (; j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float wave = arm_sin_f32(rads);
         float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
         dst[j] += amp * wave;
@@ -72,7 +72,7 @@ void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
 
     for (; j + 4 <= len; j += 4) {
         for (int k = 0; k < 4; k++) {
-            rads_v[k] = phase_to_rads(compute_phase(phase0, alpha, beta, j + k));
+            rads_v[k] = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)(j + k)));
             amps_v[k] = (amp0 + d_amp * (float)(j + k)) * fade_envelope(j + k, &fp, len);
         }
         arm_scale_f32(rads_v, -SPECTRAL_INV_PI, waves, 4);
@@ -81,7 +81,7 @@ void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
     }
 
     for (; j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float wave = rads * -SPECTRAL_INV_PI;
         float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
         dst[j] += amp * wave;
@@ -100,7 +100,7 @@ void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
     const float d_amp = lp->d_amp;
 
     for (size_t j = 0; j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float wave = rads > 0.0f ? 1.0f : -1.0f;
         float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
         dst[j] += amp * wave;
@@ -123,7 +123,7 @@ void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
 
     for (; j + 4 <= len; j += 4) {
         for (int k = 0; k < 4; k++) {
-            rads_v[k] = phase_to_rads(compute_phase(phase0, alpha, beta, j + k)) * SPECTRAL_INV_PI;
+            rads_v[k] = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)(j + k))) * SPECTRAL_INV_PI;
             amps_v[k] = (amp0 + d_amp * (float)(j + k)) * fade_envelope(j + k, &fp, len);
         }
         arm_abs_f32(rads_v, abs_v, 4);
@@ -134,7 +134,7 @@ void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
     }
 
     for (; j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float wave = 1.0f - fabsf(rads * SPECTRAL_INV_PI) * 2.0f;
         float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
         dst[j] += amp * wave;
@@ -157,7 +157,7 @@ void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
 
     for (; j + 4 <= len; j += 4) {
         for (int k = 0; k < 4; k++) {
-            rads_v[k] = phase_to_rads(compute_phase(phase0, alpha, beta, j + k));
+            rads_v[k] = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)(j + k)));
             amps_v[k] = (amp0 + d_amp * (float)(j + k)) * fade_envelope(j + k, &fp, len);
         }
         arm_mult_f32(rads_v, rads_v, sq_v, 4);
@@ -168,7 +168,7 @@ void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
     }
 
     for (; j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float wave = 1.0f - rads * rads * SPECTRAL_INV_PI_SQ;
         float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
         dst[j] += amp * wave;
@@ -369,7 +369,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
 
     /* Fade-in region: scalar */
     for (size_t j = 0; j < fade_in_end && j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float amp = (amp0 + d_amp * (float)j) * fade_envelope_in(j, fp.inv_fade);
         dst[j] += amp * wave_fn1(rads, ctx);
     }
@@ -406,7 +406,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
         }
         /* Scalar tail for sustain */
         for (; j < sustain_end; j++) {
-            float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+            float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
             dst[j] += (amp0 + d_amp * (float)j) * wave_fn1(rads, ctx);
         }
     }
@@ -414,7 +414,7 @@ static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
     /* Fade-out region: scalar */
     size_t fo_start = (fade_out_start > fade_in_end) ? fade_out_start : fade_in_end;
     for (size_t j = fo_start; j < len; j++) {
-        float rads = phase_to_rads(compute_phase(phase0, alpha, beta, j));
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
         float amp = (amp0 + d_amp * (float)j) * fade_envelope_out(j, len, fp.inv_fade);
         dst[j] += amp * wave_fn1(rads, ctx);
     }

@@ -28,15 +28,6 @@ SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t
 SpectralError synth_validate_params(float stretch, float pitch);
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len);
 
-/* Compute instantaneous phase at sample j (quadratic phase model) */
-static inline float compute_phase(float phase0, float alpha, float beta, size_t j) {
-    return spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
-}
-
-static inline float compute_amplitude(float amp0, float d_amp, size_t j) {
-    return spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
-}
-
 /* Validate synth inputs; call at start of every synth function */
 
 typedef enum {

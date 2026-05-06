@@ -65,8 +65,7 @@ SpectralError spectral_peak_model_validate(const SpectralPeakModel* model);
 SpectralError spectral_peak_model_resolve(const SpectralPeakModel* model,
                                           SpectralResolvedPeakModel* out);
 
-int spectral_peak_model_requires_phase_row(const SpectralPeakModel* model);
-int spectral_peak_model_requires_complex_triplet(const SpectralPeakModel* model);
+int spectral_peak_model_has_capability(const SpectralPeakModel* model, unsigned capability);
 
 #ifdef __cplusplus
 }

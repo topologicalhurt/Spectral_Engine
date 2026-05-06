@@ -236,7 +236,7 @@ SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
         return SPECTRAL_ERR_OVERFLOW;
     }
     
-    float* stereo = malloc(stereo_bytes);
+    float* stereo = (float*)spectral_malloc_array(stereo_samples, sizeof(float));
     if (!stereo) return SPECTRAL_ERR_MEMORY;
 
     spectral_mono_to_stereo_float(mono, stereo, num_frames);

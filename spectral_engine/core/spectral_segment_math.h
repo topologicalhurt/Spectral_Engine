@@ -49,9 +49,6 @@ SPECTRAL_SEGMENT_MATH_INLINE float spectral_segment_amp_at_f32(
     return amp0 + d_amp * sample_offset;
 }
 
-float spectral_segment_phase_at_index_f32(float phase0, float alpha, float beta, size_t sample_index);
-float spectral_segment_amp_at_index_f32(float amp0, float d_amp, size_t sample_index);
-
 #ifdef __cplusplus
 }
 #endif

@@ -259,7 +259,7 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
         result = SPECTRAL_ERR_OVERFLOW;
         goto cleanup;
     }
-    sim_segs = (SimSegment*)malloc(sim_segs_bytes);
+    sim_segs = (SimSegment*)spectral_malloc_array(sa.count, sizeof(*sim_segs));
     if (!sim_segs) {
         spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_MEMORY,
                                 "Simulation segment buffer allocation failed (segments=%zu)",
@@ -324,7 +324,7 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
         result = SPECTRAL_ERR_OVERFLOW;
         goto cleanup;
     }
-    accum = (int64_t*)calloc(1, accum_bytes);
+    accum = (int64_t*)spectral_calloc_array((size_t)block_size, sizeof(*accum));
     if (!accum) {
         spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_MEMORY,
                                 "Simulation accumulator buffer allocation failed (samples=%u)",

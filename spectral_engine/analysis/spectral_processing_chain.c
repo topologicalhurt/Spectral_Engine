@@ -3,6 +3,7 @@
 #include "spectral_proc_serra_smith_1990.h"
 #include "spectral_proc_johnston_1988.h"
 #include "spectral_proc_adaptive_track_density.h"
+#include "spectral_utils.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -126,9 +127,11 @@ int spectral_process_mask_parse(const char* spec, SpectralProcessMask* out_mask)
     }
 
     size_t n = strlen(spec);
-    char* buf = (char*)malloc(n + 1);
+    size_t buf_len = 0;
+    if (!spectral_size_add(n, 1u, &buf_len)) return 0;
+    char* buf = (char*)spectral_malloc_array(buf_len, sizeof(char));
     if (!buf) return 0;
-    memcpy(buf, spec, n + 1);
+    memcpy(buf, spec, buf_len);
 
     SpectralProcessMask mask = 0;
     int saw_none = 0;

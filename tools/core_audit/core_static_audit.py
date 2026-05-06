@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 20):
+    for pass_num in range(1, 22):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -611,6 +611,85 @@ def main() -> int:
             "return spectral_tracker_apply_peak_model(tracker, model);" in track_c_pass18 and
             "fallback = spectral_peak_model_default()" not in track_c_pass18,
             "pass 18 tracker setters must resolve atomically and preserve prior models on failure")
+
+
+    peak_model_h_pass20 = read("spectral_engine/analysis/spectral_peak_model.h")
+    peak_model_c_pass20 = read("spectral_engine/analysis/spectral_peak_model.c")
+    track_c_pass20 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_peak_model_has_capability" in peak_model_h_pass20 and
+            "spectral_peak_model_requires_phase_row" not in peak_model_h_pass20 and
+            "spectral_peak_model_requires_next_phase_row" not in peak_model_h_pass20,
+            "pass 20 peak model API must expose one generic capability helper, not alias-style requirement wrappers")
+    require("int spectral_peak_model_has_capability" in peak_model_c_pass20 and
+            "return (resolved.capabilities & capability) != 0u;" in peak_model_c_pass20,
+            "pass 20 peak model capability checks must share one resolver")
+    require("SPECTRAL_PEAK_MODEL_CAP_PHASE_ROW |" in peak_model_c_pass20 and
+            "SPECTRAL_PEAK_MODEL_CAP_NEXT_PHASE_ROW" in peak_model_c_pass20,
+            "pass 20 phase diagnostics must require both current and next phase rows")
+    require("return spectral_tracker_apply_peak_model(tracker, model);" in track_c_pass20,
+            "pass 20 set_peak_model must remain transactional and not fallback to default")
+    require("fallback = spectral_peak_model_default()" not in track_c_pass20,
+            "pass 20 invalid model mutations must preserve existing profile, not fallback to Hann")
+
+
+    oscillator_pass21 = read("spectral_engine/core/oscillator.c")
+    synth_internal_pass21 = read("spectral_engine/core/spectral_synth_internal.h")
+    synth_internal_c_pass21 = read("spectral_engine/core/spectral_synth_internal.c")
+    segment_math_h_pass21 = read("spectral_engine/core/spectral_segment_math.h")
+    segment_mt_pass21 = read("spectral_engine/core/spectral_segment_mt.c")
+    spectral_in_pass21 = read("spectral_engine/core/spectral_in.c")
+    spectral_out_pass21 = read("spectral_engine/core/spectral_out.c")
+    processing_chain_pass21 = read("spectral_engine/analysis/spectral_processing_chain.c")
+    synth_cpu_pass21 = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
+    synth_sim_pass21 = read("spectral_engine/synth/backends/sim/spectral_synth_simulation.c")
+    track_c_pass21 = read("spectral_engine/analysis/spectral_peak_track.c")
+    manifest_pass21 = read("spectral_engine/cmake/source-manifest.cmake")
+    perf_pass21 = read("spectral_engine/runtime/spectral_perf.c")
+    ai_canon_pass21 = read("docs/core_audit/AI_CANON.md")
+    pass21_notes = read("docs/core_audit/PATCH_NOTES_PASS21.md")
+    require("static inline float osc_sine" not in oscillator_pass21 and
+            "static inline float osc_saw" not in oscillator_pass21 and
+            "spectral_osc_sine," in oscillator_pass21 and
+            "spectral_osc_pwm" in oscillator_pass21,
+            "pass 21 oscillator dispatch must point at canonical formulas without local alias wrappers")
+    require("compute_phase(" not in synth_internal_pass21 and
+            "compute_amplitude(" not in synth_internal_pass21,
+            "pass 21 synth internals must not re-alias canonical segment math helpers")
+    require("spectral_segment_phase_at_index_f32" not in segment_math_h_pass21 and
+            "spectral_segment_amp_at_index_f32" not in segment_math_h_pass21 and
+            "spectral_segment_math.c" not in manifest_pass21,
+            "pass 21 segment math must not keep unused out-of-line alias wrappers")
+    require(perf_pass21.count("void perf_get_cpu_time") == 1,
+            "pass 21 desktop CPU-time accounting must not be duplicated per platform branch")
+    require(not (ROOT / "spectral_engine/analysis/spectral_peak_chain.c").exists() and
+            not (ROOT / "spectral_engine/analysis/spectral_peak_chain.h").exists(),
+            "pass 21 must remove the dead peak-chain files instead of preserving duplicate segment-copy logic")
+    require("static void spectral_tracker_free_segment_storage" in track_c_pass21 and
+            "spectral_calloc_array((size_t)n_threads, sizeof(TrackSegment*))" in track_c_pass21 and
+            track_c_pass21.count("spectral_tracker_free_segment_storage(tracker);") >= 3,
+            "pass 21 tracker ownership cleanup must use one helper and NULL-safe per-thread storage")
+    require(synth_internal_c_pass21.count("lp.amp = s->amp;") == 1 and
+            "static void gpu_tile_preprocess_scratch_free" in synth_internal_c_pass21 and
+            synth_internal_c_pass21.count("gpu_tile_preprocess_scratch_free(") == 3,
+            "pass 21 synth internals must remove repeated field assignment and share GPU tile scratch cleanup")
+    require("static void segment_array_mt_apply_pending_locked" in segment_mt_pass21 and
+            segment_mt_pass21.count("segment_array_mt_apply_pending_locked(sa);") == 2,
+            "pass 21 segment MT get/copy must share one pending-swap commit helper")
+    require("float* audio = malloc(" not in spectral_in_pass21 and
+            "float* mono = malloc(" not in spectral_in_pass21 and
+            "float* stereo = malloc(" not in spectral_out_pass21 and
+            "spectral_size_add(n, 1u, &buf_len)" in processing_chain_pass21 and
+            "tb.arena = spectral_calloc_array(arena_size, 1u)" in synth_cpu_pass21 and
+            "memset(tb.arena" not in synth_cpu_pass21 and
+            "sim_segs = (SimSegment*)spectral_malloc_array" in synth_sim_pass21 and
+            "accum = (int64_t*)spectral_calloc_array" in synth_sim_pass21,
+            "pass 21 array allocations must reuse safe allocation helpers in touched kernel paths")
+    require("Alias wrappers are not architecture" in ai_canon_pass21 and
+            "Do not add a wrapper whose only job is to rename another helper" in pass21_notes and
+            "dead duplicate kernel files" in pass21_notes and
+            "central cleanup helpers" in pass21_notes and
+            "safe allocation helpers" in pass21_notes,
+            "pass 21 docs must forbid low-value aliases, repeated cleanup and local allocation reinvention")
 
     if FAILURES:
         for f in FAILURES:

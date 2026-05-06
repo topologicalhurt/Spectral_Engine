@@ -77,15 +77,13 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
         tb.n_threads = 0;
         return tb;
     }
-    tb.arena = malloc(arena_size);
+    tb.arena = spectral_calloc_array(arena_size, 1u);
     if (!tb.arena) {
         free(tb.bufs);
         tb.bufs = NULL;
         tb.n_threads = 0;
         return tb;
     }
-
-    memset(tb.arena, 0, arena_size);
 
     /* Set up per-thread buffer pointers */
     char* aligned_base = (char*)(((uintptr_t)tb.arena + SPECTRAL_CACHE_ALIGN - 1) & ~(SPECTRAL_CACHE_ALIGN - 1));
@@ -197,9 +195,9 @@ static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, c
     float* out = (float*)dst;
     FadeParams fp = fade_params_init(lp->length, SPECTRAL_SYNTH_CPU_FADE_SAMPLES);
     for (size_t j = 0; j < lp->length; j++) {
-        float p = compute_phase(lp->phase, lp->alpha, lp->beta, j);
+        float p = spectral_segment_phase_at_f32(lp->phase, lp->alpha, lp->beta, (float)j);
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
-        float amp = compute_amplitude(lp->amp, lp->d_amp, j) * fade_envelope(j, &fp, lp->length);
+        float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         spectral_sample_t sample = spectral_wavetable_lookup_f(wc->table, phase_norm);
         out[j] += amp * SPECTRAL_SAMPLE_TO_FLOAT(sample);
     }
@@ -211,8 +209,8 @@ static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, con
     spectral_sample_t* out = (spectral_sample_t*)dst;
     FadeParams fp = fade_params_init(lp->length, SPECTRAL_SYNTH_CPU_FADE_SAMPLES);
     for (size_t j = 0; j < lp->length; j++) {
-        float p = compute_phase(lp->phase, lp->alpha, lp->beta, j);
-        float amp = compute_amplitude(lp->amp, lp->d_amp, j) * fade_envelope(j, &fp, lp->length);
+        float p = spectral_segment_phase_at_f32(lp->phase, lp->alpha, lp->beta, (float)j);
+        float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         float sample_f = timbre_oscillator(p, amp, tc->timbre, lp->width);
         out[j] = SPECTRAL_SAMPLE_ADD(out[j], FLOAT_TO_SPECTRAL_SAMPLE(sample_f));
     }
@@ -223,9 +221,9 @@ static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, 
     spectral_sample_t* out = (spectral_sample_t*)dst;
     FadeParams fp = fade_params_init(lp->length, SPECTRAL_SYNTH_CPU_FADE_SAMPLES);
     for (size_t j = 0; j < lp->length; j++) {
-        float p = compute_phase(lp->phase, lp->alpha, lp->beta, j);
+        float p = spectral_segment_phase_at_f32(lp->phase, lp->alpha, lp->beta, (float)j);
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
-        float amp = compute_amplitude(lp->amp, lp->d_amp, j) * fade_envelope(j, &fp, lp->length);
+        float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         spectral_sample_t sample = spectral_wavetable_lookup_f(nwc->table, phase_norm);
         spectral_sample_t amp_native = FLOAT_TO_SPECTRAL_SAMPLE(amp);
         spectral_sample_t scaled = SPECTRAL_SAMPLE_MUL(sample, amp_native);

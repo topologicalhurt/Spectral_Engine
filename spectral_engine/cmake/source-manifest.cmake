@@ -27,7 +27,6 @@ set(SPECTRAL_SOURCE_ENTRY_MAIN "${SPECTRAL_CMD_CLI_DIR}/main.c")
 set(SPECTRAL_SOURCE_CONVERT_SEGMENTS_ENTRY "${SPECTRAL_CMD_DIR}/convert_segments.c")
 
 set(SPECTRAL_SOURCES_CORE
-    "${SPECTRAL_CORE_DIR}/spectral_segment_math.c"
     "${SPECTRAL_CORE_DIR}/oscillator.c"
     "${SPECTRAL_CORE_DIR}/oscillator_simd.c"
     "${SPECTRAL_CORE_DIR}/spectral_backend.c"

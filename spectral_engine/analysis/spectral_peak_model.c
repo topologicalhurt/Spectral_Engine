@@ -183,8 +183,9 @@ SpectralError spectral_peak_model_resolve(const SpectralPeakModel* model,
         capabilities |= SPECTRAL_PEAK_MODEL_CAP_PEAK_HEIGHT;
     }
     if (model->phase_policy != SPECTRAL_PEAK_PHASE_POLICY_IGNORE) {
-        capabilities |= SPECTRAL_PEAK_MODEL_CAP_PHASE_DIAGNOSTIC |
-                        SPECTRAL_PEAK_MODEL_CAP_NEXT_PHASE_ROW;
+        capabilities |= SPECTRAL_PEAK_MODEL_CAP_PHASE_ROW |
+                        SPECTRAL_PEAK_MODEL_CAP_NEXT_PHASE_ROW |
+                        SPECTRAL_PEAK_MODEL_CAP_PHASE_DIAGNOSTIC;
         assumptions |= SPECTRAL_PEAK_MODEL_ASSUME_PHASE_VOCODER_ADVANCE;
     }
 
@@ -205,14 +206,9 @@ SpectralError spectral_peak_model_resolve(const SpectralPeakModel* model,
     return SPECTRAL_OK;
 }
 
-int spectral_peak_model_requires_phase_row(const SpectralPeakModel* model) {
+int spectral_peak_model_has_capability(const SpectralPeakModel* model, unsigned capability) {
     SpectralResolvedPeakModel resolved;
+    if (capability == 0u) return 0;
     if (spectral_peak_model_resolve(model, &resolved) != SPECTRAL_OK) return 0;
-    return (resolved.capabilities & SPECTRAL_PEAK_MODEL_CAP_PHASE_ROW) != 0u;
-}
-
-int spectral_peak_model_requires_complex_triplet(const SpectralPeakModel* model) {
-    SpectralResolvedPeakModel resolved;
-    if (spectral_peak_model_resolve(model, &resolved) != SPECTRAL_OK) return 0;
-    return (resolved.capabilities & SPECTRAL_PEAK_MODEL_CAP_COMPLEX_TRIPLET) != 0u;
+    return (resolved.capabilities & capability) != 0u;
 }

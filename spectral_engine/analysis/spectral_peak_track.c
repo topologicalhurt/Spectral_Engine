@@ -200,6 +200,21 @@ void spectral_segment_array_free(SegmentArray* arr) {
     arr->capacity = 0;
 }
 
+static void spectral_tracker_free_segment_storage(SpectralTracker* tracker) {
+    if (!tracker) return;
+    if (tracker->seg_arrays) {
+        for (int t = 0; t < tracker->n_threads; t++) {
+            free(tracker->seg_arrays[t]);
+        }
+        free(tracker->seg_arrays);
+    }
+    free(tracker->seg_counts);
+    free(tracker->seg_capacities);
+    tracker->seg_arrays = NULL;
+    tracker->seg_counts = NULL;
+    tracker->seg_capacities = NULL;
+}
+
 /* ── End accessors ─────────────────────────────────────────────────── */
 
 
@@ -557,7 +572,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
      * The previous 16M-per-thread virtual allocation depended on Linux
      * overcommit behavior and is not a portable real-time contract. */
     size_t init_cap = (size_t)SPECTRAL_TRACK_INITIAL_SEG_CAP;
-    tracker->seg_arrays = (TrackSegment**)spectral_malloc_array((size_t)n_threads, sizeof(TrackSegment*));
+    tracker->seg_arrays = (TrackSegment**)spectral_calloc_array((size_t)n_threads, sizeof(TrackSegment*));
     /* Pad heavily to 64-byte cache line stride to eliminate catastrophic False Sharing. */
     tracker->seg_counts = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
     tracker->seg_capacities = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
@@ -576,14 +591,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     return tracker;
 
 fail:
-    if (tracker->seg_arrays) {
-        for (t = 0; t < n_threads; t++) {
-            free(tracker->seg_arrays[t]);
-        }
-        free(tracker->seg_arrays);
-    }
-    if (tracker->seg_counts) free(tracker->seg_counts);
-    if (tracker->seg_capacities) free(tracker->seg_capacities);
+    spectral_tracker_free_segment_storage(tracker);
     free(tracker);
     return NULL;
 }
@@ -966,16 +974,7 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
     
     /* Perform OS-level free sequentially to avoid massive mmap_sem lock
      * contention across 20 threads simultaneously unmapping 512MB allocations. */
-    for (int t = 0; t < n_threads; t++) {
-        free(tracker->seg_arrays[t]);
-    }
-    
-    free(tracker->seg_arrays);
-    free(tracker->seg_counts);
-    free(tracker->seg_capacities);
-    tracker->seg_arrays = NULL;
-    tracker->seg_counts = NULL;
-    tracker->seg_capacities = NULL;
+    spectral_tracker_free_segment_storage(tracker);
     free(offsets);
 
     track_total_time = (override_wall_time > 0.0) 
@@ -1081,29 +1080,13 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
 fail:
     free(segs);
     free(offsets);
-    if (tracker->seg_arrays) {
-        for (int t = 0; t < n_threads; t++) free(tracker->seg_arrays[t]);
-        free(tracker->seg_arrays);
-    }
-    free(tracker->seg_counts);
-    free(tracker->seg_capacities);
-    tracker->seg_arrays = NULL;
-    tracker->seg_counts = NULL;
-    tracker->seg_capacities = NULL;
+    spectral_tracker_free_segment_storage(tracker);
     return peak_track_return_empty(t_track);
 }
 
 void spectral_tracker_destroy(SpectralTracker* tracker) {
     if (!tracker) return;
-    /* Clean up any remaining internal state not freed by finalize */
-    if (tracker->seg_arrays) {
-        for (int t = 0; t < tracker->n_threads; t++) {
-            free(tracker->seg_arrays[t]);
-        }
-        free(tracker->seg_arrays);
-    }
-    free(tracker->seg_counts);
-    free(tracker->seg_capacities);
+    spectral_tracker_free_segment_storage(tracker);
     free(tracker);
 }
 

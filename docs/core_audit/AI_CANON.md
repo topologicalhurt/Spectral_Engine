@@ -175,6 +175,18 @@ locality. In particular:
 If a duplicate formula is unavoidable, document why a shared utility is not
 usable and add a parity test that would fail if the copies drift.
 
+The same rule applies to ownership and conversion plumbing. If success,
+failure, and destroy paths free the same resource set, use one cleanup helper.
+If an uncompiled file mirrors live kernel logic, delete it or make it canonical
+through the source manifest and tests. Dead duplicate files are not
+documentation.
+
+For array allocation, use the kernel helpers by default. `spectral_size_add()`,
+`spectral_malloc_array()`, `spectral_calloc_array()`, and
+`spectral_realloc_array()` are the canonical arithmetic boundary. Local
+`count * sizeof(T)`, `strlen(x) + 1`, or `calloc(1, bytes)` patterns need a
+specific platform or ABI reason.
+
 ## 18. Patch notes are the canonical pass record
 
 Patch audit notes must use one numeric filename per pass:
@@ -198,3 +210,21 @@ Expected invariants:
 - docs updates that change the contract update `AI_CANON.md`,
   `ACADEMIC_SOURCES.md`, and `DISCIPLINE_FINDINGS.md` when those documents are
   affected.
+
+## 19. Alias wrappers are not architecture
+
+Do not add a function whose only behavior is to rename another function or
+resolve one constant into another helper. It increases API surface without
+reducing complexity.
+
+Acceptable wrappers must do at least one real job:
+
+- validate or normalize inputs;
+- bind a backend or ownership boundary;
+- preserve a stable external ABI intentionally;
+- record units or convert representation;
+- centralize a policy that has multiple callsites.
+
+For internal kernel code, prefer calling the canonical helper directly. If a
+semantic predicate is needed for multiple capability bits, expose one generic
+predicate instead of one alias per bit.

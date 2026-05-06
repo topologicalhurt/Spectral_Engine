@@ -13,28 +13,17 @@ static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SCALAR;
 void osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
 OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 
-/* Waveform generators — thin wrappers around canonical formulas in spectral_osc_formulas.h */
-
-static inline float osc_sine(float rads, float width)     { return spectral_osc_sine(rads, width); }
-static inline float osc_saw(float rads, float width)      { return spectral_osc_saw(rads, width); }
-static inline float osc_square(float rads, float width)   { return spectral_osc_square(rads, width); }
-static inline float osc_triangle(float rads, float width) { return spectral_osc_triangle(rads, width); }
-static inline float osc_asin(float rads, float width)     { return spectral_osc_asin(rads, width); }
-static inline float osc_parabola(float rads, float width) { return spectral_osc_parabola(rads, width); }
-static inline float osc_quantized(float rads, float width){ return spectral_osc_quantized(rads, width); }
-static inline float osc_pwm(float rads, float width)      { return spectral_osc_pwm(rads, width); }
-
 typedef float (*TimbreFunc)(float rads, float width);
 
 static const TimbreFunc timbre_table[TIMBRE_COUNT] = {
-    osc_sine,
-    osc_saw,
-    osc_square,
-    osc_triangle,
-    osc_asin,
-    osc_parabola,
-    osc_quantized,
-    osc_pwm
+    spectral_osc_sine,
+    spectral_osc_saw,
+    spectral_osc_square,
+    spectral_osc_triangle,
+    spectral_osc_asin,
+    spectral_osc_parabola,
+    spectral_osc_quantized,
+    spectral_osc_pwm
 };
 
 float timbre_oscillator(float p, float a, SpectralTimbre timbre, float width) {
@@ -58,28 +47,28 @@ static void synth_segment_scalar(
 
     /* Fade-in region */
     for (size_t j = 0; j < fade_in_end && j < len; j++) {
-        float p = compute_phase(phase0, alpha, beta, j);
+        float p = spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = compute_amplitude(amp0, d_amp, j) * fade_envelope_in(j, fp->inv_fade);
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_in(j, fp->inv_fade);
         dst[j] += amp * wave;
     }
 
     /* Sustain region (envelope = 1.0, no branching) */
     for (size_t j = fade_in_end; j < fade_out_start && j < len; j++) {
-        float p = compute_phase(phase0, alpha, beta, j);
+        float p = spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = compute_amplitude(amp0, d_amp, j);
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
         dst[j] += amp * wave;
     }
 
     /* Fade-out region */
     for (size_t j = (fade_out_start > fade_in_end ? fade_out_start : fade_in_end); j < len; j++) {
-        float p = compute_phase(phase0, alpha, beta, j);
+        float p = spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
-        float amp = compute_amplitude(amp0, d_amp, j) * fade_envelope_out(j, len, fp->inv_fade);
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_out(j, len, fp->inv_fade);
         dst[j] += amp * wave;
     }
 }

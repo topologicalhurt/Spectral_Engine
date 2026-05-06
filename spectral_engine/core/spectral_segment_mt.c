@@ -26,6 +26,14 @@ void segment_array_mt_destroy(SegmentArrayMT* sa) {
     sa->initialized = 0;
 }
 
+static void segment_array_mt_apply_pending_locked(SegmentArrayMT* sa) {
+    if (!sa || !sa->pending_swap) return;
+    free(sa->array.segs);
+    sa->array = sa->pending;
+    sa->pending = (SegmentArray)SEGMENT_ARRAY_EMPTY;
+    sa->pending_swap = 0;
+}
+
 SpectralError segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t count) {
     if (!sa || !sa->initialized) return SPECTRAL_ERR_PARAM;
     pthread_mutex_lock(&sa->mutex);
@@ -41,13 +49,7 @@ SpectralError segment_array_mt_load(SegmentArrayMT* sa, Segment* segs, uint32_t 
 void segment_array_mt_get(SegmentArrayMT* sa, SegmentArray* out) {
     if (!sa || !sa->initialized || !out) return;
     pthread_mutex_lock(&sa->mutex);
-    if (sa->pending_swap) {
-        free(sa->array.segs);
-        sa->array = sa->pending;
-        sa->pending.segs = NULL;
-        sa->pending.count = 0;
-        sa->pending_swap = 0;
-    }
+    segment_array_mt_apply_pending_locked(sa);
     *out = sa->array;
     pthread_mutex_unlock(&sa->mutex);
 }
@@ -55,13 +57,7 @@ void segment_array_mt_get(SegmentArrayMT* sa, SegmentArray* out) {
 SpectralError segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out) {
     if (!sa || !sa->initialized || !out) return SPECTRAL_ERR_PARAM;
     pthread_mutex_lock(&sa->mutex);
-    if (sa->pending_swap) {
-        free(sa->array.segs);
-        sa->array = sa->pending;
-        sa->pending.segs = NULL;
-        sa->pending.count = 0;
-        sa->pending_swap = 0;
-    }
+    segment_array_mt_apply_pending_locked(sa);
     out->count = sa->array.count;
     out->capacity = sa->array.count;
     out->segs = NULL;

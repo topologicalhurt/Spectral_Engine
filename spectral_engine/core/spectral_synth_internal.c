@@ -318,6 +318,21 @@ static int spectral_gpu_segment_tile_span(const Segment* seg,
     return 1;
 }
 
+static void gpu_tile_preprocess_scratch_free(uint32_t* tile_counts,
+                                             uint32_t* tile_cursors,
+                                             uint32_t** thread_counts,
+                                             int n_threads)
+{
+    free(tile_counts);
+    free(tile_cursors);
+    if (thread_counts) {
+        for (int t = 0; t < n_threads; t++) {
+            free(thread_counts[t]);
+        }
+        free(thread_counts);
+    }
+}
+
 SpectralError gpu_tile_preprocess(
     SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
     GpuTileData* out
@@ -473,12 +488,7 @@ SpectralError gpu_tile_preprocess(
         }
     }
 
-    free(tile_counts);
-    free(tile_cursors);
-    if (thread_counts) {
-        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
-        free(thread_counts);
-    }
+    gpu_tile_preprocess_scratch_free(tile_counts, tile_cursors, thread_counts, n_threads);
 
     out->ranges = tile_ranges;
     out->segment_ids = tile_segment_ids;
@@ -487,14 +497,9 @@ SpectralError gpu_tile_preprocess(
     return SPECTRAL_OK;
 
 cleanup:
-    free(tile_counts);
-    free(tile_cursors);
+    gpu_tile_preprocess_scratch_free(tile_counts, tile_cursors, thread_counts, n_threads);
     free(tile_ranges);
     free(tile_segment_ids);
-    if (thread_counts) {
-        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
-        free(thread_counts);
-    }
     return return_err;
 }
 

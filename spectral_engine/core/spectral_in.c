@@ -32,13 +32,13 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
     
     /* Read all audio data */
     size_t total_samples = 0;
-    size_t audio_bytes = 0;
+    size_t mono_bytes = 0;
     if (!spectral_size_mul((size_t)sfinfo.frames, (size_t)sfinfo.channels, &total_samples) ||
-        !spectral_size_mul(total_samples, sizeof(float), &audio_bytes)) {
+        !spectral_array_bytes((size_t)sfinfo.frames, sizeof(float), &mono_bytes)) {
         sf_close(file);
         return SPECTRAL_ERR_OVERFLOW;
     }
-    float* audio = malloc(audio_bytes);
+    float* audio = (float*)spectral_malloc_array(total_samples, sizeof(float));
     if (!audio) {
         sf_close(file);
         return SPECTRAL_ERR_MEMORY;
@@ -52,12 +52,7 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         return SPECTRAL_ERR_FILE_READ;
     }
     
-    size_t mono_bytes = 0;
-    if (!spectral_size_mul((size_t)sfinfo.frames, sizeof(float), &mono_bytes)) {
-        free(audio);
-        return SPECTRAL_ERR_OVERFLOW;
-    }
-    float* mono = malloc(mono_bytes);
+    float* mono = (float*)spectral_malloc_array((size_t)sfinfo.frames, sizeof(float));
     if (!mono) {
         free(audio);
         return SPECTRAL_ERR_MEMORY;

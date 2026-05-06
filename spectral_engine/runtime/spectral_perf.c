@@ -41,18 +41,6 @@ void perf_get_memory(size_t* resident_kb, size_t* virtual_kb) {
     }
 }
 
-void perf_get_cpu_time(double* user_ms, double* sys_ms) {
-    struct rusage usage;
-    if (getrusage(RUSAGE_SELF, &usage) == 0) {
-        *user_ms = usage.ru_utime.tv_sec * SPECTRAL_MILLIS_PER_SECOND_D +
-                   usage.ru_utime.tv_usec / SPECTRAL_MILLIS_PER_SECOND_D;
-        *sys_ms = usage.ru_stime.tv_sec * SPECTRAL_MILLIS_PER_SECOND_D +
-                  usage.ru_stime.tv_usec / SPECTRAL_MILLIS_PER_SECOND_D;
-    } else {
-        *user_ms = *sys_ms = 0;
-    }
-}
-
 int perf_get_num_cores(void) {
     int cores = 0;
     size_t len = sizeof(cores);
@@ -82,6 +70,8 @@ void perf_get_memory(size_t* resident_kb, size_t* virtual_kb) {
     }
 }
 
+#endif /* __APPLE__ */
+
 void perf_get_cpu_time(double* user_ms, double* sys_ms) {
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage) == 0) {
@@ -94,12 +84,12 @@ void perf_get_cpu_time(double* user_ms, double* sys_ms) {
     }
 }
 
+#ifndef __APPLE__
 int perf_get_num_cores(void) {
     int cores = (int)sysconf(_SC_NPROCESSORS_ONLN);
     return (cores > 0) ? cores : 1;
 }
-
-#endif /* __APPLE__ */
+#endif
 
 void perf_track_alloc(size_t bytes) {
     #pragma omp critical

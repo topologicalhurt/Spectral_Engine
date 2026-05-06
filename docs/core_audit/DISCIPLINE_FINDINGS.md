@@ -123,6 +123,22 @@ GPU tiling is a hardware-conscious choice, but GPU code must be formula-equivale
 
 The current engine mixes kernel math, backend fallback policy, logging, runtime cache state and CLI concerns. A minimal reusable kernel should not own user-facing policy.
 
+Thin alias wrappers are a separate architecture smell. They look like
+abstraction but only increase the number of names reviewers must track. Kernel
+helpers should either enforce a contract, cross a boundary, or disappear in
+favor of the canonical helper.
+
+Dead duplicate kernel files are worse than comments because they can drift from
+the compiled path while still looking authoritative. If a file is not in the
+manifest and not included by live code, it must not mirror active kernel logic.
+Repeated ownership cleanup deserves the same treatment: shared resources should
+have one cleanup helper instead of separate success, failure and destroy
+versions.
+
+Raw allocation arithmetic is another repeat-offender pattern. Use the existing
+safe allocation helpers for arrays and scratch strings so overflow policy stays
+centralized instead of reimplemented one callsite at a time.
+
 ### Public API
 
 A future `spectral_kernel.h` should expose only:
