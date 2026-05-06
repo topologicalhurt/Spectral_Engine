@@ -143,14 +143,14 @@ int spectral_tracker_emit_segment(
         if (old_cap == 0u || new_cap < old_cap ||
             !spectral_size_mul(new_cap, sizeof(TrackSegment), &new_bytes) ||
             !spectral_size_mul(count, sizeof(TrackSegment), &copy_bytes)) {
-            atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_OVERFLOW, memory_order_relaxed);
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
             return 0;
         }
 
         SPECTRAL_LOG_WARN("Track segment realloc: tid=%d cap=%zu->%zu (unexpected)", tid, count, new_cap);
         new_arr = (TrackSegment*)spectral_aligned_alloc(new_bytes);
         if (!new_arr) {
-            atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);
             return 0;
         }
         memcpy(new_arr, tracker->seg_arrays[tid], copy_bytes);

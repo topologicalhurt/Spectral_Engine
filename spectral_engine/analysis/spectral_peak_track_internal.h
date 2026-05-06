@@ -85,6 +85,8 @@ struct SpectralTracker {
 #endif
 };
 
+void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error);
+
 int spectral_tracker_flush_candidate_batch(
     SpectralTracker* tracker,
     int tid,

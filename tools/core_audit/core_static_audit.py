@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 25):
+    for pass_num in range(1, 26):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -745,6 +745,22 @@ def main() -> int:
     require("spectral_aligned_alloc(new_bytes)" in interp_c_pass24 and
             "memcpy(new_arr, tracker->seg_arrays[tid], copy_bytes)" in interp_c_pass24,
             "pass 24 tracker segment growth must use checked byte counts")
+
+
+    track_internal_pass25 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    track_c_pass25 = read("spectral_engine/analysis/spectral_peak_track.c")
+    interp_c_pass25 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    require("void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error);" in track_internal_pass25,
+            "pass 25 tracker error propagation must expose internal first-error setter")
+    require("atomic_compare_exchange_strong_explicit" in track_c_pass25 and
+            "expected = SPECTRAL_OK" in track_c_pass25,
+            "pass 25 tracker error propagation must preserve first non-OK error")
+    require("spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);" in track_c_pass25 and
+            "atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY" not in track_c_pass25,
+            "pass 25 tracker failure helper must not overwrite an existing root-cause error")
+    require("spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);" in interp_c_pass25 and
+            "spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);" in interp_c_pass25,
+            "pass 25 emit path must record overflow/memory through first-error setter")
 
     if FAILURES:
         for f in FAILURES:

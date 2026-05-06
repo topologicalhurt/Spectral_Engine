@@ -66,9 +66,20 @@ int spectral_tracker_has_failed(SpectralTracker* tracker) {
     return atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK;
 }
 
+void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error) {
+    SpectralError expected = SPECTRAL_OK;
+    if (!tracker || error == SPECTRAL_OK) return;
+
+    (void)atomic_compare_exchange_strong_explicit(
+        &tracker->last_error,
+        &expected,
+        error,
+        memory_order_relaxed,
+        memory_order_relaxed);
+}
+
 void spectral_tracker_set_failed(SpectralTracker* tracker) {
-    if (!tracker) return;
-    atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
+    spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);
 }
 
 
@@ -389,7 +400,7 @@ int spectral_tracker_flush_candidate_batch(
             , local_emit_amp_time
 #endif
             )) {
-        atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);
         return 0;
     }
     *candidate_batch_count = 0;
