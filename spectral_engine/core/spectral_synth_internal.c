@@ -9,7 +9,16 @@
 
 #include "spectral_omp.h"
 
-SpectralError synth_validate_params(float stretch, float pitch) {
+static SpectralError synth_derive_param_scalars(float stretch, float pitch,
+                                               float* out_inv_stretch,
+                                               float* out_inv_stretch_sq,
+                                               float* out_pitch_factor)
+{
+    float stretch_sq = 0.0f;
+    float inv_stretch = 0.0f;
+    float inv_stretch_sq = 0.0f;
+    float pitch_factor = 0.0f;
+
     if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) {
         return SPECTRAL_ERR_PARAM;
     }
@@ -17,22 +26,59 @@ SpectralError synth_validate_params(float stretch, float pitch) {
         pitch < SPECTRAL_MIN_PITCH || pitch > SPECTRAL_MAX_PITCH) {
         return SPECTRAL_ERR_PARAM;
     }
+
+    /* The public domain is not just "stretch is positive".  Backends consume
+     * these derived scalars directly; tiny positive stretch values can make
+     * stretch * stretch underflow to zero and expose Inf in inv_stretch_sq. */
+    stretch_sq = stretch * stretch;
+    if (!spectral_is_finite_f32(stretch_sq) || stretch_sq <= 0.0f) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    inv_stretch = 1.0f / stretch;
+    inv_stretch_sq = 1.0f / stretch_sq;
+    pitch_factor = SPECTRAL_PITCH_FACTOR(pitch);
+
+    if (!spectral_is_finite_positive_f32(inv_stretch) ||
+        !spectral_is_finite_positive_f32(inv_stretch_sq) ||
+        !spectral_is_finite_positive_f32(pitch_factor)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    if (out_inv_stretch) *out_inv_stretch = inv_stretch;
+    if (out_inv_stretch_sq) *out_inv_stretch_sq = inv_stretch_sq;
+    if (out_pitch_factor) *out_pitch_factor = pitch_factor;
     return SPECTRAL_OK;
 }
 
+SpectralError synth_validate_params(float stretch, float pitch) {
+    return synth_derive_param_scalars(stretch, pitch, NULL, NULL, NULL);
+}
+
+
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs) {
-    if (synth_validate_params(stretch, pitch) != SPECTRAL_OK || num_segs > (size_t)UINT32_MAX) {
+    float inv_stretch = 0.0f;
+    float inv_stretch_sq = 0.0f;
+    float pitch_factor = 0.0f;
+
+    if (num_segs > (size_t)UINT32_MAX ||
+        synth_derive_param_scalars(stretch, pitch,
+                                   &inv_stretch,
+                                   &inv_stretch_sq,
+                                   &pitch_factor) != SPECTRAL_OK) {
         return (SynthParams){0};
     }
+
     return (SynthParams){
         .stretch = stretch,
-        .inv_stretch = 1.0f / stretch,
-        .inv_stretch_sq = 1.0f / (stretch * stretch),
-        .pitch_factor = SPECTRAL_PITCH_FACTOR(pitch),
+        .inv_stretch = inv_stretch,
+        .inv_stretch_sq = inv_stretch_sq,
+        .pitch_factor = pitch_factor,
         .out_len = out_len,
         .num_segments = (uint32_t)num_segs
     };
 }
+
 
 static void synth_zero_output_if_valid(void* out_buffer, size_t out_len, size_t elem_size) {
     size_t out_bytes = 0;

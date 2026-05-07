@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 39):
+    for pass_num in range(1, 40):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -980,6 +980,23 @@ def main() -> int:
     require("spectral_fs_read_exact(f, chunk, sizeof(chunk), SPECTRAL_ERR_FILE_READ)" in audio_out_pass38 and
             "spectral_fs_write_exact(f, zero4, sizeof(zero4), SPECTRAL_ERR_FILE_WRITE)" in audio_out_pass38,
             "pass 38 WAV PEAK scrubber must use exact I/O for chunk headers and timestamp write")
+
+
+    synth_internal_pass39 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("synth_derive_param_scalars" in synth_internal_pass39 and
+            "stretch_sq = stretch * stretch;" in synth_internal_pass39 and
+            "stretch_sq <= 0.0f" in synth_internal_pass39,
+            "pass 39 synth params must reject tiny stretch values whose square underflows")
+    require("inv_stretch = 1.0f / stretch;" in synth_internal_pass39 and
+            "inv_stretch_sq = 1.0f / stretch_sq;" in synth_internal_pass39 and
+            "spectral_is_finite_positive_f32(inv_stretch_sq)" in synth_internal_pass39,
+            "pass 39 synth params must validate finite derived reciprocal scalars")
+    require("synth_derive_param_scalars(stretch, pitch," in synth_internal_pass39 and
+            ".inv_stretch = inv_stretch" in synth_internal_pass39 and
+            ".inv_stretch_sq = inv_stretch_sq" in synth_internal_pass39,
+            "pass 39 make_synth_params must reuse checked derived scalars")
+    require(".inv_stretch_sq = 1.0f / (stretch * stretch)" not in synth_internal_pass39,
+            "pass 39 make_synth_params must not recompute unchecked reciprocal-square stretch")
 
     if FAILURES:
         for f in FAILURES:
