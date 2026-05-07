@@ -289,6 +289,16 @@ extern "C" SpectralError synth_cuda(
         return_err = tile_err;
         goto cleanup;
     }
+    if (td.total_refs == 0u) {
+        sync_err = cudaStreamSynchronize(g_cuda.stream);
+        if (sync_err != cudaSuccess) {
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
+        memset(out_buffer, 0, out_size);
+        *t_synth = omp_get_wtime() - pf.start_time;
+        goto cleanup;
+    }
 
     if (!spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
         !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {

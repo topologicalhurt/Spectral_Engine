@@ -318,6 +318,11 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
             return_err = tile_err;
             goto cleanup;
         }
+        if (td.total_refs == 0u) {
+            memset(out_buffer, 0, output_size);
+            *t_synth = omp_get_wtime() - pf.start_time;
+            goto cleanup;
+        }
 
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
         float avg_segs = (float)td.total_refs / td.num_tiles;

@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 49):
+    for pass_num in range(1, 50):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1101,6 +1101,16 @@ def main() -> int:
     require(synth_internal_pass48.index("if (sa.count > (size_t)UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;") <
             synth_internal_pass48.index("#pragma omp parallel"),
             "pass 48 GPU tile preprocess must check segment-ID narrowing before parallel passes")
+
+
+    metal_pass49 = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
+    cuda_pass49 = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("if (td.total_refs == 0u)" in metal_pass49 and
+            "memset(out_buffer, 0, output_size);" in metal_pass49,
+            "pass 49 zero-reference GPU tile layout must produce silence in Metal before dispatch")
+    require("if (td.total_refs == 0u)" in cuda_pass49 and
+            "memset(out_buffer, 0, out_size);" in cuda_pass49,
+            "pass 49 zero-reference GPU tile layout must produce silence in CUDA before dispatch")
 
     if FAILURES:
         for f in FAILURES:
