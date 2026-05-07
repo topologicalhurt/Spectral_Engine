@@ -659,6 +659,43 @@ cleanup:
  * these even in simulation/embedded builds where gpu_tile_preprocess is
  * unavailable — the cache simply stays empty. */
 
+static int gpu_tile_data_refs_valid(const TileRange* ranges,
+                                    const uint32_t* segment_ids,
+                                    uint32_t num_tiles,
+                                    uint32_t total_refs,
+                                    uint32_t segment_count)
+{
+    uint32_t running_refs = 0;
+
+    if (num_tiles == 0u) return total_refs == 0u;
+    if (!ranges) return 0;
+    if (total_refs > 0u && !segment_ids) return 0;
+
+    for (uint32_t i = 0; i < num_tiles; i++) {
+        if (ranges[i].start != running_refs) {
+            return 0;
+        }
+        if (ranges[i].count > UINT32_MAX - running_refs) {
+            return 0;
+        }
+        running_refs += ranges[i].count;
+        if (running_refs > total_refs) {
+            return 0;
+        }
+    }
+    if (running_refs != total_refs) {
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < total_refs; i++) {
+        if (segment_ids[i] >= segment_count) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static SPECTRAL_THREAD_LOCAL struct {
     TileRange*  ranges;
     uint32_t*   segment_ids;
@@ -674,6 +711,10 @@ void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
                         uint32_t num_tiles, uint32_t total_refs,
                         float stretch, size_t out_len)
 {
+    if (num_tiles == 0u || (total_refs > 0u && (!ranges || !segment_ids))) {
+        gpu_tile_cache_clear();
+        return;
+    }
     g_gpu_tile_cache.ranges      = (TileRange*)ranges;
     g_gpu_tile_cache.segment_ids = (uint32_t*)segment_ids;
     g_gpu_tile_cache.num_tiles   = num_tiles;
@@ -714,7 +755,16 @@ SpectralError gpu_tile_preprocess_cached(
     *out_owns_data = 0;
     if (tile_size == (uint32_t)SPECTRAL_GPU_TILE_SIZE &&
         gpu_tile_cache_try_get(stretch, out_len, out_td)) {
-        return SPECTRAL_OK;
+        if (sa.count <= (size_t)UINT32_MAX &&
+            gpu_tile_data_refs_valid(out_td->ranges,
+                                     out_td->segment_ids,
+                                     out_td->num_tiles,
+                                     out_td->total_refs,
+                                     (uint32_t)sa.count)) {
+            return SPECTRAL_OK;
+        }
+        gpu_tile_cache_clear();
+        *out_td = (GpuTileData){0};
     }
 #if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
     SpectralError tile_err = gpu_tile_preprocess(sa, stretch, tile_size, out_len, out_td);

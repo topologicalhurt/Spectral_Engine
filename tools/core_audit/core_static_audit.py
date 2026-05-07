@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 50):
+    for pass_num in range(1, 51):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1111,6 +1111,17 @@ def main() -> int:
     require("if (td.total_refs == 0u)" in cuda_pass49 and
             "memset(out_buffer, 0, out_size);" in cuda_pass49,
             "pass 49 zero-reference GPU tile layout must produce silence in CUDA before dispatch")
+
+
+    synth_internal_pass50 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("gpu_tile_data_refs_valid" in synth_internal_pass50 and
+            "segment_ids[i] >= segment_count" in synth_internal_pass50,
+            "pass 50 GPU tile cache must validate cached segment references")
+    require("if (num_tiles == 0u || (total_refs > 0u && (!ranges || !segment_ids)))" in synth_internal_pass50,
+            "pass 50 GPU tile cache set must fail closed on invalid pointer/count shapes")
+    require("gpu_tile_data_refs_valid(out_td->ranges" in synth_internal_pass50 and
+            "gpu_tile_cache_clear();" in synth_internal_pass50,
+            "pass 50 GPU tile cache hits must be validated before reuse")
 
     if FAILURES:
         for f in FAILURES:
