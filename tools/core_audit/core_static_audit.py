@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 38):
+    for pass_num in range(1, 39):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -965,6 +965,21 @@ def main() -> int:
             "pass 37 audio IO output path must reject non-finite samples before opening output")
     require("spectral_audio_samples_finite(mono, num_frames)" in audio_out_pass37,
             "pass 37 stereo writer must reject non-finite mono source before duplication")
+
+
+    audio_out_pass38 = read("spectral_engine/core/spectral_out.c")
+    require("spectral_wav_seek_u64_checked" in audio_out_pass38 and
+            "offset > (uint64_t)INT64_MAX" in audio_out_pass38,
+            "pass 38 WAV PEAK scrubber must reject unrepresentable seek offsets")
+    require("spectral_fs_file_size(f, &file_size)" in audio_out_pass38 and
+            "file_size - chunk_header_pos < (uint64_t)sizeof(chunk)" in audio_out_pass38,
+            "pass 38 WAV PEAK scrubber must validate chunk header extent before reading")
+    require("(uint64_t)size > file_size - data_pos" in audio_out_pass38 and
+            "next_chunk_pos > file_size" in audio_out_pass38,
+            "pass 38 WAV PEAK scrubber must validate RIFF chunk extents before seeking")
+    require("spectral_fs_read_exact(f, chunk, sizeof(chunk), SPECTRAL_ERR_FILE_READ)" in audio_out_pass38 and
+            "spectral_fs_write_exact(f, zero4, sizeof(zero4), SPECTRAL_ERR_FILE_WRITE)" in audio_out_pass38,
+            "pass 38 WAV PEAK scrubber must use exact I/O for chunk headers and timestamp write")
 
     if FAILURES:
         for f in FAILURES:

@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include "spectral_fs.h"
 #include <string.h>
+#include <stdint.h>
 
 static int spectral_audio_samples_finite(const float* samples, size_t count)
 {
@@ -173,16 +174,31 @@ void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_fr
 
 #if SPECTRAL_HAS_FILE_IO
 
+static int spectral_wav_seek_u64_checked(FILE* f, uint64_t offset, SpectralError on_error)
+{
+    if (!f || offset > (uint64_t)INT64_MAX) return 0;
+    return spectral_fs_seek(f, (int64_t)offset, SEEK_SET, on_error) == SPECTRAL_OK;
+}
+
+
 /* libsndfile writes a PEAK chunk with a run-time timestamp for float WAV.
  * Scrub the timestamp field so rendered artifacts are byte-for-byte reproducible. */
 static void spectral_wav_scrub_peak_timestamp(const char* path) {
     FILE* f = NULL;
     unsigned char hdr[12];
+    uint64_t file_size = 0;
+
     if (spectral_is_empty_string(path)) return;
 
     if (spectral_fs_open(&f, path, "r+b") != SPECTRAL_OK) return;
 
-    if (spectral_fs_read(hdr, 1, sizeof(hdr), f) != sizeof(hdr)) {
+    if (spectral_fs_file_size(f, &file_size) != SPECTRAL_OK ||
+        file_size < (uint64_t)sizeof(hdr)) {
+        spectral_fs_close(&f, SPECTRAL_OK);
+        return;
+    }
+
+    if (spectral_fs_read_exact(f, hdr, sizeof(hdr), SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
         spectral_fs_close(&f, SPECTRAL_OK);
         return;
     }
@@ -193,31 +209,68 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
 
     for (;;) {
         unsigned char chunk[8];
-        uint64_t data_pos;
-        unsigned int size;
-        if (spectral_fs_read(chunk, 1, sizeof(chunk), f) != sizeof(chunk)) break;
+        uint64_t chunk_header_pos = 0;
+        uint64_t data_pos = 0;
+        uint64_t chunk_end = 0;
+        uint64_t next_chunk_pos = 0;
+        uint32_t size = 0;
+
+        if (spectral_fs_tell(f, &chunk_header_pos, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) break;
+        if (chunk_header_pos > file_size ||
+            file_size - chunk_header_pos < (uint64_t)sizeof(chunk)) {
+            break;
+        }
+
+        if (spectral_fs_read_exact(f, chunk, sizeof(chunk), SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
+            break;
+        }
 
         if (spectral_fs_tell(f, &data_pos, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) break;
-        size = (unsigned int)chunk[4]
-             | ((unsigned int)chunk[5] << 8)
-             | ((unsigned int)chunk[6] << 16)
-             | ((unsigned int)chunk[7] << 24);
 
-        if (memcmp(chunk, "PEAK", 4) == 0 && size >= 8) {
+        size = (uint32_t)chunk[4]
+             | ((uint32_t)chunk[5] << 8)
+             | ((uint32_t)chunk[6] << 16)
+             | ((uint32_t)chunk[7] << 24);
+
+        /* Validate the RIFF chunk extent before adding offsets or seeking.
+         * This scrubber is best-effort, but it must not wrap data_pos + size
+         * or cast an unrepresentable uint64_t offset into the seek API. */
+        if ((uint64_t)size > file_size - data_pos) {
+            break;
+        }
+        chunk_end = data_pos + (uint64_t)size;
+        if ((size & 1u) != 0u) {
+            if (chunk_end == UINT64_MAX) break;
+            next_chunk_pos = chunk_end + 1u;
+        } else {
+            next_chunk_pos = chunk_end;
+        }
+        if (next_chunk_pos > file_size) {
+            break;
+        }
+
+        if (memcmp(chunk, "PEAK", 4) == 0 && size >= 8u) {
             unsigned char zero4[4] = {0, 0, 0, 0};
-            if (spectral_fs_seek(f, (int64_t)(data_pos + 4), SEEK_SET, SPECTRAL_ERR_FILE_READ) == SPECTRAL_OK) {
-                (void)spectral_fs_write(zero4, 1, sizeof(zero4), f);
+            uint64_t timestamp_pos = data_pos + 4u;
+
+            if (timestamp_pos > file_size ||
+                sizeof(zero4) > (size_t)(file_size - timestamp_pos)) {
+                break;
+            }
+            if (spectral_wav_seek_u64_checked(f, timestamp_pos, SPECTRAL_ERR_FILE_WRITE)) {
+                (void)spectral_fs_write_exact(f, zero4, sizeof(zero4), SPECTRAL_ERR_FILE_WRITE);
             }
             break;
         }
 
-        if (spectral_fs_seek(f, (int64_t)(data_pos + size + (size & 1u)), SEEK_SET, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
+        if (!spectral_wav_seek_u64_checked(f, next_chunk_pos, SPECTRAL_ERR_FILE_READ)) {
             break;
         }
     }
 
     spectral_fs_close(&f, SPECTRAL_OK);
 }
+
 
 SpectralError spectral_audio_write(const char* path, const float* buffer,
                          size_t num_frames, int sample_rate, int channels) {
