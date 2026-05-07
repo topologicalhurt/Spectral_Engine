@@ -467,6 +467,7 @@ SpectralError gpu_tile_preprocess(
         return SPECTRAL_ERR_PARAM;
     }
     if (sa.count > 0 && !sa.segs) return SPECTRAL_ERR_PARAM;
+    if (sa.count > (size_t)UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;
 
     *out = (GpuTileData){0};
     if (out_len > UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;

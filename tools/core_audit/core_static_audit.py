@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 48):
+    for pass_num in range(1, 49):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1093,6 +1093,14 @@ def main() -> int:
     require("const float last = (float)last_offset_d;" in synth_internal_pass47 and
             "const float last = (float)(lp.length - 1u);" not in synth_internal_pass47,
             "pass 47 segment loop endpoint validation must narrow only checked offsets")
+
+
+    synth_internal_pass48 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("if (sa.count > (size_t)UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;" in synth_internal_pass48,
+            "pass 48 GPU tile preprocess must reject segment counts outside uint32 ID domain")
+    require(synth_internal_pass48.index("if (sa.count > (size_t)UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;") <
+            synth_internal_pass48.index("#pragma omp parallel"),
+            "pass 48 GPU tile preprocess must check segment-ID narrowing before parallel passes")
 
     if FAILURES:
         for f in FAILURES:
