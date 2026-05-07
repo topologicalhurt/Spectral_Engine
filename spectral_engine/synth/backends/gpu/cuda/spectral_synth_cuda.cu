@@ -302,7 +302,10 @@ extern "C" SpectralError synth_cuda(
     cudaMemcpyAsync(g_cuda.d_tile_ranges, td.ranges, tile_ranges_size, cudaMemcpyHostToDevice, g_cuda.stream);
 
     /* Pack GPU params and launch tile-parallel kernel */
-    gp = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
+    return_err = gpu_synth_params_pack_checked(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre, &gp);
+    if (return_err != SPECTRAL_OK) {
+        goto cleanup;
+    }
 
     cudaEvent_t ev_start, ev_stop;
     cudaEventCreate(&ev_start);

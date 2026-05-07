@@ -5,6 +5,7 @@
 #include "spectral_common.h"
 #include "spectral_error.h"
 #include "spectral_segment_math.h"
+#include "spectral_utils.h"
 #include <stdlib.h>
 
 #ifdef __cplusplus
@@ -142,13 +143,43 @@ typedef struct {
     uint32_t out_len, num_segments, tile_size, timbre;
 } GpuSynthParams;
 
-static inline GpuSynthParams gpu_synth_params_pack(
-    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre) {
-    return (GpuSynthParams){
+/* Checked GPU params pack: GPU kernels expose 32-bit lengths/counts even though
+ * shared SynthParams stores out_len as size_t.  This helper is the only valid
+ * boundary-crossing pack for Metal/CUDA dispatch. */
+static inline SpectralError gpu_synth_params_pack_checked(
+    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre, GpuSynthParams* out)
+{
+    if (!sp || !out || tile_size == 0u) return SPECTRAL_ERR_PARAM;
+    *out = (GpuSynthParams){0};
+
+    if (sp->out_len > (size_t)UINT32_MAX ||
+        sp->num_segments > UINT32_MAX ||
+        (int)timbre < TIMBRE_SINE ||
+        (int)timbre > TIMBRE_PWM) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    if (!spectral_is_finite_positive_f32(sp->stretch) ||
+        !spectral_is_finite_positive_f32(sp->inv_stretch) ||
+        !spectral_is_finite_positive_f32(sp->inv_stretch_sq) ||
+        !spectral_is_finite_positive_f32(sp->pitch_factor)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    *out = (GpuSynthParams){
         sp->stretch, sp->inv_stretch, sp->inv_stretch_sq, sp->pitch_factor,
         (uint32_t)sp->out_len, sp->num_segments, tile_size, (uint32_t)timbre
     };
+    return SPECTRAL_OK;
 }
+
+static inline GpuSynthParams gpu_synth_params_pack(
+    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre) {
+    GpuSynthParams out = {0};
+    (void)gpu_synth_params_pack_checked(sp, tile_size, timbre, &out);
+    return out;
+}
+
 
 #ifdef __cplusplus
 }

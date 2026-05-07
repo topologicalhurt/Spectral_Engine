@@ -323,7 +323,10 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         float avg_segs = (float)td.total_refs / td.num_tiles;
 #endif
         
-        params = gpu_synth_params_pack(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre);
+        return_err = gpu_synth_params_pack_checked(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre, &params);
+        if (return_err != SPECTRAL_OK) {
+            goto cleanup;
+        }
         
         if (!spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
             !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {

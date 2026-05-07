@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 42):
+    for pass_num in range(1, 43):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1026,6 +1026,18 @@ def main() -> int:
             "pass 41 segment loop must validate endpoint phase/amplitude before marking valid")
     require("lp.length == 0" in synth_internal_pass41,
             "pass 41 segment loop must reject zero-length post-stretch segments")
+
+
+    synth_header_pass42 = read("spectral_engine/core/spectral_synth_internal.h")
+    metal_pass42 = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
+    cuda_pass42 = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("gpu_synth_params_pack_checked" in synth_header_pass42 and
+            "sp->out_len > (size_t)UINT32_MAX" in synth_header_pass42,
+            "pass 42 GPU synth params must expose checked size_t-to-uint32 ABI pack")
+    require("gpu_synth_params_pack_checked(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre, &params)" in metal_pass42,
+            "pass 42 Metal backend must use checked GPU params pack")
+    require("gpu_synth_params_pack_checked(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre, &gp)" in cuda_pass42,
+            "pass 42 CUDA backend must use checked GPU params pack")
 
     if FAILURES:
         for f in FAILURES:
