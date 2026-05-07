@@ -283,6 +283,10 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
 
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
     SegmentLoopParams lp = {0};
+    float alpha = 0.0f;
+    float beta = 0.0f;
+    float d_amp = 0.0f;
+
     if (!s || !p || out_len == 0) return lp;
 
     if (!spectral_is_finite_f32(s->start) ||
@@ -312,7 +316,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     lp.start_idx = (size_t)start_d;
     lp.length = (size_t)length_d;
 
-    if (lp.start_idx >= out_len) {
+    if (lp.start_idx >= out_len || lp.length == 0) {
         lp.valid = 0;
         return lp;
     }
@@ -320,10 +324,44 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     if (lp.length > out_len - lp.start_idx) {
         lp.length = out_len - lp.start_idx;
     }
-    
-    lp.alpha = spectral_segment_alpha_f32(s->omega, p->pitch_factor, p->inv_stretch);
-    lp.beta = spectral_segment_beta_f32(s->df, p->pitch_factor, p->inv_stretch_sq);
-    lp.d_amp = spectral_segment_d_amp_f32(s->da, p->inv_stretch);
+    if (lp.length == 0) {
+        lp.valid = 0;
+        return lp;
+    }
+
+    alpha = spectral_segment_alpha_f32(s->omega, p->pitch_factor, p->inv_stretch);
+    beta = spectral_segment_beta_f32(s->df, p->pitch_factor, p->inv_stretch_sq);
+    d_amp = spectral_segment_d_amp_f32(s->da, p->inv_stretch);
+
+    /* Segment fields and SynthParams can each be finite while their derived
+     * hot-loop scalars overflow.  Reject before the backend loop consumes
+     * alpha/beta/d_amp or endpoint phase/amplitude state. */
+    if (!spectral_is_finite_f32(alpha) ||
+        !spectral_is_finite_f32(beta) ||
+        !spectral_is_finite_f32(d_amp)) {
+        lp.valid = 0;
+        return lp;
+    }
+
+    {
+        const float last = (float)(lp.length - 1u);
+        const float phase0 = spectral_segment_phase_at_f32(s->phase, alpha, beta, 0.0f);
+        const float phase1 = spectral_segment_phase_at_f32(s->phase, alpha, beta, last);
+        const float amp0 = spectral_segment_amp_at_f32(s->amp, d_amp, 0.0f);
+        const float amp1 = spectral_segment_amp_at_f32(s->amp, d_amp, last);
+
+        if (!spectral_is_finite_f32(phase0) ||
+            !spectral_is_finite_f32(phase1) ||
+            !spectral_is_finite_f32(amp0) ||
+            !spectral_is_finite_f32(amp1)) {
+            lp.valid = 0;
+            return lp;
+        }
+    }
+
+    lp.alpha = alpha;
+    lp.beta = beta;
+    lp.d_amp = d_amp;
     lp.phase = s->phase;
     lp.amp = s->amp;
     lp.width = s->width;
@@ -331,6 +369,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
     return lp;
 }
+
 
 /* GPU tile preprocessing - maps segments to tiles for Metal/CUDA dispatch */
 #if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE

@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 41):
+    for pass_num in range(1, 42):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1014,6 +1014,18 @@ def main() -> int:
     require("if (!seg_cache_segments_valid(sa->segs, sa->count, NULL))" in seg_cache_pass40 and
             "!seg_cache_tile_layout_words_valid(tile_ranges," in seg_cache_pass40,
             "pass 40 segment cache store must reject corrupt Segment/tile payloads before append")
+
+
+    synth_internal_pass41 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("!spectral_is_finite_f32(alpha)" in synth_internal_pass41 and
+            "!spectral_is_finite_f32(beta)" in synth_internal_pass41 and
+            "!spectral_is_finite_f32(d_amp)" in synth_internal_pass41,
+            "pass 41 segment loop must reject non-finite derived hot-loop scalars")
+    require("spectral_segment_phase_at_f32(s->phase, alpha, beta, last)" in synth_internal_pass41 and
+            "spectral_segment_amp_at_f32(s->amp, d_amp, last)" in synth_internal_pass41,
+            "pass 41 segment loop must validate endpoint phase/amplitude before marking valid")
+    require("lp.length == 0" in synth_internal_pass41,
+            "pass 41 segment loop must reject zero-length post-stretch segments")
 
     if FAILURES:
         for f in FAILURES:
