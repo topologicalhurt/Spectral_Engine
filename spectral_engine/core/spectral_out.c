@@ -15,6 +15,22 @@
 #include <stdlib.h>
 #include "spectral_fs.h"
 #include <string.h>
+
+static int spectral_size_to_sf_count(size_t value, sf_count_t* out)
+{
+    sf_count_t narrowed = 0;
+
+    if (!out) return 0;
+
+    narrowed = (sf_count_t)value;
+    if (narrowed < 0 || (size_t)narrowed != value) {
+        return 0;
+    }
+
+    *out = narrowed;
+    return 1;
+}
+
 #endif
 
 #if SPECTRAL_USE_CMSIS
@@ -194,34 +210,52 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
 
 SpectralError spectral_audio_write(const char* path, const float* buffer,
                          size_t num_frames, int sample_rate, int channels) {
-    if (spectral_is_empty_string(path) || !buffer || num_frames == 0 || sample_rate <= 0 || channels <= 0) {
+    SF_INFO info = {0};
+    SNDFILE* file = NULL;
+    sf_count_t frames_sf = 0;
+    sf_count_t written = 0;
+    size_t sample_count = 0;
+    int close_status = 0;
+
+    if (spectral_is_empty_string(path) || !buffer || num_frames == 0 || channels <= 0) {
         return SPECTRAL_ERR_PARAM;
     }
-    
-    SF_INFO info = {0};
+    if (sample_rate < SPECTRAL_MIN_SAMPLE_RATE || sample_rate > SPECTRAL_MAX_SAMPLE_RATE) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (!spectral_size_to_sf_count(num_frames, &frames_sf) ||
+        !spectral_size_mul(num_frames, (size_t)channels, &sample_count)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+    (void)sample_count;
+
     info.samplerate = sample_rate;
-    info.frames = (sf_count_t)num_frames;
+    info.frames = frames_sf;
     info.channels = channels;
     info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
 
 #ifdef SFC_SET_ADD_PEAK_CHUNK
     /* Configure libsndfile globally before open to avoid non-deterministic PEAK timestamps. */
-    int add_peak_chunk = SF_FALSE;
-    (void)sf_command(NULL, SFC_SET_ADD_PEAK_CHUNK, &add_peak_chunk, (int)sizeof(add_peak_chunk));
-#endif
-    
-    SNDFILE* file = sf_open(path, SFM_WRITE, &info);
-    if (!file) return SPECTRAL_ERR_FILE_OPEN;
-    
-    sf_count_t written = sf_writef_float(file, buffer, (sf_count_t)num_frames);
-    sf_close(file);
-
-    if (written == (sf_count_t)num_frames) {
-        spectral_wav_scrub_peak_timestamp(path);
+    {
+        int add_peak_chunk = SF_FALSE;
+        (void)sf_command(NULL, SFC_SET_ADD_PEAK_CHUNK, &add_peak_chunk, (int)sizeof(add_peak_chunk));
     }
-    
-    return (written == (sf_count_t)num_frames) ? SPECTRAL_OK : SPECTRAL_ERR_FILE_WRITE;
+#endif
+
+    file = sf_open(path, SFM_WRITE, &info);
+    if (!file) return SPECTRAL_ERR_FILE_OPEN;
+
+    written = sf_writef_float(file, buffer, frames_sf);
+    close_status = sf_close(file);
+
+    if (written == frames_sf && close_status == 0) {
+        spectral_wav_scrub_peak_timestamp(path);
+        return SPECTRAL_OK;
+    }
+
+    return SPECTRAL_ERR_FILE_WRITE;
 }
+
 
 SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
                                 size_t num_frames, int sample_rate) {

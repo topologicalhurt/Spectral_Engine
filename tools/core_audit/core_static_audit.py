@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 36):
+    for pass_num in range(1, 37):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -929,6 +929,24 @@ def main() -> int:
             "wavetable_runtime_samples_valid(temp_table, SPECTRAL_WAVETABLE_SIZE)" in wavetable_pass35 and
             "wavetable_runtime_samples_valid(data, SPECTRAL_WAVETABLE_SIZE)" in wavetable_pass35,
             "pass 35 wavetable raw/hex/buffer ingress must validate runtime samples before publishing")
+
+
+    audio_in_pass36 = read("spectral_engine/core/spectral_in.c")
+    audio_out_pass36 = read("spectral_engine/core/spectral_out.c")
+    require("spectral_sf_count_to_size" in audio_in_pass36 and
+            "if (!spectral_sf_count_to_size(sfinfo.frames, &frames))" in audio_in_pass36,
+            "pass 36 audio IO must prove libsndfile input frame count is representable as size_t")
+    require("spectral_size_mul(frames, channels, &total_samples)" in audio_in_pass36 and
+            "memcpy(mono, audio, mono_bytes)" in audio_in_pass36 and
+            "(size_t)sfinfo.frames * sizeof(float)" not in audio_in_pass36,
+            "pass 36 audio IO input path must reuse checked frame byte counts")
+    require("spectral_size_to_sf_count" in audio_out_pass36 and
+            "if (!spectral_size_to_sf_count(num_frames, &frames_sf)" in audio_out_pass36,
+            "pass 36 audio IO must prove output frame count is representable as sf_count_t")
+    require("info.frames = frames_sf;" in audio_out_pass36 and
+            "sf_writef_float(file, buffer, frames_sf)" in audio_out_pass36 and
+            "(sf_count_t)num_frames" not in audio_out_pass36,
+            "pass 36 audio IO output path must not silently narrow size_t frame counts")
 
     if FAILURES:
         for f in FAILURES:
