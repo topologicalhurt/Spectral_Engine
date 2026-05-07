@@ -462,6 +462,7 @@ SpectralError gpu_tile_preprocess(
     uint32_t num_tiles = out_len_u32 / tile_size + ((out_len_u32 % tile_size) ? 1u : 0u);
     SpectralError return_err = SPECTRAL_OK;
     int tile_overflow = 0;
+    int fill_overflow = 0;
     uint32_t total_refs = 0;
 
     uint32_t** thread_counts = NULL;
@@ -588,10 +589,38 @@ SpectralError gpu_tile_preprocess(
 
             for (uint32_t tt = span.start_tile; tt <= span.end_tile; tt++) {
                 uint32_t pos;
+                uint32_t write_index = 0;
                 #pragma omp atomic capture
                 pos = tile_cursors[tt]++;
-                tile_segment_ids[tile_ranges[tt].start + pos] = (uint32_t)i;
+
+                if (pos >= tile_ranges[tt].count ||
+                    tile_ranges[tt].start > total_refs ||
+                    pos > total_refs - tile_ranges[tt].start) {
+                    #pragma omp atomic write
+                    fill_overflow = 1;
+                    continue;
+                }
+
+                write_index = tile_ranges[tt].start + pos;
+                if (write_index >= total_refs) {
+                    #pragma omp atomic write
+                    fill_overflow = 1;
+                    continue;
+                }
+
+                tile_segment_ids[write_index] = (uint32_t)i;
             }
+        }
+    }
+
+    if (fill_overflow) {
+        return_err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
+    }
+    for (uint32_t t = 0; t < num_tiles; t++) {
+        if (tile_cursors[t] != tile_counts[t]) {
+            return_err = SPECTRAL_ERR_FILE_CORRUPT;
+            goto cleanup;
         }
     }
 

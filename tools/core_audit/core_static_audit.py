@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 45):
+    for pass_num in range(1, 46):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1060,6 +1060,17 @@ def main() -> int:
     require(metal_pass44.index("[cmdBuffer status] != MTLCommandBufferStatusCompleted") <
             metal_pass44.index("memcpy(out_buffer, [g_mtl.outputBuf contents], output_size)"),
             "pass 44 Metal dispatch must not copy stale output before status check")
+
+
+    synth_internal_pass45 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("int fill_overflow = 0;" in synth_internal_pass45 and
+            "pos >= tile_ranges[tt].count" in synth_internal_pass45 and
+            "write_index >= total_refs" in synth_internal_pass45,
+            "pass 45 GPU tile fill must bound-check atomic cursor writes")
+    require("tile_cursors[t] != tile_counts[t]" in synth_internal_pass45,
+            "pass 45 GPU tile fill must verify count/fill cursor agreement")
+    require("#pragma omp atomic write" in synth_internal_pass45,
+            "pass 45 GPU tile fill overflow flag must be set safely under OpenMP")
 
     if FAILURES:
         for f in FAILURES:
