@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 47):
+    for pass_num in range(1, 48):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1084,6 +1084,15 @@ def main() -> int:
             "pass 46 CUDA stream synchronization must be checked")
     require("cudaEventElapsedTime(&gpu_ms, ev_start, ev_stop) != cudaSuccess" in cuda_pass46,
             "pass 46 CUDA timing query must be checked")
+
+
+    synth_internal_pass47 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("last_offset_d = (double)(lp.length - 1u);" in synth_internal_pass47 and
+            "last_offset_d > (double)FLT_MAX" in synth_internal_pass47,
+            "pass 47 segment loop must prove sample offset is representable as float")
+    require("const float last = (float)last_offset_d;" in synth_internal_pass47 and
+            "const float last = (float)(lp.length - 1u);" not in synth_internal_pass47,
+            "pass 47 segment loop endpoint validation must narrow only checked offsets")
 
     if FAILURES:
         for f in FAILURES:

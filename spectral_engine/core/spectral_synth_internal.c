@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 
 #include "spectral_omp.h"
 
@@ -286,6 +287,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     float alpha = 0.0f;
     float beta = 0.0f;
     float d_amp = 0.0f;
+    double last_offset_d = 0.0;
 
     if (!s || !p || out_len == 0) return lp;
 
@@ -329,6 +331,15 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
         return lp;
     }
 
+    /* Hot loops cast sample offsets to float.  Prove the final offset is
+     * representable before later `(float)j` conversions in CPU/native callbacks
+     * and before endpoint validation below. */
+    last_offset_d = (double)(lp.length - 1u);
+    if (!spectral_is_finite_f64(last_offset_d) || last_offset_d > (double)FLT_MAX) {
+        lp.valid = 0;
+        return lp;
+    }
+
     alpha = spectral_segment_alpha_f32(s->omega, p->pitch_factor, p->inv_stretch);
     beta = spectral_segment_beta_f32(s->df, p->pitch_factor, p->inv_stretch_sq);
     d_amp = spectral_segment_d_amp_f32(s->da, p->inv_stretch);
@@ -344,7 +355,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     }
 
     {
-        const float last = (float)(lp.length - 1u);
+        const float last = (float)last_offset_d;
         const float phase0 = spectral_segment_phase_at_f32(s->phase, alpha, beta, 0.0f);
         const float phase1 = spectral_segment_phase_at_f32(s->phase, alpha, beta, last);
         const float amp0 = spectral_segment_amp_at_f32(s->amp, d_amp, 0.0f);
@@ -369,6 +380,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
     return lp;
 }
+
 
 
 /* GPU tile preprocessing - maps segments to tiles for Metal/CUDA dispatch */
