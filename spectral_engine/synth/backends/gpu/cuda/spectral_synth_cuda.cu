@@ -238,6 +238,8 @@ extern "C" SpectralError synth_cuda(
     size_t tile_ranges_size = 0;
     GpuSynthParams gp = {0};
     cudaError_t kernel_err = cudaSuccess;
+    cudaEvent_t ev_start = NULL;
+    cudaEvent_t ev_stop = NULL;
 
     SpectralError return_err = SPECTRAL_OK;
 
@@ -307,9 +309,11 @@ extern "C" SpectralError synth_cuda(
         goto cleanup;
     }
 
-    cudaEvent_t ev_start, ev_stop;
-    cudaEventCreate(&ev_start);
-    cudaEventCreate(&ev_stop);
+    if (cudaEventCreate(&ev_start) != cudaSuccess ||
+        cudaEventCreate(&ev_stop) != cudaSuccess) {
+        return_err = SPECTRAL_ERR_GPU_INIT;
+        goto cleanup;
+    }
 
     cudaEventRecord(ev_start, g_cuda.stream);
     synthesize_tile_kernel<<<td.num_tiles, SPECTRAL_GPU_TILE_SIZE, 0, g_cuda.stream>>>(
@@ -333,9 +337,9 @@ extern "C" SpectralError synth_cuda(
     cudaEventElapsedTime(&gpu_ms, ev_start, ev_stop);
     *t_synth = gpu_ms / SPECTRAL_MILLIS_PER_SECOND_D;
 
-    cudaEventDestroy(ev_start);
-    cudaEventDestroy(ev_stop);
 cleanup:
+    if (ev_start) cudaEventDestroy(ev_start);
+    if (ev_stop) cudaEventDestroy(ev_stop);
     if (owns_tile_data) gpu_tile_data_free(&td);
     if (return_err != SPECTRAL_OK) {
         memset(out_buffer, 0, out_size);

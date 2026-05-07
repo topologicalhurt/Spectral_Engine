@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 43):
+    for pass_num in range(1, 44):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1038,6 +1038,18 @@ def main() -> int:
             "pass 42 Metal backend must use checked GPU params pack")
     require("gpu_synth_params_pack_checked(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre, &gp)" in cuda_pass42,
             "pass 42 CUDA backend must use checked GPU params pack")
+
+
+    cuda_pass43 = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("cudaEvent_t ev_start = NULL;" in cuda_pass43 and
+            "cudaEvent_t ev_stop = NULL;" in cuda_pass43,
+            "pass 43 CUDA events must be in cleanup scope")
+    require("cudaEventCreate(&ev_start) != cudaSuccess" in cuda_pass43 and
+            "cudaEventCreate(&ev_stop) != cudaSuccess" in cuda_pass43,
+            "pass 43 CUDA event creation must be checked")
+    require("if (ev_start) cudaEventDestroy(ev_start);" in cuda_pass43 and
+            "if (ev_stop) cudaEventDestroy(ev_stop);" in cuda_pass43,
+            "pass 43 CUDA events must be destroyed on common cleanup path")
 
     if FAILURES:
         for f in FAILURES:
