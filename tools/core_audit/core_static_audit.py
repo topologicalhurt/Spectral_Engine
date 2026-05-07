@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 46):
+    for pass_num in range(1, 47):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1071,6 +1071,19 @@ def main() -> int:
             "pass 45 GPU tile fill must verify count/fill cursor agreement")
     require("#pragma omp atomic write" in synth_internal_pass45,
             "pass 45 GPU tile fill overflow flag must be set safely under OpenMP")
+
+
+    cuda_pass46 = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("copy_err = cudaMemcpyAsync" in cuda_pass46 and "copy_err != cudaSuccess" in cuda_pass46,
+            "pass 46 CUDA async copies must be checked")
+    require("cudaEventRecord(ev_start, g_cuda.stream) != cudaSuccess" in cuda_pass46 and
+            "cudaEventRecord(ev_stop, g_cuda.stream) != cudaSuccess" in cuda_pass46,
+            "pass 46 CUDA event records must be checked")
+    require("sync_err = cudaStreamSynchronize(g_cuda.stream)" in cuda_pass46 and
+            "sync_err != cudaSuccess" in cuda_pass46,
+            "pass 46 CUDA stream synchronization must be checked")
+    require("cudaEventElapsedTime(&gpu_ms, ev_start, ev_stop) != cudaSuccess" in cuda_pass46,
+            "pass 46 CUDA timing query must be checked")
 
     if FAILURES:
         for f in FAILURES:
