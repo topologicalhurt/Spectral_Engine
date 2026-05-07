@@ -182,6 +182,120 @@ static SpectralError seg_cache_validate_data_extent(const char* cache_dir,
 }
 
 
+static int seg_cache_segment_valid(const Segment* s)
+{
+    if (!s) return 0;
+
+    if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->length) || s->length < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->phase)) return 0;
+    if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->df)) return 0;
+    if (!spectral_is_finite_f32(s->amp)) return 0;
+    if (!spectral_is_finite_f32(s->da)) return 0;
+    if (!spectral_is_finite_f32(s->width)) return 0;
+    return 1;
+}
+
+static int seg_cache_segments_valid(const Segment* segs, uint32_t count, uint32_t* bad_idx)
+{
+    if (count > 0u && !segs) return 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        if (!seg_cache_segment_valid(&segs[i])) {
+            if (bad_idx) *bad_idx = i;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int seg_cache_gpu_segment_valid(const SegmentGpu* s)
+{
+    if (!s) return 0;
+
+    if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->length) || s->length < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->phase)) return 0;
+    if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->df)) return 0;
+    if (!spectral_is_finite_f32(s->amp)) return 0;
+    if (!spectral_is_finite_f32(s->da)) return 0;
+    return 1;
+}
+
+static int seg_cache_gpu_segments_match(const Segment* segs,
+                                        const SegmentGpu* gpu_segs,
+                                        uint32_t count,
+                                        uint32_t* bad_idx)
+{
+    if (count > 0u && (!segs || !gpu_segs)) return 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        SegmentGpu expected = spectral_segment_pack_gpu(&segs[i]);
+
+        if (!seg_cache_gpu_segment_valid(&gpu_segs[i]) ||
+            memcmp(&expected, &gpu_segs[i], sizeof(expected)) != 0) {
+            if (bad_idx) *bad_idx = i;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int seg_cache_tile_layout_words_valid(const void* tile_ranges,
+                                             const void* tile_segment_ids,
+                                             uint32_t tile_count,
+                                             uint32_t tile_total_refs,
+                                             uint32_t seg_count)
+{
+    const char* range_src = (const char*)tile_ranges;
+    const char* id_src = (const char*)tile_segment_ids;
+    uint32_t running_refs = 0;
+
+    if (tile_count == 0u || tile_total_refs == 0u) {
+        return tile_count == 0u && tile_total_refs == 0u;
+    }
+    if (!range_src || !id_src || seg_count == 0u) {
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < tile_count; i++) {
+        uint32_t range_words[2] = {0, 0};
+        uint32_t start = 0;
+        uint32_t count = 0;
+
+        memcpy(range_words, range_src + ((size_t)i * sizeof(range_words)), sizeof(range_words));
+        start = range_words[0];
+        count = range_words[1];
+
+        if (start != running_refs) {
+            return 0;
+        }
+        if (count > UINT32_MAX - running_refs) {
+            return 0;
+        }
+        running_refs += count;
+        if (running_refs > tile_total_refs) {
+            return 0;
+        }
+    }
+    if (running_refs != tile_total_refs) {
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < tile_total_refs; i++) {
+        uint32_t segment_id = 0;
+        memcpy(&segment_id, id_src + ((size_t)i * sizeof(segment_id)), sizeof(segment_id));
+        if (segment_id >= seg_count) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+
 static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
                                         const char* tile_base,
                                         size_t tile_data_bytes,
@@ -189,6 +303,9 @@ static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
 {
     SpectralSegCacheTileHeader th;
     size_t expected_bytes = 0;
+    size_t ranges_bytes = 0;
+    const char* ranges_base = NULL;
+    const char* refs_base = NULL;
 
     if (!e || !tile_base || !result) return 0;
     if (e->tile_count == 0 || e->tile_total_refs == 0) return 0;
@@ -211,14 +328,30 @@ static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
         return 0;
     }
 
+    if (!spectral_array_bytes((size_t)th.num_tiles, sizeof(uint32_t) * 2u, &ranges_bytes)) {
+        return 0;
+    }
+
+    ranges_base = tile_base + sizeof(SpectralSegCacheTileHeader);
+    refs_base = ranges_base + ranges_bytes;
+
+    if (!seg_cache_tile_layout_words_valid(ranges_base,
+                                           refs_base,
+                                           th.num_tiles,
+                                           th.total_refs,
+                                           e->seg_count)) {
+        SPECTRAL_LOG_WARN("Segment cache tile references invalid — skipping tile cache data");
+        return 0;
+    }
+
     result->tile_size = th.tile_size;
     result->tile_count = th.num_tiles;
     result->tile_total_refs = th.total_refs;
-    result->tile_ranges = (void*)(tile_base + sizeof(SpectralSegCacheTileHeader));
-    result->tile_segment_ids = (uint32_t*)(tile_base + sizeof(SpectralSegCacheTileHeader)
-                                           + (size_t)th.num_tiles * (sizeof(uint32_t) * 2u));
+    result->tile_ranges = (void*)ranges_base;
+    result->tile_segment_ids = (uint32_t*)refs_base;
     return 1;
 }
+
 
 /* --- Public API ---------------------------------------------------------- */
 
@@ -295,13 +428,25 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
                 cache_dir, e->data_offset, total_data_bytes, &mv);
             if (map_err == SPECTRAL_OK) {
                 char* data_ptr = (char*)mv.base + mv.page_offset;
+                Segment* mapped_segments = (Segment*)data_ptr;
+                const SegmentGpu* mapped_gpu_segs = (const SegmentGpu*)(data_ptr + seg_bytes);
+                uint32_t bad_payload_idx = 0;
 
-                result->segments.segs = (Segment*)data_ptr;
+                if (!seg_cache_segments_valid(mapped_segments, e->seg_count, &bad_payload_idx) ||
+                    !seg_cache_gpu_segments_match(mapped_segments, mapped_gpu_segs, e->seg_count, &bad_payload_idx)) {
+                    SPECTRAL_LOG_WARN("Segment cache payload corrupt at segment %u — rejecting cache hit",
+                                      bad_payload_idx);
+                    spectral_seg_cache_fs_data_unmap(&mv);
+                    free(entries);
+                    return SPECTRAL_ERR_FILE_CORRUPT;
+                }
+
+                result->segments.segs = mapped_segments;
                 result->segments.count = e->seg_count;
                 result->segments.capacity = 0; /* mmap-owned */
 
                 /* Pre-packed GPU segments follow Segment data. */
-                result->gpu_segs = (const SegmentGpu*)(data_ptr + seg_bytes);
+                result->gpu_segs = mapped_gpu_segs;
 
                 if (tile_data_bytes > 0) {
                     const char* tile_base = data_ptr + seg_bytes + gpu_seg_bytes;
@@ -341,6 +486,12 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
                 for (uint32_t i = 0; i < e->seg_count; i++) {
                     spectral_segment_swap_endian(&segs[i]);
                 }
+            }
+
+            if (!seg_cache_segments_valid(segs, e->seg_count, NULL)) {
+                free(segs);
+                free(entries);
+                return SPECTRAL_ERR_FILE_CORRUPT;
             }
 
             result->hit = 1;
@@ -441,6 +592,17 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
 
     if (!cache_dir || !sa) return SPECTRAL_ERR_PARAM;
     if (!seg_cache_store_metadata_valid(key, sa, sample_rate, stretch, pitch, output_length)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (!seg_cache_segments_valid(sa->segs, sa->count, NULL)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (has_tile_blob &&
+        !seg_cache_tile_layout_words_valid(tile_ranges,
+                                           tile_segment_ids,
+                                           tile_count,
+                                           tile_total_refs,
+                                           sa->count)) {
         return SPECTRAL_ERR_PARAM;
     }
 

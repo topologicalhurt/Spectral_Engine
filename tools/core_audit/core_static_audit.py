@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 40):
+    for pass_num in range(1, 41):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -997,6 +997,23 @@ def main() -> int:
             "pass 39 make_synth_params must reuse checked derived scalars")
     require(".inv_stretch_sq = 1.0f / (stretch * stretch)" not in synth_internal_pass39,
             "pass 39 make_synth_params must not recompute unchecked reciprocal-square stretch")
+
+
+    seg_cache_pass40 = read("spectral_engine/core/spectral_seg_cache.c")
+    require("seg_cache_segment_valid" in seg_cache_pass40 and
+            "!spectral_is_finite_f32(s->omega) || s->omega < 0.0f" in seg_cache_pass40,
+            "pass 40 segment cache payload must validate Segment fields")
+    require("seg_cache_gpu_segments_match" in seg_cache_pass40 and
+            "SegmentGpu expected = spectral_segment_pack_gpu(&segs[i]);" in seg_cache_pass40,
+            "pass 40 segment cache payload must validate mmap GPU-segment payloads against Segment payloads")
+    require("seg_cache_gpu_segments_match(mapped_segments, mapped_gpu_segs" in seg_cache_pass40 and
+            "spectral_seg_cache_fs_data_unmap(&mv)" in seg_cache_pass40,
+            "pass 40 segment cache lookup must reject corrupt mmap payloads before publishing result")
+    require("if (!seg_cache_segments_valid(segs, e->seg_count, NULL))" in seg_cache_pass40,
+            "pass 40 segment cache heap fallback must validate copied Segment payload")
+    require("if (!seg_cache_segments_valid(sa->segs, sa->count, NULL))" in seg_cache_pass40 and
+            "!seg_cache_tile_layout_words_valid(tile_ranges," in seg_cache_pass40,
+            "pass 40 segment cache store must reject corrupt Segment/tile payloads before append")
 
     if FAILURES:
         for f in FAILURES:
