@@ -356,9 +356,21 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         paramsBuffer = [metalDevice newBufferWithBytes:&params
                                                 length:sizeof(params)
                                                options:MTLResourceStorageModeShared];
-        
+        if (!paramsBuffer) {
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
+
         cmdBuffer = [metalQueue commandBuffer];
+        if (!cmdBuffer) {
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
         encoder = [cmdBuffer computeCommandEncoder];
+        if (!encoder) {
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
         
         [encoder setComputePipelineState:metalSynthPipeline];
         [encoder setBuffer:segBufForDispatch offset:0 atIndex:0];
@@ -373,7 +385,17 @@ SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
         
         [cmdBuffer commit];
         [cmdBuffer waitUntilCompleted];
-        
+        if ([cmdBuffer status] != MTLCommandBufferStatusCompleted) {
+            if ([cmdBuffer error]) {
+                SPECTRAL_WARN("Metal: command buffer failed: %s",
+                              [[[cmdBuffer error] localizedDescription] UTF8String]);
+            } else {
+                SPECTRAL_WARN("Metal: command buffer failed");
+            }
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
+
         memcpy(out_buffer, [g_mtl.outputBuf contents], output_size);
         *t_synth = omp_get_wtime() - pf.start_time;
 

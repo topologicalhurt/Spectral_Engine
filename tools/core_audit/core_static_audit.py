@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 44):
+    for pass_num in range(1, 45):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1050,6 +1050,16 @@ def main() -> int:
     require("if (ev_start) cudaEventDestroy(ev_start);" in cuda_pass43 and
             "if (ev_stop) cudaEventDestroy(ev_stop);" in cuda_pass43,
             "pass 43 CUDA events must be destroyed on common cleanup path")
+
+
+    metal_pass44 = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
+    require("if (!paramsBuffer)" in metal_pass44 and "if (!cmdBuffer)" in metal_pass44 and "if (!encoder)" in metal_pass44,
+            "pass 44 Metal dispatch must validate dispatch objects before use")
+    require("[cmdBuffer status] != MTLCommandBufferStatusCompleted" in metal_pass44,
+            "pass 44 Metal dispatch must check command buffer completion before output copyback")
+    require(metal_pass44.index("[cmdBuffer status] != MTLCommandBufferStatusCompleted") <
+            metal_pass44.index("memcpy(out_buffer, [g_mtl.outputBuf contents], output_size)"),
+            "pass 44 Metal dispatch must not copy stale output before status check")
 
     if FAILURES:
         for f in FAILURES:
