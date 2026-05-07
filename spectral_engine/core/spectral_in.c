@@ -13,6 +13,18 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
+
+static int spectral_audio_samples_finite(const float* samples, size_t count)
+{
+    if (count > 0u && !samples) return 0;
+    for (size_t i = 0; i < count; i++) {
+        if (!spectral_is_finite_f32(samples[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 static int spectral_sf_count_to_size(sf_count_t value, size_t* out)
 {
@@ -83,6 +95,10 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         free(audio);
         return SPECTRAL_ERR_FILE_READ;
     }
+    if (!spectral_audio_samples_finite(audio, total_samples)) {
+        free(audio);
+        return SPECTRAL_ERR_FILE_FORMAT;
+    }
 
     mono = (float*)spectral_malloc_array(frames, sizeof(float));
     if (!mono) {
@@ -93,14 +109,25 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
     if (sfinfo.channels == 1) {
         memcpy(mono, audio, mono_bytes);
     } else {
-        float inv_ch = 1.0f / (float)channels;
+        const double inv_ch = 1.0 / (double)channels;
         for (size_t i = 0; i < frames; i++) {
-            float sum = 0.0f;
+            double sum = 0.0;
+            double mono_d = 0.0;
             size_t base = i * channels;
+
             for (size_t ch = 0; ch < channels; ch++) {
-                sum += audio[base + ch];
+                sum += (double)audio[base + ch];
             }
-            mono[i] = sum * inv_ch;
+
+            mono_d = sum * inv_ch;
+            if (!spectral_is_finite_f64(mono_d) ||
+                mono_d < -(double)FLT_MAX ||
+                mono_d > (double)FLT_MAX) {
+                free(mono);
+                free(audio);
+                return SPECTRAL_ERR_FILE_FORMAT;
+            }
+            mono[i] = (float)mono_d;
         }
     }
 
@@ -112,6 +139,7 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
     *out_mono = mono;
     return SPECTRAL_OK;
 }
+
 
 
 SpectralError spectral_audio_window(float* audio, size_t total_frames,

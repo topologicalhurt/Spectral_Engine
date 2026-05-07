@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 37):
+    for pass_num in range(1, 38):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -947,6 +947,24 @@ def main() -> int:
             "sf_writef_float(file, buffer, frames_sf)" in audio_out_pass36 and
             "(sf_count_t)num_frames" not in audio_out_pass36,
             "pass 36 audio IO output path must not silently narrow size_t frame counts")
+
+
+    audio_in_pass37 = read("spectral_engine/core/spectral_in.c")
+    audio_out_pass37 = read("spectral_engine/core/spectral_out.c")
+    require("spectral_audio_samples_finite(audio, total_samples)" in audio_in_pass37 and
+            audio_in_pass37.index("spectral_audio_samples_finite(audio, total_samples)") <
+            audio_in_pass37.index("mono = (float*)spectral_malloc_array(frames, sizeof(float));"),
+            "pass 37 audio IO input path must reject non-finite samples before publishing mono")
+    require("const double inv_ch = 1.0 / (double)channels;" in audio_in_pass37 and
+            "mono_d < -(double)FLT_MAX" in audio_in_pass37 and
+            "mono_d > (double)FLT_MAX" in audio_in_pass37,
+            "pass 37 audio IO downmix must prove finite float narrowing")
+    require("spectral_audio_samples_finite(buffer, sample_count)" in audio_out_pass37 and
+            audio_out_pass37.index("spectral_audio_samples_finite(buffer, sample_count)") <
+            audio_out_pass37.index("file = sf_open(path, SFM_WRITE, &info);"),
+            "pass 37 audio IO output path must reject non-finite samples before opening output")
+    require("spectral_audio_samples_finite(mono, num_frames)" in audio_out_pass37,
+            "pass 37 stereo writer must reject non-finite mono source before duplication")
 
     if FAILURES:
         for f in FAILURES:
