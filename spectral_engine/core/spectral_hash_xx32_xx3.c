@@ -460,9 +460,20 @@ void spectral_hash_file_method_destroy(SpectralHashFileMethod* method)
 
 SpectralHashDigest spectral_hash_oneshot(const void* data, size_t len)
 {
+    static const unsigned char empty = 0u;
+    const void* src = data;
+
+    if (!src) {
+        if (len > 0u) {
+            return (SpectralHashDigest)0;
+        }
+        src = &empty;
+    }
+
 #if SPECTRAL_HASH_HAS_HOST_FILE_API
-    return XXH3_64bits(data, len);
+    return XXH3_64bits(src, len);
 #else
-    return (uint64_t)XXH32(data, len, 0u);
+    return (uint64_t)XXH32(src, len, 0u);
 #endif
 }
+

@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 64):
+    for pass_num in range(1, 65):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1243,6 +1243,15 @@ def main() -> int:
     require("spectral_hash_file_method_get_descriptor(method->type, &desc)" in hash_pass63 and
             "switch (desc->type)" in hash_pass63,
             "pass 63 hash consume must dispatch through descriptor capability registry")
+
+
+    hash_pass64 = read("spectral_engine/core/spectral_hash_xx32_xx3.c")
+    require("static const unsigned char empty = 0u;" in hash_pass64 and
+            "return (SpectralHashDigest)0;" in hash_pass64,
+            "pass 64 hash oneshot must define null-span behavior")
+    require("XXH3_64bits(src, len)" in hash_pass64 and
+            "XXH3_64bits(data, len)" not in hash_pass64,
+            "pass 64 hash oneshot must hash only validated span pointers")
 
     if FAILURES:
         for f in FAILURES:
