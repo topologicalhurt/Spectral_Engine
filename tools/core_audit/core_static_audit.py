@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 69):
+    for pass_num in range(1, 70):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1289,6 +1289,14 @@ def main() -> int:
             "pass 68 fused frame time overflow must preserve tracker root-cause error")
     require("float t_hop = (float)pair * (float)hop;" not in fused_pass68,
             "pass 68 fused frame time must not use unchecked float product")
+
+
+    fft_pass69 = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("spectral_fft_single_frame_args_valid" in fft_pass69 and
+            "tid < 0 || tid >= res->n_threads" in fft_pass69,
+            "pass 69 FFT single frame must validate resource/thread domain")
+    require(fft_pass69.count("spectral_fft_single_frame_clear(out_magsq, out_phases, res ? res->n_freqs : 0u, out_frame_max);") == 2,
+            "pass 69 FFT single frame must fail closed in both backend definitions")
 
     if FAILURES:
         for f in FAILURES:
