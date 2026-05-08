@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 55):
+    for pass_num in range(1, 56):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1160,6 +1160,14 @@ def main() -> int:
             "pass 54 wavetable HEX parser must validate exact declared record length")
     require("if (data_len != 0u || address != 0u)" in wavetable_pass54,
             "pass 54 wavetable HEX loader must require canonical EOF record shape")
+
+
+    hash_pass55 = read("spectral_engine/core/spectral_hash_xx32_xx3.c")
+    require("spectral_hash_file_method_get_descriptor(method->type, &desc)" in hash_pass55,
+            "pass 55 hash reset must validate descriptor before resetting state")
+    require(hash_pass55.index("spectral_hash_file_method_get_descriptor(method->type, &desc)") <
+            hash_pass55.index("return spectral_hash_method_reset_impl(method);", hash_pass55.index("spectral_hash_file_method_reset")),
+            "pass 55 hash reset descriptor check must occur before reset implementation")
 
     if FAILURES:
         for f in FAILURES:

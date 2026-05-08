@@ -367,12 +367,26 @@ SpectralError spectral_hash_file_method_init(
 
 SpectralError spectral_hash_file_method_reset(SpectralHashFileMethod* method)
 {
+    SpectralError err = SPECTRAL_OK;
+    const SpectralHashFileMethodDescriptor* desc = NULL;
+
     if (!method) {
         return SPECTRAL_ERR_PARAM;
     }
 
+    /* Public reset is part of the explicit lifecycle.  A zero-initialized object
+     * has type METHOD_COUNT and must not be implicitly initialized by reset().
+     * init() sets method->type before its internal first reset, so validating the
+     * descriptor here preserves init->reset behavior while rejecting reset before
+     * init and unavailable methods. */
+    err = spectral_hash_file_method_get_descriptor(method->type, &desc);
+    if (err != SPECTRAL_OK) {
+        return err;
+    }
+
     return spectral_hash_method_reset_impl(method);
 }
+
 
 SpectralError spectral_hash_file_method_update(
     SpectralHashFileMethod* method,
