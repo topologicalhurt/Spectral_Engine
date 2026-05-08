@@ -157,39 +157,47 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
  */
 
 void spectral_mono_to_stereo_float(const float* mono, float* stereo, size_t num_frames) {
-    if (!mono || !stereo || num_frames == 0) return;
+    if (!mono || !stereo || num_frames == 0 || num_frames > SIZE_MAX / 2u) return;
 
     SPECTRAL_UNROLL_4
     for (size_t i = 0; i < num_frames; i++) {
-        stereo[i * 2]     = mono[i];
-        stereo[i * 2 + 1] = mono[i];
+        size_t stereo_i = i * 2u;
+        stereo[stereo_i]     = mono[i];
+        stereo[stereo_i + 1u] = mono[i];
     }
 }
 
+
+
 void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_frames) {
-    if (!mono || !stereo || num_frames == 0) return;
-    
+    if (!mono || !stereo || num_frames == 0 || num_frames > SIZE_MAX / 2u) return;
+
 #if SPECTRAL_ARM_M7 && defined(__ARM_FEATURE_DSP)
     size_t pairs = num_frames & ~1U;
     size_t i = 0;
     for (; i < pairs; i += 2) {
-        stereo[i * 2]     = mono[i];
-        stereo[i * 2 + 1] = mono[i];
-        stereo[i * 2 + 2] = mono[i + 1];
-        stereo[i * 2 + 3] = mono[i + 1];
+        size_t stereo_i = i * 2u;
+        stereo[stereo_i]     = mono[i];
+        stereo[stereo_i + 1u] = mono[i];
+        stereo[stereo_i + 2u] = mono[i + 1u];
+        stereo[stereo_i + 3u] = mono[i + 1u];
     }
     if (i < num_frames) {
-        stereo[i * 2]     = mono[i];
-        stereo[i * 2 + 1] = mono[i];
+        size_t stereo_i = i * 2u;
+        stereo[stereo_i]     = mono[i];
+        stereo[stereo_i + 1u] = mono[i];
     }
 #else
     SPECTRAL_UNROLL_4
     for (size_t i = 0; i < num_frames; i++) {
-        stereo[i * 2]     = mono[i];
-        stereo[i * 2 + 1] = mono[i];
+        size_t stereo_i = i * 2u;
+        stereo[stereo_i]     = mono[i];
+        stereo[stereo_i + 1u] = mono[i];
     }
 #endif
 }
+
+
 
 /*
  * File Output (Desktop Only)

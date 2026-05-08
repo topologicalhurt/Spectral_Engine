@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 57):
+    for pass_num in range(1, 58):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1177,6 +1177,15 @@ def main() -> int:
     require("arm_absmax_q15(buffer, len_u32" in out_pass56 and
             "arm_shift_q15(buffer, -shift_amt, buffer, len_u32)" in out_pass56,
             "pass 56 Q15 normalization must use checked CMSIS length")
+
+
+    out_pass57 = read("spectral_engine/core/spectral_out.c")
+    require("num_frames > SIZE_MAX / 2u" in out_pass57 and
+            "size_t stereo_i = i * 2u;" in out_pass57,
+            "pass 57 mono-to-stereo helpers must validate stereo index domain")
+    require("stereo[i * 2]" not in out_pass57 and
+            "stereo[i * 2 + 1]" not in out_pass57,
+            "pass 57 mono-to-stereo helpers must not use repeated raw index products")
 
     if FAILURES:
         for f in FAILURES:
