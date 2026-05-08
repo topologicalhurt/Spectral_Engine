@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 52):
+    for pass_num in range(1, 53):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1133,6 +1133,14 @@ def main() -> int:
     require("reduce_err = reduce_fn(&tb, out_buffer, out_len, out_bytes);" in cpu_pass51 and
             "return reduce_err;" in cpu_pass51,
             "pass 51 CPU synth driver must propagate reduction contract failures")
+
+
+    out_pass52 = read("spectral_engine/core/spectral_out.c")
+    require("spectral_float_buffer_all_finite" in out_pass52 and
+            "!spectral_is_finite_f32(headroom) || headroom < 0.0f" in out_pass52,
+            "pass 52 float normalization must validate headroom and input finiteness")
+    require("if (!spectral_is_finite_f32(scale)) return 0.0f;" in out_pass52,
+            "pass 52 float normalization must validate scale before applying")
 
     if FAILURES:
         for f in FAILURES:

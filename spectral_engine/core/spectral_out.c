@@ -53,15 +53,30 @@ static int spectral_size_to_sf_count(size_t value, sf_count_t* out)
  * Normalization
  */
 
+static int spectral_float_buffer_all_finite(const float* buffer, size_t len)
+{
+    if (len > 0u && !buffer) return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!spectral_is_finite_f32(buffer[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 float spectral_normalize_float(float* buffer, size_t len, float headroom) {
     if (!buffer || len == 0) return 0.0f;
+    if (!spectral_is_finite_f32(headroom) || headroom < 0.0f) return 0.0f;
+    if (!spectral_float_buffer_all_finite(buffer, len)) return 0.0f;
 
     float max_amp = 0.0f;
 
 #if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !SPECTRAL_USE_CMSIS
     spectral_vmaxmgv(buffer, &max_amp, len);
+    if (!spectral_is_finite_f32(max_amp) || max_amp < 0.0f) return 0.0f;
     if (max_amp > 0.0f) {
         float scale = headroom / max_amp;
+        if (!spectral_is_finite_f32(scale)) return 0.0f;
         spectral_vsmul(buffer, scale, buffer, len);
     }
 #else
@@ -69,8 +84,10 @@ float spectral_normalize_float(float* buffer, size_t len, float headroom) {
         float a = fabsf(buffer[i]);
         if (a > max_amp) max_amp = a;
     }
+    if (!spectral_is_finite_f32(max_amp) || max_amp < 0.0f) return 0.0f;
     if (max_amp > 0.0f) {
         float scale = headroom / max_amp;
+        if (!spectral_is_finite_f32(scale)) return 0.0f;
         SPECTRAL_UNROLL_4
         for (size_t i = 0; i < len; i++) {
             buffer[i] *= scale;
@@ -80,6 +97,7 @@ float spectral_normalize_float(float* buffer, size_t len, float headroom) {
 
     return max_amp;
 }
+
 
 q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
     if (!buffer || len == 0) {
