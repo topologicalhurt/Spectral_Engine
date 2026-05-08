@@ -145,27 +145,48 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
 SpectralError spectral_audio_window(float* audio, size_t total_frames,
                           float start_sec, float end_sec, int sample_rate,
                           float** out_start, size_t* out_frames) {
-    if (!audio || !out_start || !out_frames || sample_rate <= 0) return SPECTRAL_ERR_PARAM;
+    double start_d = 0.0;
+    double end_d = 0.0;
+    size_t start_frame = 0;
+    size_t end_frame = 0;
 
-    double start_d = (start_sec > 0.0f) ? (double)start_sec * (double)sample_rate : 0.0;
-    double end_d = (end_sec < 0.0f) ? (double)total_frames : (double)end_sec * (double)sample_rate;
+    if (!audio || !out_start || !out_frames) return SPECTRAL_ERR_PARAM;
+    *out_start = NULL;
+    *out_frames = 0;
+
+    if (total_frames == 0 ||
+        sample_rate < SPECTRAL_MIN_SAMPLE_RATE ||
+        sample_rate > SPECTRAL_MAX_SAMPLE_RATE) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (!spectral_is_finite_f32(start_sec)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (end_sec >= 0.0f && !spectral_is_finite_f32(end_sec)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    start_d = (start_sec > 0.0f) ? (double)start_sec * (double)sample_rate : 0.0;
+    end_d = (end_sec < 0.0f) ? (double)total_frames : (double)end_sec * (double)sample_rate;
+
     if (!spectral_is_finite_f64(start_d) || !spectral_is_finite_f64(end_d)) return SPECTRAL_ERR_PARAM;
     if (start_d < 0.0) start_d = 0.0;
     if (end_d < 0.0) end_d = 0.0;
     if (start_d > (double)total_frames) start_d = (double)total_frames;
     if (end_d > (double)total_frames) end_d = (double)total_frames;
 
-    size_t start_frame = (size_t)start_d;
-    size_t end_frame = (size_t)end_d;
+    start_frame = (size_t)start_d;
+    end_frame = (size_t)end_d;
 
     /* Clamp to valid range */
     if (start_frame > total_frames) start_frame = total_frames;
     if (end_frame > total_frames) end_frame = total_frames;
     if (end_frame <= start_frame) return SPECTRAL_ERR_PARAM;
-    
+
     *out_start = audio + start_frame;
     *out_frames = end_frame - start_frame;
     return SPECTRAL_OK;
 }
+
 
 #endif /* SPECTRAL_HAS_FILE_IO */

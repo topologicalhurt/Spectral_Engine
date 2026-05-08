@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 53):
+    for pass_num in range(1, 54):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1141,6 +1141,17 @@ def main() -> int:
             "pass 52 float normalization must validate headroom and input finiteness")
     require("if (!spectral_is_finite_f32(scale)) return 0.0f;" in out_pass52,
             "pass 52 float normalization must validate scale before applying")
+
+
+    audio_in_pass53 = read("spectral_engine/core/spectral_in.c")
+    require("!spectral_is_finite_f32(start_sec)" in audio_in_pass53 and
+            "end_sec >= 0.0f && !spectral_is_finite_f32(end_sec)" in audio_in_pass53,
+            "pass 53 audio window must reject invalid time-domain inputs")
+    require("sample_rate < SPECTRAL_MIN_SAMPLE_RATE" in audio_in_pass53 and
+            "sample_rate > SPECTRAL_MAX_SAMPLE_RATE" in audio_in_pass53,
+            "pass 53 audio window must validate sample-rate domain")
+    require("*out_start = NULL;" in audio_in_pass53 and "*out_frames = 0;" in audio_in_pass53,
+            "pass 53 audio window must clear outputs before validation")
 
     if FAILURES:
         for f in FAILURES:
