@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 63):
+    for pass_num in range(1, 64):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1234,6 +1234,15 @@ def main() -> int:
             "pass 62 FFT magnitude scaling must route interior bins through checked helper")
     require("if (isfinite(magsq[i]) && magsq[i] > max_magsq)" in fft_pass62,
             "pass 62 FFT trackable max must ignore non-finite bins")
+
+
+    hash_pass63 = read("spectral_engine/core/spectral_hash_xx32_xx3.c")
+    require("if (!method->initialized)" in hash_pass63 and
+            "return SPECTRAL_ERR_NOTINIT;" in hash_pass63,
+            "pass 63 hash consume must validate lifecycle before dispatch")
+    require("spectral_hash_file_method_get_descriptor(method->type, &desc)" in hash_pass63 and
+            "switch (desc->type)" in hash_pass63,
+            "pass 63 hash consume must dispatch through descriptor capability registry")
 
     if FAILURES:
         for f in FAILURES:

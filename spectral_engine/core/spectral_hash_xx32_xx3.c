@@ -415,11 +415,22 @@ SpectralError spectral_hash_file_method_consume_file(
     SpectralHashFileMethod* method,
     FILE* file)
 {
-    if (!method) {
+    SpectralError err = SPECTRAL_OK;
+    const SpectralHashFileMethodDescriptor* desc = NULL;
+
+    if (!method || !file) {
         return SPECTRAL_ERR_PARAM;
     }
+    if (!method->initialized) {
+        return SPECTRAL_ERR_NOTINIT;
+    }
 
-    switch (method->type) {
+    err = spectral_hash_file_method_get_descriptor(method->type, &desc);
+    if (err != SPECTRAL_OK) {
+        return err;
+    }
+
+    switch (desc->type) {
         case SPECTRAL_HASH_FILE_FULL_DIRECT:
             return spectral_hash_method_consume_file_full_direct_impl(method, file);
         case SPECTRAL_HASH_FILE_FULL_MMAP:
@@ -430,6 +441,7 @@ SpectralError spectral_hash_file_method_consume_file(
             return SPECTRAL_ERR_BACKEND_UNAVAIL;
     }
 }
+
 
 void spectral_hash_file_method_destroy(SpectralHashFileMethod* method)
 {
