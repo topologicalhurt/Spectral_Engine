@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 61):
+    for pass_num in range(1, 62):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1216,6 +1216,14 @@ def main() -> int:
     require("if (!out) return;" in vec_pass60 and
             "if (!src || len == 0) { *out = 0.0f; return; }" in vec_pass60,
             "pass 60 vector max helpers must guard out pointer and empty spans")
+
+
+    fft_pass61 = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("if (frame_end < frame_start) return 0.0f;" in fft_pass61 and
+            "spectral_size_mul(local_n_frames, n_freqs, &output_bins)" in fft_pass61,
+            "pass 61 FFT frame dispatch must validate frame range and output shape")
+    require("#pragma omp parallel reduction(max:max_magsq) num_threads(res->n_threads)" in fft_pass61,
+            "pass 61 FFT frame dispatch must bind OpenMP team size to allocated resources")
 
     if FAILURES:
         for f in FAILURES:
