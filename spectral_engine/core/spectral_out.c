@@ -100,17 +100,21 @@ float spectral_normalize_float(float* buffer, size_t len, float headroom) {
 
 
 q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
+    if (shift) *shift = 0;
     if (!buffer || len == 0) {
-        if (shift) *shift = 0;
         return 0;
     }
-    
+    if (len > (size_t)UINT32_MAX) {
+        return 0;
+    }
+
     /* Find maximum absolute value */
     q15_t max_val = 0;
-    
+
 #if SPECTRAL_USE_CMSIS
+    uint32_t len_u32 = (uint32_t)len;
     uint32_t max_idx;
-    arm_absmax_q15(buffer, (uint32_t)len, &max_val, &max_idx);
+    arm_absmax_q15(buffer, len_u32, &max_val, &max_idx);
 #else
     for (size_t i = 0; i < len; i++) {
         q15_t abs_val;
@@ -122,7 +126,7 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
         if (abs_val > max_val) max_val = abs_val;
     }
 #endif
-    
+
     /* Determine if normalization needed (prevent clipping) */
     int shift_amt = 0;
     if (max_val > Q15_MAX / 2) {
@@ -132,20 +136,21 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift) {
             test >>= 1;
             shift_amt++;
         }
-        
+
         /* Apply shift - CMSIS arm_shift_q15 uses SIMD on M7 */
 #if SPECTRAL_USE_CMSIS
-        arm_shift_q15(buffer, -shift_amt, buffer, (uint32_t)len);
+        arm_shift_q15(buffer, -shift_amt, buffer, len_u32);
 #else
         for (size_t i = 0; i < len; i++) {
             buffer[i] >>= shift_amt;
         }
 #endif
     }
-    
+
     if (shift) *shift = shift_amt;
     return max_val;
 }
+
 
 /*
  * Stereo Interleaving

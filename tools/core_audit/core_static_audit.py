@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 56):
+    for pass_num in range(1, 57):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1168,6 +1168,15 @@ def main() -> int:
     require(hash_pass55.index("spectral_hash_file_method_get_descriptor(method->type, &desc)") <
             hash_pass55.index("return spectral_hash_method_reset_impl(method);", hash_pass55.index("spectral_hash_file_method_reset")),
             "pass 55 hash reset descriptor check must occur before reset implementation")
+
+
+    out_pass56 = read("spectral_engine/core/spectral_out.c")
+    require("if (len > (size_t)UINT32_MAX)" in out_pass56 and
+            "uint32_t len_u32 = (uint32_t)len;" in out_pass56,
+            "pass 56 Q15 normalization must validate CMSIS uint32 length domain")
+    require("arm_absmax_q15(buffer, len_u32" in out_pass56 and
+            "arm_shift_q15(buffer, -shift_amt, buffer, len_u32)" in out_pass56,
+            "pass 56 Q15 normalization must use checked CMSIS length")
 
     if FAILURES:
         for f in FAILURES:
