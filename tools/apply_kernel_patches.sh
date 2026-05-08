@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # TODO:
-# Have we already applied this patch or patchset before? I.e. persistence
+# (I) Have we already applied this patch or patchset before? I.e. persistence. Would need to belong in remote git history.
+# (II) Ensure adherence to git workflow
+# (III) Ensure apply script is signed off / securely hashed; that the patch is coming from a secure source
+# (IV) Run against suite of external checks (that the control surface it is modifying uses pre-existing modules etc.)
 
 KERNEL_RE='^spectral_engine_core_pass_[1-9][0-9]*_bundle\.zip$'     # Regex to group passes under in the given parent directory
 SCRIPT_LOC='scripts/apply_pass_'                                    # Patch apply script/hook; relative to parent patch folder
