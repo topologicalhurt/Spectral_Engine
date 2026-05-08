@@ -731,11 +731,23 @@ void spectral_tracker_process(SpectralTracker* tracker,
     if (atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK) return;
 
     const size_t n_freqs = tracker->n_freqs;
+    size_t chunk_bins = 0;
     const float threshsq = tracker->threshsq;
     const float freq_step_omega = tracker->freq_step_omega;
     const float freq_step_df = tracker->freq_step_df;
     const float inv_hop = tracker->inv_hop;
     const float hop_float = tracker->hop_float;
+
+    if (!isfinite(threshsq) || threshsq < 0.0f ||
+        !isfinite(freq_step_omega) || freq_step_omega <= 0.0f ||
+        !isfinite(freq_step_df) || freq_step_df <= 0.0f ||
+        !isfinite(inv_hop) || inv_hop <= 0.0f ||
+        !isfinite(hop_float) || hop_float <= 0.0f ||
+        !spectral_size_mul(chunk_n_frames, n_freqs, &chunk_bins)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+    (void)chunk_bins;
     /* Number of frame-pairs we can process:
      * - All internal pairs within this chunk (chunk_n_frames - 1)
      * - Plus one extra pair if overlap_magsq_row is provided
@@ -744,6 +756,10 @@ void spectral_tracker_process(SpectralTracker* tracker,
     if (overlap_magsq_row) n_pairs = chunk_n_frames;
 
     if (n_pairs == 0) return;
+    if (global_frame_offset > SIZE_MAX - (n_pairs - 1u)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
     double process_start = omp_get_wtime();
 
     #pragma omp parallel num_threads(tracker->n_threads)
@@ -799,7 +815,13 @@ void spectral_tracker_process(SpectralTracker* tracker,
                 next_row = overlap_magsq_row;
             }
 
-            const float t_hop = (global_frame_offset + t) * hop_float;
+            double t_hop_d = (double)(global_frame_offset + t) * (double)hop_float;
+            if (!isfinite(t_hop_d) || t_hop_d < 0.0 || t_hop_d > (double)FLT_MAX) {
+                spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+                local_failed = 1;
+                continue;
+            }
+            const float t_hop = (float)t_hop_d;
 #if SPECTRAL_TRACK_DEBUG_TIMING
             double pair_start = omp_get_wtime();
             double pair_validate_time = 0.0;

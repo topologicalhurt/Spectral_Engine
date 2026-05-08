@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 72):
+    for pass_num in range(1, 73):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1319,6 +1319,16 @@ def main() -> int:
             "pass 71 tracker create must store checked derived scalars")
     require("threshsq_d = (double)tracker->thresh_linear_sq * (double)new_max_magsq;" in track_pass71,
             "pass 71 tracker threshold update must validate product before narrowing")
+
+
+    track_pass72 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_size_mul(chunk_n_frames, n_freqs, &chunk_bins)" in track_pass72,
+            "pass 72 tracker process must validate chunk matrix shape")
+    require("global_frame_offset > SIZE_MAX - (n_pairs - 1u)" in track_pass72,
+            "pass 72 tracker process must validate global frame offset domain")
+    require("double t_hop_d = (double)(global_frame_offset + t) * (double)hop_float;" in track_pass72 and
+            "const float t_hop = (float)t_hop_d;" in track_pass72,
+            "pass 72 tracker process must prove frame time is representable as float")
 
     if FAILURES:
         for f in FAILURES:
