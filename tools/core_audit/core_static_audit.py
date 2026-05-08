@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 71):
+    for pass_num in range(1, 72):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1308,6 +1308,17 @@ def main() -> int:
     require("int n_threads = spectral_analysis_effective_thread_count();" in full_pass70 and
             "int n_threads = spectral_analysis_effective_thread_count();" in fused_pass70,
             "pass 70 analysis paths must use bounded effective thread count")
+
+
+    track_pass71 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_tracker_derive_create_scalars" in track_pass71 and
+            "thresh_linear_sq_d = pow(10.0, (double)db_thresh / 10.0);" in track_pass71,
+            "pass 71 tracker scalar creation must derive threshold in checked double domain")
+    require("tracker->thresh_linear_sq = thresh_linear_sq;" in track_pass71 and
+            "float thresh_linear = powf" not in track_pass71,
+            "pass 71 tracker create must store checked derived scalars")
+    require("threshsq_d = (double)tracker->thresh_linear_sq * (double)new_max_magsq;" in track_pass71,
+            "pass 71 tracker threshold update must validate product before narrowing")
 
     if FAILURES:
         for f in FAILURES:

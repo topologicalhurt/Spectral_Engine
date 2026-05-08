@@ -24,6 +24,7 @@
 #include "spectral_log.h"
 #include "spectral_utils.h"
 #include <math.h>
+#include <float.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -528,11 +529,98 @@ static int spectral_tracker_estimate_bytes(const SpectralTracker* tracker, size_
     return 1;
 }
 
+static int spectral_tracker_derive_create_scalars(size_t n_freqs,
+                                                  int sr,
+                                                  int n_fft,
+                                                  int hop,
+                                                  float db_thresh,
+                                                  float max_magsq,
+                                                  float* out_thresh_linear_sq,
+                                                  float* out_threshsq,
+                                                  float* out_inv_hop,
+                                                  float* out_freq_step_omega,
+                                                  float* out_freq_step_df,
+                                                  float* out_hop_float)
+{
+    double thresh_linear_sq_d = 0.0;
+    double threshsq_d = 0.0;
+    double freq_step_d = 0.0;
+    double two_pi_ts_d = 0.0;
+    double inv_hop_d = 0.0;
+    double freq_step_omega_d = 0.0;
+    double freq_step_df_d = 0.0;
+
+    if (!out_thresh_linear_sq || !out_threshsq || !out_inv_hop ||
+        !out_freq_step_omega || !out_freq_step_df || !out_hop_float) {
+        return 0;
+    }
+
+    if (n_freqs < 3u ||
+        sr < SPECTRAL_MIN_SAMPLE_RATE || sr > SPECTRAL_MAX_SAMPLE_RATE ||
+        n_fft < SPECTRAL_MIN_FFT_SIZE ||
+        ((size_t)n_fft & ((size_t)n_fft - 1u)) != 0u ||
+        n_freqs != ((size_t)n_fft / 2u + 1u) ||
+        hop <= 0 ||
+        !isfinite(db_thresh) ||
+        !isfinite(max_magsq) || max_magsq < 0.0f) {
+        return 0;
+    }
+
+    thresh_linear_sq_d = pow(10.0, (double)db_thresh / 10.0);
+    if (!isfinite(thresh_linear_sq_d) ||
+        thresh_linear_sq_d < 0.0 ||
+        thresh_linear_sq_d > (double)FLT_MAX) {
+        return 0;
+    }
+
+    threshsq_d = thresh_linear_sq_d * (double)max_magsq;
+    if (!isfinite(threshsq_d) ||
+        threshsq_d < 0.0 ||
+        threshsq_d > (double)FLT_MAX) {
+        return 0;
+    }
+
+    freq_step_d = (double)sr / (double)n_fft;
+    two_pi_ts_d = (double)SPECTRAL_TWO_PI / (double)sr;
+    inv_hop_d = 1.0 / (double)hop;
+    freq_step_omega_d = freq_step_d * two_pi_ts_d;
+    freq_step_df_d = 0.5 * freq_step_d * inv_hop_d * two_pi_ts_d;
+
+    if (!isfinite(freq_step_omega_d) || freq_step_omega_d <= 0.0 ||
+        freq_step_omega_d > (double)FLT_MAX ||
+        !isfinite(freq_step_df_d) || freq_step_df_d <= 0.0 ||
+        freq_step_df_d > (double)FLT_MAX ||
+        !isfinite(inv_hop_d) || inv_hop_d <= 0.0 ||
+        inv_hop_d > (double)FLT_MAX ||
+        (double)hop > (double)FLT_MAX) {
+        return 0;
+    }
+
+    *out_thresh_linear_sq = (float)thresh_linear_sq_d;
+    *out_threshsq = (float)threshsq_d;
+    *out_inv_hop = (float)inv_hop_d;
+    *out_freq_step_omega = (float)freq_step_omega_d;
+    *out_freq_step_df = (float)freq_step_df_d;
+    *out_hop_float = (float)hop;
+    return 1;
+}
+
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,
                                           float db_thresh, float max_magsq) {
     int t = 0;
-    if (n_freqs < 3 || sr <= 0 || n_fft <= 0 || hop <= 0) return NULL;
+    float thresh_linear_sq = 0.0f;
+    float threshsq = 0.0f;
+    float inv_hop = 0.0f;
+    float freq_step_omega = 0.0f;
+    float freq_step_df = 0.0f;
+    float hop_float = 0.0f;
+
+    if (!spectral_tracker_derive_create_scalars(n_freqs, sr, n_fft, hop, db_thresh, max_magsq,
+                                                &thresh_linear_sq, &threshsq, &inv_hop,
+                                                &freq_step_omega, &freq_step_df, &hop_float)) {
+        return NULL;
+    }
 
     SpectralTracker* tracker = (SpectralTracker*)malloc(sizeof(SpectralTracker));
     if (!tracker) return NULL;
@@ -558,16 +646,12 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->debug_emit_amp_time_total = 0.0;
 #endif
 
-    float thresh_linear = powf(10.0f, db_thresh / 20.0f);
-    tracker->thresh_linear_sq = thresh_linear * thresh_linear;
-    tracker->threshsq = tracker->thresh_linear_sq * max_magsq;
-
-    float freq_step = (float)sr / n_fft;
-    float two_pi_ts = SPECTRAL_TWO_PI / sr;
-    tracker->inv_hop = 1.0f / hop;
-    tracker->freq_step_omega = freq_step * two_pi_ts;
-    tracker->freq_step_df = 0.5f * freq_step * tracker->inv_hop * two_pi_ts;
-    tracker->hop_float = (float)hop;
+    tracker->thresh_linear_sq = thresh_linear_sq;
+    tracker->threshsq = threshsq;
+    tracker->inv_hop = inv_hop;
+    tracker->freq_step_omega = freq_step_omega;
+    tracker->freq_step_df = freq_step_df;
+    tracker->hop_float = hop_float;
     tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);
     tracker->interp_magsq = spectral_window_interp_magsq_parabolic;
     tracker->peak_magsq = spectral_window_peak_magsq_center;
@@ -621,8 +705,22 @@ fail:
 }
 
 void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq) {
+    double threshsq_d = 0.0;
+
     if (!tracker) return;
-    tracker->threshsq = tracker->thresh_linear_sq * new_max_magsq;
+    if (!isfinite(new_max_magsq) || new_max_magsq < 0.0f ||
+        !isfinite(tracker->thresh_linear_sq) || tracker->thresh_linear_sq < 0.0f) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
+
+    threshsq_d = (double)tracker->thresh_linear_sq * (double)new_max_magsq;
+    if (!isfinite(threshsq_d) || threshsq_d < 0.0 || threshsq_d > (double)FLT_MAX) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+
+    tracker->threshsq = (float)threshsq_d;
 }
 
 void spectral_tracker_process(SpectralTracker* tracker,
