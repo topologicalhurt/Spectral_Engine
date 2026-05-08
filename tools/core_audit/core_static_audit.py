@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 68):
+    for pass_num in range(1, 69):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1279,6 +1279,16 @@ def main() -> int:
             "pass 67 fused analysis OpenMP regions must bind team size to resource count")
     require("omp_set_num_threads(actual_threads)" not in fused_pass67,
             "pass 67 fused analysis must not mutate global OpenMP thread count")
+
+
+    fused_pass68 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("double t_hop_d = (double)pair * (double)hop;" in fused_pass68 and
+            "t_hop_d > (double)FLT_MAX" in fused_pass68,
+            "pass 68 fused frame time must prove float representability before narrowing")
+    require("spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);" in fused_pass68,
+            "pass 68 fused frame time overflow must preserve tracker root-cause error")
+    require("float t_hop = (float)pair * (float)hop;" not in fused_pass68,
+            "pass 68 fused frame time must not use unchecked float product")
 
     if FAILURES:
         for f in FAILURES:

@@ -19,6 +19,8 @@
  */
 #include "spectral_analysis_internal.h"
 #include "spectral_peak_track.h"
+#include "spectral_peak_track_internal.h"
+#include <float.h>
 
 SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                                          int sr, int n_fft, int hop, float db_thresh,
@@ -150,8 +152,15 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                     for (size_t pair = pair_start;
                          pair < pair_end && !spectral_tracker_has_failed(tracker);
                          pair++) {
-                        float t_hop = (float)pair * (float)hop;
+                        double t_hop_d = (double)pair * (double)hop;
+                        float t_hop = 0.0f;
                         SpectralFrameContext fctx;
+
+                        if (!isfinite(t_hop_d) || t_hop_d < 0.0 || t_hop_d > (double)FLT_MAX) {
+                            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+                            break;
+                        }
+                        t_hop = (float)t_hop_d;
                         double track_start = 0.0;
 
                         fft_start = omp_get_wtime();
