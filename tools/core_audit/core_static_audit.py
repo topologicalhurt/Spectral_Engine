@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 59):
+    for pass_num in range(1, 60):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1196,6 +1196,16 @@ def main() -> int:
             "(uint64_t)size > riff_end - data_pos" in out_pass58 and
             "next_chunk_pos > riff_end" in out_pass58,
             "pass 58 WAV RIFF scrubber must bound chunk scanning by declared RIFF extent")
+
+
+    vec_pass59 = read("spectral_engine/core/spectral_vector_ops.c")
+    require("spectral_complex_interleaved_count_valid" in vec_pass59 and
+            "count <= SIZE_MAX / 2u" in vec_pass59,
+            "pass 59 vector complex helpers must validate interleaved count domain")
+    require("if (!interleaved || !re || !im || count == 0 || !spectral_complex_interleaved_count_valid(count)) return;" in vec_pass59,
+            "pass 59 deinterleave must guard complex interleaved indexing")
+    require(vec_pass59.count("*max_magsq = 0.0f;") >= 2,
+            "pass 59 magnitude helpers must clear max output before early return")
 
     if FAILURES:
         for f in FAILURES:

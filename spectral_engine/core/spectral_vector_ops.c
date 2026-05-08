@@ -8,6 +8,11 @@
 #include "simde/x86/avx2.h"
 #endif
 #include <math.h>
+#include <stdint.h>
+
+static int spectral_complex_interleaved_count_valid(size_t count) {
+    return count <= SIZE_MAX / 2u;
+}
 
 void spectral_vmul(const float* a, const float* b, float* dst, size_t len) {
     size_t i = 0;
@@ -293,6 +298,7 @@ void spectral_vatan2(const float* y, const float* x, float* dst, size_t len) {
 
 void spectral_deinterleave(const float* interleaved,
                             float* re, float* im, size_t count) {
+    if (!interleaved || !re || !im || count == 0 || !spectral_complex_interleaved_count_valid(count)) return;
     size_t i = 0;
     for (; i + 4 <= count; i += 4) {
         const float* src = interleaved + i * 2;
@@ -314,6 +320,9 @@ void spectral_magsq_phase(const float* interleaved,
                            float* max_magsq, size_t count) {
     size_t i = 0;
     float m = 0.0f;
+    if (!interleaved || !magsq || !phase || !max_magsq) return;
+    *max_magsq = 0.0f;
+    if (count == 0 || !spectral_complex_interleaved_count_valid(count)) return;
 
 #if !SPECTRAL_ENABLE_APPROX_ATAN2
     for (; i < count; i++) {
@@ -500,6 +509,9 @@ void spectral_magsq_only(const float* interleaved,
                           float* magsq, float* max_magsq, size_t count) {
     size_t i = 0;
     float m = 0.0f;
+    if (!interleaved || !magsq || !max_magsq) return;
+    *max_magsq = 0.0f;
+    if (count == 0 || !spectral_complex_interleaved_count_valid(count)) return;
 
 #ifdef __AVX2__
     {
