@@ -61,8 +61,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         int pass1_failed = 0;
         double p1_start = omp_get_wtime();
 
-        omp_set_num_threads(actual_threads);
-        #pragma omp parallel reduction(max:pass1_max)
+        #pragma omp parallel reduction(max:pass1_max) num_threads(actual_threads)
         {
             int tid = omp_get_thread_num();
             int local_failed = 0;
@@ -102,8 +101,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         const size_t total_chunks = (pair_count + pair_chunk_size - 1u) / pair_chunk_size;
         double parallel_start = omp_get_wtime();
 
-        omp_set_num_threads(actual_threads);
-        #pragma omp parallel
+        #pragma omp parallel num_threads(actual_threads)
         {
             int tid = omp_get_thread_num();
             float* row_curr = spectral_aligned_alloc(n_freqs_f32_bytes);

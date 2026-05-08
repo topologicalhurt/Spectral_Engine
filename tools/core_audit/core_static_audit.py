@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 67):
+    for pass_num in range(1, 68):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1271,6 +1271,14 @@ def main() -> int:
     require("spectral_aligned_alloc(n_freqs_f32_bytes)" in fused_pass66 and
             "n_freqs * sizeof(float)" not in fused_pass66,
             "pass 66 fused analysis scratch rows must not use raw n_freqs float products")
+
+
+    fused_pass67 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("#pragma omp parallel reduction(max:pass1_max) num_threads(actual_threads)" in fused_pass67 and
+            "#pragma omp parallel num_threads(actual_threads)" in fused_pass67,
+            "pass 67 fused analysis OpenMP regions must bind team size to resource count")
+    require("omp_set_num_threads(actual_threads)" not in fused_pass67,
+            "pass 67 fused analysis must not mutate global OpenMP thread count")
 
     if FAILURES:
         for f in FAILURES:
