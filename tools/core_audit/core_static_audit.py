@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 65):
+    for pass_num in range(1, 66):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1252,6 +1252,17 @@ def main() -> int:
     require("XXH3_64bits(src, len)" in hash_pass64 and
             "XXH3_64bits(data, len)" not in hash_pass64,
             "pass 64 hash oneshot must hash only validated span pointers")
+
+
+    windows_pass65 = read("spectral_engine/core/spectral_windows.c")
+    require("spectral_window_samples_valid" in windows_pass65 and
+            "!isfinite(window[i])" in windows_pass65,
+            "pass 65 window metrics must validate finite window samples")
+    require("sum > (double)FLT_MAX" in windows_pass65 and
+            "energy > (double)FLT_MAX" in windows_pass65,
+            "pass 65 window metric accumulators must reject unrepresentable totals")
+    require("if (!spectral_window_samples_valid(window, length)) {" in windows_pass65,
+            "pass 65 window metrics must fail closed before deriving calibration flags")
 
     if FAILURES:
         for f in FAILURES:

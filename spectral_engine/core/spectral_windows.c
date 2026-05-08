@@ -8,10 +8,23 @@
 #include "spectral_fast_math.h"
 #include <math.h>
 #include <string.h>
+#include <float.h>
 
 #if SPECTRAL_USE_VDSP
 #include <Accelerate/Accelerate.h>
 #endif
+
+static int spectral_window_samples_valid(const float* window, size_t length)
+{
+    if (length > 0u && !window) return 0;
+    for (size_t i = 0; i < length; i++) {
+        if (!isfinite(window[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 
 void spectral_window_hann(float* window, size_t length) {
     if (!window || length == 0) return;
@@ -178,25 +191,33 @@ const char* spectral_window_name(SpectralWindowType type) {
 }
 
 float spectral_window_sum(const float* window, size_t length) {
-    if (!window || length == 0) return 0.0f;
+    if (!window || length == 0 || !spectral_window_samples_valid(window, length)) return 0.0f;
 
     double sum = 0.0;
     for (size_t i = 0; i < length; i++) {
         sum += (double)window[i];
+        if (!isfinite(sum) || sum > (double)FLT_MAX || sum < -(double)FLT_MAX) {
+            return 0.0f;
+        }
     }
     return (float)sum;
 }
 
+
 float spectral_window_energy(const float* window, size_t length) {
-    if (!window || length == 0) return 0.0f;
+    if (!window || length == 0 || !spectral_window_samples_valid(window, length)) return 0.0f;
 
     double energy = 0.0;
     for (size_t i = 0; i < length; i++) {
         double v = (double)window[i];
         energy += v * v;
+        if (!isfinite(energy) || energy > (double)FLT_MAX) {
+            return 0.0f;
+        }
     }
     return (float)energy;
 }
+
 
 SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length) {
     SpectralWindowMetrics metrics = {0};
@@ -207,6 +228,9 @@ SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length
     metrics.endpoint_bin_magsq_scale = 1.0f;
 
     if (!window || length == 0u) {
+        return metrics;
+    }
+    if (!spectral_window_samples_valid(window, length)) {
         return metrics;
     }
 
