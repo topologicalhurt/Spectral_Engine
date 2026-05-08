@@ -159,15 +159,33 @@ static void thread_buffers_free(ThreadBuffers* tb) {
 }
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
-static void thread_buffers_reduce_float(const ThreadBuffers* tb, float* out_buffer, size_t out_len) {
-    memcpy(out_buffer, tb->bufs[0], out_len * sizeof(float));
+static SpectralError thread_buffers_reduce_float(const ThreadBuffers* tb, float* out_buffer,
+                                                 size_t out_len, size_t out_bytes) {
+    if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (tb->buf_size < out_bytes) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    memcpy(out_buffer, tb->bufs[0], out_bytes);
     for (int t = 1; t < tb->n_threads; t++) {
         spectral_vadd(out_buffer, (float*)tb->bufs[t], out_buffer, out_len);
     }
+    return SPECTRAL_OK;
 }
+
 #endif
 
-static void thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sample_t* out_buffer, size_t out_len) {
+static SpectralError thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sample_t* out_buffer,
+                                                  size_t out_len, size_t out_bytes) {
+    if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (tb->buf_size < out_bytes) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
     #pragma omp parallel for schedule(static)
     for (size_t j = 0; j < out_len; j++) {
         spectral_sample_t sum = ((spectral_sample_t*)tb->bufs[0])[j];
@@ -176,12 +194,14 @@ static void thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sampl
         }
         out_buffer[j] = sum;
     }
+    return SPECTRAL_OK;
 }
+
 
 /* All CPU synth variants: validate -> alloc ThreadBuffers -> parallel loop -> reduce -> free */
 
 typedef void (*SegmentSynthFn)(void* dst, const SegmentLoopParams* lp, const void* ctx);
-typedef void (*ReduceFn)(const ThreadBuffers* tb, void* out_buffer, size_t out_len);
+typedef SpectralError (*ReduceFn)(const ThreadBuffers* tb, void* out_buffer, size_t out_len, size_t out_bytes);
 
 static SpectralError synth_cpu_driver(
     SegmentArray sa, void* out_buffer, size_t out_len, size_t elem_size,
@@ -192,6 +212,7 @@ static SpectralError synth_cpu_driver(
     SynthParams params = *params_in;
     size_t out_bytes = 0;
     SpectralError tb_err = SPECTRAL_OK;
+    SpectralError reduce_err = SPECTRAL_OK;
     int n_parts = synth_partition_count(sa.count, n_threads);
     ThreadBuffers tb = {0};
 
@@ -224,20 +245,26 @@ static SpectralError synth_cpu_driver(
         }
     }
 
-    reduce_fn(&tb, out_buffer, out_len);
+    reduce_err = reduce_fn(&tb, out_buffer, out_len, out_bytes);
+    if (reduce_err != SPECTRAL_OK) {
+        memset(out_buffer, 0, out_bytes);
+        thread_buffers_free(&tb);
+        *t_synth = 0;
+        return reduce_err;
+    }
     thread_buffers_free(&tb);
     *t_synth = omp_get_wtime() - synth_start;
     return SPECTRAL_OK;
 }
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
-static void reduce_float_wrapper(const ThreadBuffers* tb, void* out, size_t len) {
-    thread_buffers_reduce_float(tb, (float*)out, len);
+static SpectralError reduce_float_wrapper(const ThreadBuffers* tb, void* out, size_t len, size_t out_bytes) {
+    return thread_buffers_reduce_float(tb, (float*)out, len, out_bytes);
 }
 #endif
 
-static void reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len) {
-    thread_buffers_reduce_native(tb, (spectral_sample_t*)out, len);
+static SpectralError reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len, size_t out_bytes) {
+    return thread_buffers_reduce_native(tb, (spectral_sample_t*)out, len, out_bytes);
 }
 
 /* Per-segment callbacks */

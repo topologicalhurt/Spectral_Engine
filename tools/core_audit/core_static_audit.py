@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 51):
+    for pass_num in range(1, 52):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1122,6 +1122,17 @@ def main() -> int:
     require("gpu_tile_data_refs_valid(out_td->ranges" in synth_internal_pass50 and
             "gpu_tile_cache_clear();" in synth_internal_pass50,
             "pass 50 GPU tile cache hits must be validated before reuse")
+
+
+    cpu_pass51 = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
+    require("memcpy(out_buffer, tb->bufs[0], out_bytes)" in cpu_pass51 and
+            "out_len * sizeof(float)" not in cpu_pass51,
+            "pass 51 CPU synth reduction must reuse checked byte count")
+    require("typedef SpectralError (*ReduceFn)(const ThreadBuffers* tb, void* out_buffer, size_t out_len, size_t out_bytes);" in cpu_pass51,
+            "pass 51 CPU synth reduction function signature must carry checked byte count")
+    require("reduce_err = reduce_fn(&tb, out_buffer, out_len, out_bytes);" in cpu_pass51 and
+            "return reduce_err;" in cpu_pass51,
+            "pass 51 CPU synth driver must propagate reduction contract failures")
 
     if FAILURES:
         for f in FAILURES:
