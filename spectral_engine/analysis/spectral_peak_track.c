@@ -375,7 +375,21 @@ int spectral_tracker_flush_candidate_batch(
 #endif
 )
 {
+    if (!tracker || tid < 0 || tid >= tracker->n_threads ||
+        !candidate_batch_count || !local_segments) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return 0;
+    }
     if (*candidate_batch_count == 0) return 1;
+    if (!candidate_batch || !row || !next_row || !phase_row) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return 0;
+    }
+    if (*candidate_batch_count > SPECTRAL_TRACK_CANDIDATE_BATCH) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        *candidate_batch_count = 0;
+        return 0;
+    }
 
     if (!spectral_tracker_process_candidate_batch(
             tracker,
@@ -408,6 +422,7 @@ int spectral_tracker_flush_candidate_batch(
     return 1;
 }
 
+
 static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
     SpectralTracker* tracker,
     int tid,
@@ -434,6 +449,40 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
 #endif
 )
 {
+    if (!tracker || !candidate_batch || !candidate_batch_count) return 0;
+    if (*candidate_batch_count >= SPECTRAL_TRACK_CANDIDATE_BATCH) {
+        if (!spectral_tracker_flush_candidate_batch(
+            tracker,
+            tid,
+            candidate_batch,
+            candidate_batch_count,
+            row,
+            next_row,
+            phase_row,
+            next_phase_row,
+            t_hop,
+            threshsq,
+            freq_step_omega,
+            freq_step_df,
+            inv_hop,
+            hop_float,
+            local_segments
+#if SPECTRAL_TRACK_DEBUG_TIMING
+            , local_validate_time
+            , local_emit_time
+            , local_emit_alloc_time
+            , local_emit_interp_time
+            , local_emit_amp_time
+#endif
+        )) {
+            return 0;
+        }
+    }
+    if (*candidate_batch_count >= SPECTRAL_TRACK_CANDIDATE_BATCH) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return 0;
+    }
+
     candidate_batch[(*candidate_batch_count)++] = candidate;
     if (*candidate_batch_count < SPECTRAL_TRACK_CANDIDATE_BATCH) return 1;
 

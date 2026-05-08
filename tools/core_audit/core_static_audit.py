@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 73):
+    for pass_num in range(1, 74):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1329,6 +1329,15 @@ def main() -> int:
     require("double t_hop_d = (double)(global_frame_offset + t) * (double)hop_float;" in track_pass72 and
             "const float t_hop = (float)t_hop_d;" in track_pass72,
             "pass 72 tracker process must prove frame time is representable as float")
+
+
+    track_pass73 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("*candidate_batch_count > SPECTRAL_TRACK_CANDIDATE_BATCH" in track_pass73,
+            "pass 73 tracker candidate batch flush must validate count capacity")
+    require("*candidate_batch_count >= SPECTRAL_TRACK_CANDIDATE_BATCH" in track_pass73,
+            "pass 73 tracker candidate queue must check capacity before write")
+    require("!candidate_batch || !row || !next_row || !phase_row" in track_pass73,
+            "pass 73 tracker candidate flush must validate batch and row pointers")
 
     if FAILURES:
         for f in FAILURES:
