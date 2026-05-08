@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 58):
+    for pass_num in range(1, 59):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1186,6 +1186,16 @@ def main() -> int:
     require("stereo[i * 2]" not in out_pass57 and
             "stereo[i * 2 + 1]" not in out_pass57,
             "pass 57 mono-to-stereo helpers must not use repeated raw index products")
+
+
+    out_pass58 = read("spectral_engine/core/spectral_out.c")
+    require("riff_payload_size = (uint64_t)hdr[4]" in out_pass58 and
+            "riff_end = 8u + riff_payload_size;" in out_pass58,
+            "pass 58 WAV RIFF scrubber must parse declared RIFF extent")
+    require("riff_end - chunk_header_pos < (uint64_t)sizeof(chunk)" in out_pass58 and
+            "(uint64_t)size > riff_end - data_pos" in out_pass58 and
+            "next_chunk_pos > riff_end" in out_pass58,
+            "pass 58 WAV RIFF scrubber must bound chunk scanning by declared RIFF extent")
 
     if FAILURES:
         for f in FAILURES:

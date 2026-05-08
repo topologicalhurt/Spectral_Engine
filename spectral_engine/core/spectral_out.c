@@ -218,6 +218,8 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
     FILE* f = NULL;
     unsigned char hdr[12];
     uint64_t file_size = 0;
+    uint64_t riff_payload_size = 0;
+    uint64_t riff_end = 0;
 
     if (spectral_is_empty_string(path)) return;
 
@@ -238,6 +240,20 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
         return;
     }
 
+    riff_payload_size = (uint64_t)hdr[4]
+                      | ((uint64_t)hdr[5] << 8)
+                      | ((uint64_t)hdr[6] << 16)
+                      | ((uint64_t)hdr[7] << 24);
+    if (riff_payload_size < 4u || riff_payload_size > file_size - 8u) {
+        spectral_fs_close(&f, SPECTRAL_OK);
+        return;
+    }
+    riff_end = 8u + riff_payload_size;
+    if (riff_end > file_size) {
+        spectral_fs_close(&f, SPECTRAL_OK);
+        return;
+    }
+
     for (;;) {
         unsigned char chunk[8];
         uint64_t chunk_header_pos = 0;
@@ -247,8 +263,8 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
         uint32_t size = 0;
 
         if (spectral_fs_tell(f, &chunk_header_pos, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) break;
-        if (chunk_header_pos > file_size ||
-            file_size - chunk_header_pos < (uint64_t)sizeof(chunk)) {
+        if (chunk_header_pos > riff_end ||
+            riff_end - chunk_header_pos < (uint64_t)sizeof(chunk)) {
             break;
         }
 
@@ -266,7 +282,7 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
         /* Validate the RIFF chunk extent before adding offsets or seeking.
          * This scrubber is best-effort, but it must not wrap data_pos + size
          * or cast an unrepresentable uint64_t offset into the seek API. */
-        if ((uint64_t)size > file_size - data_pos) {
+        if ((uint64_t)size > riff_end - data_pos) {
             break;
         }
         chunk_end = data_pos + (uint64_t)size;
@@ -276,7 +292,7 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
         } else {
             next_chunk_pos = chunk_end;
         }
-        if (next_chunk_pos > file_size) {
+        if (next_chunk_pos > riff_end) {
             break;
         }
 
@@ -284,8 +300,8 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
             unsigned char zero4[4] = {0, 0, 0, 0};
             uint64_t timestamp_pos = data_pos + 4u;
 
-            if (timestamp_pos > file_size ||
-                sizeof(zero4) > (size_t)(file_size - timestamp_pos)) {
+            if (timestamp_pos > riff_end ||
+                sizeof(zero4) > (size_t)(riff_end - timestamp_pos)) {
                 break;
             }
             if (spectral_wav_seek_u64_checked(f, timestamp_pos, SPECTRAL_ERR_FILE_WRITE)) {
@@ -301,6 +317,7 @@ static void spectral_wav_scrub_peak_timestamp(const char* path) {
 
     spectral_fs_close(&f, SPECTRAL_OK);
 }
+
 
 
 SpectralError spectral_audio_write(const char* path, const float* buffer,
