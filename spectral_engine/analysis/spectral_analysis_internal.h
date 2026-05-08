@@ -46,6 +46,8 @@ typedef struct {
 #endif
 } SpectralFftResources;
 
+int spectral_analysis_effective_thread_count(void);
+
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track);
 
 int spectral_analysis_estimate_fft_bytes(size_t frame_count,

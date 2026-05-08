@@ -7,6 +7,20 @@
 #include "spectral_analysis_internal.h"
 #include "spectral_log.h"
 
+int spectral_analysis_effective_thread_count(void)
+{
+    int n_threads = omp_get_max_threads();
+
+    if (n_threads < 1) {
+        return 1;
+    }
+    if (n_threads > SPECTRAL_MAX_THREADS) {
+        return SPECTRAL_MAX_THREADS;
+    }
+    return n_threads;
+}
+
+
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track)
 {
     if (t_fft) *t_fft = 0;

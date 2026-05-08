@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 70):
+    for pass_num in range(1, 71):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1297,6 +1297,17 @@ def main() -> int:
             "pass 69 FFT single frame must validate resource/thread domain")
     require(fft_pass69.count("spectral_fft_single_frame_clear(out_magsq, out_phases, res ? res->n_freqs : 0u, out_frame_max);") == 2,
             "pass 69 FFT single frame must fail closed in both backend definitions")
+
+
+    analysis_pass70 = read("spectral_engine/analysis/spectral_analysis.c")
+    full_pass70 = read("spectral_engine/analysis/spectral_analysis_full.c")
+    fused_pass70 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("int spectral_analysis_effective_thread_count(void)" in analysis_pass70 and
+            "SPECTRAL_MAX_THREADS" in analysis_pass70,
+            "pass 70 analysis thread count must clamp OpenMP max threads to engine domain")
+    require("int n_threads = spectral_analysis_effective_thread_count();" in full_pass70 and
+            "int n_threads = spectral_analysis_effective_thread_count();" in fused_pass70,
+            "pass 70 analysis paths must use bounded effective thread count")
 
     if FAILURES:
         for f in FAILURES:
