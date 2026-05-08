@@ -15,6 +15,7 @@ static int spectral_complex_interleaved_count_valid(size_t count) {
 }
 
 void spectral_vmul(const float* a, const float* b, float* dst, size_t len) {
+    if (!a || !b || !dst || len == 0) return;
     size_t i = 0;
 #ifdef __AVX2__
     for (; i + 8 <= len; i += 8) {
@@ -34,6 +35,7 @@ void spectral_vmul(const float* a, const float* b, float* dst, size_t len) {
 }
 
 void spectral_vadd(const float* a, const float* b, float* dst, size_t len) {
+    if (!a || !b || !dst || len == 0) return;
     size_t i = 0;
 #ifdef __AVX2__
     for (; i + 8 <= len; i += 8) {
@@ -53,6 +55,7 @@ void spectral_vadd(const float* a, const float* b, float* dst, size_t len) {
 }
 
 void spectral_vsq(const float* src, float* dst, size_t len) {
+    if (!src || !dst || len == 0) return;
     size_t i = 0;
 #ifdef __AVX2__
     for (; i + 8 <= len; i += 8) {
@@ -70,7 +73,8 @@ void spectral_vsq(const float* src, float* dst, size_t len) {
 }
 
 void spectral_vmax(const float* src, float* out, size_t len) {
-    if (len == 0) { *out = 0.0f; return; }
+    if (!out) return;
+    if (!src || len == 0) { *out = 0.0f; return; }
     float m = src[0];
     size_t i = 0;
 #ifdef __AVX2__
@@ -106,7 +110,8 @@ void spectral_vmax(const float* src, float* out, size_t len) {
 }
 
 void spectral_vmaxmgv(const float* src, float* out, size_t len) {
-    if (len == 0) { *out = 0.0f; return; }
+    if (!out) return;
+    if (!src || len == 0) { *out = 0.0f; return; }
     float m = 0.0f;
     size_t i = 0;
 #ifdef __AVX2__
@@ -148,6 +153,7 @@ void spectral_vmaxmgv(const float* src, float* out, size_t len) {
 }
 
 void spectral_vsmul(const float* src, float scalar, float* dst, size_t len) {
+    if (!src || !dst || len == 0) return;
     size_t i = 0;
 #ifdef __AVX2__
     {
@@ -169,6 +175,7 @@ void spectral_vsmul(const float* src, float scalar, float* dst, size_t len) {
 }
 
 void spectral_vatan2(const float* y, const float* x, float* dst, size_t len) {
+    if (!y || !x || !dst || len == 0) return;
     size_t i = 0;
 
 #if !SPECTRAL_ENABLE_APPROX_ATAN2

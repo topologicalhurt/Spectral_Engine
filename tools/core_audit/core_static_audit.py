@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 60):
+    for pass_num in range(1, 61):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1206,6 +1206,16 @@ def main() -> int:
             "pass 59 deinterleave must guard complex interleaved indexing")
     require(vec_pass59.count("*max_magsq = 0.0f;") >= 2,
             "pass 59 magnitude helpers must clear max output before early return")
+
+
+    vec_pass60 = read("spectral_engine/core/spectral_vector_ops.c")
+    require("if (!a || !b || !dst || len == 0) return;" in vec_pass60,
+            "pass 60 vector primitives must guard binary vector pointers")
+    require("if (!src || !dst || len == 0) return;" in vec_pass60,
+            "pass 60 vector primitives must guard unary vector pointers")
+    require("if (!out) return;" in vec_pass60 and
+            "if (!src || len == 0) { *out = 0.0f; return; }" in vec_pass60,
+            "pass 60 vector max helpers must guard out pointer and empty spans")
 
     if FAILURES:
         for f in FAILURES:
