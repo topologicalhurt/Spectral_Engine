@@ -23,6 +23,7 @@
 #include "spectral_peak_estimator.h"
 #include "spectral_fast_math.h"
 #include <limits.h>
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -429,10 +430,13 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
     float phase0 = 0.0f;
     float phase1 = 0.0f;
     float phase_delta = 0.0f;
-    float expected_center = 0.0f;
+    double expected_center_d = 0.0;
+    double residual_arg_d = 0.0;
     float residual = 0.0f;
-    float denom = 0.0f;
+    double denom_d = 0.0;
     float phase_bin_offset = 0.0f;
+    double phase_omega_d = 0.0;
+    double phase_error_arg_d = 0.0;
     float phase_omega = 0.0f;
     float phase_error = 0.0f;
 
@@ -441,6 +445,7 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
         return 0;
     }
     if (input->bin >= input->n_freqs ||
+        (double)input->bin > (double)FLT_MAX ||
         !isfinite(input->hop_float) || input->hop_float <= 0.0f ||
         !isfinite(input->freq_step_omega) || input->freq_step_omega <= 0.0f ||
         !isfinite(model_omega)) {
@@ -453,26 +458,55 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
         return 0;
     }
 
+    phase_delta = phase1 - phase0;
+    if (!isfinite(phase_delta)) {
+        return 0;
+    }
+
     /* Phase-vocoder instantaneous-frequency relation:
      *
      *   residual = princarg(phi[t+1,k] - phi[t,k] - omega_bin_center * hop)
      *   bin_offset_from_phase = residual / (bin_step_omega * hop)
      *
-     * This is diagnostic here. It tells us whether the magnitude-derived
-     * oscillator model agrees with adjacent-frame phase advance, but it does
-     * not yet override the emitted omega/df fields. */
-    phase_delta = phase1 - phase0;
-    expected_center = (float)input->bin * input->freq_step_omega * input->hop_float;
-    residual = spectral_peak_wrap_phase_pi(phase_delta - expected_center);
-    denom = input->freq_step_omega * input->hop_float;
-    if (!isfinite(denom) || fabsf(denom) < 1.0e-12f) {
+     * The products are derived in double before narrowing into the float-domain
+     * phase wrapper.  Without this, large finite bin/hop values can overflow
+     * the intermediate float product and still look like a phase-policy result. */
+    expected_center_d = (double)input->bin *
+                        (double)input->freq_step_omega *
+                        (double)input->hop_float;
+    residual_arg_d = (double)phase_delta - expected_center_d;
+    denom_d = (double)input->freq_step_omega * (double)input->hop_float;
+
+    if (!isfinite(expected_center_d) ||
+        !isfinite(residual_arg_d) ||
+        fabs(residual_arg_d) > (double)FLT_MAX ||
+        !isfinite(denom_d) ||
+        fabs(denom_d) < 1.0e-12 ||
+        fabs(denom_d) > (double)FLT_MAX) {
         return 0;
     }
 
-    phase_bin_offset = residual / denom;
-    phase_omega = ((float)input->bin + phase_bin_offset) * input->freq_step_omega;
-    phase_error = spectral_peak_wrap_phase_pi(phase_delta - model_omega * input->hop_float);
-    if (!isfinite(phase_bin_offset) || !isfinite(phase_omega) || !isfinite(phase_error)) {
+    residual = spectral_peak_wrap_phase_pi((float)residual_arg_d);
+    phase_bin_offset = residual / (float)denom_d;
+    if (!isfinite(phase_bin_offset)) {
+        return 0;
+    }
+
+    phase_omega_d = ((double)input->bin + (double)phase_bin_offset) *
+                    (double)input->freq_step_omega;
+    phase_error_arg_d = (double)phase_delta -
+                        ((double)model_omega * (double)input->hop_float);
+
+    if (!isfinite(phase_omega_d) ||
+        fabs(phase_omega_d) > (double)FLT_MAX ||
+        !isfinite(phase_error_arg_d) ||
+        fabs(phase_error_arg_d) > (double)FLT_MAX) {
+        return 0;
+    }
+
+    phase_omega = (float)phase_omega_d;
+    phase_error = spectral_peak_wrap_phase_pi((float)phase_error_arg_d);
+    if (!isfinite(phase_omega) || !isfinite(phase_error)) {
         return 0;
     }
 
@@ -481,6 +515,7 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
     *out_phase_error = phase_error;
     return 1;
 }
+
 
 
 static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateInput* input,
