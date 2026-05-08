@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 54):
+    for pass_num in range(1, 55):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1152,6 +1152,14 @@ def main() -> int:
             "pass 53 audio window must validate sample-rate domain")
     require("*out_start = NULL;" in audio_in_pass53 and "*out_frames = 0;" in audio_in_pass53,
             "pass 53 audio window must clear outputs before validation")
+
+
+    wavetable_pass54 = read("spectral_engine/core/spectral_wavetable.c")
+    require("required_len = 11u + ((size_t)byte_count * 2u);" in wavetable_pass54 and
+            "if (line_len != required_len) return WAVETABLE_ERR_FORMAT;" in wavetable_pass54,
+            "pass 54 wavetable HEX parser must validate exact declared record length")
+    require("if (data_len != 0u || address != 0u)" in wavetable_pass54,
+            "pass 54 wavetable HEX loader must require canonical EOF record shape")
 
     if FAILURES:
         for f in FAILURES:

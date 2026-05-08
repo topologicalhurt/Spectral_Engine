@@ -404,12 +404,23 @@ static WavetableError parse_hex_line(const char* line, uint8_t* data, size_t dat
     uint8_t byte_count = 0;
     uint8_t checksum_calc = 0;
     uint8_t checksum_read = 0;
+    size_t line_len = 0;
+    size_t required_len = 0;
 
-    if (!line || line[0] != ':') return WAVETABLE_ERR_FORMAT;
+    if (!line || !data || !data_len || !address || !record_type) return WAVETABLE_ERR_PARAM;
+    if (line[0] != ':') return WAVETABLE_ERR_FORMAT;
+
+    line_len = strcspn(line, "\r\n");
+    if (line_len < 11u) return WAVETABLE_ERR_FORMAT;
+
     if (sscanf(line + 1, "%2hhx", &byte_count) != 1) return WAVETABLE_ERR_FORMAT;
+    if (byte_count > data_capacity) return WAVETABLE_ERR_SIZE;
+
+    required_len = 11u + ((size_t)byte_count * 2u);
+    if (line_len != required_len) return WAVETABLE_ERR_FORMAT;
+
     if (sscanf(line + 3, "%4hx", address) != 1) return WAVETABLE_ERR_FORMAT;
     if (sscanf(line + 7, "%2hhx", record_type) != 1) return WAVETABLE_ERR_FORMAT;
-    if (byte_count > data_capacity) return WAVETABLE_ERR_SIZE;
 
     checksum_calc += byte_count;
     checksum_calc += (uint8_t)((*address >> 8) & 0xFFu);
@@ -427,6 +438,7 @@ static WavetableError parse_hex_line(const char* line, uint8_t* data, size_t dat
 
     return WAVETABLE_OK;
 }
+
 
 WavetableError spectral_wavetable_load_hex(SpectralWavetableBank* bank,
                                             const char* filename,
@@ -498,6 +510,12 @@ WavetableError spectral_wavetable_load_hex(SpectralWavetableBank* bank,
             }
             memcpy((uint8_t*)temp_table + offset, data, data_len);
         } else if (record_type == 0x01) {
+            if (data_len != 0u || address != 0u) {
+                spectral_fs_close(&f, SPECTRAL_OK);
+                free(temp_table);
+                free(written);
+                return WAVETABLE_ERR_FORMAT;
+            }
             saw_eof = 1;
             break;
         } else {
