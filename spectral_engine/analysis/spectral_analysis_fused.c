@@ -26,6 +26,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                                          double* t_fft, double* t_track)
 {
     size_t n_fft_f32_bytes = 0;
+    size_t n_freqs_f32_bytes = 0;
     float* window_func = NULL;
     SpectralWindowMetrics window_metrics = {0};
     SpectralFftResources res = {0};
@@ -40,7 +41,8 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
     if (actual_threads < 1) actual_threads = 1;
     if (n_frames < 2u) goto fail;
-    if (!spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes)) goto fail;
+    if (!spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes) ||
+        !spectral_array_bytes(n_freqs, sizeof(float), &n_freqs_f32_bytes)) goto fail;
 
     window_func = spectral_aligned_alloc(n_fft_f32_bytes);
     if (!window_func) goto fail;
@@ -64,7 +66,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         {
             int tid = omp_get_thread_num();
             int local_failed = 0;
-            float* scratch_magsq = spectral_aligned_alloc(n_freqs * sizeof(float));
+            float* scratch_magsq = spectral_aligned_alloc(n_freqs_f32_bytes);
             if (!scratch_magsq) {
                 local_failed = 1;
                 #pragma omp atomic write
@@ -104,10 +106,10 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         #pragma omp parallel
         {
             int tid = omp_get_thread_num();
-            float* row_curr = spectral_aligned_alloc(n_freqs * sizeof(float));
-            float* row_next = spectral_aligned_alloc(n_freqs * sizeof(float));
-            float* phase_curr = spectral_aligned_alloc(n_freqs * sizeof(float));
-            float* phase_next = spectral_aligned_alloc(n_freqs * sizeof(float));
+            float* row_curr = spectral_aligned_alloc(n_freqs_f32_bytes);
+            float* row_next = spectral_aligned_alloc(n_freqs_f32_bytes);
+            float* phase_curr = spectral_aligned_alloc(n_freqs_f32_bytes);
+            float* phase_next = spectral_aligned_alloc(n_freqs_f32_bytes);
             uint32_t candidate_batch[SPECTRAL_TRACK_CANDIDATE_BATCH];
             size_t candidate_batch_count = 0;
             uint64_t local_pairs = 0;

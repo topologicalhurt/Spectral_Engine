@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 66):
+    for pass_num in range(1, 67):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1263,6 +1263,14 @@ def main() -> int:
             "pass 65 window metric accumulators must reject unrepresentable totals")
     require("if (!spectral_window_samples_valid(window, length)) {" in windows_pass65,
             "pass 65 window metrics must fail closed before deriving calibration flags")
+
+
+    fused_pass66 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("spectral_array_bytes(n_freqs, sizeof(float), &n_freqs_f32_bytes)" in fused_pass66,
+            "pass 66 fused analysis scratch rows must precompute checked n_freqs byte count")
+    require("spectral_aligned_alloc(n_freqs_f32_bytes)" in fused_pass66 and
+            "n_freqs * sizeof(float)" not in fused_pass66,
+            "pass 66 fused analysis scratch rows must not use raw n_freqs float products")
 
     if FAILURES:
         for f in FAILURES:
