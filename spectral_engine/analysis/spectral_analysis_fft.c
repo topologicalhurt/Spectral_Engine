@@ -4,10 +4,27 @@
  */
 #include "spectral_analysis_internal.h"
 #include <limits.h>
+#include <float.h>
 
 static int spectral_fft_magsq_scale_valid(float scale)
 {
     return isfinite(scale) && scale > 0.0f;
+}
+
+static float spectral_fft_scaled_magsq(float value, float scale)
+{
+    double scaled = 0.0;
+
+    if (!isfinite(value) || value < 0.0f || !spectral_fft_magsq_scale_valid(scale)) {
+        return 0.0f;
+    }
+
+    scaled = (double)value * (double)scale;
+    if (!isfinite(scaled) || scaled < 0.0 || scaled > (double)FLT_MAX) {
+        return 0.0f;
+    }
+
+    return (float)scaled;
 }
 
 void spectral_fft_resources_set_magsq_scales(SpectralFftResources* res,
@@ -29,12 +46,13 @@ static float spectral_fft_trackable_magsq_max(const float* magsq, size_t n_freqs
     if (!magsq || n_freqs <= 2u) return 0.0f;
 
     for (size_t i = 1u; i + 1u < n_freqs; i++) {
-        if (magsq[i] > max_magsq) {
+        if (isfinite(magsq[i]) && magsq[i] > max_magsq) {
             max_magsq = magsq[i];
         }
     }
     return max_magsq;
 }
+
 
 static void spectral_fft_apply_magsq_scales(const SpectralFftResources* res,
                                             float* magsq,
@@ -59,12 +77,12 @@ static void spectral_fft_apply_magsq_scales(const SpectralFftResources* res,
      * https://scipy.github.io/devdocs/reference/generated/scipy.signal.periodogram.html
      * https://www.fftw.org/doc/The-1d-Real_002ddata-DFT.html
      */
-    magsq[0] *= endpoint_scale;
+    magsq[0] = spectral_fft_scaled_magsq(magsq[0], endpoint_scale);
     if (n_freqs > 1u) {
-        magsq[n_freqs - 1u] *= endpoint_scale;
+        magsq[n_freqs - 1u] = spectral_fft_scaled_magsq(magsq[n_freqs - 1u], endpoint_scale);
     }
     for (size_t i = 1u; i + 1u < n_freqs; i++) {
-        magsq[i] *= positive_scale;
+        magsq[i] = spectral_fft_scaled_magsq(magsq[i], positive_scale);
     }
     if (frame_max) {
         *frame_max = spectral_fft_trackable_magsq_max(magsq, n_freqs);

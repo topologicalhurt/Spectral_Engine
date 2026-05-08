@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 62):
+    for pass_num in range(1, 63):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1224,6 +1224,16 @@ def main() -> int:
             "pass 61 FFT frame dispatch must validate frame range and output shape")
     require("#pragma omp parallel reduction(max:max_magsq) num_threads(res->n_threads)" in fft_pass61,
             "pass 61 FFT frame dispatch must bind OpenMP team size to allocated resources")
+
+
+    fft_pass62 = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require("spectral_fft_scaled_magsq" in fft_pass62 and
+            "scaled > (double)FLT_MAX" in fft_pass62,
+            "pass 62 FFT magnitude scaling must validate scaled finite product")
+    require("magsq[i] = spectral_fft_scaled_magsq(magsq[i], positive_scale);" in fft_pass62,
+            "pass 62 FFT magnitude scaling must route interior bins through checked helper")
+    require("if (isfinite(magsq[i]) && magsq[i] > max_magsq)" in fft_pass62,
+            "pass 62 FFT trackable max must ignore non-finite bins")
 
     if FAILURES:
         for f in FAILURES:
