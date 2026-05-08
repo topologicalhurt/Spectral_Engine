@@ -527,6 +527,8 @@ static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateIn
 
 static int spectral_peak_bounded_magsq_gain_ok(float center_magsq, float peak_magsq) {
     float max_gain = SPECTRAL_PEAK_AMP_MAX_GAIN;
+    double gain_limit = 0.0;
+
     if (!spectral_peak_finite_positive(center_magsq) ||
         !spectral_peak_finite_positive(peak_magsq)) {
         return 0;
@@ -534,8 +536,18 @@ static int spectral_peak_bounded_magsq_gain_ok(float center_magsq, float peak_ma
     if (!isfinite(max_gain) || max_gain < 1.0f) {
         max_gain = 1.0f;
     }
-    return peak_magsq <= center_magsq * max_gain;
+
+    /* Do not compute the gain limit in float.  If center_magsq is large,
+     * center_magsq * max_gain can overflow to Inf and every finite candidate
+     * would pass the bound. */
+    gain_limit = (double)center_magsq * (double)max_gain;
+    if (!isfinite(gain_limit) || gain_limit <= 0.0) {
+        return 0;
+    }
+
+    return (double)peak_magsq <= gain_limit;
 }
+
 
 static int spectral_peak_window_peak_magsq(const SpectralPeakEstimateInput* input,
                                            size_t center_bin,

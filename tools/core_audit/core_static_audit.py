@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 74):
+    for pass_num in range(1, 75):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1338,6 +1338,14 @@ def main() -> int:
             "pass 73 tracker candidate queue must check capacity before write")
     require("!candidate_batch || !row || !next_row || !phase_row" in track_pass73,
             "pass 73 tracker candidate flush must validate batch and row pointers")
+
+
+    peak_pass74 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("gain_limit = (double)center_magsq * (double)max_gain;" in peak_pass74 and
+            "return (double)peak_magsq <= gain_limit;" in peak_pass74,
+            "pass 74 peak amplitude gain bound must use checked double product")
+    require("peak_magsq <= center_magsq * max_gain" not in peak_pass74,
+            "pass 74 peak amplitude gain bound must not use raw float product")
 
     if FAILURES:
         for f in FAILURES:
