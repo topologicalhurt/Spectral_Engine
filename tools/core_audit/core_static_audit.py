@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 76):
+    for pass_num in range(1, 81):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1355,6 +1355,48 @@ def main() -> int:
     require("phase_omega_d = ((double)input->bin + (double)phase_bin_offset)" in peak_pass75 and
             "fabs(phase_omega_d) > (double)FLT_MAX" in peak_pass75,
             "pass 75 peak phase advance must check phase omega before narrowing")
+
+
+    peak_pass76 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("double den_mag2 = 0.0;" in peak_pass76 and
+            "offset_d = (num_re * den_re + num_im * den_im) / den_mag2;" in peak_pass76,
+            "pass 76 Jacobsen complex offset must use checked double quotient products")
+    require("if (offset_d > 0.5)" in peak_pass76 and
+            "*out_offset = (float)offset_d;" in peak_pass76,
+            "pass 76 Jacobsen complex offset must clamp before float narrowing")
+
+
+    peak_pass77 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("double ap = 0.0, am = 0.0;" in peak_pass77 and
+            "ap = ((double)xp.re * (double)x0.re" in peak_pass77,
+            "pass 77 Quinn second estimator must use double dot products")
+    require("dp2 > (double)FLT_MAX" in peak_pass77 and
+            "tau_p = spectral_peak_quinn_tau((float)dp2);" in peak_pass77,
+            "pass 77 Quinn second estimator must validate tau inputs before narrowing")
+
+
+    peak_pass78 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("denom = (double)left - 2.0 * (double)center + (double)right;" in peak_pass78 and
+            "offset_d = numer / denom;" in peak_pass78,
+            "pass 78 magnitude parabolic estimator must compute quadratic fit in double")
+    require("offset = 0.5f * (left - right) / denom;" not in peak_pass78,
+            "pass 78 magnitude parabolic estimator must not use raw float offset quotient")
+
+
+    peak_pass79 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("left = input->magsq_row[center_bin - 1u];" in peak_pass79 and
+            "!spectral_peak_finite_nonnegative(left)" in peak_pass79,
+            "pass 79 peak window callback must validate current-frame neighborhood")
+    require("float left = input->next_magsq_row[next_bin - 1u];" in peak_pass79 and
+            "!isfinite(next_offset)" in peak_pass79,
+            "pass 79 peak window callback must validate next-frame neighborhood and offset")
+
+
+    fast_pass80 = read("spectral_engine/core/spectral_fast_math.c")
+    require(fast_pass80.count("if (!(x > 0.0f) || !isfinite(x)) return 0.0f;") >= 2,
+            "pass 80 fast sqrt helpers must reject non-finite inputs")
+    require("return isfinite(y) && y > 0.0f ? y : 0.0f;" in fast_pass80,
+            "pass 80 fast sqrt approximation paths must validate computed result")
 
     if FAILURES:
         for f in FAILURES:

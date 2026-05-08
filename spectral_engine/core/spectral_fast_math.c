@@ -31,7 +31,7 @@ float fast_atan2(float y, float x) {
  * be audible when propagated across many emitted segments.
  */
 float fast_inv_sqrt(float x) {
-    if (x <= 0.0f) return 0.0f;
+    if (!(x > 0.0f) || !isfinite(x)) return 0.0f;
 #if defined(SPECTRAL_ENABLE_APPROX_INV_SQRT) && SPECTRAL_ENABLE_APPROX_INV_SQRT
     union { float f; uint32_t i; } conv;
     float x2 = x * 0.5f, y = x;
@@ -40,21 +40,26 @@ float fast_inv_sqrt(float x) {
     y = conv.f;
     y = y * (1.5f - (x2 * y * y));
     y = y * (1.5f - (x2 * y * y));
-    return y;
+    return isfinite(y) && y > 0.0f ? y : 0.0f;
 #else
     return 1.0f / sqrtf(x);
 #endif
 }
 
+
 /* fast_sqrt: exact by default; approximate only when explicitly requested. */
 float fast_sqrt(float x) {
-    if (x <= 0.0f) return 0.0f;
+    if (!(x > 0.0f) || !isfinite(x)) return 0.0f;
 #if defined(SPECTRAL_ENABLE_APPROX_INV_SQRT) && SPECTRAL_ENABLE_APPROX_INV_SQRT
-    return x * fast_inv_sqrt(x);
+    {
+        float y = x * fast_inv_sqrt(x);
+        return isfinite(y) && y > 0.0f ? y : 0.0f;
+    }
 #else
     return sqrtf(x);
 #endif
 }
+
 
 /* fast_peak_log: exact by default.
  *
