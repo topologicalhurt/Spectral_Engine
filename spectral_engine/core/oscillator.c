@@ -128,7 +128,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
 /* All constants injected from spectral_consts.h via METAL_CONST_* macros
  * defined in spectral_osc_formulas.h. Formulas must match the canonical
  * C implementations in spectral_osc_formulas.h exactly. */
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 3,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 4,
     "oscillator_metal_source MSL strings are stale — mirror formula changes and bump version");
 const char* oscillator_metal_source =
 "#define TIMBRE_SINE     0\n"

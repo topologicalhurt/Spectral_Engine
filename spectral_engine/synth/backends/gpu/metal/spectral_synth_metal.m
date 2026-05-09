@@ -20,7 +20,7 @@
  * here means the Metal shader is out of sync with CPU/CUDA backends. */
 _Static_assert(SPECTRAL_SEGMENT_MATH_VERSION == 1,
     "Metal segment_math MSL strings are stale — update metalKernelCode and bump version");
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 3,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 4,
     "Metal oscillator MSL strings are stale — update oscillator_metal_source and bump version");
 
 /* Metal kernel source - struct definitions and synthesis kernel.

@@ -136,6 +136,27 @@ SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size
     return SYNTH_VALIDATE_OK;
 }
 
+static int synth_segment_payload_valid(const Segment* segs, size_t count)
+{
+    if (count > 0u && !segs) return 0;
+
+    for (size_t i = 0; i < count; i++) {
+        const Segment* s = &segs[i];
+
+        if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
+        if (!spectral_is_finite_f32(s->length) || s->length <= 0.0f) return 0;
+        if (!spectral_is_finite_f32(s->phase)) return 0;
+        if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
+        if (!spectral_is_finite_f32(s->df)) return 0;
+        if (!spectral_is_finite_f32(s->amp) || s->amp < 0.0f) return 0;
+        if (!spectral_is_finite_f32(s->da)) return 0;
+        if (!spectral_is_finite_f32(s->width)) return 0;
+    }
+
+    return 1;
+}
+
+
 static SynthPreflight synth_preflight_common(
     void* out_buffer, size_t out_len, size_t elem_size, SegmentArray sa,
     float stretch, float pitch, double** t_synth)
@@ -178,6 +199,12 @@ static SynthPreflight synth_preflight_common(
 
     if (sa.count > UINT32_MAX) {
         pf.error = SPECTRAL_ERR_OVERFLOW;
+        synth_zero_output_if_valid(out_buffer, out_len, elem_size);
+        if (t_synth && *t_synth) **t_synth = 0;
+        return pf;
+    }
+    if (!synth_segment_payload_valid(sa.segs, sa.count)) {
+        pf.error = SPECTRAL_ERR_PARAM;
         synth_zero_output_if_valid(out_buffer, out_len, elem_size);
         if (t_synth && *t_synth) **t_synth = 0;
         return pf;
@@ -727,15 +754,31 @@ void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
 
 int gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out)
 {
+    GpuTileData td = {0};
+
     if (!g_gpu_tile_cache.valid || !out) return 0;
-    if (g_gpu_tile_cache.tile_size != (uint32_t)SPECTRAL_GPU_TILE_SIZE) return 0;
-    if (g_gpu_tile_cache.stretch != stretch || g_gpu_tile_cache.out_len != out_len) return 0;
-    out->ranges      = g_gpu_tile_cache.ranges;
-    out->segment_ids = g_gpu_tile_cache.segment_ids;
-    out->num_tiles   = g_gpu_tile_cache.num_tiles;
-    out->total_refs  = g_gpu_tile_cache.total_refs;
+    if (g_gpu_tile_cache.tile_size != (uint32_t)SPECTRAL_GPU_TILE_SIZE ||
+        g_gpu_tile_cache.stretch != stretch ||
+        g_gpu_tile_cache.out_len != out_len) {
+        gpu_tile_cache_clear();
+        return 0;
+    }
+
+    td.ranges      = g_gpu_tile_cache.ranges;
+    td.segment_ids = g_gpu_tile_cache.segment_ids;
+    td.num_tiles   = g_gpu_tile_cache.num_tiles;
+    td.total_refs  = g_gpu_tile_cache.total_refs;
+
+    /* Tile layout depends on segment start/length as well as output shape.
+     * Since this cache key does not encode segment identity, it is a one-shot
+     * handoff from the analysis/cache path to the immediately following GPU
+     * synthesis call. */
+    gpu_tile_cache_clear();
+
+    *out = td;
     return 1;
 }
+
 
 void gpu_tile_cache_clear(void)
 {
@@ -794,11 +837,24 @@ void gpu_seg_cache_set(const SegmentGpu* segs, uint32_t count)
 
 int gpu_seg_cache_try_get(uint32_t count, const SegmentGpu** out)
 {
+    const SegmentGpu* segs = NULL;
+
     if (!g_gpu_seg_cache.valid || !out) return 0;
-    if (g_gpu_seg_cache.count != count) return 0;
-    *out = g_gpu_seg_cache.segs;
+    if (g_gpu_seg_cache.count != count || !g_gpu_seg_cache.segs) {
+        gpu_seg_cache_clear();
+        return 0;
+    }
+
+    segs = g_gpu_seg_cache.segs;
+    *out = segs;
+
+    /* Process-local cache entries are scoped to the immediately following
+     * backend invocation.  A count-only cache key is not a segment identity, so
+     * never allow a previous call's SegmentGpu pointer to be reused implicitly. */
+    gpu_seg_cache_clear();
     return 1;
 }
+
 
 void gpu_seg_cache_clear(void)
 {

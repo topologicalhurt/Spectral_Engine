@@ -159,6 +159,20 @@ static void thread_buffers_free(ThreadBuffers* tb) {
 }
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
+static int synth_float_output_finite(const float* out_buffer, size_t out_len)
+{
+    if (out_len > 0u && !out_buffer) return 0;
+    for (size_t i = 0; i < out_len; i++) {
+        if (!spectral_is_finite_f32(out_buffer[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+#endif
+
+
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static SpectralError thread_buffers_reduce_float(const ThreadBuffers* tb, float* out_buffer,
                                                  size_t out_len, size_t out_bytes) {
     if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
@@ -171,6 +185,9 @@ static SpectralError thread_buffers_reduce_float(const ThreadBuffers* tb, float*
     memcpy(out_buffer, tb->bufs[0], out_bytes);
     for (int t = 1; t < tb->n_threads; t++) {
         spectral_vadd(out_buffer, (float*)tb->bufs[t], out_buffer, out_len);
+    }
+    if (!synth_float_output_finite(out_buffer, out_len)) {
+        return SPECTRAL_ERR_PARAM;
     }
     return SPECTRAL_OK;
 }

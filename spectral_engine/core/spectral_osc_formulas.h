@@ -21,8 +21,9 @@
 /* Bump when any oscillator formula, fast_sin, normalize_phase, or
  * fade_envelope changes.  Metal shader (oscillator.c) duplicates these
  * as MSL strings and checks this version at compile time. */
-#define SPECTRAL_OSC_FORMULAS_VERSION 3
+#define SPECTRAL_OSC_FORMULAS_VERSION 4
 #include <math.h>
+#include <limits.h>
 
 /* Dual-compile: C inline or CUDA device inline */
 #ifdef __CUDACC__
@@ -101,14 +102,27 @@ OSC_FORMULA_FUNC float spectral_osc_parabola(float rads, float width) {
 }
 
 OSC_FORMULA_FUNC float spectral_osc_quantized(float rads, float width) {
-    if (width <= 0.0f) return 0.0f;
-    float inv_w = 1.0f / width;
-    return (float)(int)(rads * width) * inv_w;
+    float scaled = 0.0f;
+    float inv_w = 0.0f;
+
+    if (!isfinite(rads) || !isfinite(width) || width <= 0.0f) return 0.0f;
+
+    scaled = rads * width;
+    inv_w = 1.0f / width;
+    if (!isfinite(scaled) || !isfinite(inv_w) ||
+        scaled < (float)INT_MIN || scaled > (float)INT_MAX) {
+        return 0.0f;
+    }
+
+    return (float)(int)scaled * inv_w;
 }
 
+
 OSC_FORMULA_FUNC float spectral_osc_pwm(float rads, float width) {
+    if (!isfinite(rads) || !isfinite(width)) return 0.0f;
     return (width > 0.0f) ? (((rads + SPECTRAL_PI) * SPECTRAL_INV_TWO_PI < width) ? 1.0f : -1.0f) : 1.0f;
 }
+
 
 /* Fade envelope (Hann-window ramp for segment boundaries).
  * fade_in:  0.5 * (1 + fast_sin((j * inv_fade - 0.5) * pi))

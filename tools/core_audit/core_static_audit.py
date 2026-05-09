@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 86):
+    for pass_num in range(1, 91):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1437,6 +1437,49 @@ def main() -> int:
             "pass 85 tracker candidate int domain must check candidate index before best_next narrowing")
     require("#include <limits.h>" in interp_pass85,
             "pass 85 tracker candidate int domain must include explicit INT_MAX contract")
+
+
+    synth_pass86 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("synth_segment_payload_valid" in synth_pass86 and
+            "if (!synth_segment_payload_valid(sa.segs, sa.count))" in synth_pass86,
+            "pass 86 synth segment preflight must validate caller-provided SegmentArray payloads")
+    require("!spectral_is_finite_f32(s->omega) || s->omega < 0.0f" in synth_pass86,
+            "pass 86 synth segment preflight must validate oscillator-domain segment fields")
+
+
+    synth_pass87 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("Count is not identity" in synth_pass87 and
+            "segs = g_gpu_seg_cache.segs;" in synth_pass87,
+            "pass 87 GPU segment cache must be one-shot and not count-only identity")
+    require("g_gpu_seg_cache.count != count || !g_gpu_seg_cache.segs" in synth_pass87,
+            "pass 87 GPU segment cache must clear stale cache on mismatch")
+
+
+    synth_pass88 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("Tile layout depends on segment start/length" in synth_pass88 and
+            "*out = td;" in synth_pass88,
+            "pass 88 GPU tile cache must be one-shot layout handoff")
+    require("g_gpu_tile_cache.out_len != out_len" in synth_pass88,
+            "pass 88 GPU tile cache must still validate shape before one-shot handoff")
+
+
+    formulas_pass89 = read("spectral_engine/core/spectral_osc_formulas.h")
+    require("scaled < (float)INT_MIN" in formulas_pass89 and
+            "scaled > (float)INT_MAX" in formulas_pass89,
+            "pass 89 oscillator quantized must check float-to-int domain")
+    require("(int)(rads * width)" not in formulas_pass89,
+            "pass 89 oscillator quantized must not use raw float-to-int cast")
+    require("#define SPECTRAL_OSC_FORMULAS_VERSION 4" in formulas_pass89,
+            "pass 89 oscillator formula version must be bumped")
+
+
+    cpu_pass90 = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
+    require("synth_float_output_finite" in cpu_pass90 and
+            "if (!synth_float_output_finite(out_buffer, out_len))" in cpu_pass90,
+            "pass 90 CPU synth finite output postcondition must be checked after reduction")
+    require("memset(out_buffer, 0, out_bytes);" in cpu_pass90 and
+            "return reduce_err;" in cpu_pass90,
+            "pass 90 CPU synth finite output failure must use existing zero-output reducer error path")
 
     if FAILURES:
         for f in FAILURES:
