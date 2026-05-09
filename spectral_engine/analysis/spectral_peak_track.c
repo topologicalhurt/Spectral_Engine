@@ -169,40 +169,112 @@ double spectral_tracker_get_process_time(const SpectralTracker* tracker) {
     return tracker ? tracker->process_time_total : 0.0;
 }
 
+static int spectral_tracker_u64_add_checked(uint64_t a, uint64_t b, uint64_t* out)
+{
+    if (!out || b > UINT64_MAX - a) return 0;
+    *out = a + b;
+    return 1;
+}
+
 void spectral_tracker_accumulate_stats(
     SpectralTracker* tracker,
     uint64_t local_pairs, uint64_t local_candidates, uint64_t local_segments,
     double local_track_time
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double local_scan_time, double local_validate_time, double local_emit_time,
-    double local_emit_alloc_time, double local_emit_interp_time,
-    double local_emit_amp_time
+    double local_emit_alloc_time, double local_emit_interp_time, double local_emit_amp_time
 #endif
 ) {
     if (!tracker) return;
-    #pragma omp atomic update
-    tracker->process_time_total += local_track_time;
-    #pragma omp atomic update
-    tracker->total_pairs += local_pairs;
-    #pragma omp atomic update
-    tracker->total_candidates += local_candidates;
-    #pragma omp atomic update
-    tracker->total_segments += local_segments;
+    if (!isfinite(local_track_time) || local_track_time < 0.0) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
 #if SPECTRAL_TRACK_DEBUG_TIMING
-    #pragma omp atomic update
-    tracker->debug_scan_time_total += local_scan_time;
-    #pragma omp atomic update
-    tracker->debug_validate_time_total += local_validate_time;
-    #pragma omp atomic update
-    tracker->debug_emit_time_total += local_emit_time;
-    #pragma omp atomic update
-    tracker->debug_emit_alloc_time_total += local_emit_alloc_time;
-    #pragma omp atomic update
-    tracker->debug_emit_interp_time_total += local_emit_interp_time;
-    #pragma omp atomic update
-    tracker->debug_emit_amp_time_total += local_emit_amp_time;
+    if (!isfinite(local_scan_time) || local_scan_time < 0.0 ||
+        !isfinite(local_validate_time) || local_validate_time < 0.0 ||
+        !isfinite(local_emit_time) || local_emit_time < 0.0 ||
+        !isfinite(local_emit_alloc_time) || local_emit_alloc_time < 0.0 ||
+        !isfinite(local_emit_interp_time) || local_emit_interp_time < 0.0 ||
+        !isfinite(local_emit_amp_time) || local_emit_amp_time < 0.0) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
 #endif
+
+    /* Stats are accumulated once per worker, not per bin.  Use a critical
+     * section so overflow can be checked before mutating shared counters. */
+    #pragma omp critical(spectral_tracker_stats_accum)
+    {
+        uint64_t next_u64 = 0;
+        double next_time = 0.0;
+
+        if (!spectral_tracker_u64_add_checked(tracker->total_pairs, local_pairs, &next_u64)) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->total_pairs = next_u64;
+        }
+
+        if (!spectral_tracker_u64_add_checked(tracker->total_candidates, local_candidates, &next_u64)) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->total_candidates = next_u64;
+        }
+
+        if (!spectral_tracker_u64_add_checked(tracker->total_segments, local_segments, &next_u64)) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->total_segments = next_u64;
+        }
+
+        next_time = tracker->process_time_total + local_track_time;
+        if (!isfinite(next_time) || next_time < tracker->process_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->process_time_total = next_time;
+        }
+
+#if SPECTRAL_TRACK_DEBUG_TIMING
+        next_time = tracker->debug_scan_time_total + local_scan_time;
+        if (!isfinite(next_time) || next_time < tracker->debug_scan_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->debug_scan_time_total = next_time;
+        }
+        next_time = tracker->debug_validate_time_total + local_validate_time;
+        if (!isfinite(next_time) || next_time < tracker->debug_validate_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->debug_validate_time_total = next_time;
+        }
+        next_time = tracker->debug_emit_time_total + local_emit_time;
+        if (!isfinite(next_time) || next_time < tracker->debug_emit_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->debug_emit_time_total = next_time;
+        }
+        next_time = tracker->debug_emit_alloc_time_total + local_emit_alloc_time;
+        if (!isfinite(next_time) || next_time < tracker->debug_emit_alloc_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->debug_emit_alloc_time_total = next_time;
+        }
+        next_time = tracker->debug_emit_interp_time_total + local_emit_interp_time;
+        if (!isfinite(next_time) || next_time < tracker->debug_emit_interp_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->debug_emit_interp_time_total = next_time;
+        }
+        next_time = tracker->debug_emit_amp_time_total + local_emit_amp_time;
+        if (!isfinite(next_time) || next_time < tracker->debug_emit_amp_time_total) {
+            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        } else {
+            tracker->debug_emit_amp_time_total = next_time;
+        }
+#endif
+    }
 }
+
 
 void spectral_segment_array_free(SegmentArray* arr) {
     if (!arr) return;
@@ -557,10 +629,12 @@ static int spectral_tracker_estimate_bytes(const SpectralTracker* tracker, size_
 
     /* Fusion architecture memory access: FFT STFT data is also processed in this loop */
     size_t stft_writes = 0;
-    if (spectral_size_mul(pairs, tracker->n_freqs, &stft_writes)) {
+    {
         size_t fft_mags_phases = 0;
-        if (spectral_size_mul(stft_writes, 2u, &fft_mags_phases)) {
-            spectral_size_add(total_read_floats, fft_mags_phases, &total_read_floats);
+        if (!spectral_size_mul(pairs, tracker->n_freqs, &stft_writes) ||
+            !spectral_size_mul(stft_writes, 2u, &fft_mags_phases) ||
+            !spectral_size_add(total_read_floats, fft_mags_phases, &total_read_floats)) {
+            return 0;
         }
     }
 
@@ -605,6 +679,7 @@ static int spectral_tracker_derive_create_scalars(size_t n_freqs,
     }
 
     if (n_freqs < 3u ||
+        n_freqs > (size_t)INT_MAX ||
         sr < SPECTRAL_MIN_SAMPLE_RATE || sr > SPECTRAL_MAX_SAMPLE_RATE ||
         n_fft < SPECTRAL_MIN_FFT_SIZE ||
         ((size_t)n_fft & ((size_t)n_fft - 1u)) != 0u ||
@@ -675,6 +750,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     if (!tracker) return NULL;
 
     if (n_threads < 1) n_threads = 1;
+    if (n_threads > SPECTRAL_MAX_THREADS) return NULL;
     tracker->n_threads = n_threads;
     tracker->n_freqs = n_freqs;
     tracker->seg_arrays = NULL;

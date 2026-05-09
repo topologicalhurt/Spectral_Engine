@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 81):
+    for pass_num in range(1, 86):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1397,6 +1397,46 @@ def main() -> int:
             "pass 80 fast sqrt helpers must reject non-finite inputs")
     require("return isfinite(y) && y > 0.0f ? y : 0.0f;" in fast_pass80,
             "pass 80 fast sqrt approximation paths must validate computed result")
+
+
+    interp_pass81 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    require("spectral_tracker_emitted_segment_valid" in interp_pass81 and
+            "!isfinite(estimate->omega) || estimate->omega < 0.0f" in interp_pass81,
+            "pass 81 tracker emitted segment must validate final segment fields")
+    require("if (!spectral_tracker_emitted_segment_valid(" in interp_pass81 and
+            interp_pass81.index("if (!spectral_tracker_emitted_segment_valid(") <
+            interp_pass81.index("count = tracker->seg_counts[tid * SPECTRAL_CACHE_LINE_STRIDE];"),
+            "pass 81 tracker emitted segment validation must occur before storage write")
+
+
+    track_pass82 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_tracker_u64_add_checked" in track_pass82 and
+            "#pragma omp critical(spectral_tracker_stats_accum)" in track_pass82,
+            "pass 82 tracker stats must check counter additions before mutation")
+    require("!isfinite(local_track_time) || local_track_time < 0.0" in track_pass82 and
+            "next_time = tracker->process_time_total + local_track_time;" in track_pass82,
+            "pass 82 tracker stats must validate timing accumulation")
+
+
+    track_pass83 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("n_freqs > (size_t)INT_MAX" in track_pass83,
+            "pass 83 tracker creation must reject frequency counts outside estimator int domain")
+    require("if (n_threads > SPECTRAL_MAX_THREADS) return NULL;" in track_pass83,
+            "pass 83 tracker creation must reject thread counts outside engine domain")
+
+
+    track_pass84 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("!spectral_size_add(total_read_floats, fft_mags_phases, &total_read_floats))" in track_pass84,
+            "pass 84 tracker byte estimate must check STFT accounting addition")
+    require("spectral_size_add(total_read_floats, fft_mags_phases, &total_read_floats);" not in track_pass84,
+            "pass 84 tracker byte estimate must not ignore checked-add return value")
+
+
+    interp_pass85 = read("spectral_engine/analysis/spectral_peak_interp.c")
+    require("cf > (size_t)INT_MAX" in interp_pass85,
+            "pass 85 tracker candidate int domain must check candidate index before best_next narrowing")
+    require("#include <limits.h>" in interp_pass85,
+            "pass 85 tracker candidate int domain must include explicit INT_MAX contract")
 
     if FAILURES:
         for f in FAILURES:

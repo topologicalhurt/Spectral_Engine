@@ -6,6 +6,7 @@
 #include "spectral_windows.h"
 #include "spectral_omp.h"
 #include <math.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,7 +33,8 @@ int spectral_tracker_validate_candidate(
     int best_idx = 0;
 
     if (!row || !next_row || !out_curr || !out_max_vsq || !out_best_next ||
-        cf == 0u || !isfinite(threshsq) || threshsq < 0.0f) {
+        cf == 0u || cf > (size_t)INT_MAX ||
+        !isfinite(threshsq) || threshsq < 0.0f) {
         return 0;
     }
 
@@ -61,6 +63,35 @@ int spectral_tracker_validate_candidate(
     *out_best_next = (int)cf + best_idx - 1;
     return 1;
 }
+
+static int spectral_tracker_emitted_segment_valid(const SpectralTracker* tracker,
+                                                  int tid,
+                                                  float t_hop,
+                                                  float hop_float,
+                                                  float phase,
+                                                  const SpectralPeakEstimate* estimate)
+{
+    if (!tracker || !estimate || tid < 0 || tid >= tracker->n_threads) {
+        return 0;
+    }
+    if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities) {
+        return 0;
+    }
+    if (!isfinite(t_hop) || t_hop < 0.0f ||
+        !isfinite(hop_float) || hop_float <= 0.0f ||
+        !isfinite(phase) ||
+        !isfinite(SPECTRAL_TRACK_DEFAULT_WIDTH) || SPECTRAL_TRACK_DEFAULT_WIDTH <= 0.0f) {
+        return 0;
+    }
+    if (!isfinite(estimate->amp) || estimate->amp < 0.0f ||
+        !isfinite(estimate->da) ||
+        !isfinite(estimate->omega) || estimate->omega < 0.0f ||
+        !isfinite(estimate->df)) {
+        return 0;
+    }
+    return 1;
+}
+
 
 int spectral_tracker_emit_segment(
     SpectralTracker* tracker,
@@ -131,6 +162,11 @@ int spectral_tracker_emit_segment(
     *local_emit_interp_time += omp_get_wtime() - phase_start;
     phase_start = omp_get_wtime();
 #endif
+
+    if (!spectral_tracker_emitted_segment_valid(tracker, tid, t_hop, hop_float, phase_row[cf], &estimate)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return 0;
+    }
 
     count = tracker->seg_counts[tid * SPECTRAL_CACHE_LINE_STRIDE];
     if (SPECTRAL_UNLIKELY(count >= tracker->seg_capacities[tid * SPECTRAL_CACHE_LINE_STRIDE])) {
