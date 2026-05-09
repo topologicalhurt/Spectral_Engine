@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 97):
+    for pass_num in range(1, 102):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1559,6 +1559,45 @@ def main() -> int:
             "pass 96 OpenMP effective thread count must live in the OpenMP shim")
     require("int n_threads = spectral_omp_effective_thread_count();" in synth_pass96,
             "pass 96 GPU tile preprocessing must use shared effective thread helper")
+
+
+    fft_pass97 = read("spectral_engine/analysis/spectral_analysis_fft.c")
+    require(fft_pass97.count("float spectral_fft_frames(") == 1,
+            "pass 97 FFT frame dispatch must have one backend-agnostic spectral_fft_frames implementation")
+    require(fft_pass97.count("void spectral_fft_single_frame(") == 2,
+            "pass 97 FFT backend-specific single-frame kernels must remain backend-local")
+
+
+    analysis_internal_pass98 = read("spectral_engine/analysis/spectral_analysis_internal.h")
+    full_pass98 = read("spectral_engine/analysis/spectral_analysis_full.c")
+    require("SpectralAnalysisStftMatrix" in analysis_internal_pass98 and
+            "spectral_analysis_stft_matrix_alloc" in analysis_internal_pass98,
+            "pass 98 STFT matrix owner must expose reusable allocation API")
+    require("SpectralAnalysisStftMatrix stft = {0};" in full_pass98 and
+            "spectral_analysis_stft_matrix_free(&stft)" in full_pass98,
+            "pass 98 full analysis must use STFT matrix owner")
+
+
+    track_internal_pass99 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    fused_pass99 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    track_pass99 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_tracker_frame_time_from_index" in track_internal_pass99,
+            "pass 99 tracker frame time helper must live in tracker internal header")
+    require("spectral_tracker_frame_time_from_index(pair, (float)hop, &t_hop)" in fused_pass99 and
+            "spectral_tracker_frame_time_from_index(global_frame_offset + t, hop_float, &t_hop)" in track_pass99,
+            "pass 99 fused and incremental tracker paths must share frame-time conversion")
+
+
+    peak_pass100 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("spectral_peak_store_clamped_offset_d" in peak_pass100 and
+            peak_pass100.count("return spectral_peak_store_clamped_offset_d(out_offset, offset_d);") >= 3,
+            "pass 100 peak offset clamp must centralize double-domain offset narrowing")
+
+
+    track_pass101 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_tracker_accumulate_counter_checked" in track_pass101 and
+            "spectral_tracker_accumulate_time_checked" in track_pass101,
+            "pass 101 tracker stats helpers must centralize counter/time accumulation")
 
     if FAILURES:
         for f in FAILURES:

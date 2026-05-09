@@ -322,53 +322,6 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     }
 }
 
-float spectral_fft_frames(const SpectralFftResources* res,
-                          const float* audio, int hop,
-                          const float* window_func,
-                          size_t frame_start, size_t frame_end,
-                          float* out_magsq, float* out_phases,
-                          int magsq_only)
-{
-    float max_magsq = 0.0f;
-    size_t local_n_frames = 0;
-    size_t n_freqs = 0;
-    size_t output_bins = 0;
-
-    if (!res || !audio || !window_func || !out_magsq || hop <= 0) return 0.0f;
-    if (res->n_threads < 1 || res->n_freqs == 0u || res->n_fft == 0u) return 0.0f;
-    if (frame_end < frame_start) return 0.0f;
-    if (!magsq_only && !out_phases) return 0.0f;
-
-    local_n_frames = frame_end - frame_start;
-    n_freqs = res->n_freqs;
-    if (local_n_frames == 0u) return 0.0f;
-    if (!spectral_size_mul(local_n_frames, n_freqs, &output_bins)) return 0.0f;
-    (void)output_bins;
-
-    /* FFT resource arrays are allocated for res->n_threads slots.  Bind the
-     * OpenMP team to the same count so omp_get_thread_num() cannot index past
-     * the per-thread FFT buffers if the process-wide OpenMP setting changes. */
-    #pragma omp parallel reduction(max:max_magsq) num_threads(res->n_threads)
-    {
-        int tid = omp_get_thread_num();
-
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < local_n_frames; i++) {
-            size_t t = frame_start + i;
-            float frame_max = 0.0f;
-            spectral_fft_single_frame(res, tid, audio, hop, window_func, t,
-                                      out_magsq + i * n_freqs,
-                                      magsq_only ? NULL : (out_phases + i * n_freqs),
-                                      &frame_max);
-            if (frame_max > max_magsq) max_magsq = frame_max;
-        }
-    }
-
-    return max_magsq;
-}
-
-
-
 #else
 
 void spectral_fft_single_frame(const SpectralFftResources* res,
@@ -408,6 +361,8 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     }
 }
 
+#endif
+
 float spectral_fft_frames(const SpectralFftResources* res,
                           const float* audio, int hop,
                           const float* window_func,
@@ -431,9 +386,6 @@ float spectral_fft_frames(const SpectralFftResources* res,
     if (!spectral_size_mul(local_n_frames, n_freqs, &output_bins)) return 0.0f;
     (void)output_bins;
 
-    /* FFT resource arrays are allocated for res->n_threads slots.  Bind the
-     * OpenMP team to the same count so omp_get_thread_num() cannot index past
-     * the per-thread FFT buffers if the process-wide OpenMP setting changes. */
     #pragma omp parallel reduction(max:max_magsq) num_threads(res->n_threads)
     {
         int tid = omp_get_thread_num();
@@ -453,5 +405,3 @@ float spectral_fft_frames(const SpectralFftResources* res,
     return max_magsq;
 }
 
-
-#endif

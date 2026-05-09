@@ -45,6 +45,13 @@ static int spectral_peak_finite_nonnegative(float v) {
     return isfinite(v) && v >= 0.0f;
 }
 
+static int spectral_peak_store_clamped_offset_d(float* out_offset, double offset_d)
+{
+    if (!out_offset || !isfinite(offset_d)) return 0;
+
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
+}
+
 static float spectral_peak_clamp_offset(float p) {
     /* Callers reject non-finite estimator output before clamping. */
     if (p > 0.5f) return 0.5f;
@@ -234,14 +241,7 @@ static int spectral_peak_complex_offset_jacobsen(const SpectralPeakEstimateInput
     offset_d = (num_re * den_re + num_im * den_im) / den_mag2;
     if (!isfinite(offset_d)) return 0;
 
-    if (offset_d > 0.5) {
-        *out_offset = 0.5f;
-    } else if (offset_d < -0.5) {
-        *out_offset = -0.5f;
-    } else {
-        *out_offset = (float)offset_d;
-    }
-    return 1;
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
 }
 
 
@@ -330,14 +330,7 @@ static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* i
     offset_d = numer / denom;
     if (!isfinite(offset_d)) return 0;
 
-    if (offset_d > 0.5) {
-        *out_offset = 0.5f;
-    } else if (offset_d < -0.5) {
-        *out_offset = -0.5f;
-    } else {
-        *out_offset = (float)offset_d;
-    }
-    return 1;
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
 }
 
 
@@ -441,14 +434,7 @@ static int spectral_peak_offset_quinn_second(const SpectralPeakEstimateInput* in
     offset_d = 0.5 * (dp + dm) + (double)tau_p - (double)tau_m;
     if (!isfinite(offset_d)) return 0;
 
-    if (offset_d > 0.5) {
-        *out_offset = 0.5f;
-    } else if (offset_d < -0.5) {
-        *out_offset = -0.5f;
-    } else {
-        *out_offset = (float)offset_d;
-    }
-    return 1;
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
 }
 
 

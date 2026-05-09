@@ -61,6 +61,41 @@ SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track)
     return (SegmentArray)SEGMENT_ARRAY_EMPTY;
 }
 
+SpectralError spectral_analysis_stft_matrix_alloc(SpectralAnalysisStftMatrix* matrix,
+                                                  size_t n_frames,
+                                                  size_t n_freqs)
+{
+    size_t total_bins = 0;
+    size_t total_bytes = 0;
+
+    if (!matrix || n_frames == 0u || n_freqs == 0u) return SPECTRAL_ERR_PARAM;
+    *matrix = (SpectralAnalysisStftMatrix){0};
+
+    if (!spectral_size_mul(n_frames, n_freqs, &total_bins) ||
+        !spectral_size_mul(total_bins, sizeof(float), &total_bytes)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    matrix->magsq = (float*)spectral_aligned_alloc(total_bytes);
+    matrix->phases = (float*)spectral_aligned_alloc(total_bytes);
+    if (!matrix->magsq || !matrix->phases) {
+        spectral_analysis_stft_matrix_free(matrix);
+        return SPECTRAL_ERR_MEMORY;
+    }
+
+    matrix->total_bins = total_bins;
+    matrix->total_bytes = total_bytes;
+    return SPECTRAL_OK;
+}
+
+void spectral_analysis_stft_matrix_free(SpectralAnalysisStftMatrix* matrix)
+{
+    if (!matrix) return;
+    free(matrix->magsq);
+    free(matrix->phases);
+    *matrix = (SpectralAnalysisStftMatrix){0};
+}
+
 int spectral_analysis_estimate_fft_bytes(size_t frame_count,
                                          size_t n_fft,
                                          size_t n_freqs,

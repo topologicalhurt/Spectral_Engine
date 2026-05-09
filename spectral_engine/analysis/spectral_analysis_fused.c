@@ -194,15 +194,13 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                     for (size_t pair = pair_start;
                          pair < pair_end && !spectral_tracker_has_failed(tracker);
                          pair++) {
-                        double t_hop_d = (double)pair * (double)hop;
                         float t_hop = 0.0f;
                         SpectralFrameContext fctx;
 
-                        if (!isfinite(t_hop_d) || t_hop_d < 0.0 || t_hop_d > (double)FLT_MAX) {
+                        if (spectral_tracker_frame_time_from_index(pair, (float)hop, &t_hop) != SPECTRAL_OK) {
                             spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
                             break;
                         }
-                        t_hop = (float)t_hop_d;
                         double track_start = 0.0;
 
                         fft_start = omp_get_wtime();

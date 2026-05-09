@@ -202,6 +202,39 @@ static int spectral_tracker_u64_add_checked(uint64_t a, uint64_t b, uint64_t* ou
     return 1;
 }
 
+static void spectral_tracker_accumulate_counter_checked(SpectralTracker* tracker,
+                                                        uint64_t* field,
+                                                        uint64_t delta)
+{
+    uint64_t next = 0;
+
+    if (!tracker || !field) return;
+    if (!spectral_tracker_u64_add_checked(*field, delta, &next)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+    *field = next;
+}
+
+static void spectral_tracker_accumulate_time_checked(SpectralTracker* tracker,
+                                                     double* field,
+                                                     double delta)
+{
+    double next = 0.0;
+
+    if (!tracker || !field) return;
+    if (!isfinite(delta) || delta < 0.0) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
+    next = *field + delta;
+    if (!isfinite(next) || next < *field) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+    *field = next;
+}
+
 void spectral_tracker_accumulate_stats(
     SpectralTracker* tracker,
     uint64_t local_pairs, uint64_t local_candidates, uint64_t local_segments,
@@ -228,80 +261,23 @@ void spectral_tracker_accumulate_stats(
     }
 #endif
 
-    /* Stats are accumulated once per worker, not per bin.  Use a critical
-     * section so overflow can be checked before mutating shared counters. */
     #pragma omp critical(spectral_tracker_stats_accum)
     {
-        uint64_t next_u64 = 0;
-        double next_time = 0.0;
-
-        if (!spectral_tracker_u64_add_checked(tracker->total_pairs, local_pairs, &next_u64)) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->total_pairs = next_u64;
-        }
-
-        if (!spectral_tracker_u64_add_checked(tracker->total_candidates, local_candidates, &next_u64)) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->total_candidates = next_u64;
-        }
-
-        if (!spectral_tracker_u64_add_checked(tracker->total_segments, local_segments, &next_u64)) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->total_segments = next_u64;
-        }
-
-        next_time = tracker->process_time_total + local_track_time;
-        if (!isfinite(next_time) || next_time < tracker->process_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->process_time_total = next_time;
-        }
+        spectral_tracker_accumulate_counter_checked(tracker, &tracker->total_pairs, local_pairs);
+        spectral_tracker_accumulate_counter_checked(tracker, &tracker->total_candidates, local_candidates);
+        spectral_tracker_accumulate_counter_checked(tracker, &tracker->total_segments, local_segments);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->process_time_total, local_track_time);
 
 #if SPECTRAL_TRACK_DEBUG_TIMING
-        next_time = tracker->debug_scan_time_total + local_scan_time;
-        if (!isfinite(next_time) || next_time < tracker->debug_scan_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->debug_scan_time_total = next_time;
-        }
-        next_time = tracker->debug_validate_time_total + local_validate_time;
-        if (!isfinite(next_time) || next_time < tracker->debug_validate_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->debug_validate_time_total = next_time;
-        }
-        next_time = tracker->debug_emit_time_total + local_emit_time;
-        if (!isfinite(next_time) || next_time < tracker->debug_emit_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->debug_emit_time_total = next_time;
-        }
-        next_time = tracker->debug_emit_alloc_time_total + local_emit_alloc_time;
-        if (!isfinite(next_time) || next_time < tracker->debug_emit_alloc_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->debug_emit_alloc_time_total = next_time;
-        }
-        next_time = tracker->debug_emit_interp_time_total + local_emit_interp_time;
-        if (!isfinite(next_time) || next_time < tracker->debug_emit_interp_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->debug_emit_interp_time_total = next_time;
-        }
-        next_time = tracker->debug_emit_amp_time_total + local_emit_amp_time;
-        if (!isfinite(next_time) || next_time < tracker->debug_emit_amp_time_total) {
-            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        } else {
-            tracker->debug_emit_amp_time_total = next_time;
-        }
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_scan_time_total, local_scan_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_validate_time_total, local_validate_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_time_total, local_emit_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_alloc_time_total, local_emit_alloc_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_interp_time_total, local_emit_interp_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_amp_time_total, local_emit_amp_time);
 #endif
     }
 }
-
-
 void spectral_segment_array_free(SegmentArray* arr) {
     if (!arr) return;
     free(arr->segs);
@@ -966,13 +942,12 @@ void spectral_tracker_process(SpectralTracker* tracker,
                 next_row = overlap_magsq_row;
             }
 
-            double t_hop_d = (double)(global_frame_offset + t) * (double)hop_float;
-            if (!isfinite(t_hop_d) || t_hop_d < 0.0 || t_hop_d > (double)FLT_MAX) {
+            float t_hop = 0.0f;
+            if (spectral_tracker_frame_time_from_index(global_frame_offset + t, hop_float, &t_hop) != SPECTRAL_OK) {
                 spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
                 local_failed = 1;
                 continue;
             }
-            const float t_hop = (float)t_hop_d;
 #if SPECTRAL_TRACK_DEBUG_TIMING
             double pair_start = omp_get_wtime();
             double pair_validate_time = 0.0;

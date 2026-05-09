@@ -10,6 +10,8 @@
 #include "spectral_windows.h"
 
 #include <limits.h>
+#include <float.h>
+#include <math.h>
 #include <stdatomic.h>
 #include "spectral_error.h"
 #include <sys/mman.h>
@@ -84,6 +86,25 @@ struct SpectralTracker {
     double debug_emit_amp_time_total;
 #endif
 };
+
+static inline SpectralError spectral_tracker_frame_time_from_index(size_t frame_index,
+                                                                  float hop_float,
+                                                                  float* out_t_hop)
+{
+    double t_hop_d = 0.0;
+
+    if (!out_t_hop || !isfinite(hop_float) || hop_float <= 0.0f) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    t_hop_d = (double)frame_index * (double)hop_float;
+    if (!isfinite(t_hop_d) || t_hop_d < 0.0 || t_hop_d > (double)FLT_MAX) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    *out_t_hop = (float)t_hop_d;
+    return SPECTRAL_OK;
+}
 
 void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error);
 
