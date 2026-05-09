@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 92):
+    for pass_num in range(1, 93):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1440,8 +1440,8 @@ def main() -> int:
 
 
     synth_pass86 = read("spectral_engine/core/spectral_synth_internal.c")
-    require("synth_segment_payload_valid" in synth_pass86 and
-            "if (!synth_segment_payload_valid(sa.segs, sa.count))" in synth_pass86,
+    require("spectral_segment_array_valid_for_synth" in synth_pass86 and
+            "if (!spectral_segment_array_valid_for_synth(sa.segs, sa.count))" in synth_pass86,
             "pass 86 synth segment preflight must validate caller-provided SegmentArray payloads")
     require("!spectral_is_finite_f32(s->omega) || s->omega < 0.0f" in synth_pass86,
             "pass 86 synth segment preflight must validate oscillator-domain segment fields")
@@ -1509,6 +1509,23 @@ def main() -> int:
     require("Do not add alias wrappers" in pass91_guidelines and
             "Kernel patches must be strategically minimal" in pass91_guidelines,
             "pass 91 must document repo-wide kernel patching guidelines")
+
+
+    synth_c_pass92 = read("spectral_engine/core/spectral_synth_internal.c")
+    synth_h_pass92 = read("spectral_engine/core/spectral_synth_internal.h")
+    require("synth_validate_inputs" not in synth_c_pass92 and
+            "synth_validate_inputs" not in synth_h_pass92 and
+            "SynthValidateResult" not in synth_h_pass92,
+            "pass 92 synth preflight consolidation must remove legacy validation API")
+    require("spectral_size_mul(out_len, elem_size, &preflight_out_bytes)" in synth_c_pass92 and
+            "memset(out_buffer, 0, preflight_out_bytes)" in synth_c_pass92,
+            "pass 92 synth preflight consolidation must derive and reuse output byte count once")
+    require("synth_segment_payload_valid" not in synth_c_pass92 and
+            "spectral_segment_array_valid_for_synth(&sa)" in synth_c_pass92,
+            "pass 92 synth preflight consolidation must use canonical SegmentArray contract")
+    require("static inline GpuSynthParams gpu_synth_params_pack(" not in synth_h_pass92 and
+            "gpu_synth_params_pack_checked" in synth_h_pass92,
+            "pass 92 must remove unchecked GPU params pack alias")
 
     if FAILURES:
         for f in FAILURES:

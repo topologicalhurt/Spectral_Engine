@@ -29,22 +29,6 @@ SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t
 SpectralError synth_validate_params(float stretch, float pitch);
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len);
 
-/* Validate synth inputs; call at start of every synth function */
-
-typedef enum {
-    SYNTH_VALIDATE_OK = 1,
-    SYNTH_VALIDATE_EARLY_EXIT = 0
-} SynthValidateResult;
-
-SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size_t elem_size,
-                                          SegmentArray sa, double** t_synth_ptr);
-
-#define SYNTH_VALIDATE_FLOAT(buf, len, sa, t_ptr) \
-    synth_validate_inputs((buf), (len), sizeof(float), (sa), (t_ptr))
-
-#define SYNTH_VALIDATE_NATIVE(buf, len, sa, t_ptr) \
-    synth_validate_inputs((buf), (len), sizeof(spectral_sample_t), (sa), (t_ptr))
-
 /* Shared preflight: validate + params + timing in one call.
  * ok==0 means early exit was already handled (zero-filled or dummy timing). */
 typedef struct {
@@ -172,14 +156,6 @@ static inline SpectralError gpu_synth_params_pack_checked(
     };
     return SPECTRAL_OK;
 }
-
-static inline GpuSynthParams gpu_synth_params_pack(
-    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre) {
-    GpuSynthParams out = {0};
-    (void)gpu_synth_params_pack_checked(sp, tile_size, timbre, &out);
-    return out;
-}
-
 
 #ifdef __cplusplus
 }

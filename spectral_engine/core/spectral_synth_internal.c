@@ -107,68 +107,15 @@ SpectralTimbre synth_effective_timbre_get(void) {
 }
 
 /* Validate synth inputs. All backends call this first. */
-SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size_t elem_size,
-                                          SegmentArray sa, double** t_synth_ptr) {
-    size_t out_bytes = 0;
-    if (!t_synth_ptr) {
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-
-    if (!*t_synth_ptr) {
-        *t_synth_ptr = &g_synth_timing_dummy;
-    }
-
-    if (elem_size == 0 || !spectral_size_mul(out_len, elem_size, &out_bytes)) {
-        **t_synth_ptr = 0;
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-    
-    if (!out_buffer || out_len == 0) {
-        **t_synth_ptr = 0;
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-    
-    if (sa.count == 0 || !sa.segs) {
-        memset(out_buffer, 0, out_bytes);
-        **t_synth_ptr = 0;
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-    
-    return SYNTH_VALIDATE_OK;
-}
-
-static int synth_segment_payload_valid(const Segment* segs, size_t count)
-{
-    if (count > 0u && !segs) return 0;
-
-    for (size_t i = 0; i < count; i++) {
-        const Segment* s = &segs[i];
-
-        if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
-        if (!spectral_is_finite_f32(s->length) || s->length <= 0.0f) return 0;
-        if (!spectral_is_finite_f32(s->phase)) return 0;
-        if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
-        if (!spectral_is_finite_f32(s->df)) return 0;
-        if (!spectral_is_finite_f32(s->amp) || s->amp < 0.0f) return 0;
-        if (!spectral_is_finite_f32(s->da)) return 0;
-        if (!spectral_is_finite_f32(s->width)) return 0;
-    }
-
-    return 1;
-}
-
-
 static SynthPreflight synth_preflight_common(
     void* out_buffer, size_t out_len, size_t elem_size, SegmentArray sa,
     float stretch, float pitch, double** t_synth)
 {
     SynthPreflight pf = {0};
     size_t preflight_out_bytes = 0;
+
     pf.error = SPECTRAL_OK;
 
-    /* Error cases must not be collapsed into the benign early-exit path.
-     * In particular, out_len * elem_size overflow is a contract failure that
-     * every backend must see as SPECTRAL_ERR_OVERFLOW, not SPECTRAL_OK. */
     if (!t_synth) {
         pf.error = SPECTRAL_ERR_PARAM;
         return pf;
@@ -176,7 +123,8 @@ static SynthPreflight synth_preflight_common(
     if (!*t_synth) {
         *t_synth = &g_synth_timing_dummy;
     }
-    if (elem_size == 0) {
+
+    if (elem_size == 0u) {
         **t_synth = 0;
         pf.error = SPECTRAL_ERR_PARAM;
         return pf;
@@ -187,27 +135,35 @@ static SynthPreflight synth_preflight_common(
         return pf;
     }
 
-    if (!synth_validate_inputs(out_buffer, out_len, elem_size, sa, t_synth)) {
+    if (!out_buffer || out_len == 0u) {
+        **t_synth = 0;
+        return pf;
+    }
+
+    if (sa.count == 0u || !sa.segs) {
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
         return pf;
     }
 
     pf.error = synth_validate_params(stretch, pitch);
     if (pf.error != SPECTRAL_OK) {
-        synth_zero_output_if_valid(out_buffer, out_len, elem_size);
-        if (t_synth && *t_synth) **t_synth = 0;
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
         return pf;
     }
 
     if (sa.count > UINT32_MAX) {
         pf.error = SPECTRAL_ERR_OVERFLOW;
-        synth_zero_output_if_valid(out_buffer, out_len, elem_size);
-        if (t_synth && *t_synth) **t_synth = 0;
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
         return pf;
     }
-    if (!synth_segment_payload_valid(sa.segs, sa.count)) {
+
+    if (!spectral_segment_array_valid_for_synth(&sa)) {
         pf.error = SPECTRAL_ERR_PARAM;
-        synth_zero_output_if_valid(out_buffer, out_len, elem_size);
-        if (t_synth && *t_synth) **t_synth = 0;
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
         return pf;
     }
 
@@ -216,7 +172,6 @@ static SynthPreflight synth_preflight_common(
     pf.ok = 1;
     return pf;
 }
-
 SynthPreflight synth_preflight_float(
     float* out_buffer, size_t out_len, SegmentArray sa,
     float stretch, float pitch, double** t_synth)
