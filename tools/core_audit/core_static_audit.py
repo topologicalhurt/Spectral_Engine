@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 102):
+    for pass_num in range(1, 107):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1598,6 +1598,43 @@ def main() -> int:
     require("spectral_tracker_accumulate_counter_checked" in track_pass101 and
             "spectral_tracker_accumulate_time_checked" in track_pass101,
             "pass 101 tracker stats helpers must centralize counter/time accumulation")
+
+
+    peak_pass102 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    peak_clamp_start = peak_pass102.find("static int spectral_peak_store_clamped_offset_d")
+    peak_clamp_body = peak_pass102[peak_clamp_start:peak_pass102.find("static float spectral_peak_clamp_offset", peak_clamp_start)]
+    require(peak_clamp_body.count("spectral_peak_store_clamped_offset_d(") == 1 and
+            "*out_offset = (float)offset_d;" in peak_clamp_body,
+            "pass 102 peak clamp regression must not recurse")
+
+
+    peak_pass103 = read("spectral_engine/analysis/spectral_peak_estimator.c")
+    require("SpectralPeakMagsqTriplet" in peak_pass103 and
+            peak_pass103.count("spectral_peak_load_magsq_triplet(") >= 6,
+            "pass 103 peak triplet helper must centralize estimator neighborhood loading")
+
+
+    analysis_pass104 = read("spectral_engine/analysis/spectral_analysis.c")
+    require("spectral_analysis_shape_init" in analysis_pass104 and
+            "SpectralAnalysisShape shape = {0};" in analysis_pass104,
+            "pass 104 analysis shape must be centralized before dispatch")
+
+
+    contracts_pass105 = read("spectral_engine/core/spectral_contracts.h")
+    track_pass105 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_u64_add_checked" in contracts_pass105 and
+            "spectral_double_accumulate_nonnegative_checked" in contracts_pass105,
+            "pass 105 checked accumulation helpers must live in canonical contract layer")
+    require("spectral_tracker_u64_add_checked" not in track_pass105 and
+            "spectral_u64_add_checked(*field, delta, &next)" in track_pass105,
+            "pass 105 tracker stats must use canonical checked accumulation")
+
+
+    arch_status_pass106 = read("docs/core_audit/ARCHITECTURE_CLEANUP_STATUS.md")
+    require("Completed reusable owners" in arch_status_pass106 and
+            "Remaining high-value dedup targets" in arch_status_pass106 and
+            "Forbidden anti-patterns" in arch_status_pass106,
+            "pass 106 architecture cleanup status must document reusable owners and remaining dedup targets")
 
     if FAILURES:
         for f in FAILURES:

@@ -23,6 +23,7 @@
 #include "spectral_peak_track_internal.h"
 #include "spectral_log.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include <math.h>
 #include <float.h>
 #include <stdint.h>
@@ -195,13 +196,6 @@ double spectral_tracker_get_process_time(const SpectralTracker* tracker) {
     return tracker ? tracker->process_time_total : 0.0;
 }
 
-static int spectral_tracker_u64_add_checked(uint64_t a, uint64_t b, uint64_t* out)
-{
-    if (!out || b > UINT64_MAX - a) return 0;
-    *out = a + b;
-    return 1;
-}
-
 static void spectral_tracker_accumulate_counter_checked(SpectralTracker* tracker,
                                                         uint64_t* field,
                                                         uint64_t delta)
@@ -209,7 +203,7 @@ static void spectral_tracker_accumulate_counter_checked(SpectralTracker* tracker
     uint64_t next = 0;
 
     if (!tracker || !field) return;
-    if (!spectral_tracker_u64_add_checked(*field, delta, &next)) {
+    if (!spectral_u64_add_checked(*field, delta, &next)) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
         return;
     }
@@ -227,8 +221,7 @@ static void spectral_tracker_accumulate_time_checked(SpectralTracker* tracker,
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
         return;
     }
-    next = *field + delta;
-    if (!isfinite(next) || next < *field) {
+    if (!spectral_double_accumulate_nonnegative_checked(*field, delta, &next)) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
         return;
     }

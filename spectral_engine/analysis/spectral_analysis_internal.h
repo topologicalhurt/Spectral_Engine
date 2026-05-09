@@ -62,6 +62,22 @@ void spectral_analysis_window_context_apply_magsq_scales(const SpectralAnalysisW
 
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track);
 
+typedef struct SpectralAnalysisShape {
+    size_t n_fft_size;
+    size_t n_frames;
+    size_t n_freqs;
+    size_t total_bins;
+    int use_fused_path;
+} SpectralAnalysisShape;
+
+SpectralError spectral_analysis_shape_init(SpectralAnalysisShape* shape,
+                                           size_t n_samples,
+                                           int sr,
+                                           int n_fft,
+                                           int hop,
+                                           float db_thresh);
+const char* spectral_analysis_path_name(int use_fused_path);
+
 typedef struct SpectralAnalysisStftMatrix {
     float* magsq;
     float* phases;

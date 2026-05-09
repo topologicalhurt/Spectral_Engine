@@ -49,8 +49,16 @@ static int spectral_peak_store_clamped_offset_d(float* out_offset, double offset
 {
     if (!out_offset || !isfinite(offset_d)) return 0;
 
-    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
+    if (offset_d > 0.5) {
+        *out_offset = 0.5f;
+    } else if (offset_d < -0.5) {
+        *out_offset = -0.5f;
+    } else {
+        *out_offset = (float)offset_d;
+    }
+    return 1;
 }
+
 
 static float spectral_peak_clamp_offset(float p) {
     /* Callers reject non-finite estimator output before clamping. */
@@ -151,6 +159,42 @@ float spectral_peak_candan_correction_for_n_freqs(size_t n_freqs) {
     return correction;
 }
 
+typedef struct SpectralPeakMagsqTriplet {
+    float left;
+    float center;
+    float right;
+} SpectralPeakMagsqTriplet;
+
+static int spectral_peak_load_magsq_triplet(const float* row,
+                                            size_t n_freqs,
+                                            size_t center_bin,
+                                            int center_must_be_positive,
+                                            SpectralPeakMagsqTriplet* out)
+{
+    SpectralPeakMagsqTriplet triplet = {0};
+
+    if (!row || !out || center_bin == 0u || center_bin + 1u >= n_freqs) {
+        return 0;
+    }
+
+    triplet.left = row[center_bin - 1u];
+    triplet.center = row[center_bin];
+    triplet.right = row[center_bin + 1u];
+
+    if (!spectral_peak_finite_nonnegative(triplet.left) ||
+        !spectral_peak_finite_nonnegative(triplet.right)) {
+        return 0;
+    }
+    if (center_must_be_positive) {
+        if (!spectral_peak_finite_positive(triplet.center)) return 0;
+    } else {
+        if (!spectral_peak_finite_nonnegative(triplet.center)) return 0;
+    }
+
+    *out = triplet;
+    return 1;
+}
+
 static int spectral_peak_reconstruct_complex(const SpectralPeakEstimateInput* input,
                                              size_t idx,
                                              int neighborhood_validated,
@@ -248,52 +292,31 @@ static int spectral_peak_complex_offset_jacobsen(const SpectralPeakEstimateInput
 static int spectral_peak_offset_log_parabolic(const SpectralPeakEstimateInput* input,
                                               int neighborhood_validated,
                                               float* out_offset) {
-    float left = 0.0f;
-    float center = 0.0f;
-    float right = 0.0f;
+    SpectralPeakMagsqTriplet triplet = {0};
     float raw_offset = 0.0f;
     SpectralWindowInterpMagsqFn interp = NULL;
 
     (void)neighborhood_validated;
 
-    if (!input || !out_offset || input->bin == 0u || input->bin + 1u >= input->n_freqs ||
-        !input->magsq_row) {
+    if (!input || !out_offset) return 0;
+    if (!spectral_peak_load_magsq_triplet(input->magsq_row, input->n_freqs,
+                                          input->bin, 0, &triplet)) {
         return 0;
     }
 
-    left = input->magsq_row[input->bin - 1u];
-    center = input->curr_magsq;
-    right = input->magsq_row[input->bin + 1u];
-
-    /* Keep the finite/nonnegative guard even for the validated hot path.  A
-     * custom descriptor callback is allowed here; do not pass NaN/negative
-     * magnitudes into arbitrary window-specific interpolation code. */
-    if (!spectral_peak_finite_nonnegative(left) ||
-        !spectral_peak_finite_nonnegative(center) ||
-        !spectral_peak_finite_nonnegative(right)) {
-        return 0;
-    }
-
-    /* Log-power parabolic estimator (Smith/Harris basis):
-     *   p = 0.5 * (log(left) - log(right)) /
-     *       (log(left) - 2*log(center) + log(right))
-     * where left/center/right are adjacent magnitude-squared STFT bins and
-     * p is a bin offset clamped to [-0.5, 0.5]. This is the AUTO baseline for
-     * Hann-windowed rows; custom descriptor callbacks must return finite p. */
     interp = input->interp_magsq ? input->interp_magsq
                                  : spectral_window_interp_magsq_parabolic;
-    raw_offset = interp(left, center, right);
+    raw_offset = interp(triplet.left, triplet.center, triplet.right);
     if (!isfinite(raw_offset)) return 0;
 
     *out_offset = spectral_peak_clamp_offset(raw_offset);
     return 1;
 }
-
-
 static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* input,
                                               int neighborhood_validated,
                                               float* out_offset,
                                               float* out_center_mag) {
+    SpectralPeakMagsqTriplet triplet = {0};
     float left = 0.0f, center = 0.0f, right = 0.0f;
     double denom = 0.0;
     double numer = 0.0;
@@ -301,22 +324,15 @@ static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* i
 
     (void)neighborhood_validated;
 
-    if (!input || !out_offset || input->bin == 0u || input->bin + 1u >= input->n_freqs ||
-        !input->magsq_row) {
-        return 0;
-    }
-    if (!spectral_peak_finite_nonnegative(input->magsq_row[input->bin - 1u]) ||
-        !spectral_peak_finite_nonnegative(input->curr_magsq) ||
-        !spectral_peak_finite_nonnegative(input->magsq_row[input->bin + 1u])) {
+    if (!input || !out_offset) return 0;
+    if (!spectral_peak_load_magsq_triplet(input->magsq_row, input->n_freqs,
+                                          input->bin, 0, &triplet)) {
         return 0;
     }
 
-    /* Magnitude parabolic is the same quadratic peak fit applied after sqrt.
-     * Derive the quadratic numerator/denominator in double so large finite
-     * magnitudes do not overflow the subtraction chain before clamping. */
-    left = fast_sqrt(input->magsq_row[input->bin - 1u]);
-    center = fast_sqrt(input->curr_magsq);
-    right = fast_sqrt(input->magsq_row[input->bin + 1u]);
+    left = fast_sqrt(triplet.left);
+    center = fast_sqrt(triplet.center);
+    right = fast_sqrt(triplet.right);
     if (!isfinite(left) || !isfinite(center) || !isfinite(right)) return 0;
     if (out_center_mag) *out_center_mag = center;
 
@@ -328,13 +344,8 @@ static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* i
 
     numer = 0.5 * ((double)left - (double)right);
     offset_d = numer / denom;
-    if (!isfinite(offset_d)) return 0;
-
     return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
 }
-
-
-
 static int spectral_peak_offset_candan(const SpectralPeakEstimateInput* input,
                                        int neighborhood_validated,
                                        float* out_offset,
@@ -542,9 +553,7 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
 static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateInput* input,
                                                    float* out_next_offset) {
     size_t next_bin = 0u;
-    float left = 0.0f;
-    float center = 0.0f;
-    float right = 0.0f;
+    SpectralPeakMagsqTriplet triplet = {0};
     float raw_offset = 0.0f;
     SpectralWindowInterpMagsqFn interp = NULL;
 
@@ -552,35 +561,23 @@ static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateIn
     if (input->best_next_bin < 0) return 0;
 
     next_bin = (size_t)input->best_next_bin;
-    if (next_bin == 0u || next_bin + 1u >= input->n_freqs) return 0;
-
-    left = input->next_magsq_row[next_bin - 1u];
-    center = input->next_magsq_row[next_bin];
-    right = input->next_magsq_row[next_bin + 1u];
-
-    if (!spectral_peak_finite_nonnegative(left) ||
-        !spectral_peak_finite_nonnegative(center) ||
-        !spectral_peak_finite_nonnegative(right)) {
+    if (!spectral_peak_load_magsq_triplet(input->next_magsq_row, input->n_freqs,
+                                          next_bin, 0, &triplet)) {
         return 0;
     }
 
-    /* The best-next bin was selected from the candidate's local +/-1 search.
-     * For a sub-bin temporal slope, require it to also be a local maximum in
-     * its own next-frame neighborhood. Otherwise keep the old coarse df. */
-    if (center < left || center < right) {
+    if (triplet.center < triplet.left || triplet.center < triplet.right) {
         return 0;
     }
 
     interp = input->interp_magsq ? input->interp_magsq
                                  : spectral_window_interp_magsq_parabolic;
-    raw_offset = interp(left, center, right);
+    raw_offset = interp(triplet.left, triplet.center, triplet.right);
     if (!isfinite(raw_offset)) return 0;
 
     *out_next_offset = spectral_peak_clamp_offset(raw_offset);
     return 1;
 }
-
-
 static int spectral_peak_bounded_magsq_gain_ok(float center_magsq, float peak_magsq) {
     float max_gain = SPECTRAL_PEAK_AMP_MAX_GAIN;
     double gain_limit = 0.0;
@@ -610,38 +607,34 @@ static int spectral_peak_window_peak_magsq(const SpectralPeakEstimateInput* inpu
                                            float offset,
                                            float center_magsq,
                                            float* out_peak_magsq) {
-    float left = 0.0f;
-    float right = 0.0f;
+    SpectralPeakMagsqTriplet triplet = {0};
     float candidate = 0.0f;
     SpectralWindowPeakMagsqFn peak_magsq = NULL;
 
-    if (!input || !input->magsq_row || !out_peak_magsq ||
-        center_bin == 0u || center_bin + 1u >= input->n_freqs ||
-        !spectral_peak_finite_positive(center_magsq) || !isfinite(offset)) {
+    if (!input || !out_peak_magsq || !isfinite(offset)) {
         return 0;
     }
-
-    left = input->magsq_row[center_bin - 1u];
-    right = input->magsq_row[center_bin + 1u];
-    if (!spectral_peak_finite_nonnegative(left) ||
-        !spectral_peak_finite_nonnegative(right)) {
+    if (!spectral_peak_finite_positive(center_magsq)) {
         return 0;
     }
+    if (!spectral_peak_load_magsq_triplet(input->magsq_row, input->n_freqs,
+                                          center_bin, 0, &triplet)) {
+        return 0;
+    }
+    triplet.center = center_magsq;
 
     peak_magsq = input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
-    if (!peak_magsq(left, center_magsq, right, offset, &candidate)) {
+    if (!peak_magsq(triplet.left, triplet.center, triplet.right, offset, &candidate)) {
         return 0;
     }
 
-    if (!spectral_peak_bounded_magsq_gain_ok(center_magsq, candidate)) {
+    if (!spectral_peak_bounded_magsq_gain_ok(triplet.center, candidate)) {
         return 0;
     }
 
     *out_peak_magsq = candidate;
     return 1;
 }
-
-
 static int spectral_peak_current_window_magsq(const SpectralPeakEstimateInput* input,
                                               float offset,
                                               float* out_peak_magsq) {
@@ -654,44 +647,29 @@ static int spectral_peak_next_window_magsq(const SpectralPeakEstimateInput* inpu
                                            float next_offset,
                                            float* out_peak_magsq) {
     size_t next_bin = 0u;
+    SpectralPeakMagsqTriplet triplet = {0};
+    float candidate = 0.0f;
+    SpectralWindowPeakMagsqFn peak_magsq = NULL;
 
-    if (!input || !out_peak_magsq || input->best_next_bin < 0) {
+    if (!input || !out_peak_magsq || input->best_next_bin < 0 || !isfinite(next_offset)) {
         return 0;
     }
     next_bin = (size_t)input->best_next_bin;
-    if (next_bin == 0u || next_bin + 1u >= input->n_freqs ||
-        !input->next_magsq_row) {
+    if (!spectral_peak_load_magsq_triplet(input->next_magsq_row, input->n_freqs,
+                                          next_bin, 1, &triplet)) {
         return 0;
     }
 
-    /* Temporarily evaluate against next_magsq_row by using the supplied
-     * callback directly. Keep the same estimator-level gain bound here so a
-     * custom window callback cannot bypass safety. */
-    {
-        float left = input->next_magsq_row[next_bin - 1u];
-        float center = input->next_magsq_row[next_bin];
-        float right = input->next_magsq_row[next_bin + 1u];
-        float candidate = 0.0f;
-        SpectralWindowPeakMagsqFn peak_magsq =
-            input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
-
-        if (!isfinite(next_offset) ||
-            !spectral_peak_finite_nonnegative(left) ||
-            !spectral_peak_finite_positive(center) ||
-            !spectral_peak_finite_nonnegative(right) ||
-            !peak_magsq(left, center, right, next_offset, &candidate)) {
-            return 0;
-        }
-        if (!spectral_peak_bounded_magsq_gain_ok(center, candidate)) {
-            return 0;
-        }
-        *out_peak_magsq = candidate;
-        return 1;
+    peak_magsq = input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
+    if (!peak_magsq(triplet.left, triplet.center, triplet.right, next_offset, &candidate)) {
+        return 0;
     }
+    if (!spectral_peak_bounded_magsq_gain_ok(triplet.center, candidate)) {
+        return 0;
+    }
+    *out_peak_magsq = candidate;
+    return 1;
 }
-
-
-
 static int spectral_peak_estimate_offset(const SpectralPeakEstimateInput* input,
                                          SpectralPeakEstimatorType type,
                                          int neighborhood_validated,

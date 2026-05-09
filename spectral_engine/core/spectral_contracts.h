@@ -156,4 +156,28 @@ static inline int spectral_gpu_tile_layout_words_valid(const void* tile_ranges,
     return 1;
 }
 
+static inline int spectral_u64_add_checked(uint64_t a, uint64_t b, uint64_t* out)
+{
+    if (!out || b > UINT64_MAX - a) return 0;
+    *out = a + b;
+    return 1;
+}
+
+static inline int spectral_double_accumulate_nonnegative_checked(double current,
+                                                                 double delta,
+                                                                 double* out)
+{
+    double next = 0.0;
+
+    if (!out || !isfinite(current) || current < 0.0 ||
+        !isfinite(delta) || delta < 0.0) {
+        return 0;
+    }
+
+    next = current + delta;
+    if (!isfinite(next) || next < current) return 0;
+    *out = next;
+    return 1;
+}
+
 #endif /* SPECTRAL_CONTRACTS_H */
