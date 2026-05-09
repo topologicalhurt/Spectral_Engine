@@ -22,17 +22,68 @@
 #include "spectral_peak_track_internal.h"
 #include <float.h>
 
+typedef struct SpectralFusedScratchRows {
+    float* row_curr;
+    float* row_next;
+    float* phase_curr;
+    float* phase_next;
+} SpectralFusedScratchRows;
+
+static int spectral_fused_scratch_rows_alloc(SpectralFusedScratchRows* rows, size_t row_bytes)
+{
+    if (!rows || row_bytes == 0u) return 0;
+    *rows = (SpectralFusedScratchRows){0};
+
+    rows->row_curr = (float*)spectral_aligned_alloc(row_bytes);
+    rows->row_next = (float*)spectral_aligned_alloc(row_bytes);
+    rows->phase_curr = (float*)spectral_aligned_alloc(row_bytes);
+    rows->phase_next = (float*)spectral_aligned_alloc(row_bytes);
+
+    if (!rows->row_curr || !rows->row_next || !rows->phase_curr || !rows->phase_next) {
+        free(rows->row_curr);
+        free(rows->row_next);
+        free(rows->phase_curr);
+        free(rows->phase_next);
+        *rows = (SpectralFusedScratchRows){0};
+        return 0;
+    }
+
+    return 1;
+}
+
+static void spectral_fused_scratch_rows_free(SpectralFusedScratchRows* rows)
+{
+    if (!rows) return;
+    free(rows->row_curr);
+    free(rows->row_next);
+    free(rows->phase_curr);
+    free(rows->phase_next);
+    *rows = (SpectralFusedScratchRows){0};
+}
+
+static void spectral_fused_scratch_rows_rotate(SpectralFusedScratchRows* rows)
+{
+    float* tmp = NULL;
+    if (!rows) return;
+
+    tmp = rows->row_curr;
+    rows->row_curr = rows->row_next;
+    rows->row_next = tmp;
+
+    tmp = rows->phase_curr;
+    rows->phase_curr = rows->phase_next;
+    rows->phase_next = tmp;
+}
+
 SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                                          int sr, int n_fft, int hop, float db_thresh,
                                          size_t n_frames, size_t n_freqs,
                                          double* t_fft, double* t_track)
 {
-    size_t n_fft_f32_bytes = 0;
     size_t n_freqs_f32_bytes = 0;
-    float* window_func = NULL;
-    SpectralWindowMetrics window_metrics = {0};
+    SpectralAnalysisWindowContext window_ctx = {0};
     SpectralFftResources res = {0};
-    int n_threads = spectral_analysis_effective_thread_count();
+    int n_threads = spectral_omp_effective_thread_count();
     int actual_threads = n_threads;
     double fft_time_total = 0.0;
     float global_max_magsq = 0.0f;
@@ -43,18 +94,12 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
     if (actual_threads < 1) actual_threads = 1;
     if (n_frames < 2u) goto fail;
-    if (!spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes) ||
-        !spectral_array_bytes(n_freqs, sizeof(float), &n_freqs_f32_bytes)) goto fail;
+    if (!spectral_array_bytes(n_freqs, sizeof(float), &n_freqs_f32_bytes)) goto fail;
 
-    window_func = spectral_aligned_alloc(n_fft_f32_bytes);
-    if (!window_func) goto fail;
-    spectral_window_generate(window_func, (size_t)n_fft, SPECTRAL_WINDOW_HANN);
-    window_metrics = spectral_window_metrics(window_func, (size_t)n_fft);
+    if (spectral_analysis_window_context_init(&window_ctx, (size_t)n_fft, SPECTRAL_WINDOW_HANN) != SPECTRAL_OK) goto fail;
 
     if (!spectral_fft_resources_alloc(&res, actual_threads, (size_t)n_fft, n_freqs)) goto fail;
-    spectral_fft_resources_set_magsq_scales(&res,
-        window_metrics.endpoint_bin_magsq_scale,
-        window_metrics.positive_bin_magsq_scale);
+    spectral_analysis_window_context_apply_magsq_scales(&window_ctx, &res);
 
     {
         /* Pass 1: Global maximum discovery is required for stable dB thresholding.
@@ -78,7 +123,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
             for (size_t t = 0; t < n_frames; t++) {
                 if (local_failed) continue;
                 float frame_max = 0.0f;
-                spectral_fft_single_frame(&res, tid, audio, hop, window_func, t,
+                spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, t,
                                           scratch_magsq, NULL, &frame_max);
                 if (frame_max > pass1_max) pass1_max = frame_max;
             }
@@ -96,7 +141,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
     tracker = spectral_tracker_create(actual_threads, n_freqs, sr, n_fft, hop, db_thresh, global_max_magsq);
     if (!tracker) goto fail;
-    spectral_tracker_set_window_descriptor(tracker, spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
+    spectral_tracker_set_window_descriptor(tracker, window_ctx.descriptor);
 
     {
         const size_t pair_count = n_frames - 1u;
@@ -106,10 +151,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         #pragma omp parallel num_threads(actual_threads)
         {
             int tid = omp_get_thread_num();
-            float* row_curr = spectral_aligned_alloc(n_freqs_f32_bytes);
-            float* row_next = spectral_aligned_alloc(n_freqs_f32_bytes);
-            float* phase_curr = spectral_aligned_alloc(n_freqs_f32_bytes);
-            float* phase_next = spectral_aligned_alloc(n_freqs_f32_bytes);
+            SpectralFusedScratchRows rows = {0};
             uint32_t candidate_batch[SPECTRAL_TRACK_CANDIDATE_BATCH];
             size_t candidate_batch_count = 0;
             uint64_t local_pairs = 0;
@@ -126,7 +168,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
             double local_emit_amp_time = 0.0;
 #endif
 
-            if (!row_curr || !row_next || !phase_curr || !phase_next) {
+            if (!spectral_fused_scratch_rows_alloc(&rows, n_freqs_f32_bytes)) {
                 spectral_tracker_set_failed(tracker);
             }
 
@@ -145,8 +187,8 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
                     /* Prime the current row for this pair range. */
                     fft_start = omp_get_wtime();
-                    spectral_fft_single_frame(&res, tid, audio, hop, window_func, pair_start,
-                                              row_curr, phase_curr, &frame_max);
+                    spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, pair_start,
+                                              rows.row_curr, rows.phase_curr, &frame_max);
                     local_fft_time += (omp_get_wtime() - fft_start);
 
                     for (size_t pair = pair_start;
@@ -164,14 +206,14 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                         double track_start = 0.0;
 
                         fft_start = omp_get_wtime();
-                        spectral_fft_single_frame(&res, tid, audio, hop, window_func, pair + 1u,
-                                                  row_next, phase_next, &frame_max);
+                        spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, pair + 1u,
+                                                  rows.row_next, rows.phase_next, &frame_max);
                         local_fft_time += (omp_get_wtime() - fft_start);
 
-                        fctx.row = row_curr;
-                        fctx.next_row = row_next;
-                        fctx.phase_row = phase_curr;
-                        fctx.next_phase_row = phase_next;
+                        fctx.row = rows.row_curr;
+                        fctx.next_row = rows.row_next;
+                        fctx.phase_row = rows.phase_curr;
+                        fctx.next_phase_row = rows.phase_next;
                         fctx.t_hop = t_hop;
                         fctx.threshsq = threshsq;
                         fctx.can_start_new = 1;
@@ -193,16 +235,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                         }
                         local_track_time += (omp_get_wtime() - track_start);
 
-                        {
-                            float* tmp = row_curr;
-                            row_curr = row_next;
-                            row_next = tmp;
-                        }
-                        {
-                            float* tmp = phase_curr;
-                            phase_curr = phase_next;
-                            phase_next = tmp;
-                        }
+                        spectral_fused_scratch_rows_rotate(&rows);
                     }
                 }
             }
@@ -224,10 +257,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                 local_pairs, local_candidates, local_segments, local_track_time);
 #endif
 
-            free(row_curr);
-            free(row_next);
-            free(phase_curr);
-            free(phase_next);
+            spectral_fused_scratch_rows_free(&rows);
         }
 
         {
@@ -245,9 +275,8 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
             }
 
             spectral_fft_resources_free(&res);
-            free(window_func);
+            spectral_analysis_window_context_free(&window_ctx);
             res = (SpectralFftResources){0};
-            window_func = NULL;
 
             {
                 SegmentArray final_res = spectral_tracker_finalize(tracker, t_track, track_wall_time);
@@ -263,6 +292,6 @@ fail:
         spectral_tracker_destroy(tracker);
     }
     spectral_fft_resources_free(&res);
-    free(window_func);
+    spectral_analysis_window_context_free(&window_ctx);
     return spectral_analysis_return_empty(t_fft, t_track);
 }

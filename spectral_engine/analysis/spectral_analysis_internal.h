@@ -46,7 +46,19 @@ typedef struct {
 #endif
 } SpectralFftResources;
 
-int spectral_analysis_effective_thread_count(void);
+typedef struct SpectralAnalysisWindowContext {
+    float* samples;
+    size_t bytes;
+    SpectralWindowMetrics metrics;
+    const SpectralWindowDescriptor* descriptor;
+} SpectralAnalysisWindowContext;
+
+SpectralError spectral_analysis_window_context_init(SpectralAnalysisWindowContext* ctx,
+                                                    size_t n_fft,
+                                                    SpectralWindowType type);
+void spectral_analysis_window_context_free(SpectralAnalysisWindowContext* ctx);
+void spectral_analysis_window_context_apply_magsq_scales(const SpectralAnalysisWindowContext* ctx,
+                                                         SpectralFftResources* res);
 
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track);
 

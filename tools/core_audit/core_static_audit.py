@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 93):
+    for pass_num in range(1, 97):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1302,11 +1302,11 @@ def main() -> int:
     analysis_pass70 = read("spectral_engine/analysis/spectral_analysis.c")
     full_pass70 = read("spectral_engine/analysis/spectral_analysis_full.c")
     fused_pass70 = read("spectral_engine/analysis/spectral_analysis_fused.c")
-    require("int spectral_analysis_effective_thread_count(void)" in analysis_pass70 and
+    require("static inline int spectral_omp_effective_thread_count(void)" in analysis_pass70 and
             "SPECTRAL_MAX_THREADS" in analysis_pass70,
             "pass 70 analysis thread count must clamp OpenMP max threads to engine domain")
-    require("int n_threads = spectral_analysis_effective_thread_count();" in full_pass70 and
-            "int n_threads = spectral_analysis_effective_thread_count();" in fused_pass70,
+    require("int n_threads = spectral_omp_effective_thread_count();" in full_pass70 and
+            "int n_threads = spectral_omp_effective_thread_count();" in fused_pass70,
             "pass 70 analysis paths must use bounded effective thread count")
 
 
@@ -1513,19 +1513,52 @@ def main() -> int:
 
     synth_c_pass92 = read("spectral_engine/core/spectral_synth_internal.c")
     synth_h_pass92 = read("spectral_engine/core/spectral_synth_internal.h")
-    require("synth_validate_inputs" not in synth_c_pass92 and
-            "synth_validate_inputs" not in synth_h_pass92 and
+    require("synth_preflight_common" not in synth_c_pass92 and
+            "synth_preflight_common" not in synth_h_pass92 and
             "SynthValidateResult" not in synth_h_pass92,
             "pass 92 synth preflight consolidation must remove legacy validation API")
     require("spectral_size_mul(out_len, elem_size, &preflight_out_bytes)" in synth_c_pass92 and
             "memset(out_buffer, 0, preflight_out_bytes)" in synth_c_pass92,
             "pass 92 synth preflight consolidation must derive and reuse output byte count once")
-    require("synth_segment_payload_valid" not in synth_c_pass92 and
+    require("spectral_segment_array_valid_for_synth" not in synth_c_pass92 and
             "spectral_segment_array_valid_for_synth(&sa)" in synth_c_pass92,
             "pass 92 synth preflight consolidation must use canonical SegmentArray contract")
     require("static inline GpuSynthParams gpu_synth_params_pack(" not in synth_h_pass92 and
             "gpu_synth_params_pack_checked" in synth_h_pass92,
             "pass 92 must remove unchecked GPU params pack alias")
+
+
+    analysis_internal_pass93 = read("spectral_engine/analysis/spectral_analysis_internal.h")
+    analysis_pass93 = read("spectral_engine/analysis/spectral_analysis.c")
+    full_pass93 = read("spectral_engine/analysis/spectral_analysis_full.c")
+    fused_pass93 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("SpectralAnalysisWindowContext" in analysis_internal_pass93 and
+            "spectral_analysis_window_context_init" in analysis_pass93,
+            "pass 93 analysis window context must centralize window setup")
+    require("spectral_analysis_window_context_apply_magsq_scales(&window_ctx, &res);" in full_pass93 and
+            "spectral_analysis_window_context_apply_magsq_scales(&window_ctx, &res);" in fused_pass93,
+            "pass 93 full/fused analysis must share window scale wiring")
+
+
+    fused_pass94 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("SpectralFusedScratchRows rows = {0};" in fused_pass94 and
+            "spectral_fused_scratch_rows_rotate(&rows);" in fused_pass94,
+            "pass 94 fused scratch rows must have a single owner/rotation API")
+
+
+    track_pass95 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_tracker_update_peak_model_field" in track_pass95 and
+            track_pass95.count("spectral_tracker_update_peak_model_field(tracker,") == 4,
+            "pass 95 tracker peak model setters must route through one mutation helper")
+
+
+    omp_pass96 = read("spectral_engine/core/spectral_omp.h")
+    synth_pass96 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("spectral_omp_effective_thread_count" in omp_pass96 and
+            "SPECTRAL_MAX_THREADS" in omp_pass96,
+            "pass 96 OpenMP effective thread count must live in the OpenMP shim")
+    require("int n_threads = spectral_omp_effective_thread_count();" in synth_pass96,
+            "pass 96 GPU tile preprocessing must use shared effective thread helper")
 
     if FAILURES:
         for f in FAILURES:

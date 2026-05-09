@@ -7,19 +7,52 @@
 #include "spectral_analysis_internal.h"
 #include "spectral_log.h"
 
-int spectral_analysis_effective_thread_count(void)
+SpectralError spectral_analysis_window_context_init(SpectralAnalysisWindowContext* ctx,
+                                                    size_t n_fft,
+                                                    SpectralWindowType type)
 {
-    int n_threads = omp_get_max_threads();
+    size_t bytes = 0;
+    const SpectralWindowDescriptor* desc = NULL;
 
-    if (n_threads < 1) {
-        return 1;
+    if (!ctx || n_fft == 0u) return SPECTRAL_ERR_PARAM;
+    *ctx = (SpectralAnalysisWindowContext){0};
+
+    desc = spectral_window_descriptor(type);
+    if (!desc) return SPECTRAL_ERR_PARAM;
+
+    if (!spectral_array_bytes(n_fft, sizeof(float), &bytes)) {
+        return SPECTRAL_ERR_OVERFLOW;
     }
-    if (n_threads > SPECTRAL_MAX_THREADS) {
-        return SPECTRAL_MAX_THREADS;
+
+    ctx->samples = (float*)spectral_aligned_alloc(bytes);
+    if (!ctx->samples) return SPECTRAL_ERR_MEMORY;
+
+    if (spectral_window_generate(ctx->samples, n_fft, type) != SPECTRAL_OK) {
+        spectral_analysis_window_context_free(ctx);
+        return SPECTRAL_ERR_PARAM;
     }
-    return n_threads;
+
+    ctx->metrics = spectral_window_metrics(ctx->samples, n_fft);
+    ctx->descriptor = desc;
+    ctx->bytes = bytes;
+    return SPECTRAL_OK;
 }
 
+void spectral_analysis_window_context_free(SpectralAnalysisWindowContext* ctx)
+{
+    if (!ctx) return;
+    free(ctx->samples);
+    *ctx = (SpectralAnalysisWindowContext){0};
+}
+
+void spectral_analysis_window_context_apply_magsq_scales(const SpectralAnalysisWindowContext* ctx,
+                                                         SpectralFftResources* res)
+{
+    if (!ctx || !res) return;
+    spectral_fft_resources_set_magsq_scales(res,
+                                            ctx->metrics.endpoint_bin_magsq_scale,
+                                            ctx->metrics.positive_bin_magsq_scale);
+}
 
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track)
 {

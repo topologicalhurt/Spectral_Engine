@@ -460,12 +460,7 @@ SpectralError gpu_tile_preprocess(
     uint32_t* tile_segment_ids = NULL;
     uint32_t* tile_cursors = NULL;
 
-#ifdef _OPENMP
-    int n_threads = omp_get_max_threads();
-#else
-    int n_threads = 1;
-#endif
-    if (n_threads < 1) n_threads = 1;
+    int n_threads = spectral_omp_effective_thread_count();
 
     if (!spectral_size_mul((size_t)n_threads, sizeof(uint32_t*), &bytes)) {
         return_err = SPECTRAL_ERR_OVERFLOW;

@@ -11,36 +11,33 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
 {
     size_t total_bins = 0;
     size_t total_bytes = 0;
-    size_t n_fft_f32_bytes = 0;
     size_t fft_bytes = 0;
-    float* window_func = NULL;
+    SpectralAnalysisWindowContext window_ctx = {0};
     float* magsq = NULL;
     float* phases = NULL;
     float max_magsq = 0.0f;
-    SpectralWindowMetrics window_metrics = {0};
     SpectralFftResources res = {0};
-    int n_threads = spectral_analysis_effective_thread_count();
+    int n_threads = spectral_omp_effective_thread_count();
 
     (void)n_samples;
 
     if (!spectral_size_mul(n_frames, n_freqs, &total_bins) ||
         !spectral_size_mul(total_bins, sizeof(float), &total_bytes) ||
-        !spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes) ||
         !spectral_analysis_estimate_fft_bytes(n_frames, (size_t)n_fft, n_freqs, &fft_bytes)) {
         return spectral_analysis_return_empty(t_fft, t_track);
     }
 
-    window_func = spectral_aligned_alloc(n_fft_f32_bytes);
+    if (spectral_analysis_window_context_init(&window_ctx, (size_t)n_fft, SPECTRAL_WINDOW_HANN) != SPECTRAL_OK) {
+        return spectral_analysis_return_empty(t_fft, t_track);
+    }
     magsq = spectral_aligned_alloc(total_bytes);
     phases = spectral_aligned_alloc(total_bytes);
-    if (!window_func || !magsq || !phases) {
-        free(window_func);
+    if (!magsq || !phases) {
+        spectral_analysis_window_context_free(&window_ctx);
         free(magsq);
         free(phases);
         return spectral_analysis_return_empty(t_fft, t_track);
     }
-    spectral_window_generate(window_func, (size_t)n_fft, SPECTRAL_WINDOW_HANN);
-    window_metrics = spectral_window_metrics(window_func, (size_t)n_fft);
 
 #if defined(POSIX_MADV_SEQUENTIAL)
     posix_madvise(magsq, total_bytes, POSIX_MADV_SEQUENTIAL);
@@ -51,16 +48,14 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
         spectral_fft_resources_free(&res);
         free(magsq);
         free(phases);
-        free(window_func);
+        spectral_analysis_window_context_free(&window_ctx);
         return spectral_analysis_return_empty(t_fft, t_track);
     }
-    spectral_fft_resources_set_magsq_scales(&res,
-        window_metrics.endpoint_bin_magsq_scale,
-        window_metrics.positive_bin_magsq_scale);
+    spectral_analysis_window_context_apply_magsq_scales(&window_ctx, &res);
 
     {
         double fft_start = omp_get_wtime();
-        max_magsq = spectral_fft_frames(&res, audio, hop, window_func,
+        max_magsq = spectral_fft_frames(&res, audio, hop, window_ctx.samples,
                                         0, n_frames, magsq, phases, 0);
         *t_fft = omp_get_wtime() - fft_start;
 
@@ -75,7 +70,7 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     }
 
     spectral_fft_resources_free(&res);
-    free(window_func);
+    spectral_analysis_window_context_free(&window_ctx);
 
     {
         SegmentArray result = spectral_track_peaks_with_window_descriptor(
@@ -83,7 +78,7 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
             n_frames, n_freqs,
             sr, n_fft, hop,
             db_thresh,
-            spectral_window_descriptor(SPECTRAL_WINDOW_HANN),
+            window_ctx.descriptor,
             SPECTRAL_PEAK_ESTIMATOR_AUTO,
             t_track);
         free(phases);

@@ -116,6 +116,44 @@ static SpectralError spectral_tracker_apply_peak_model(SpectralTracker* tracker,
     return SPECTRAL_OK;
 }
 
+typedef enum SpectralTrackerModelField {
+    SPECTRAL_TRACKER_MODEL_FIELD_WINDOW,
+    SPECTRAL_TRACKER_MODEL_FIELD_ESTIMATOR,
+    SPECTRAL_TRACKER_MODEL_FIELD_PHASE_POLICY,
+    SPECTRAL_TRACKER_MODEL_FIELD_AMPLITUDE_POLICY
+} SpectralTrackerModelField;
+
+static SpectralError spectral_tracker_update_peak_model_field(SpectralTracker* tracker,
+                                                              SpectralTrackerModelField field,
+                                                              const void* value)
+{
+    SpectralPeakModel model;
+
+    if (!tracker || !value) return SPECTRAL_ERR_PARAM;
+
+    model = spectral_tracker_current_peak_model(tracker);
+    switch (field) {
+        case SPECTRAL_TRACKER_MODEL_FIELD_WINDOW:
+            model.window = *(const SpectralWindowDescriptor* const*)value;
+            if (!model.window) model.window = spectral_window_descriptor(SPECTRAL_WINDOW_HANN);
+            model.amplitude_policy = spectral_peak_model_for_window(model.window).amplitude_policy;
+            break;
+        case SPECTRAL_TRACKER_MODEL_FIELD_ESTIMATOR:
+            model.estimator = *(const SpectralPeakEstimatorType*)value;
+            break;
+        case SPECTRAL_TRACKER_MODEL_FIELD_PHASE_POLICY:
+            model.phase_policy = *(const SpectralPeakPhasePolicy*)value;
+            break;
+        case SPECTRAL_TRACKER_MODEL_FIELD_AMPLITUDE_POLICY:
+            model.amplitude_policy = *(const SpectralPeakAmplitudePolicy*)value;
+            break;
+        default:
+            return SPECTRAL_ERR_PARAM;
+    }
+
+    return spectral_tracker_set_peak_model(tracker, &model);
+}
+
 SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const SpectralPeakModel* model) {
     if (!tracker || !model) return SPECTRAL_ERR_PARAM;
     /* Apply only after the full model resolves. A failed mutation must not
@@ -124,41 +162,29 @@ SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const Sp
     return spectral_tracker_apply_peak_model(tracker, model);
 }
 
-void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc) {
-    SpectralPeakModel model;
-    if (!tracker) return;
 
-    model = spectral_tracker_current_peak_model(tracker);
-    model.window = desc ? desc : spectral_window_descriptor(SPECTRAL_WINDOW_HANN);
-    model.amplitude_policy = spectral_peak_model_for_window(model.window).amplitude_policy;
-    (void)spectral_tracker_set_peak_model(tracker, &model);
+void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc) {
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_WINDOW,
+                                                   &desc);
 }
 
 void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type) {
-    SpectralPeakModel model;
-    if (!tracker) return;
-
-    model = spectral_tracker_current_peak_model(tracker);
-    model.estimator = type;
-    (void)spectral_tracker_set_peak_model(tracker, &model);
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_ESTIMATOR,
+                                                   &type);
 }
 
 void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy) {
-    SpectralPeakModel model;
-    if (!tracker) return;
-
-    model = spectral_tracker_current_peak_model(tracker);
-    model.phase_policy = policy;
-    (void)spectral_tracker_set_peak_model(tracker, &model);
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_PHASE_POLICY,
+                                                   &policy);
 }
 
 void spectral_tracker_set_amplitude_policy(SpectralTracker* tracker, SpectralPeakAmplitudePolicy policy) {
-    SpectralPeakModel model;
-    if (!tracker) return;
-
-    model = spectral_tracker_current_peak_model(tracker);
-    model.amplitude_policy = policy;
-    (void)spectral_tracker_set_peak_model(tracker, &model);
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_AMPLITUDE_POLICY,
+                                                   &policy);
 }
 
 float spectral_tracker_get_threshsq(const SpectralTracker* tracker) {
