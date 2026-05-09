@@ -12,6 +12,7 @@
 #include "spectral_fs.h"
 #include "spectral_endian.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include "spectral_log.h"
 
 #if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
@@ -50,15 +51,11 @@ static int segment_validate(const Segment* seg) {
 }
 
 /* Validate entire segment array, report first corrupt segment index */
-static int segments_validate_all(const Segment* segs, uint32_t count, uint32_t* bad_idx) {
-    for (uint32_t i = 0; i < count; i++) {
-        if (!segment_validate(&segs[i])) {
-            if (bad_idx) *bad_idx = i;
-            return 0;
-        }
-    }
-    return 1;
+static int segments_validate_all(const Segment* segs, uint32_t count, uint32_t* bad_idx)
+{
+    return spectral_segment_array_payload_valid(segs, count, bad_idx);
 }
+
 
 static int segment_file_metadata_valid_u32(uint32_t sr, float stretch, float pitch)
 {

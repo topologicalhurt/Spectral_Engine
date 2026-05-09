@@ -12,6 +12,7 @@
 #include "spectral_endian.h"
 #include "spectral_hash_xx32_xx3.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include "spectral_log.h"
 
 #if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
@@ -184,64 +185,30 @@ static SpectralError seg_cache_validate_data_extent(const char* cache_dir,
 
 static int seg_cache_segment_valid(const Segment* s)
 {
-    if (!s) return 0;
-
-    if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
-    if (!spectral_is_finite_f32(s->length) || s->length < 0.0f) return 0;
-    if (!spectral_is_finite_f32(s->phase)) return 0;
-    if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
-    if (!spectral_is_finite_f32(s->df)) return 0;
-    if (!spectral_is_finite_f32(s->amp)) return 0;
-    if (!spectral_is_finite_f32(s->da)) return 0;
-    if (!spectral_is_finite_f32(s->width)) return 0;
-    return 1;
+    return spectral_segment_payload_valid(s);
 }
+
 
 static int seg_cache_segments_valid(const Segment* segs, uint32_t count, uint32_t* bad_idx)
 {
-    if (count > 0u && !segs) return 0;
-
-    for (uint32_t i = 0; i < count; i++) {
-        if (!seg_cache_segment_valid(&segs[i])) {
-            if (bad_idx) *bad_idx = i;
-            return 0;
-        }
-    }
-    return 1;
+    return spectral_segment_array_payload_valid(segs, count, bad_idx);
 }
+
 
 static int seg_cache_gpu_segment_valid(const SegmentGpu* s)
 {
-    if (!s) return 0;
-
-    if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
-    if (!spectral_is_finite_f32(s->length) || s->length < 0.0f) return 0;
-    if (!spectral_is_finite_f32(s->phase)) return 0;
-    if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
-    if (!spectral_is_finite_f32(s->df)) return 0;
-    if (!spectral_is_finite_f32(s->amp)) return 0;
-    if (!spectral_is_finite_f32(s->da)) return 0;
-    return 1;
+    return spectral_segment_gpu_payload_valid(s);
 }
+
 
 static int seg_cache_gpu_segments_match(const Segment* segs,
                                         const SegmentGpu* gpu_segs,
                                         uint32_t count,
                                         uint32_t* bad_idx)
 {
-    if (count > 0u && (!segs || !gpu_segs)) return 0;
-
-    for (uint32_t i = 0; i < count; i++) {
-        SegmentGpu expected = spectral_segment_pack_gpu(&segs[i]);
-
-        if (!seg_cache_gpu_segment_valid(&gpu_segs[i]) ||
-            memcmp(&expected, &gpu_segs[i], sizeof(expected)) != 0) {
-            if (bad_idx) *bad_idx = i;
-            return 0;
-        }
-    }
-    return 1;
+    return spectral_segment_gpu_array_matches_segments(segs, gpu_segs, count, bad_idx);
 }
+
 
 static int seg_cache_tile_layout_words_valid(const void* tile_ranges,
                                              const void* tile_segment_ids,
@@ -249,51 +216,13 @@ static int seg_cache_tile_layout_words_valid(const void* tile_ranges,
                                              uint32_t tile_total_refs,
                                              uint32_t seg_count)
 {
-    const char* range_src = (const char*)tile_ranges;
-    const char* id_src = (const char*)tile_segment_ids;
-    uint32_t running_refs = 0;
-
-    if (tile_count == 0u || tile_total_refs == 0u) {
-        return tile_count == 0u && tile_total_refs == 0u;
-    }
-    if (!range_src || !id_src || seg_count == 0u) {
-        return 0;
-    }
-
-    for (uint32_t i = 0; i < tile_count; i++) {
-        uint32_t range_words[2] = {0, 0};
-        uint32_t start = 0;
-        uint32_t count = 0;
-
-        memcpy(range_words, range_src + ((size_t)i * sizeof(range_words)), sizeof(range_words));
-        start = range_words[0];
-        count = range_words[1];
-
-        if (start != running_refs) {
-            return 0;
-        }
-        if (count > UINT32_MAX - running_refs) {
-            return 0;
-        }
-        running_refs += count;
-        if (running_refs > tile_total_refs) {
-            return 0;
-        }
-    }
-    if (running_refs != tile_total_refs) {
-        return 0;
-    }
-
-    for (uint32_t i = 0; i < tile_total_refs; i++) {
-        uint32_t segment_id = 0;
-        memcpy(&segment_id, id_src + ((size_t)i * sizeof(segment_id)), sizeof(segment_id));
-        if (segment_id >= seg_count) {
-            return 0;
-        }
-    }
-
-    return 1;
+    return spectral_gpu_tile_layout_words_valid(tile_ranges,
+                                                (const uint32_t*)tile_segment_ids,
+                                                tile_count,
+                                                tile_total_refs,
+                                                seg_count);
 }
+
 
 
 static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,

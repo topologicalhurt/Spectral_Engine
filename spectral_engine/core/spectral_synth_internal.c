@@ -3,6 +3,7 @@
 #include "spectral_synth_internal.h"
 #include "spectral_synth.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -318,14 +319,7 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
     if (!s || !p || out_len == 0) return lp;
 
-    if (!spectral_is_finite_f32(s->start) ||
-        !spectral_is_finite_f32(s->length) ||
-        !spectral_is_finite_f32(s->phase) ||
-        !spectral_is_finite_f32(s->omega) ||
-        !spectral_is_finite_f32(s->df) ||
-        !spectral_is_finite_f32(s->amp) ||
-        !spectral_is_finite_f32(s->da) ||
-        !spectral_is_finite_f32(s->width)) {
+    if (!spectral_segment_valid_for_synth(s)) {
         lp.valid = 0;
         return lp;
     }
@@ -692,36 +686,13 @@ static int gpu_tile_data_refs_valid(const TileRange* ranges,
                                     uint32_t total_refs,
                                     uint32_t segment_count)
 {
-    uint32_t running_refs = 0;
-
-    if (num_tiles == 0u) return total_refs == 0u;
-    if (!ranges) return 0;
-    if (total_refs > 0u && !segment_ids) return 0;
-
-    for (uint32_t i = 0; i < num_tiles; i++) {
-        if (ranges[i].start != running_refs) {
-            return 0;
-        }
-        if (ranges[i].count > UINT32_MAX - running_refs) {
-            return 0;
-        }
-        running_refs += ranges[i].count;
-        if (running_refs > total_refs) {
-            return 0;
-        }
-    }
-    if (running_refs != total_refs) {
-        return 0;
-    }
-
-    for (uint32_t i = 0; i < total_refs; i++) {
-        if (segment_ids[i] >= segment_count) {
-            return 0;
-        }
-    }
-
-    return 1;
+    return spectral_gpu_tile_layout_words_valid((const void*)ranges,
+                                                segment_ids,
+                                                num_tiles,
+                                                total_refs,
+                                                segment_count);
 }
+
 
 static SPECTRAL_THREAD_LOCAL struct {
     TileRange*  ranges;

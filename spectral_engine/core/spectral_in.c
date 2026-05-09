@@ -6,6 +6,7 @@
 
 #include "spectral_io.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 
 #if SPECTRAL_HAS_FILE_IO
 
@@ -17,14 +18,9 @@
 
 static int spectral_audio_samples_finite(const float* samples, size_t count)
 {
-    if (count > 0u && !samples) return 0;
-    for (size_t i = 0; i < count; i++) {
-        if (!spectral_is_finite_f32(samples[i])) {
-            return 0;
-        }
-    }
-    return 1;
+    return spectral_f32_span_finite(samples, count);
 }
+
 
 static int spectral_sf_count_to_size(sf_count_t value, size_t* out)
 {

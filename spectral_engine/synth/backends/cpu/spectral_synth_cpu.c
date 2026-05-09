@@ -4,6 +4,7 @@
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include "spectral_vector_ops.h"
 #include "spectral_wavetable.h"
 #include "oscillator.h"
@@ -161,14 +162,9 @@ static void thread_buffers_free(ThreadBuffers* tb) {
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static int synth_float_output_finite(const float* out_buffer, size_t out_len)
 {
-    if (out_len > 0u && !out_buffer) return 0;
-    for (size_t i = 0; i < out_len; i++) {
-        if (!spectral_is_finite_f32(out_buffer[i])) {
-            return 0;
-        }
-    }
-    return 1;
+    return spectral_f32_span_finite(out_buffer, out_len);
 }
+
 #endif
 
 

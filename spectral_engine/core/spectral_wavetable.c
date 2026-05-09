@@ -17,6 +17,7 @@
  */
 #include "spectral_wavetable.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include "spectral_osc_formulas.h"
 #include <stdlib.h>
 #include <string.h>
@@ -121,14 +122,9 @@ static int wavetable_file_expected_bytes(SpectralWavetableFormat format,
 
 static int wavetable_float_samples_finite(const float* samples, uint32_t count)
 {
-    if (count > 0u && !samples) return 0;
-    for (uint32_t i = 0; i < count; i++) {
-        if (!spectral_is_finite_f32(samples[i])) {
-            return 0;
-        }
-    }
-    return 1;
+    return spectral_f32_span_finite(samples, count);
 }
+
 
 static int wavetable_runtime_samples_valid(const spectral_sample_t* samples, uint32_t count)
 {

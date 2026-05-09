@@ -1481,6 +1481,21 @@ def main() -> int:
             "return reduce_err;" in cpu_pass90,
             "pass 90 CPU synth finite output failure must use existing zero-output reducer error path")
 
+
+    contracts_phase_c = read("spectral_engine/core/spectral_contracts.h")
+    require("spectral_segment_payload_valid" in contracts_phase_c and
+            "spectral_segment_valid_for_synth" in contracts_phase_c,
+            "Phase C contract consolidation must define canonical Segment contracts")
+    require("spectral_f32_span_finite" in contracts_phase_c and
+            "spectral_gpu_tile_layout_words_valid" in contracts_phase_c,
+            "Phase C contract consolidation must define canonical span/tile contracts")
+    seg_cache_phase_c = read("spectral_engine/core/spectral_seg_cache.c")
+    require("return spectral_segment_array_payload_valid(segs, count, bad_idx);" in seg_cache_phase_c,
+            "Phase C segment cache validation must delegate to canonical contracts")
+    synth_phase_c = read("spectral_engine/core/spectral_synth_internal.c")
+    require("spectral_segment_array_valid_for_synth(&sa)" in synth_phase_c,
+            "Phase C synth preflight must validate SegmentArray through canonical contract")
+
     if FAILURES:
         for f in FAILURES:
             print(f"FAIL: {f}", file=sys.stderr)
