@@ -9,12 +9,12 @@ def read(rel: str) -> str:
 def test_cpu_float_reduction_validates_finite_output_postcondition() -> None:
     src = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
 
-    assert "synth_float_output_finite" in src
+    assert "spectral_f32_span_finite" in src
     assert "!spectral_is_finite_f32(out_buffer[i])" in src
-    assert "if (!synth_float_output_finite(out_buffer, out_len))" in src
+    assert "if (!spectral_f32_span_finite(out_buffer, out_len))" in src
     assert "return SPECTRAL_ERR_PARAM;" in src
 
-    check_idx = src.index("if (!synth_float_output_finite(out_buffer, out_len))")
+    check_idx = src.index("if (!spectral_f32_span_finite(out_buffer, out_len))")
     return_idx = src.index("return SPECTRAL_OK;", check_idx)
     assert check_idx < return_idx
 

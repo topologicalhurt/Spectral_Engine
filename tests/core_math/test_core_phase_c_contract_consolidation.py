@@ -19,10 +19,10 @@ def test_segment_cache_delegates_payload_validation_to_canonical_contracts() -> 
     src = read("spectral_engine/core/spectral_seg_cache.c")
 
     assert '#include "spectral_contracts.h"' in src
-    assert "return spectral_segment_payload_valid(s);" in src
-    assert "return spectral_segment_array_payload_valid(segs, count, bad_idx);" in src
-    assert "return spectral_segment_gpu_array_matches_segments(segs, gpu_segs, count, bad_idx);" in src
-    assert "return spectral_gpu_tile_layout_words_valid(tile_ranges," in src
+    assert "spectral_segment_array_payload_valid(mapped_segments" in src
+    assert "spectral_segment_gpu_array_matches_segments(mapped_segments" in src
+    assert "spectral_gpu_tile_layout_words_valid(ranges_base" in src
+    assert "seg_cache_segments_valid(" not in src
 
 def test_synth_preflight_and_loop_use_canonical_segment_contracts() -> None:
     src = read("spectral_engine/core/spectral_synth_internal.c")
@@ -30,7 +30,7 @@ def test_synth_preflight_and_loop_use_canonical_segment_contracts() -> None:
     assert '#include "spectral_contracts.h"' in src
     assert "spectral_segment_array_valid_for_synth(&sa)" in src
     assert "if (!spectral_segment_valid_for_synth(s))" in src
-    assert "return spectral_gpu_tile_layout_words_valid((const void*)ranges," in src
+    assert "spectral_gpu_tile_layout_words_valid((const void*)out_td->ranges" in src
 
 def test_finite_span_wrappers_delegate_to_canonical_contract() -> None:
     combined = (

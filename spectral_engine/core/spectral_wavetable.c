@@ -120,12 +120,6 @@ static int wavetable_file_expected_bytes(SpectralWavetableFormat format,
     return spectral_size_add(sizeof(SpectralWavetableHeader), payload_bytes, out_bytes);
 }
 
-static int wavetable_float_samples_finite(const float* samples, uint32_t count)
-{
-    return spectral_f32_span_finite(samples, count);
-}
-
-
 static int wavetable_runtime_samples_valid(const spectral_sample_t* samples, uint32_t count)
 {
     if (count > 0u && !samples) return 0;
@@ -134,7 +128,7 @@ static int wavetable_runtime_samples_valid(const spectral_sample_t* samples, uin
     (void)count;
     return 1;
 #else
-    return wavetable_float_samples_finite(samples, count);
+    return spectral_f32_span_finite(samples, count);
 #endif
 }
 
@@ -243,7 +237,7 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
             spectral_fs_close(&f, SPECTRAL_OK);
             return WAVETABLE_ERR_SIZE;
         }
-        if (!wavetable_float_samples_finite(temp, hdr.size)) {
+        if (!spectral_f32_span_finite(temp, hdr.size)) {
             free(temp);
             spectral_fs_close(&f, SPECTRAL_OK);
             return WAVETABLE_ERR_FORMAT;

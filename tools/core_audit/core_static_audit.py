@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 91):
+    for pass_num in range(1, 92):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -118,7 +118,7 @@ def main() -> int:
     require("SpectralError synth_validate_params" in synth_internal, "synthesis must validate public stretch/pitch params centrally")
     require("SPECTRAL_MAX_STRETCH" in synth_internal and "SPECTRAL_MIN_PITCH" in synth_internal,
             "synthesis param validation must use canonical configured bounds")
-    require("!spectral_is_finite_f32(s->omega)" in synth_internal and "!spectral_is_finite_f32(s->amp)" in synth_internal,
+    require("spectral_segment_valid_for_synth" in synth_internal,
             "segment loop params must reject non-finite segment fields")
     require("stretch > SPECTRAL_MAX_STRETCH" in synth_internal[synth_internal.find("gpu_tile_preprocess"):],
             "GPU tile preprocessing must reject invalid stretch before tile math")
@@ -904,7 +904,7 @@ def main() -> int:
             "spectral_fs_file_size(f, &file_size)" in wavetable_pass34 and
             "file_size != (uint64_t)expected_file_bytes" in wavetable_pass34,
             "pass 34 wavetable parser must validate exact .spwt file shape before payload read")
-    require("wavetable_float_samples_finite" in wavetable_pass34 and
+    require("spectral_f32_span_finite" in wavetable_pass34 and
             "!spectral_is_finite_f32(samples[i])" in wavetable_pass34,
             "pass 34 wavetable parser must reject non-finite float samples")
     require("spectral_fs_read_exact(f, temp, payload_bytes, SPECTRAL_ERR_FILE_READ)" in wavetable_pass34,
@@ -951,19 +951,19 @@ def main() -> int:
 
     audio_in_pass37 = read("spectral_engine/core/spectral_in.c")
     audio_out_pass37 = read("spectral_engine/core/spectral_out.c")
-    require("spectral_audio_samples_finite(audio, total_samples)" in audio_in_pass37 and
-            audio_in_pass37.index("spectral_audio_samples_finite(audio, total_samples)") <
+    require("spectral_f32_span_finite(audio, total_samples)" in audio_in_pass37 and
+            audio_in_pass37.index("spectral_f32_span_finite(audio, total_samples)") <
             audio_in_pass37.index("mono = (float*)spectral_malloc_array(frames, sizeof(float));"),
             "pass 37 audio IO input path must reject non-finite samples before publishing mono")
     require("const double inv_ch = 1.0 / (double)channels;" in audio_in_pass37 and
             "mono_d < -(double)FLT_MAX" in audio_in_pass37 and
             "mono_d > (double)FLT_MAX" in audio_in_pass37,
             "pass 37 audio IO downmix must prove finite float narrowing")
-    require("spectral_audio_samples_finite(buffer, sample_count)" in audio_out_pass37 and
-            audio_out_pass37.index("spectral_audio_samples_finite(buffer, sample_count)") <
+    require("spectral_f32_span_finite(buffer, sample_count)" in audio_out_pass37 and
+            audio_out_pass37.index("spectral_f32_span_finite(buffer, sample_count)") <
             audio_out_pass37.index("file = sf_open(path, SFM_WRITE, &info);"),
             "pass 37 audio IO output path must reject non-finite samples before opening output")
-    require("spectral_audio_samples_finite(mono, num_frames)" in audio_out_pass37,
+    require("spectral_f32_span_finite(mono, num_frames)" in audio_out_pass37,
             "pass 37 stereo writer must reject non-finite mono source before duplication")
 
 
@@ -1000,19 +1000,19 @@ def main() -> int:
 
 
     seg_cache_pass40 = read("spectral_engine/core/spectral_seg_cache.c")
-    require("seg_cache_segment_valid" in seg_cache_pass40 and
+    require("spectral_segment_payload_valid" in seg_cache_pass40 and
             "!spectral_is_finite_f32(s->omega) || s->omega < 0.0f" in seg_cache_pass40,
             "pass 40 segment cache payload must validate Segment fields")
-    require("seg_cache_gpu_segments_match" in seg_cache_pass40 and
+    require("spectral_segment_gpu_array_matches_segments" in seg_cache_pass40 and
             "SegmentGpu expected = spectral_segment_pack_gpu(&segs[i]);" in seg_cache_pass40,
             "pass 40 segment cache payload must validate mmap GPU-segment payloads against Segment payloads")
-    require("seg_cache_gpu_segments_match(mapped_segments, mapped_gpu_segs" in seg_cache_pass40 and
+    require("spectral_segment_gpu_array_matches_segments(mapped_segments, mapped_gpu_segs" in seg_cache_pass40 and
             "spectral_seg_cache_fs_data_unmap(&mv)" in seg_cache_pass40,
             "pass 40 segment cache lookup must reject corrupt mmap payloads before publishing result")
-    require("if (!seg_cache_segments_valid(segs, e->seg_count, NULL))" in seg_cache_pass40,
+    require("if (!spectral_segment_array_payload_valid(segs, e->seg_count, NULL))" in seg_cache_pass40,
             "pass 40 segment cache heap fallback must validate copied Segment payload")
-    require("if (!seg_cache_segments_valid(sa->segs, sa->count, NULL))" in seg_cache_pass40 and
-            "!seg_cache_tile_layout_words_valid(tile_ranges," in seg_cache_pass40,
+    require("if (!spectral_segment_array_payload_valid(sa->segs, sa->count, NULL))" in seg_cache_pass40 and
+            "!spectral_gpu_tile_layout_words_valid(tile_ranges," in seg_cache_pass40,
             "pass 40 segment cache store must reject corrupt Segment/tile payloads before append")
 
 
@@ -1136,7 +1136,7 @@ def main() -> int:
 
 
     out_pass52 = read("spectral_engine/core/spectral_out.c")
-    require("spectral_float_buffer_all_finite" in out_pass52 and
+    require("spectral_f32_span_finite" in out_pass52 and
             "!spectral_is_finite_f32(headroom) || headroom < 0.0f" in out_pass52,
             "pass 52 float normalization must validate headroom and input finiteness")
     require("if (!spectral_is_finite_f32(scale)) return 0.0f;" in out_pass52,
@@ -1255,13 +1255,13 @@ def main() -> int:
 
 
     windows_pass65 = read("spectral_engine/core/spectral_windows.c")
-    require("spectral_window_samples_valid" in windows_pass65 and
+    require("spectral_f32_span_finite" in windows_pass65 and
             "!isfinite(window[i])" in windows_pass65,
             "pass 65 window metrics must validate finite window samples")
     require("sum > (double)FLT_MAX" in windows_pass65 and
             "energy > (double)FLT_MAX" in windows_pass65,
             "pass 65 window metric accumulators must reject unrepresentable totals")
-    require("if (!spectral_window_samples_valid(window, length)) {" in windows_pass65,
+    require("if (!spectral_f32_span_finite(window, length)) {" in windows_pass65,
             "pass 65 window metrics must fail closed before deriving calibration flags")
 
 
@@ -1474,8 +1474,8 @@ def main() -> int:
 
 
     cpu_pass90 = read("spectral_engine/synth/backends/cpu/spectral_synth_cpu.c")
-    require("synth_float_output_finite" in cpu_pass90 and
-            "if (!synth_float_output_finite(out_buffer, out_len))" in cpu_pass90,
+    require("spectral_f32_span_finite" in cpu_pass90 and
+            "if (!spectral_f32_span_finite(out_buffer, out_len))" in cpu_pass90,
             "pass 90 CPU synth finite output postcondition must be checked after reduction")
     require("memset(out_buffer, 0, out_bytes);" in cpu_pass90 and
             "return reduce_err;" in cpu_pass90,
@@ -1495,6 +1495,20 @@ def main() -> int:
     synth_phase_c = read("spectral_engine/core/spectral_synth_internal.c")
     require("spectral_segment_array_valid_for_synth(&sa)" in synth_phase_c,
             "Phase C synth preflight must validate SegmentArray through canonical contract")
+
+
+    pass91_seg_cache = read("spectral_engine/core/spectral_seg_cache.c")
+    pass91_synth = read("spectral_engine/core/spectral_synth_internal.c")
+    pass91_guidelines = read("docs/core_audit/KERNEL_PATCHING_GUIDELINES.md")
+    require("seg_cache_segments_valid(" not in pass91_seg_cache and
+            "spectral_segment_array_payload_valid(mapped_segments" in pass91_seg_cache,
+            "pass 91 contract routing must remove segment-cache alias wrappers")
+    require("gpu_tile_data_refs_valid(" not in pass91_synth and
+            "spectral_gpu_tile_layout_words_valid((const void*)out_td->ranges" in pass91_synth,
+            "pass 91 contract routing must wire tile cache validation directly")
+    require("Do not add alias wrappers" in pass91_guidelines and
+            "Kernel patches must be strategically minimal" in pass91_guidelines,
+            "pass 91 must document repo-wide kernel patching guidelines")
 
     if FAILURES:
         for f in FAILURES:

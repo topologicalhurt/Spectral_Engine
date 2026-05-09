@@ -14,18 +14,6 @@
 #include <Accelerate/Accelerate.h>
 #endif
 
-static int spectral_window_samples_valid(const float* window, size_t length)
-{
-    if (length > 0u && !window) return 0;
-    for (size_t i = 0; i < length; i++) {
-        if (!isfinite(window[i])) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-
 void spectral_window_hann(float* window, size_t length) {
     if (!window || length == 0) return;
     if (length == 1) { window[0] = 1.0f; return; }
@@ -191,7 +179,7 @@ const char* spectral_window_name(SpectralWindowType type) {
 }
 
 float spectral_window_sum(const float* window, size_t length) {
-    if (!window || length == 0 || !spectral_window_samples_valid(window, length)) return 0.0f;
+    if (!window || length == 0 || !spectral_f32_span_finite(window, length)) return 0.0f;
 
     double sum = 0.0;
     for (size_t i = 0; i < length; i++) {
@@ -205,7 +193,7 @@ float spectral_window_sum(const float* window, size_t length) {
 
 
 float spectral_window_energy(const float* window, size_t length) {
-    if (!window || length == 0 || !spectral_window_samples_valid(window, length)) return 0.0f;
+    if (!window || length == 0 || !spectral_f32_span_finite(window, length)) return 0.0f;
 
     double energy = 0.0;
     for (size_t i = 0; i < length; i++) {
@@ -230,7 +218,7 @@ SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length
     if (!window || length == 0u) {
         return metrics;
     }
-    if (!spectral_window_samples_valid(window, length)) {
+    if (!spectral_f32_span_finite(window, length)) {
         return metrics;
     }
 

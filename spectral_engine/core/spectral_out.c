@@ -18,12 +18,6 @@
 #include <string.h>
 #include <stdint.h>
 
-static int spectral_audio_samples_finite(const float* samples, size_t count)
-{
-    return spectral_f32_span_finite(samples, count);
-}
-
-
 static int spectral_size_to_sf_count(size_t value, sf_count_t* out)
 {
     sf_count_t narrowed = 0;
@@ -49,16 +43,10 @@ static int spectral_size_to_sf_count(size_t value, sf_count_t* out)
  * Normalization
  */
 
-static int spectral_float_buffer_all_finite(const float* buffer, size_t len)
-{
-    return spectral_f32_span_finite(buffer, len);
-}
-
-
 float spectral_normalize_float(float* buffer, size_t len, float headroom) {
     if (!buffer || len == 0) return 0.0f;
     if (!spectral_is_finite_f32(headroom) || headroom < 0.0f) return 0.0f;
-    if (!spectral_float_buffer_all_finite(buffer, len)) return 0.0f;
+    if (!spectral_f32_span_finite(buffer, len)) return 0.0f;
 
     float max_amp = 0.0f;
 
@@ -330,7 +318,7 @@ SpectralError spectral_audio_write(const char* path, const float* buffer,
         !spectral_size_mul(num_frames, (size_t)channels, &sample_count)) {
         return SPECTRAL_ERR_OVERFLOW;
     }
-    if (!spectral_audio_samples_finite(buffer, sample_count)) {
+    if (!spectral_f32_span_finite(buffer, sample_count)) {
         return SPECTRAL_ERR_PARAM;
     }
 
@@ -376,7 +364,7 @@ SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
     if (sample_rate < SPECTRAL_MIN_SAMPLE_RATE || sample_rate > SPECTRAL_MAX_SAMPLE_RATE) {
         return SPECTRAL_ERR_PARAM;
     }
-    if (!spectral_audio_samples_finite(mono, num_frames)) {
+    if (!spectral_f32_span_finite(mono, num_frames)) {
         return SPECTRAL_ERR_PARAM;
     }
 

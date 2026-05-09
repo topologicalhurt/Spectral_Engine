@@ -9,12 +9,12 @@ def read(rel: str) -> str:
 def test_audio_read_rejects_nonfinite_input_samples_before_publishing_mono() -> None:
     src = read("spectral_engine/core/spectral_in.c")
 
-    assert "static int spectral_audio_samples_finite" in src
+    assert "spectral_f32_span_finite" in src
     assert "!spectral_is_finite_f32(samples[i])" in src
-    assert "if (!spectral_audio_samples_finite(audio, total_samples))" in src
+    assert "if (!spectral_f32_span_finite(audio, total_samples))" in src
     assert "return SPECTRAL_ERR_FILE_FORMAT;" in src
 
-    finite_idx = src.index("if (!spectral_audio_samples_finite(audio, total_samples))")
+    finite_idx = src.index("if (!spectral_f32_span_finite(audio, total_samples))")
     mono_alloc_idx = src.index("mono = (float*)spectral_malloc_array(frames, sizeof(float));")
     assert finite_idx < mono_alloc_idx
 
@@ -33,11 +33,11 @@ def test_audio_read_downmix_uses_double_accumulation_and_checked_float_narrowing
 def test_audio_write_rejects_nonfinite_output_samples_before_opening_file() -> None:
     src = read("spectral_engine/core/spectral_out.c")
 
-    assert "static int spectral_audio_samples_finite" in src
-    assert "if (!spectral_audio_samples_finite(buffer, sample_count))" in src
-    assert "if (!spectral_audio_samples_finite(mono, num_frames))" in src
+    assert "spectral_f32_span_finite" in src
+    assert "if (!spectral_f32_span_finite(buffer, sample_count))" in src
+    assert "if (!spectral_f32_span_finite(mono, num_frames))" in src
 
-    finite_idx = src.index("if (!spectral_audio_samples_finite(buffer, sample_count))")
+    finite_idx = src.index("if (!spectral_f32_span_finite(buffer, sample_count))")
     open_idx = src.index("file = sf_open(path, SFM_WRITE, &info);")
     assert finite_idx < open_idx
 

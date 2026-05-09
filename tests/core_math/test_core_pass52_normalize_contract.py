@@ -9,10 +9,10 @@ def read(rel: str) -> str:
 def test_float_normalization_rejects_nonfinite_buffer_and_headroom() -> None:
     src = read("spectral_engine/core/spectral_out.c")
 
-    assert "spectral_float_buffer_all_finite" in src
+    assert "spectral_f32_span_finite" in src
     assert "!spectral_is_finite_f32(buffer[i])" in src
     assert "!spectral_is_finite_f32(headroom) || headroom < 0.0f" in src
-    assert "!spectral_float_buffer_all_finite(buffer, len)" in src
+    assert "!spectral_f32_span_finite(buffer, len)" in src
 
 def test_float_normalization_validates_max_and_scale_before_applying() -> None:
     src = read("spectral_engine/core/spectral_out.c")

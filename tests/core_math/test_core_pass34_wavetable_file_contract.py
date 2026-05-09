@@ -25,11 +25,11 @@ def test_spwt_loader_validates_exact_file_shape_before_payload_read() -> None:
 def test_spwt_loader_and_saver_validate_sample_finiteness() -> None:
     src = read("spectral_engine/core/spectral_wavetable.c")
 
-    assert "wavetable_float_samples_finite" in src
+    assert "spectral_f32_span_finite" in src
     assert "wavetable_runtime_samples_valid" in src
     assert "!spectral_is_finite_f32(samples[i])" in src
     assert "wavetable_runtime_samples_valid(temp, hdr.size)" in src
-    assert "wavetable_float_samples_finite(temp, hdr.size)" in src
+    assert "spectral_f32_span_finite(temp, hdr.size)" in src
     assert "wavetable_runtime_samples_valid(table->samples, SPECTRAL_WAVETABLE_SIZE)" in src
 
 def test_spwt_header_metadata_is_validated() -> None:

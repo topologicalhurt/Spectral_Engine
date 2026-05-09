@@ -10,9 +10,9 @@ def test_window_metric_helpers_validate_finite_input_samples() -> None:
     src = read("spectral_engine/core/spectral_windows.c")
 
     assert "#include <float.h>" in src
-    assert "spectral_window_samples_valid" in src
+    assert "spectral_f32_span_finite" in src
     assert "!isfinite(window[i])" in src
-    assert "!spectral_window_samples_valid(window, length)" in src
+    assert "!spectral_f32_span_finite(window, length)" in src
 
 def test_window_sum_and_energy_reject_unrepresentable_accumulation() -> None:
     src = read("spectral_engine/core/spectral_windows.c")
@@ -24,8 +24,8 @@ def test_window_sum_and_energy_reject_unrepresentable_accumulation() -> None:
 def test_window_metrics_refuses_invalid_span_before_deriving_flags() -> None:
     src = read("spectral_engine/core/spectral_windows.c")
 
-    assert "if (!spectral_window_samples_valid(window, length)) {" in src
-    metrics_idx = src.index("if (!spectral_window_samples_valid(window, length)) {")
+    assert "if (!spectral_f32_span_finite(window, length)) {" in src
+    metrics_idx = src.index("if (!spectral_f32_span_finite(window, length)) {")
     sum_idx = src.index("metrics.sum = spectral_window_sum(window, length);")
     assert metrics_idx < sum_idx
 

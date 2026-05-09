@@ -680,20 +680,6 @@ cleanup:
  * these even in simulation/embedded builds where gpu_tile_preprocess is
  * unavailable — the cache simply stays empty. */
 
-static int gpu_tile_data_refs_valid(const TileRange* ranges,
-                                    const uint32_t* segment_ids,
-                                    uint32_t num_tiles,
-                                    uint32_t total_refs,
-                                    uint32_t segment_count)
-{
-    return spectral_gpu_tile_layout_words_valid((const void*)ranges,
-                                                segment_ids,
-                                                num_tiles,
-                                                total_refs,
-                                                segment_count);
-}
-
-
 static SPECTRAL_THREAD_LOCAL struct {
     TileRange*  ranges;
     uint32_t*   segment_ids;
@@ -770,11 +756,11 @@ SpectralError gpu_tile_preprocess_cached(
     if (tile_size == (uint32_t)SPECTRAL_GPU_TILE_SIZE &&
         gpu_tile_cache_try_get(stretch, out_len, out_td)) {
         if (sa.count <= (size_t)UINT32_MAX &&
-            gpu_tile_data_refs_valid(out_td->ranges,
-                                     out_td->segment_ids,
-                                     out_td->num_tiles,
-                                     out_td->total_refs,
-                                     (uint32_t)sa.count)) {
+            spectral_gpu_tile_layout_words_valid((const void*)out_td->ranges,
+                                             out_td->segment_ids,
+                                             out_td->num_tiles,
+                                             out_td->total_refs,
+                                             (uint32_t)sa.count)) {
             return SPECTRAL_OK;
         }
         gpu_tile_cache_clear();

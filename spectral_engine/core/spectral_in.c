@@ -16,12 +16,6 @@
 #include <string.h>
 #include <float.h>
 
-static int spectral_audio_samples_finite(const float* samples, size_t count)
-{
-    return spectral_f32_span_finite(samples, count);
-}
-
-
 static int spectral_sf_count_to_size(sf_count_t value, size_t* out)
 {
     size_t narrowed = 0;
@@ -91,7 +85,7 @@ SpectralError spectral_audio_read(const char* path, SpectralAudioInfo* info, flo
         free(audio);
         return SPECTRAL_ERR_FILE_READ;
     }
-    if (!spectral_audio_samples_finite(audio, total_samples)) {
+    if (!spectral_f32_span_finite(audio, total_samples)) {
         free(audio);
         return SPECTRAL_ERR_FILE_FORMAT;
     }
