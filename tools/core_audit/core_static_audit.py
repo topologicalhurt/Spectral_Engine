@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 117):
+    for pass_num in range(1, 122):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1714,6 +1714,32 @@ def main() -> int:
     require("Phase E: tracker candidate context object foundation" in status_pass116 and
             "Phase F: full/fused parity harness" in status_pass116,
             "pass 116 phase E status must update architecture cleanup roadmap")
+
+    analysis_internal_pass117 = read("spectral_engine/analysis/spectral_analysis_internal.h")
+    analysis_pass117 = read("spectral_engine/analysis/spectral_analysis.c")
+    require("SpectralAnalysisPathDecision" in analysis_internal_pass117 and
+            "spectral_analysis_path_decide" in analysis_pass117,
+            "pass 117 analysis path policy must centralize full/fused path decision")
+
+    analysis_pass118 = read("spectral_engine/analysis/spectral_analysis.c")
+    require("analyze_audio_with_path_mode" in analysis_pass118 and "SPECTRAL_ANALYSIS_PATH_AUTO" in analysis_pass118,
+            "pass 118 analysis path mode must expose forced full/fused testing seam")
+
+    parity_spec_pass119 = read("docs/core_audit/FULL_FUSED_PARITY_HARNESS.md")
+    require("analyze_audio_with_path_mode" in parity_spec_pass119 and
+            "SPECTRAL_ANALYSIS_PATH_FULL" in parity_spec_pass119 and
+            "SPECTRAL_ANALYSIS_PATH_FUSED" in parity_spec_pass119,
+            "pass 119 full/fused parity spec must document forced path harness")
+
+    closure_pass120 = read("docs/core_audit/MASTER_PLAN_CLOSURE_CRITERIA.md")
+    require("Require justification for every future pass" in closure_pass120 and
+            "compiled full/fused parity harness" in closure_pass120,
+            "pass 120 master plan closure must define future-pass stop criteria")
+
+    status_pass121 = read("docs/core_audit/ARCHITECTURE_CLEANUP_STATUS.md")
+    require("Phase F: full/fused parity testing seam and harness specification" in status_pass121 and
+            "Phase G: implement compiled full/fused behavioral parity harness" in status_pass121,
+            "pass 121 phase F status must update architecture roadmap")
 
     if FAILURES:
         for f in FAILURES:

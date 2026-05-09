@@ -62,12 +62,29 @@ void spectral_analysis_window_context_apply_magsq_scales(const SpectralAnalysisW
 
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track);
 
+typedef enum SpectralAnalysisPathMode {
+    SPECTRAL_ANALYSIS_PATH_AUTO = 0,
+    SPECTRAL_ANALYSIS_PATH_FULL = 1,
+    SPECTRAL_ANALYSIS_PATH_FUSED = 2
+} SpectralAnalysisPathMode;
+
+typedef struct SpectralAnalysisPathDecision {
+    size_t total_bins;
+    size_t threshold_bins;
+    SpectralAnalysisPathMode mode;
+    SpectralAnalysisPathDecision path;
+    const char* name;
+} SpectralAnalysisPathDecision;
+
+SpectralAnalysisPathDecision spectral_analysis_path_decide(size_t total_bins,
+                                                           SpectralAnalysisPathMode mode);
+
 typedef struct SpectralAnalysisShape {
     size_t n_fft_size;
     size_t n_frames;
     size_t n_freqs;
     size_t total_bins;
-    int use_fused_path;
+    SpectralAnalysisPathDecision path;
 } SpectralAnalysisShape;
 
 SpectralError spectral_analysis_shape_init(SpectralAnalysisShape* shape,
@@ -115,6 +132,11 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                size_t t,
                                float* out_magsq, float* out_phases,
                                float* out_frame_max);
+
+SegmentArray analyze_audio_with_path_mode(const float* audio, size_t n_samples, int sr,
+                                        int n_fft, int hop, float db_thresh,
+                                        SpectralAnalysisPathMode path_mode,
+                                        double* t_fft, double* t_track);
 
 SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
                                         int sr, int n_fft, int hop, float db_thresh,

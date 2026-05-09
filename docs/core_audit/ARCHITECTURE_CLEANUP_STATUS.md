@@ -12,6 +12,8 @@ spectral_contracts.h
 
 spectral_analysis_internal.h / spectral_analysis.c
   analysis shape derivation
+  analysis path decision object
+  forced full/fused path-mode entry point
   analysis window context
   full-matrix STFT matrix owner
 
@@ -50,6 +52,7 @@ spectral_synth_internal.h / spectral_synth_internal.c
 Phase C: contract consolidation and alias-wrapper removal
 Phase D: explicit prepared GPU dispatch object
 Phase E: tracker candidate context object foundation
+Phase F: full/fused parity testing seam and harness specification
 ```
 
 ## Current principles
@@ -64,27 +67,26 @@ prefer owner structs for paired resources
 keep backend-specific code backend-specific only
 make preparation objects explicit when multiple backends consume the same host-side state
 hide implementation-detail long-argument helpers from headers
+do not continue the campaign without a real bug, dedup, API-reduction, or behavioral-test payoff
 ```
 
 ## Remaining high-value dedup targets
 
 ```text
-1. GPU tile preprocessing:
-   The count/fill algorithm is still dense. Consider extracting a reusable
-   tile-layout builder with an explicit scratch object.
+1. Compiled full/fused parity harness:
+   The forced-path seam and spec exist. The next high-value work is a compiled
+   behavioral harness that runs deterministic fixtures.
 
-2. Tracker candidate flow:
-   Candidate batch/frame/stats ownership now exists, but queue/handle/batch
-   helpers still have long internal signatures. Further shortening should be
-   done only after behavioral parity tests are in place.
+2. GPU tile preprocessing:
+   The count/fill algorithm is still dense. Extract a reusable tile-layout
+   builder only after parity harnesses are in place.
 
-3. Full/fused parity:
-   Add behavioral parity tests around analysis output, not only static structure
-   tests.
+3. Tracker candidate flow:
+   Candidate batch/frame/stats ownership exists. Further signature shortening
+   should wait until parity tests protect behavior.
 
-4. Peak estimator algebra:
-   Extract more helpers only when doing so reduces code size without hiding the
-   formulas.
+4. ARM/embedded redesign:
+   Treat as a separate redesign project, not a continuation of host-kernel cleanup.
 ```
 
 ## Forbidden anti-patterns
@@ -98,10 +100,11 @@ backend-specific copies of shared dispatch policy
 backend-owned host-side GPU dispatch preparation
 tests that require stale wrapper names
 public/internal headers exposing implementation-detail long-argument helpers
+new guard-only passes without boundary-defect evidence
 ```
 
 ## Next recommended phase
 
 ```text
-Phase F: full/fused parity harness and behavioral tests
+Phase G: implement compiled full/fused behavioral parity harness
 ```
