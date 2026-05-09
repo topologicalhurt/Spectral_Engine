@@ -152,11 +152,11 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
         {
             int tid = omp_get_thread_num();
             SpectralFusedScratchRows rows = {0};
-            uint32_t candidate_batch[SPECTRAL_TRACK_CANDIDATE_BATCH];
-            size_t candidate_batch_count = 0;
+            SpectralTrackerCandidateBatch candidate_batch = {0};
             uint64_t local_pairs = 0;
             uint64_t local_candidates = 0;
             uint64_t local_segments = 0;
+            SpectralTrackerWorkerStats worker_stats = {0};
             float threshsq = spectral_tracker_get_threshsq(tracker);
             double local_fft_time = 0.0;
             double local_track_time = 0.0;
@@ -194,13 +194,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                     for (size_t pair = pair_start;
                          pair < pair_end && !spectral_tracker_has_failed(tracker);
                          pair++) {
-                        float t_hop = 0.0f;
                         SpectralFrameContext fctx;
-
-                        if (spectral_tracker_frame_time_from_index(pair, (float)hop, &t_hop) != SPECTRAL_OK) {
-                            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-                            break;
-                        }
                         double track_start = 0.0;
 
                         fft_start = omp_get_wtime();
@@ -208,19 +202,24 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                                                   rows.row_next, rows.phase_next, &frame_max);
                         local_fft_time += (omp_get_wtime() - fft_start);
 
-                        fctx.row = rows.row_curr;
-                        fctx.next_row = rows.row_next;
-                        fctx.phase_row = rows.phase_curr;
-                        fctx.next_phase_row = rows.phase_next;
-                        fctx.t_hop = t_hop;
-                        fctx.threshsq = threshsq;
-                        fctx.can_start_new = 1;
+                        if (spectral_tracker_frame_context_init(&fctx,
+                                                               rows.row_curr,
+                                                               rows.row_next,
+                                                               rows.phase_curr,
+                                                               rows.phase_next,
+                                                               pair,
+                                                               (float)hop,
+                                                               threshsq,
+                                                               1) != SPECTRAL_OK) {
+                            spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+                            break;
+                        }
 
                         track_start = omp_get_wtime();
                         local_pairs++;
                         /* spectral_tracker_run_fused_frame follows tracker helper polarity */
                         if (!spectral_tracker_run_fused_frame(
-                            tracker, tid, candidate_batch, &candidate_batch_count,
+                            tracker, tid, candidate_batch.ids, &candidate_batch.count,
                             &fctx,
                             &local_candidates, &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -241,19 +240,20 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
             #pragma omp atomic update
             fft_time_total += local_fft_time;
 
+            worker_stats.pairs = local_pairs;
+            worker_stats.candidates = local_candidates;
+            worker_stats.segments = local_segments;
+            worker_stats.track_time = local_track_time;
 #if SPECTRAL_TRACK_DEBUG_TIMING
-            {
-                double local_scan_time = (local_track_time - local_validate_time - local_emit_time > 0.0)
-                    ? (local_track_time - local_validate_time - local_emit_time) : 0.0;
-                spectral_tracker_accumulate_stats(tracker,
-                    local_pairs, local_candidates, local_segments, local_track_time,
-                    local_scan_time, local_validate_time, local_emit_time,
-                    local_emit_alloc_time, local_emit_interp_time, local_emit_amp_time);
-            }
-#else
-            spectral_tracker_accumulate_stats(tracker,
-                local_pairs, local_candidates, local_segments, local_track_time);
+            worker_stats.scan_time = (local_track_time - local_validate_time - local_emit_time > 0.0)
+                ? (local_track_time - local_validate_time - local_emit_time) : 0.0;
+            worker_stats.validate_time = local_validate_time;
+            worker_stats.emit_time = local_emit_time;
+            worker_stats.emit_alloc_time = local_emit_alloc_time;
+            worker_stats.emit_interp_time = local_emit_interp_time;
+            worker_stats.emit_amp_time = local_emit_amp_time;
 #endif
+            spectral_tracker_worker_stats_commit(tracker, &worker_stats);
 
             spectral_fused_scratch_rows_free(&rows);
         }

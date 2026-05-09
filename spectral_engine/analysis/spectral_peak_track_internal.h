@@ -87,6 +87,16 @@ struct SpectralTracker {
 #endif
 };
 
+typedef struct SpectralTrackerCandidateBatch {
+    uint32_t ids[SPECTRAL_TRACK_CANDIDATE_BATCH];
+    size_t count;
+} SpectralTrackerCandidateBatch;
+
+static inline void spectral_tracker_candidate_batch_reset(SpectralTrackerCandidateBatch* batch)
+{
+    if (batch) batch->count = 0u;
+}
+
 static inline SpectralError spectral_tracker_frame_time_from_index(size_t frame_index,
                                                                   float hop_float,
                                                                   float* out_t_hop)
@@ -106,31 +116,73 @@ static inline SpectralError spectral_tracker_frame_time_from_index(size_t frame_
     return SPECTRAL_OK;
 }
 
+static inline SpectralError spectral_tracker_frame_context_init(
+    SpectralFrameContext* ctx,
+    const float* row,
+    const float* next_row,
+    const float* phase_row,
+    const float* next_phase_row,
+    size_t frame_index,
+    float hop_float,
+    float threshsq,
+    int can_start_new)
+{
+    float t_hop = 0.0f;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!ctx || !row || !next_row || !phase_row) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    err = spectral_tracker_frame_time_from_index(frame_index, hop_float, &t_hop);
+    if (err != SPECTRAL_OK) return err;
+
+    ctx->row = row;
+    ctx->next_row = next_row;
+    ctx->phase_row = phase_row;
+    ctx->next_phase_row = next_phase_row;
+    ctx->t_hop = t_hop;
+    ctx->threshsq = threshsq;
+    ctx->can_start_new = can_start_new;
+    return SPECTRAL_OK;
+}
+
 void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error);
 
-int spectral_tracker_flush_candidate_batch(
-    SpectralTracker* tracker,
-    int tid,
-    uint32_t* __restrict__ candidate_batch,
-    size_t* candidate_batch_count,
-    const float* __restrict__ row,
-    const float* __restrict__ next_row,
-    const float* __restrict__ phase_row,
-    const float* __restrict__ next_phase_row,
-    float t_hop,
-    float threshsq,
-    float freq_step_omega,
-    float freq_step_df,
-    float inv_hop,
-    float hop_float,
-    uint64_t* local_segments
+
+typedef struct SpectralTrackerWorkerStats {
+    uint64_t pairs;
+    uint64_t candidates;
+    uint64_t segments;
+    double track_time;
 #if SPECTRAL_TRACK_DEBUG_TIMING
-    , double* pair_validate_time
-    , double* pair_emit_time
-    , double* pair_emit_alloc_time
-    , double* pair_emit_interp_time
-    , double* pair_emit_amp_time
+    double scan_time;
+    double validate_time;
+    double emit_time;
+    double emit_alloc_time;
+    double emit_interp_time;
+    double emit_amp_time;
 #endif
-);
+} SpectralTrackerWorkerStats;
+
+static inline void spectral_tracker_worker_stats_commit(SpectralTracker* tracker,
+                                                        const SpectralTrackerWorkerStats* stats)
+{
+    if (!tracker || !stats) return;
+    spectral_tracker_accumulate_stats(tracker,
+                                      stats->pairs,
+                                      stats->candidates,
+                                      stats->segments,
+                                      stats->track_time
+#if SPECTRAL_TRACK_DEBUG_TIMING
+                                      , stats->scan_time,
+                                      stats->validate_time,
+                                      stats->emit_time,
+                                      stats->emit_alloc_time,
+                                      stats->emit_interp_time,
+                                      stats->emit_amp_time
+#endif
+                                      );
+}
 
 #endif /* SPECTRAL_PEAK_TRACK_INTERNAL_H */

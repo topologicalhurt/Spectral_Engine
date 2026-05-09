@@ -417,7 +417,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
     return 1;
 }
 
-int spectral_tracker_flush_candidate_batch(
+static int spectral_tracker_flush_candidate_batch(
     SpectralTracker* tracker,
     int tid,
     uint32_t* __restrict__ candidate_batch,

@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 112):
+    for pass_num in range(1, 117):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1680,6 +1680,40 @@ def main() -> int:
     require("Phase D: explicit prepared GPU dispatch object" in status_pass111 and
             "explicit prepared GPU dispatch plan" in status_pass111,
             "pass 111 phase D completion must update architecture cleanup status")
+
+
+    internal_pass112 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    fused_pass112 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("SpectralTrackerCandidateBatch" in internal_pass112 and
+            "SpectralTrackerCandidateBatch candidate_batch = {0};" in fused_pass112,
+            "pass 112 tracker candidate batch must have an explicit owner object")
+
+
+    internal_pass113 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    fused_pass113 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("spectral_tracker_frame_context_init" in internal_pass113 and
+            "spectral_tracker_frame_context_init(&fctx" in fused_pass113,
+            "pass 113 tracker frame context must have a reusable constructor")
+
+
+    internal_pass114 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    fused_pass114 = read("spectral_engine/analysis/spectral_analysis_fused.c")
+    require("SpectralTrackerWorkerStats" in internal_pass114 and
+            "spectral_tracker_worker_stats_commit(tracker, &worker_stats);" in fused_pass114,
+            "pass 114 tracker worker stats must have an explicit context object")
+
+
+    internal_pass115 = read("spectral_engine/analysis/spectral_peak_track_internal.h")
+    track_pass115 = read("spectral_engine/analysis/spectral_peak_track.c")
+    require("spectral_tracker_flush_candidate_batch(" not in internal_pass115 and
+            "static int spectral_tracker_flush_candidate_batch(" in track_pass115,
+            "pass 115 tracker flush encapsulation must remove long flush API from internal header")
+
+
+    status_pass116 = read("docs/core_audit/ARCHITECTURE_CLEANUP_STATUS.md")
+    require("Phase E: tracker candidate context object foundation" in status_pass116 and
+            "Phase F: full/fused parity harness" in status_pass116,
+            "pass 116 phase E status must update architecture cleanup roadmap")
 
     if FAILURES:
         for f in FAILURES:
