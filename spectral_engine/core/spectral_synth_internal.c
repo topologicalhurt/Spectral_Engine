@@ -769,3 +769,61 @@ void gpu_seg_cache_clear(void)
     g_gpu_seg_cache.segs  = NULL;
     g_gpu_seg_cache.count = 0;
 }
+
+SpectralError spectral_gpu_dispatch_plan_init(SpectralGpuDispatchPlan* plan,
+                                              SegmentArray sa,
+                                              const SynthParams* params,
+                                              float stretch,
+                                              SpectralTimbre timbre,
+                                              size_t out_len)
+{
+    SpectralError err = SPECTRAL_OK;
+    const SegmentGpu* cached_gpu_segs = NULL;
+
+    if (!plan || !params) return SPECTRAL_ERR_PARAM;
+    *plan = (SpectralGpuDispatchPlan){0};
+
+    if (!spectral_array_bytes((size_t)sa.count, sizeof(SegmentGpu), &plan->segment_bytes)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    if (gpu_seg_cache_try_get(sa.count, &cached_gpu_segs)) {
+        plan->segment_source = cached_gpu_segs;
+    }
+
+    err = gpu_tile_preprocess_cached(sa, stretch, SPECTRAL_GPU_TILE_SIZE,
+                                     out_len, &plan->tiles, &plan->owns_tile_data);
+    if (err != SPECTRAL_OK) {
+        spectral_gpu_dispatch_plan_free(plan);
+        return err;
+    }
+
+    err = gpu_synth_params_pack_checked(params, SPECTRAL_GPU_TILE_SIZE, timbre, &plan->params);
+    if (err != SPECTRAL_OK) {
+        spectral_gpu_dispatch_plan_free(plan);
+        return err;
+    }
+
+    if (plan->tiles.total_refs == 0u) {
+        plan->zero_output = 1;
+        return SPECTRAL_OK;
+    }
+
+    if (!spectral_array_bytes((size_t)plan->tiles.total_refs, sizeof(uint32_t), &plan->tile_ids_bytes) ||
+        !spectral_array_bytes((size_t)plan->tiles.num_tiles, sizeof(TileRange), &plan->tile_ranges_bytes)) {
+        spectral_gpu_dispatch_plan_free(plan);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    return SPECTRAL_OK;
+}
+
+void spectral_gpu_dispatch_plan_free(SpectralGpuDispatchPlan* plan)
+{
+    if (!plan) return;
+    if (plan->owns_tile_data) {
+        gpu_tile_data_free(&plan->tiles);
+    }
+    *plan = (SpectralGpuDispatchPlan){0};
+}
+

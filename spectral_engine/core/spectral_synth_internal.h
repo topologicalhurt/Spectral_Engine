@@ -112,13 +112,11 @@ SpectralError gpu_tile_preprocess_cached(
 void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
                         uint32_t num_tiles, uint32_t total_refs,
                         float stretch, size_t out_len);
-int  gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out);
 void gpu_tile_cache_clear(void);
 
 /* Global GPU segment cache — pre-packed SegmentGpu data from the segment
  * cache (mmap'd).  Lets GPU backends skip the Segment→SegmentGpu pack loop. */
 void gpu_seg_cache_set(const SegmentGpu* segs, uint32_t count);
-int  gpu_seg_cache_try_get(uint32_t count, const SegmentGpu** out);
 void gpu_seg_cache_clear(void);
 
 /* GPU synthesis params — layout must match Metal shader SynthParams struct */
@@ -156,6 +154,25 @@ static inline SpectralError gpu_synth_params_pack_checked(
     };
     return SPECTRAL_OK;
 }
+
+typedef struct SpectralGpuDispatchPlan {
+    const SegmentGpu* segment_source;   /* NULL means backend must pack from SegmentArray */
+    size_t            segment_bytes;
+    GpuTileData       tiles;
+    int               owns_tile_data;
+    int               zero_output;
+    GpuSynthParams    params;
+    size_t            tile_ids_bytes;
+    size_t            tile_ranges_bytes;
+} SpectralGpuDispatchPlan;
+
+SpectralError spectral_gpu_dispatch_plan_init(SpectralGpuDispatchPlan* plan,
+                                              SegmentArray sa,
+                                              const SynthParams* params,
+                                              float stretch,
+                                              SpectralTimbre timbre,
+                                              size_t out_len);
+void spectral_gpu_dispatch_plan_free(SpectralGpuDispatchPlan* plan);
 
 #ifdef __cplusplus
 }

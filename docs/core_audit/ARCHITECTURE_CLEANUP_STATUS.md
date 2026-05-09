@@ -33,6 +33,18 @@ spectral_peak_track.c
 
 spectral_omp.h
   effective OpenMP thread-count clamp
+
+spectral_synth_internal.h / spectral_synth_internal.c
+  explicit prepared GPU dispatch plan
+  host-side GPU segment/tile/params preparation ownership
+  one-shot GPU cache lookup encapsulation
+```
+
+## Completed phases
+
+```text
+Phase C: contract consolidation and alias-wrapper removal
+Phase D: explicit prepared GPU dispatch object
 ```
 
 ## Current principles
@@ -45,6 +57,7 @@ avoid alias wrappers
 delete deprecated internal APIs
 prefer owner structs for paired resources
 keep backend-specific code backend-specific only
+make preparation objects explicit when multiple backends consume the same host-side state
 ```
 
 ## Remaining high-value dedup targets
@@ -54,21 +67,17 @@ keep backend-specific code backend-specific only
    The count/fill algorithm is still dense. Consider extracting a reusable
    tile-layout builder with an explicit scratch object.
 
-2. FFT resource allocation:
-   vDSP and FFTW allocation/free are necessarily backend-specific, but resource
-   shape/byte derivation can still be documented more cleanly.
-
-3. Peak estimator algebra:
-   More helpers could be extracted for double dot products and checked phase
-   products, but do this only if it reduces code size without hiding formulas.
-
-4. Tracker candidate flow:
+2. Tracker candidate flow:
    Candidate queue/flush/emit still has long parameter lists. A candidate frame
    context object would improve readability, but must not obscure hot-path data.
 
-5. GPU prepared dispatch:
-   Long-term replacement for process-local one-shot caches should be an explicit
-   prepared-GPU-dispatch object passed to Metal/CUDA.
+3. Full/fused parity:
+   Add behavioral parity tests around analysis output, not only static structure
+   tests.
+
+4. Peak estimator algebra:
+   Extract more helpers only when doing so reduces code size without hiding the
+   formulas.
 ```
 
 ## Forbidden anti-patterns
@@ -79,15 +88,13 @@ unchecked fallback wrappers that discard errors
 duplicated finite/range loops when spectral_contracts.h has a helper
 count-only identity for cached payloads
 backend-specific copies of shared dispatch policy
+backend-owned host-side GPU dispatch preparation
 tests that require stale wrapper names
 ```
 
 ## Next recommended phase
 
-Move from cleanup into architecture-bearing refactors:
-
 ```text
-Phase D: explicit prepared GPU dispatch object
 Phase E: tracker candidate context object
 Phase F: full/fused parity harness and behavioral tests
 ```

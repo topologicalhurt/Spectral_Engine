@@ -199,7 +199,6 @@ extern "C" SpectralError synth_cuda(
 ) {
     size_t out_size = 0;
 
-    /* Shared preflight: validate + params + timing */
     SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
     if (!pf.ok) return pf.error;
     if (!spectral_array_bytes(out_len, sizeof(float), &out_size)) {
@@ -207,139 +206,85 @@ extern "C" SpectralError synth_cuda(
         return SPECTRAL_ERR_OVERFLOW;
     }
 
-    /* Check CUDA availability */
     if (!cuda_available()) {
         memset(out_buffer, 0, out_size);
         *t_synth = 0;
         return SPECTRAL_OK;
     }
 
-    /* Check timbre support - fall back to CPU for unsupported timbres */
     {
         int continue_backend = 1;
         SpectralError gate_err = gpu_check_timbre_or_fallback(
             "CUDA", sa, out_buffer, out_len, stretch, pitch, timbre,
-            omp_get_max_threads(), t_synth, &continue_backend);
-        if (gate_err != SPECTRAL_OK) {
-            return gate_err;
-        }
-        if (!continue_backend) {
-            return SPECTRAL_OK;
-        }
+            spectral_omp_effective_thread_count(), t_synth, &continue_backend);
+        if (gate_err != SPECTRAL_OK) return gate_err;
+        if (!continue_backend) return SPECTRAL_OK;
     }
 
-    /* Tile preprocessing on CPU (or from cache) */
-    GpuTileData td = {0};
-    int owns_tile_data = 0;
-
-    /* Hoist declarations above first goto to satisfy C++ scoping rules */
-    SpectralError tile_err = SPECTRAL_OK;
-    size_t tile_ids_size = 0;
-    size_t tile_ranges_size = 0;
-    GpuSynthParams gp = {0};
+    SpectralGpuDispatchPlan plan = {0};
     cudaError_t kernel_err = cudaSuccess;
     cudaError_t copy_err = cudaSuccess;
     cudaError_t sync_err = cudaSuccess;
     cudaEvent_t ev_start = NULL;
     cudaEvent_t ev_stop = NULL;
-
     SpectralError return_err = SPECTRAL_OK;
 
-    /* Segment upload — prefer pre-packed SegmentGpu from cache (zero-copy),
-     * fall back to packing from the 64-byte Segment array. */
-    size_t gpu_seg_size = 0;
-    if (!spectral_array_bytes((size_t)sa.count, sizeof(SegmentGpu), &gpu_seg_size)) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-    if (!cuda_grow_buffer((void**)&g_cuda.d_segments, &g_cuda.seg_cap, gpu_seg_size)) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    {
-        const SegmentGpu* cached_gpu_segs = NULL;
-        if (gpu_seg_cache_try_get(sa.count, &cached_gpu_segs)) {
-            /* Fast path: upload pre-packed mmap'd SegmentGpu directly. */
-            copy_err = cudaMemcpyAsync(g_cuda.d_segments, cached_gpu_segs, gpu_seg_size,
-                                      cudaMemcpyHostToDevice, g_cuda.stream);
-            if (copy_err != cudaSuccess) {
-                SPECTRAL_LOG_ERROR_STDERR("CUDA async copy error: %s", cudaGetErrorString(copy_err));
-                return_err = SPECTRAL_ERR_GPU_INIT;
-                goto cleanup;
-            }
-        } else {
-            /* Slow path: pack 64-byte Segments → 32-byte SegmentGpu. */
-            if (!cuda_grow_host_buffer((void**)&g_cuda.h_staging, &g_cuda.staging_cap, gpu_seg_size)) {
-                return_err = SPECTRAL_ERR_MEMORY;
-                goto cleanup;
-            }
-            spectral_segment_pack_gpu_array(sa.segs, sa.count, g_cuda.h_staging);
-            copy_err = cudaMemcpyAsync(g_cuda.d_segments, g_cuda.h_staging, gpu_seg_size,
-                                      cudaMemcpyHostToDevice, g_cuda.stream);
-            if (copy_err != cudaSuccess) {
-                SPECTRAL_LOG_ERROR_STDERR("CUDA async copy error: %s", cudaGetErrorString(copy_err));
-                return_err = SPECTRAL_ERR_GPU_INIT;
-                goto cleanup;
-            }
-        }
-    }
-    tile_err = gpu_tile_preprocess_cached(sa, stretch, SPECTRAL_GPU_TILE_SIZE, out_len, &td, &owns_tile_data);
-    if (tile_err != SPECTRAL_OK) {
-        cudaStreamSynchronize(g_cuda.stream);
-        return_err = tile_err;
-        goto cleanup;
-    }
-    if (td.total_refs == 0u) {
-        sync_err = cudaStreamSynchronize(g_cuda.stream);
-        if (sync_err != cudaSuccess) {
-            return_err = SPECTRAL_ERR_GPU_INIT;
-            goto cleanup;
-        }
+    return_err = spectral_gpu_dispatch_plan_init(&plan, sa, &pf.params, stretch, timbre, out_len);
+    if (return_err != SPECTRAL_OK) goto cleanup;
+
+    if (plan.zero_output) {
         memset(out_buffer, 0, out_size);
         *t_synth = omp_get_wtime() - pf.start_time;
         goto cleanup;
     }
 
-    if (!spectral_array_bytes((size_t)td.total_refs, sizeof(uint32_t), &tile_ids_size) ||
-        !spectral_array_bytes((size_t)td.num_tiles, sizeof(TileRange), &tile_ranges_size)) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-
-    /* Grow device buffers as needed */
-    /* Grow device buffers as needed */
-    if (!cuda_grow_buffer((void**)&g_cuda.d_tile_ids, &g_cuda.tile_ids_cap, tile_ids_size)) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    if (!cuda_grow_buffer((void**)&g_cuda.d_tile_ranges, &g_cuda.tile_ranges_cap, tile_ranges_size)) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    if (!cuda_grow_buffer((void**)&g_cuda.d_output, &g_cuda.output_cap, out_size)) {
+    if (!cuda_grow_buffer((void**)&g_cuda.d_segments, &g_cuda.seg_cap, plan.segment_bytes)) {
         return_err = SPECTRAL_ERR_MEMORY;
         goto cleanup;
     }
 
-    /* Async upload tile data */
-    copy_err = cudaMemcpyAsync(g_cuda.d_tile_ids, td.segment_ids, tile_ids_size,
+    if (plan.segment_source) {
+        copy_err = cudaMemcpyAsync(g_cuda.d_segments, plan.segment_source, plan.segment_bytes,
+                                  cudaMemcpyHostToDevice, g_cuda.stream);
+        if (copy_err != cudaSuccess) {
+            SPECTRAL_LOG_ERROR_STDERR("CUDA async copy error: %s", cudaGetErrorString(copy_err));
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
+    } else {
+        if (!cuda_grow_host_buffer((void**)&g_cuda.h_staging, &g_cuda.staging_cap, plan.segment_bytes)) {
+            return_err = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
+        }
+        spectral_segment_pack_gpu_array(sa.segs, sa.count, g_cuda.h_staging);
+        copy_err = cudaMemcpyAsync(g_cuda.d_segments, g_cuda.h_staging, plan.segment_bytes,
+                                  cudaMemcpyHostToDevice, g_cuda.stream);
+        if (copy_err != cudaSuccess) {
+            SPECTRAL_LOG_ERROR_STDERR("CUDA async copy error: %s", cudaGetErrorString(copy_err));
+            return_err = SPECTRAL_ERR_GPU_INIT;
+            goto cleanup;
+        }
+    }
+
+    if (!cuda_grow_buffer((void**)&g_cuda.d_tile_ids, &g_cuda.tile_ids_cap, plan.tile_ids_bytes) ||
+        !cuda_grow_buffer((void**)&g_cuda.d_tile_ranges, &g_cuda.tile_ranges_cap, plan.tile_ranges_bytes) ||
+        !cuda_grow_buffer((void**)&g_cuda.d_output, &g_cuda.output_cap, out_size)) {
+        return_err = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
+    }
+
+    copy_err = cudaMemcpyAsync(g_cuda.d_tile_ids, plan.tiles.segment_ids, plan.tile_ids_bytes,
                               cudaMemcpyHostToDevice, g_cuda.stream);
     if (copy_err != cudaSuccess) {
         SPECTRAL_LOG_ERROR_STDERR("CUDA async copy error: %s", cudaGetErrorString(copy_err));
         return_err = SPECTRAL_ERR_GPU_INIT;
         goto cleanup;
     }
-    copy_err = cudaMemcpyAsync(g_cuda.d_tile_ranges, td.ranges, tile_ranges_size,
+    copy_err = cudaMemcpyAsync(g_cuda.d_tile_ranges, plan.tiles.ranges, plan.tile_ranges_bytes,
                               cudaMemcpyHostToDevice, g_cuda.stream);
     if (copy_err != cudaSuccess) {
         SPECTRAL_LOG_ERROR_STDERR("CUDA async copy error: %s", cudaGetErrorString(copy_err));
         return_err = SPECTRAL_ERR_GPU_INIT;
-        goto cleanup;
-    }
-
-    /* Pack GPU params and launch tile-parallel kernel */
-    return_err = gpu_synth_params_pack_checked(&pf.params, SPECTRAL_GPU_TILE_SIZE, timbre, &gp);
-    if (return_err != SPECTRAL_OK) {
         goto cleanup;
     }
 
@@ -353,10 +298,12 @@ extern "C" SpectralError synth_cuda(
         return_err = SPECTRAL_ERR_GPU_INIT;
         goto cleanup;
     }
-    synthesize_tile_kernel<<<td.num_tiles, SPECTRAL_GPU_TILE_SIZE, 0, g_cuda.stream>>>(
+
+    synthesize_tile_kernel<<<plan.tiles.num_tiles, SPECTRAL_GPU_TILE_SIZE, 0, g_cuda.stream>>>(
         g_cuda.d_segments, g_cuda.d_tile_ids, g_cuda.d_tile_ranges, g_cuda.d_output,
-        gp.out_len, gp.stretch, gp.inv_stretch,
-        gp.inv_stretch_sq, gp.pitch_factor, (int)timbre);
+        plan.params.out_len, plan.params.stretch, plan.params.inv_stretch,
+        plan.params.inv_stretch_sq, plan.params.pitch_factor, (int)timbre);
+
     kernel_err = cudaGetLastError();
     if (kernel_err != cudaSuccess) {
         SPECTRAL_LOG_ERROR_STDERR("CUDA kernel error: %s", cudaGetErrorString(kernel_err));
@@ -368,7 +315,6 @@ extern "C" SpectralError synth_cuda(
         goto cleanup;
     }
 
-    /* Async copy result back */
     copy_err = cudaMemcpyAsync(out_buffer, g_cuda.d_output, out_size,
                               cudaMemcpyDeviceToHost, g_cuda.stream);
     if (copy_err != cudaSuccess) {
@@ -383,7 +329,7 @@ extern "C" SpectralError synth_cuda(
         goto cleanup;
     }
 
-    float gpu_ms;
+    float gpu_ms = 0.0f;
     if (cudaEventElapsedTime(&gpu_ms, ev_start, ev_stop) != cudaSuccess) {
         return_err = SPECTRAL_ERR_GPU_INIT;
         goto cleanup;
@@ -393,14 +339,13 @@ extern "C" SpectralError synth_cuda(
 cleanup:
     if (ev_start) cudaEventDestroy(ev_start);
     if (ev_stop) cudaEventDestroy(ev_stop);
-    if (owns_tile_data) gpu_tile_data_free(&td);
+    spectral_gpu_dispatch_plan_free(&plan);
     if (return_err != SPECTRAL_OK) {
         memset(out_buffer, 0, out_size);
         *t_synth = 0;
     }
     return return_err;
 }
-
 extern "C" size_t cuda_vram_usage_bytes(void) {
     return g_cuda.seg_cap + g_cuda.tile_ids_cap
          + g_cuda.tile_ranges_cap + g_cuda.output_cap;

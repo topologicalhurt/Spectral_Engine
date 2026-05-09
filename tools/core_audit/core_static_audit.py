@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 107):
+    for pass_num in range(1, 112):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1635,6 +1635,51 @@ def main() -> int:
             "Remaining high-value dedup targets" in arch_status_pass106 and
             "Forbidden anti-patterns" in arch_status_pass106,
             "pass 106 architecture cleanup status must document reusable owners and remaining dedup targets")
+
+
+    synth_h_pass107 = read("spectral_engine/core/spectral_synth_internal.h")
+    synth_c_pass107 = read("spectral_engine/core/spectral_synth_internal.c")
+    require("SpectralGpuDispatchPlan" in synth_h_pass107 and
+            "spectral_gpu_dispatch_plan_init" in synth_c_pass107,
+            "pass 107 prepared GPU dispatch plan must exist")
+    require("gpu_tile_preprocess_cached(sa, stretch" in synth_c_pass107 and
+            "gpu_synth_params_pack_checked(params" in synth_c_pass107,
+            "pass 107 prepared GPU dispatch plan must centralize tile prep and GPU params packing")
+
+
+    metal_pass108 = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
+    require("SpectralGpuDispatchPlan plan = {0};" in metal_pass108 and
+            "spectral_gpu_dispatch_plan_init(&plan" in metal_pass108,
+            "pass 108 Metal prepared dispatch must consume SpectralGpuDispatchPlan")
+    require("gpu_tile_preprocess_cached" not in metal_pass108 and
+            "gpu_seg_cache_try_get" not in metal_pass108,
+            "pass 108 Metal backend must not own host-side GPU preparation")
+
+
+    cuda_pass109 = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("SpectralGpuDispatchPlan plan = {0};" in cuda_pass109 and
+            "spectral_gpu_dispatch_plan_init(&plan" in cuda_pass109,
+            "pass 109 CUDA prepared dispatch must consume SpectralGpuDispatchPlan")
+    require("gpu_tile_preprocess_cached" not in cuda_pass109 and
+            "gpu_seg_cache_try_get" not in cuda_pass109,
+            "pass 109 CUDA backend must not own host-side GPU preparation")
+
+
+    synth_h_pass110 = read("spectral_engine/core/spectral_synth_internal.h")
+    metal_pass110 = read("spectral_engine/synth/backends/gpu/metal/spectral_synth_metal.m")
+    cuda_pass110 = read("spectral_engine/synth/backends/gpu/cuda/spectral_synth_cuda.cu")
+    require("gpu_tile_cache_try_get" not in synth_h_pass110 and
+            "gpu_seg_cache_try_get" not in synth_h_pass110,
+            "pass 110 GPU cache encapsulation must hide try-get APIs from backend header")
+    require("gpu_tile_cache_try_get" not in metal_pass110 and
+            "gpu_tile_cache_try_get" not in cuda_pass110,
+            "pass 110 GPU backends must not bypass prepared dispatch plan")
+
+
+    status_pass111 = read("docs/core_audit/ARCHITECTURE_CLEANUP_STATUS.md")
+    require("Phase D: explicit prepared GPU dispatch object" in status_pass111 and
+            "explicit prepared GPU dispatch plan" in status_pass111,
+            "pass 111 phase D completion must update architecture cleanup status")
 
     if FAILURES:
         for f in FAILURES:
