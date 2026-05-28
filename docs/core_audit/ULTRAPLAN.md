@@ -94,6 +94,33 @@ memory-bandwidth contracts. Files: `synth/backends/arm/*`, `synth/math/spectral_
   (DISCIPLINE_FINDINGS, hardware perspective).
 ```
 
+### A1b — ARM verification foundation (oracle + sim rework)
+
+The sim (`synth_arm32_simulation`) was a parallel reimplementation, not the real
+`spectral_arm32_process`, so the interim hash oracle never exercised the redesign
+target. Decided rework (must precede A2/A3):
+
+```text
+1. Host-run the real M7 codepath: a build mode forcing SPECTRAL_ARM_M7 on with
+   EMBEDDED=0, DMA=0, so spectral_arm32_process/synth_core_m7 run on the host via
+   the portable intrinsic fallbacks (spectral_q15.h) and no-op placement/prefetch.
+   Only the dsb barrier needs a host-safe fence. Q15 math is bit-identical to HW.
+2. CTest correctness harness (tests/arm_core): drive the REAL
+   spectral_arm32_init/load/process over fixtures; assert audio vs golden and/or
+   desktop-float reference within tolerance. Wires in spectral_arm32_load +
+   validate_segment_data (currently orphaned).
+3. Sim = perf/resource MODEL over the SAME real code. Separate MEASURED
+   (assumption-free: op counts, bytes moved, cache-line touches, active counts,
+   memory high-water) from MODELED (cycles/WCET, cache misses via explicit,
+   single-sourced, QEMU/hardware-calibratable cost params). Artefacts: memory
+   bandwidth, cache-miss model, cycles/WCET, memory high-water + DTCM/SDRAM.
+4. Delete the parallel synth_arm32_simulation functional loop (one impl only).
+   Retire tests/arm_oracle/oracle.py (interim) once the CTest harness lands.
+```
+
+Closure (A1b): real spectral_arm32_process runs on host; CTest asserts its audio;
+sim reports calibratable perf artefacts over the same code; no duplicate ARM synth.
+
 ### A2 — Memory-bandwidth redesign (the core of the maintainer's critique)
 
 ```text

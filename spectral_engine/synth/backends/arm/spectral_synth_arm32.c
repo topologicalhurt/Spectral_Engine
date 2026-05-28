@@ -364,7 +364,11 @@ static SPECTRAL_MAYBE_UNUSED inline void prefetch_segment(const SpectralSegmentQ
 }
 
 static inline void spectral_data_sync_barrier(void) {
-    __asm__ volatile ("dsb" ::: "memory");
+#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
+    __asm__ volatile ("dsb" ::: "memory");   /* real Cortex-M: full data sync barrier */
+#else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST); /* host (incl. forced-M7 host-sim): ordering only */
+#endif
 }
 
 #else

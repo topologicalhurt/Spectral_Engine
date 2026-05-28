@@ -515,10 +515,14 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 
 /* Platform Detection */
 
+/* Overridable so a host build can force the M7 codepath for host-sim/testing
+ * (-DSPECTRAL_ARM_M7=1). Defaults to real-hardware detection otherwise. */
+#ifndef SPECTRAL_ARM_M7
 #if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
 #define SPECTRAL_ARM_M7         1
 #else
 #define SPECTRAL_ARM_M7         0
+#endif
 #endif
 
 #ifdef __APPLE__
@@ -554,11 +558,12 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
  * SPECTRAL_ITCM  — Zero wait-state instruction memory (64KB)
  * SPECTRAL_SDRAM — External SDRAM (large, higher latency, prefetchable)
  * On non-embedded targets these expand to nothing. */
-#if SPECTRAL_ARM_M7 && SPECTRAL_EMBEDDED
+#if SPECTRAL_ARM_M7 && SPECTRAL_EMBEDDED && (defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__))
 #define SPECTRAL_DTCM   __attribute__((section(".dtcm_data")))
 #define SPECTRAL_ITCM   __attribute__((section(".itcm_text")))
 #define SPECTRAL_SDRAM  __attribute__((section(".sdram_data")))
 #else
+/* Host (incl. forced-M7 host-sim): TCM/SDRAM sections are meaningless; no-op. */
 #define SPECTRAL_DTCM
 #define SPECTRAL_ITCM
 #define SPECTRAL_SDRAM
