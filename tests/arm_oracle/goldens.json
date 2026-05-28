@@ -1,37 +1,37 @@
 {
   "sine_bin.wav|t0|s1|p0|n1024|h256|d-70": {
-    "sha256": "a9578e4238b547b0cecdb11cee66bbcbf8086e4ea6b1a8acebf2d05e21878869",
-    "bytes": 88280,
+    "sha256": "0f230a4c868326e1b070f5d6160f5f8dbb60514b588eb7109bd74281fe05108e",
+    "pcm_bytes": 88200,
     "nsamp": 22050,
     "peak": 0.949999988079071
   },
   "sine_offbin.wav|t0|s1|p0|n1024|h256|d-70": {
-    "sha256": "bd8c2cc7f6111599186c0b4ad272a6915cee46abe7f4684258832423b3bc7723",
-    "bytes": 88280,
+    "sha256": "ba3cae58d4762816bf6c6334d2a3a1a0974930a4039f8a075db715a04b531927",
+    "pcm_bytes": 88200,
     "nsamp": 22050,
     "peak": 0.949999988079071
   },
   "two_tone.wav|t0|s1|p0|n1024|h256|d-70": {
-    "sha256": "f7509566ceb69f8e292653f48eec3bfd488f9b37de0b9637ffcb0df6e2ad6e5c",
-    "bytes": 88280,
+    "sha256": "1edec417b2649737e6f7ba5d38efed1e4c221b88c9d91e087480586d7faf81e1",
+    "pcm_bytes": 88200,
     "nsamp": 22050,
     "peak": 0.949999988079071
   },
   "sine_bin.wav|t0|s1.5|p0|n1024|h256|d-70": {
-    "sha256": "86ce99a9fbee4e0da67c4eb61af9b4240640cdbdec4fcb64d7b3b3c597026c61",
-    "bytes": 132380,
+    "sha256": "978897a0f9befc14813d031b268404efc4aa5f723f5c1c750f1874dc44f5c612",
+    "pcm_bytes": 132300,
     "nsamp": 33075,
     "peak": 0.949999988079071
   },
   "sine_offbin.wav|t0|s1.5|p0|n1024|h256|d-70": {
-    "sha256": "699344111a5a41cfcac87ab37f9731fa53ba6be92f915588ce934363d2eef8c7",
-    "bytes": 132380,
+    "sha256": "161ca2ce29b4bcd23ed49e50515b2cac3a47992ed87c1967334b4452371f69a8",
+    "pcm_bytes": 132300,
     "nsamp": 33075,
     "peak": 0.949999988079071
   },
   "two_tone.wav|t0|s1.5|p0|n1024|h256|d-70": {
-    "sha256": "2a8441bc2a876fe11feb65907328724cb1cd50024d3c557a0cfce508f9e01f5e",
-    "bytes": 132380,
+    "sha256": "df2d30279c58d6cddc781f1ac70548aa16409d6a18d36154d4b1ec2886f1426c",
+    "pcm_bytes": 132300,
     "nsamp": 33075,
     "peak": 0.949999988079071
   }

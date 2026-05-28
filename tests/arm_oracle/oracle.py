@@ -113,6 +113,25 @@ def _run_case(case):
     return outp.read_bytes()
 
 
+def _data_bytes(data):
+    """Return raw bytes of the 'data' chunk payload (audio only), else None.
+
+    We hash THIS, not the whole file: the engine writes a WAV PEAK chunk whose
+    timeStamp field tracks wall-clock time, so whole-file hashes differ between
+    runs in different seconds even when the audio is byte-identical.
+    """
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    i = 12
+    while i + 8 <= len(data):
+        cid = data[i:i + 4]
+        sz = struct.unpack("<I", data[i + 4:i + 8])[0]
+        if cid == b"data":
+            return data[i + 8:i + 8 + sz]
+        i += 8 + sz + (sz & 1)
+    return None
+
+
 def _float_pcm(data):
     """Return float32 samples from a fmt=3 32-bit WAV, else None."""
     if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
@@ -139,10 +158,11 @@ def _key(c):
 
 
 def _summ(data):
+    body = _data_bytes(data)
     pcm = _float_pcm(data)
     return {
-        "sha256": hashlib.sha256(data).hexdigest(),
-        "bytes": len(data),
+        "sha256": hashlib.sha256(body if body is not None else data).hexdigest(),
+        "pcm_bytes": (len(body) if body is not None else len(data)),
         "nsamp": (len(pcm) if pcm is not None else None),
         "peak": (max((abs(x) for x in pcm), default=0.0)
                  if pcm is not None else None),

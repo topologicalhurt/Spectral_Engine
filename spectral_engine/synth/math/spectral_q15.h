@@ -158,7 +158,7 @@ static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
     return spectral_mul_q15(sample, amplitude);
 }
 
-/* Bulk conversion (NEON-optimized on ARM) */
+/* Bulk Q31->Q15 conversion (portable scalar; see spectral_q15.c / pass 140) */
 void spectral_q31_to_q15_bulk(const q31_t* src, q15_t* dst, uint32_t count);
 void spectral_q31_to_q15_scaled(const q31_t* src, q15_t* dst, uint32_t count, q15_t scale);
 
