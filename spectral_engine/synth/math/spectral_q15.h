@@ -13,6 +13,9 @@ extern "C" {
 typedef int16_t  q15_t;
 typedef int32_t  q31_t;
 typedef uint16_t uq16_t;
+typedef uint32_t uq32_t;
+typedef uint32_t uq32_t;
+typedef uint32_t uq32_t;
 
 #define Q15_MAX     ((q15_t)32767)
 #define Q15_MIN     ((q15_t)-32768)
@@ -197,7 +200,7 @@ _Static_assert(sizeof(SpectralSegmentQ15) == 16, "size mismatch");
 
 /* Active segment state at runtime */
 typedef struct __attribute__((aligned(4))) {
-    q31_t    phase_acc;
+    uq32_t   phase_acc;
     q31_t    freq_inc;
 #if SPECTRAL_HAS_CHIRP
     q31_t    freq_delta;

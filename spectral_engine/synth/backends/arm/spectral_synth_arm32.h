@@ -41,7 +41,7 @@ typedef SpectralActiveSegQ15 SpectralActiveSegment;
  * Phase update loop reads contiguous phase_acc[]/freq_inc[] arrays;
  * LDM/STM can load 4 phases at once (32 bytes = 8 phases). */
 typedef struct {
-    q31_t    phase_acc[SPECTRAL_ARM32_MAX_ACTIVE];
+    uq32_t   phase_acc[SPECTRAL_ARM32_MAX_ACTIVE];
     q31_t    freq_inc[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_current[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_delta[SPECTRAL_ARM32_MAX_ACTIVE];

@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 133):
+    for pass_num in range(1, 134):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1822,6 +1822,88 @@ def main() -> int:
     require("start_d > (double)UINT32_MAX" in sim_c_pass132 and
             "sim_segs[i].start = (uint32_t)(sim_segs[i].start * stretch)" not in sim_c_pass132,
             "pass 132 simulation must avoid unchecked stretched start casts")
+
+
+    arm_c_pass133 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("spectral_arm32_segment_chirp_supported" in arm_c_pass133,
+            "pass 133 ARM32 must centralize unsupported chirp detection")
+    require("seg->df_q15 == 0" in arm_c_pass133,
+            "pass 133 ARM32 must reject nonzero df_q15 until the hot path consumes chirp")
+    require("!spectral_arm32_segment_chirp_supported(&data[i])" in arm_c_pass133,
+            "pass 133 ARM32 load must fail closed for unsupported chirped segments")
+
+
+    arm_c_pass133 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("spectral_arm32_segment_chirp_supported" in arm_c_pass133,
+            "pass 133 ARM32 must centralize unsupported chirp detection")
+    require("seg->df_q15 == 0" in arm_c_pass133,
+            "pass 133 ARM32 must reject nonzero df_q15 until the hot path consumes chirp")
+    require("!spectral_arm32_segment_chirp_supported(&data[i])" in arm_c_pass133,
+            "pass 133 ARM32 load must fail closed for unsupported chirped segments")
+
+
+    arm_c_pass135 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("spectral_arm32_segment_end_checked_u32" in arm_c_pass135,
+            "pass 135 ARM32 load must use checked segment end arithmetic")
+    require("spectral_arm32_validate_segment_data" in arm_c_pass135,
+            "pass 135 ARM32 load must centralize segment ordering/polyphony validation")
+    require("start < last_start || end < last_end" in arm_c_pass135,
+            "pass 135 ARM32 load must enforce monotonic start/end order required by streaming and seek")
+    require("i - first_live + 1u" in arm_c_pass135 and "SPECTRAL_ARM32_MAX_ACTIVE" in arm_c_pass135,
+            "pass 135 ARM32 load must preflight worst-case active segment capacity")
+    require("err = spectral_arm32_validate_segment_data" in arm_c_pass135,
+            "pass 135 ARM32 load must fail closed before copying invalid segment data")
+
+
+    arm_c_pass136 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("SPECTRAL_ARM32_DMA_BUFFER_DTCM" in arm_c_pass136 and
+            "SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE" in arm_c_pass136,
+            "pass 136 ARM DMA buffer placement/cacheability must be explicit build contracts")
+    require("SPECTRAL_ARM32_DMA_BUFFER_ATTR" in arm_c_pass136,
+            "pass 136 ARM DMA scratch placement must not be hardwired to DTCM")
+    require("spectral_arm32_dma_rx_sync" in arm_c_pass136,
+            "pass 136 ARM DMA receive path must centralize cache/barrier sync")
+    require("SCB_InvalidateDCache_by_Addr" in arm_c_pass136,
+            "pass 136 ARM DMA cacheable receive buffers must invalidate D-cache before CPU reads")
+    require("dma_prefetch_coherent" in arm_c_pass136,
+            "pass 136 ARM DMA completion/coherency state must be tracked per prefetch batch")
+    require("dma_prefetch_coherent = 0;" in arm_c_pass136,
+            "pass 136 ARM DMA prefetch must reset coherency state before transfer")
+    require("static SpectralSegmentQ15 dma_seg_buf[SPECTRAL_DMA_BATCH] SPECTRAL_DTCM" not in arm_c_pass136,
+            "pass 136 ARM DMA scratch must not force DTCM placement by default")
+
+
+    sim_c_pass137 = read("spectral_engine/synth/backends/sim/spectral_synth_simulation.c")
+    require("uq32_t   phase_acc;" in sim_c_pass137,
+            "pass 137 simulation active phase accumulator must be unsigned")
+    require("spectral_sim_phase_acc_from_q15" in sim_c_pass137 and
+            "spectral_sim_phase_add_inc" in sim_c_pass137 and
+            "spectral_sim_phase_add_scaled" in sim_c_pass137,
+            "pass 137 simulation must centralize modulo phase arithmetic")
+    require("spectral_sim_q31_add_scaled_sat" in sim_c_pass137,
+            "pass 137 simulation chirp frequency advances must be saturated")
+    require("((q31_t)seg->phase_q15 + 32768) << 16" not in sim_c_pass137,
+            "pass 137 simulation must not left-shift signed phase into overflow")
+    require("phase += freq_inc" not in sim_c_pass137 and "p3 + freq_inc" not in sim_c_pass137,
+            "pass 137 simulation phase updates must not use signed overflowing addition")
+
+
+    arm_c_pass133 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("spectral_arm32_segment_chirp_supported" in arm_c_pass133,
+            "pass 133 ARM32 must centralize unsupported chirp detection")
+    require("seg->df_q15 == 0" in arm_c_pass133,
+            "pass 133 ARM32 must reject nonzero df_q15 until the hot path consumes chirp")
+    require("!spectral_arm32_segment_chirp_supported(&data[i])" in arm_c_pass133,
+            "pass 133 ARM32 load must fail closed for unsupported chirped segments")
+
+
+    arm_c_pass133 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("spectral_arm32_segment_chirp_supported" in arm_c_pass133,
+            "pass 133 ARM32 must centralize unsupported chirp detection")
+    require("seg->df_q15 == 0" in arm_c_pass133,
+            "pass 133 ARM32 must reject nonzero df_q15 until the hot path consumes chirp")
+    require("!spectral_arm32_segment_chirp_supported(&data[i])" in arm_c_pass133,
+            "pass 133 ARM32 load must fail closed for unsupported chirped segments")
 
     if FAILURES:
         for f in FAILURES:

@@ -191,7 +191,7 @@ static const q15_t* get_simulation_lut(void) {
 
 typedef struct {
     uint32_t seg_idx;
-    q31_t    phase_acc;
+    uq32_t   phase_acc;
     q31_t    freq_inc;
 #if SPECTRAL_HAS_CHIRP
     q31_t    df_inc;
@@ -201,6 +201,26 @@ typedef struct {
 } SimActiveSegment;
 
 enum { SIMULATION_MAX_ACTIVE = SPECTRAL_ARM32_MAX_ACTIVE };
+
+static inline uq32_t spectral_sim_phase_acc_from_q15(q15_t phase_q15) {
+    return ((uint32_t)((int32_t)phase_q15 + 32768) << 16);
+}
+
+static inline uq32_t spectral_sim_phase_add_inc(uq32_t phase, q31_t inc) {
+    return phase + (uq32_t)inc;
+}
+
+static inline uq32_t spectral_sim_phase_add_scaled(uq32_t phase, q31_t inc, uint64_t n) {
+    return phase + (uq32_t)((uint64_t)(uint32_t)inc * n);
+}
+
+static inline q31_t spectral_sim_q31_add_scaled_sat(q31_t value, q31_t delta, uint32_t n) {
+    int64_t next = (int64_t)value + ((int64_t)delta * (int64_t)n);
+    if (next > (int64_t)Q31_MAX) return Q31_MAX;
+    if (next < (int64_t)Q31_MIN) return Q31_MIN;
+    return (q31_t)next;
+}
+
 
 /* Binary search: find first segment whose end > pos (for future seek support) */
 __attribute__((unused))
@@ -395,18 +415,19 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                 act->da = seg->da_q15;
 
                 /* Initialize phase from stored Q15 value */
-                act->phase_acc = ((q31_t)seg->phase_q15 + 32768) << 16;
+                act->phase_acc = spectral_sim_phase_acc_from_q15(seg->phase_q15);
 
                 /* Advance phase if segment started before this block */
                 if (seg->start < out_pos) {
                     uint32_t samples_in = (uint32_t)out_pos - seg->start;
 #if SPECTRAL_HAS_CHIRP
                     /* With chirp: phase += n*freq + n*(n-1)/2 * df */
-                    q31_t chirp_contrib = (q31_t)(((int64_t)samples_in * (samples_in - 1) / 2) * act->df_inc >> 16);
-                    act->phase_acc += samples_in * act->freq_inc + chirp_contrib;
-                    act->freq_inc += samples_in * act->df_inc;
+                    uint64_t chirp_steps = ((uint64_t)samples_in * (uint64_t)(samples_in - 1u)) / 2u;
+                    act->phase_acc = spectral_sim_phase_add_scaled(act->phase_acc, act->freq_inc, samples_in);
+                    act->phase_acc = spectral_sim_phase_add_scaled(act->phase_acc, act->df_inc, chirp_steps);
+                    act->freq_inc = spectral_sim_q31_add_scaled_sat(act->freq_inc, act->df_inc, samples_in);
 #else
-                    act->phase_acc += samples_in * act->freq_inc;
+                    act->phase_acc = spectral_sim_phase_add_scaled(act->phase_acc, act->freq_inc, samples_in);
 #endif
                     /* Advance amplitude: use 32-bit intermediate to prevent overflow */
                     q31_t amp_advance = (q31_t)act->da * (q31_t)samples_in;
@@ -460,7 +481,7 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
             block_phase_updates += len;
             block_loop_iterations += spectral_perf_loop_iters_for_samples(len);
             
-            q31_t phase = act->phase_acc;
+            uq32_t phase = act->phase_acc;
             q31_t freq_inc = act->freq_inc;
 #if SPECTRAL_HAS_CHIRP
             q31_t df_inc = act->df_inc;
@@ -498,7 +519,7 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                 accum[j] += (int64_t)sample * amp;
                 phase += freq_inc;
 #if SPECTRAL_HAS_CHIRP
-                freq_inc += df_inc;
+                freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 1u);
 #endif
                 amp = spectral_qadd16(amp, da);
                 fade_val = spectral_qadd16(fade_val, SPECTRAL_FADE_STEP_Q15);
@@ -511,10 +532,10 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                 uint32_t sustain_end4 = fi_end + (sustain_len & ~3U);
 
                 for (; j < sustain_end4; j += 4) {
-                    q31_t p0 = phase;
-                    q31_t p1 = phase + freq_inc;
-                    q31_t p2 = phase + (freq_inc << 1);
-                    q31_t p3 = phase + freq_inc + (freq_inc << 1);
+                    uq32_t p0 = phase;
+                    uq32_t p1 = spectral_sim_phase_add_inc(phase, freq_inc);
+                    uq32_t p2 = spectral_sim_phase_add_inc(p1, freq_inc);
+                    uq32_t p3 = spectral_sim_phase_add_inc(p2, freq_inc);
 
                     q15_t a0 = amp;
                     q15_t a1 = spectral_qadd16(amp, da);
@@ -526,10 +547,10 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                     accum[j + 2] += (int64_t)spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut) * a2;
                     accum[j + 3] += (int64_t)spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut) * a3;
 
-                    phase = p3 + freq_inc;
+                    phase = spectral_sim_phase_add_inc(p3, freq_inc);
                     amp = spectral_qadd16(a3, da);
 #if SPECTRAL_HAS_CHIRP
-                    freq_inc += df_inc * 4;
+                    freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 4u);
 #endif
                 }
 
@@ -538,9 +559,9 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                     uq16_t lut_idx = (uq16_t)(phase >> 16);
                     q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
                     accum[j] += (int64_t)sample * amp;
-                    phase += freq_inc;
+                    phase = spectral_sim_phase_add_inc(phase, freq_inc);
 #if SPECTRAL_HAS_CHIRP
-                    freq_inc += df_inc;
+                    freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 1u);
 #endif
                     amp = spectral_qadd16(amp, da);
                 }
@@ -556,9 +577,9 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                     q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
                     sample = spectral_mul_q15(sample, fade_val);
                     accum[j] += (int64_t)sample * amp;
-                    phase += freq_inc;
+                    phase = spectral_sim_phase_add_inc(phase, freq_inc);
 #if SPECTRAL_HAS_CHIRP
-                    freq_inc += df_inc;
+                    freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 1u);
 #endif
                     amp = spectral_qadd16(amp, da);
                     fade_val = spectral_qadd16(fade_val, -SPECTRAL_FADE_STEP_Q15);

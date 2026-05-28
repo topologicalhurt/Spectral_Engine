@@ -43,9 +43,52 @@
 extern void dma_start_transfer(const void* src, void* dst, size_t bytes);
 extern int  dma_transfer_complete(void);
 
-static SpectralSegmentQ15 dma_seg_buf[SPECTRAL_DMA_BATCH] SPECTRAL_DTCM;
+#ifndef SPECTRAL_ARM32_DMA_BUFFER_DTCM
+#define SPECTRAL_ARM32_DMA_BUFFER_DTCM 0
+#endif
+#ifndef SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE
+#define SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE 0
+#endif
+
+#if SPECTRAL_ARM32_DMA_BUFFER_DTCM
+#define SPECTRAL_ARM32_DMA_BUFFER_ATTR SPECTRAL_DTCM
+#else
+#define SPECTRAL_ARM32_DMA_BUFFER_ATTR
+#endif
+
+#if SPECTRAL_USE_CMSIS
+#include "arm_math.h"
+#endif
+
+static SpectralSegmentQ15 dma_seg_buf[SPECTRAL_DMA_BATCH] SPECTRAL_ARM32_DMA_BUFFER_ATTR;
 static uint32_t dma_prefetch_start = 0;
 static uint32_t dma_prefetch_count = 0;
+static int dma_prefetch_coherent = 0;
+
+static void spectral_arm32_dma_rx_sync(const void* ptr, size_t bytes) {
+#if SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE && SPECTRAL_USE_CMSIS && defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+    const uintptr_t line = (uintptr_t)SPECTRAL_CACHE_LINE;
+    if (ptr && bytes > 0u && line > 0u && (line & (line - 1u)) == 0u) {
+        uintptr_t begin = (uintptr_t)ptr & ~(line - 1u);
+        uintptr_t end = 0u;
+        if ((uintptr_t)ptr <= UINTPTR_MAX - bytes &&
+            (uintptr_t)ptr + bytes <= UINTPTR_MAX - (line - 1u)) {
+            end = ((uintptr_t)ptr + bytes + (line - 1u)) & ~(line - 1u);
+            if (end > begin && (end - begin) <= (uintptr_t)INT32_MAX) {
+                SCB_InvalidateDCache_by_Addr((uint32_t*)begin, (int32_t)(end - begin));
+            }
+        }
+    }
+#else
+    (void)ptr;
+    (void)bytes;
+#endif
+#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
+    __DSB();
+#else
+    __sync_synchronize();
+#endif
+}
 
 static void spectral_arm32_dma_prefetch(SpectralArm32Ctx* ctx) {
     uint32_t next = ctx->next_seg_idx;
@@ -54,8 +97,9 @@ static void spectral_arm32_dma_prefetch(SpectralArm32Ctx* ctx) {
     if (batch > 0) {
         dma_prefetch_start = next;
         dma_prefetch_count = batch;
+        dma_prefetch_coherent = 0;
         dma_start_transfer(&ctx->segments[next], dma_seg_buf,
-                           batch * sizeof(SpectralSegmentQ15));
+                           (size_t)batch * sizeof(SpectralSegmentQ15));
     }
 }
 
@@ -66,14 +110,15 @@ static inline const SpectralSegmentQ15* get_segment(
     const SpectralArm32Ctx* ctx, uint32_t idx)
 {
     if (idx >= dma_prefetch_start &&
-        idx < dma_prefetch_start + dma_prefetch_count &&
-        dma_transfer_complete()) {
-#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
-        __DSB();
-#else
-        __sync_synchronize();
-#endif
-        return &dma_seg_buf[idx - dma_prefetch_start];
+        idx < dma_prefetch_start + dma_prefetch_count) {
+        if (!dma_prefetch_coherent && dma_transfer_complete()) {
+            spectral_arm32_dma_rx_sync(dma_seg_buf,
+                                       (size_t)dma_prefetch_count * sizeof(SpectralSegmentQ15));
+            dma_prefetch_coherent = 1;
+        }
+        if (dma_prefetch_coherent) {
+            return &dma_seg_buf[idx - dma_prefetch_start];
+        }
     }
     return &ctx->segments[idx];
 }
@@ -85,6 +130,18 @@ static inline const SpectralSegmentQ15* get_segment(
     return &ctx->segments[idx];
 }
 #endif /* SPECTRAL_HAS_DMA */
+
+static inline int spectral_arm32_segment_chirp_supported(const SpectralSegmentQ15* seg) {
+    if (!seg) return 0;
+#if SPECTRAL_HAS_CHIRP
+    /* The current ARM32 hot path stores df_q15 but does not yet consume it in
+     * spectral_arm32_process().  Reject chirped embedded segments at load time
+     * rather than silently rendering them as constant-frequency partials. */
+    return seg->df_q15 == 0;
+#else
+    return 1;
+#endif
+}
 
 #if SPECTRAL_USE_CMSIS
 #include "arm_math.h"
@@ -324,6 +381,61 @@ static inline uint32_t spectral_arm32_segment_end_sat_u32(uint32_t start, uint32
     return start + length;
 }
 
+static inline int spectral_arm32_segment_end_checked_u32(uint32_t start,
+                                                          uint32_t length,
+                                                          uint32_t* out_end) {
+    if (!out_end || length == 0u || length > UINT32_MAX - start) return 0;
+    *out_end = start + length;
+    return 1;
+}
+
+static SpectralError spectral_arm32_validate_segment_data(const SpectralSegmentQ15* data,
+                                                          uint32_t num_segments,
+                                                          uint32_t output_len) {
+    uint32_t first_live = 0u;
+    uint32_t last_start = 0u;
+    uint32_t last_end = 0u;
+
+    if (num_segments == 0u) return SPECTRAL_OK;
+    if (!data || output_len == 0u) return SPECTRAL_ERR_PARAM;
+
+    for (uint32_t i = 0u; i < num_segments; i++) {
+        uint32_t start = data[i].start;
+        uint32_t end = 0u;
+
+        if (!spectral_arm32_segment_end_checked_u32(start, data[i].length, &end)) {
+            return SPECTRAL_ERR_OVERFLOW;
+        }
+        if (start >= output_len) {
+            return SPECTRAL_ERR_PARAM;
+        }
+        if (i > 0u && (start < last_start || end < last_end)) {
+            return SPECTRAL_ERR_PARAM;
+        }
+        if (!spectral_arm32_segment_chirp_supported(&data[i])) {
+            return SPECTRAL_ERR_PARAM;
+        }
+
+        while (first_live < i) {
+            uint32_t first_end = 0u;
+            if (!spectral_arm32_segment_end_checked_u32(data[first_live].start,
+                                                        data[first_live].length,
+                                                        &first_end)) {
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+            if (first_end > start) break;
+            first_live++;
+        }
+        if ((i - first_live + 1u) > (uint32_t)SPECTRAL_ARM32_MAX_ACTIVE) {
+            return SPECTRAL_ERR_OVERFLOW;
+        }
+
+        last_start = start;
+        last_end = end;
+    }
+    return SPECTRAL_OK;
+}
+
 static inline void spectral_arm32_zero_output(q15_t* out_left, q15_t* out_right, uint32_t num_samples) {
 #if SPECTRAL_USE_CMSIS
     arm_fill_q15(0, out_left, num_samples);
@@ -415,6 +527,12 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
     if (!ctx) return SPECTRAL_ERR_PARAM;
     if (num_segments > ctx->segments_capacity) return SPECTRAL_ERR_OVERFLOW;
     if (num_segments > 0u && (!data || !ctx->segments)) return SPECTRAL_ERR_PARAM;
+
+    for (uint32_t i = 0; i < num_segments; i++) {
+        if (!spectral_arm32_segment_chirp_supported(&data[i])) {
+            return SPECTRAL_ERR_PARAM;
+        }
+    }
 
     if (num_segments > 0u) {
         memcpy((void*)ctx->segments, data, (size_t)num_segments * sizeof(SpectralSegmentQ15));
