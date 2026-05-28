@@ -46,6 +46,13 @@ __pycache__/
 *.swp
 *~
 
+# Language server (clangd index/cache)
+.cache/
+
+# Claude Code local config (personal; permission mode etc. must not be shared)
+.claude/settings.json
+.claude/settings.local.json
+
 # Env
 *.env
 /env/

@@ -72,7 +72,7 @@ typedef struct SpectralAnalysisPathDecision {
     size_t total_bins;
     size_t threshold_bins;
     SpectralAnalysisPathMode mode;
-    SpectralAnalysisPathDecision path;
+    int use_fused_path;
     const char* name;
 } SpectralAnalysisPathDecision;
 
