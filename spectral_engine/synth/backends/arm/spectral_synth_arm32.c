@@ -446,24 +446,6 @@ static inline void spectral_arm32_zero_output(q15_t* out_left, q15_t* out_right,
 #endif
 }
 
-/* Optimized LUT Lookup */
-
-#if SPECTRAL_ARM_M7
-
-static inline q15_t spectral_osc_lookup(const q15_t* restrict lut, uq16_t idx) {
-#if SPECTRAL_OPT_LEVEL >= 2
-    return lut[idx >> SPECTRAL_OSC_FRAC_BITS];
-#else
-    uint32_t table_idx = idx >> SPECTRAL_OSC_FRAC_BITS;
-    uint32_t frac = ((idx & SPECTRAL_OSC_FRAC_MASK) * 256u) >> SPECTRAL_OSC_FRAC_BITS;
-    q15_t a = lut[table_idx];
-    q15_t b = lut[table_idx + 1];
-    return a + (q15_t)(((q31_t)(b - a) * (int32_t)frac) >> 8);
-#endif
-}
-
-#endif /* SPECTRAL_ARM_M7 */
-
 /* Initialization */
 
 void spectral_arm32_init(SpectralArm32Ctx* ctx,
@@ -593,10 +575,10 @@ static inline void synth_core_m7(
         spectral_amp_batch4(*amp, amp_delta, &a0, &a1, &a2, &a3);
 
         q15_t s0, s1, s2, s3;
-        s0 = spectral_osc_lookup(osc_lut, (uq16_t)(p0 >> 16));
-        s1 = spectral_osc_lookup(osc_lut, (uq16_t)(p1 >> 16));
-        s2 = spectral_osc_lookup(osc_lut, (uq16_t)(p2 >> 16));
-        s3 = spectral_osc_lookup(osc_lut, (uq16_t)(p3 >> 16));
+        s0 = spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut);
+        s1 = spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut);
+        s2 = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
+        s3 = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
 
         accum[j]     = spectral_mac_q15(accum[j],     s0, a0);
         accum[j + 1] = spectral_mac_q15(accum[j + 1], s1, a1);
