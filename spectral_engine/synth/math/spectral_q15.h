@@ -23,15 +23,33 @@ typedef uint16_t uq16_t;
 /* Canonical embedded fade step used by Q15 synthesis paths. */
 #define SPECTRAL_FADE_STEP_Q15 ((q15_t)(Q15_MAX / SPECTRAL_FADE_SAMPLES_EMBEDDED))
 
-#define FLOAT_TO_Q15(f) ((q15_t)((f) >= 1.0f ? Q15_MAX : (f) <= -1.0f ? Q15_MIN : (q15_t)((f) * SPECTRAL_Q15_SCALE)))
+static inline q15_t spectral_float_to_q15(float f) {
+    if (!isfinite(f)) return Q15_ZERO;
+    if (f >= 1.0f) return Q15_MAX;
+    if (f <= -1.0f) return Q15_MIN;
+    return (q15_t)(f * SPECTRAL_Q15_SCALE);
+}
+
+static inline q31_t spectral_float_to_q31(float f) {
+    if (!isfinite(f)) return (q31_t)0;
+    if (f >= 1.0f) return Q31_MAX;
+    if (f <= -1.0f) return Q31_MIN;
+    return (q31_t)(f * SPECTRAL_Q31_SCALE);
+}
+
+#define FLOAT_TO_Q15(f) spectral_float_to_q15((float)(f))
 #define Q15_TO_FLOAT(q) ((float)(q) * SPECTRAL_INV_Q15_SCALE)
-#define FLOAT_TO_Q31(f) ((q31_t)((f) >= 1.0f ? Q31_MAX : (f) <= -1.0f ? Q31_MIN : (q31_t)((f) * SPECTRAL_Q31_SCALE)))
+#define FLOAT_TO_Q31(f) spectral_float_to_q31((float)(f))
 #define Q31_TO_FLOAT(q) ((float)(q) * SPECTRAL_INV_Q31_SCALE)
 
 /* Phase conversion: radians [0, 2pi) -> signed Q15 [-32768, 32767]
  * Normalizes to [0,1), subtracts 0.5 to center at 0, scales to Q15. */
 static inline q15_t spectral_phase_rad_to_q15(float rad) {
-    float n = fmodf(rad, (float)SPECTRAL_TWO_PI) / (float)SPECTRAL_TWO_PI;
+    float n = 0.0f;
+
+    if (!isfinite(rad)) return Q15_ZERO;
+    n = fmodf(rad, (float)SPECTRAL_TWO_PI) / (float)SPECTRAL_TWO_PI;
+    if (!isfinite(n)) return Q15_ZERO;
     if (n < 0.0f) n += 1.0f;
     return (q15_t)((n - 0.5f) * 65536.0f);
 }
@@ -40,9 +58,10 @@ static inline q15_t spectral_phase_rad_to_q15(float rad) {
  * Values > 255 are divided by 4 before encoding. */
 static inline uint16_t spectral_omega_to_q88(float omega) {
     float o = omega;
+
+    if (!isfinite(o) || o <= 0.0f) return 0u;
     if (o > 255.0f) o /= 4.0f;
     if (o > 255.0f) o = 255.0f;
-    if (o < 0.0f) o = 0.0f;
     return (uint16_t)(o * 256.0f);
 }
 

@@ -48,7 +48,7 @@ def main() -> int:
     gitignore = read(".gitignore")
     require(".spectral_core_audit_backups_*/" in gitignore, "audit backup directory pattern must be ignored")
 
-    for pass_num in range(1, 122):
+    for pass_num in range(1, 133):
         require((ROOT / f"docs/core_audit/PATCH_NOTES_PASS{pass_num}.md").exists(),
                 f"core audit pass {pass_num} notes must use numeric PATCH_NOTES_PASS{pass_num}.md naming")
     require(not (ROOT / "docs/core_audit/PATCH_NOTES.md").exists(),
@@ -1740,6 +1740,88 @@ def main() -> int:
     require("Phase F: full/fused parity testing seam and harness specification" in status_pass121 and
             "Phase G: implement compiled full/fused behavioral parity harness" in status_pass121,
             "pass 121 phase F status must update architecture roadmap")
+
+
+    windows_h_pass128 = read("spectral_engine/core/spectral_windows.h")
+    windows_c_pass128 = read("spectral_engine/core/spectral_windows.c")
+    analysis_pass128 = read("spectral_engine/analysis/spectral_analysis.c")
+    require("#include "spectral_error.h"" in windows_h_pass128,
+            "pass 128 window API must expose SpectralError for generation status")
+    require("SpectralError spectral_window_generate" in windows_h_pass128 and
+            "SpectralError spectral_window_generate" in windows_c_pass128,
+            "pass 128 spectral_window_generate must return SpectralError")
+    require("void spectral_window_generate" not in windows_h_pass128 and
+            "void spectral_window_generate" not in windows_c_pass128,
+            "pass 128 spectral_window_generate must not remain a void API")
+    require("#include "spectral_contracts.h"" in windows_c_pass128,
+            "pass 128 window implementation must include canonical span contracts")
+    require("return SPECTRAL_OK;" in windows_c_pass128 and
+            "return SPECTRAL_ERR_PARAM;" in windows_c_pass128,
+            "pass 128 window generation must fail closed and report success explicitly")
+    require("spectral_window_generate(ctx->samples, n_fft, type) != SPECTRAL_OK" in analysis_pass128,
+            "pass 128 analysis window context must consume the window generation status")
+
+
+    q15_h_pass129 = read("spectral_engine/synth/math/spectral_q15.h")
+    q15_c_pass129 = read("spectral_engine/synth/math/spectral_q15.c")
+    require("static inline q15_t spectral_float_to_q15" in q15_h_pass129 and
+            "static inline q31_t spectral_float_to_q31" in q15_h_pass129,
+            "pass 129 fixed-point float narrowing must use finite checked inline helpers")
+    require("if (!isfinite(f)) return Q15_ZERO;" in q15_h_pass129 and
+            "if (!isfinite(f)) return (q31_t)0;" in q15_h_pass129,
+            "pass 129 Q15/Q31 conversion must reject NaN/Inf before integer casts")
+    require("if (!isfinite(rad)) return Q15_ZERO;" in q15_h_pass129 and
+            "if (!isfinite(o) || o <= 0.0f) return 0u;" in q15_h_pass129,
+            "pass 129 phase/frequency fixed-point helpers must reject non-finite inputs")
+    require(q15_c_pass129.count("if (count > 0u && (!src || !dst)) return;") >= 4,
+            "pass 129 bulk Q31->Q15 conversions must guard NULL spans")
+
+
+    lut_h_pass130 = read("spectral_engine/core/spectral_lut.h")
+    require("#error "SPECTRAL_OSC_LUT_BITS must be in [1,16]" in lut_h_pass130,
+            "pass 130 LUT config must reject bit widths outside uq16_t lookup domain")
+    require("if (!lut) return Q15_ZERO;" in lut_h_pass130,
+            "pass 130 LUT lookup must guard NULL table pointers")
+    require(">> (16u - SPECTRAL_OSC_LUT_BITS)" in lut_h_pass130,
+            "pass 130 LUT index shift must use the guarded unsigned bit-domain")
+    require("(uq16_t)(phase_u16 + (uq16_t)16384u)" in lut_h_pass130,
+            "pass 130 LUT cosine phase offset must wrap explicitly through uq16_t")
+
+
+    arm_c_pass131 = read("spectral_engine/synth/backends/arm/spectral_synth_arm32.c")
+    require("spectral_arm32_segment_end_sat_u32" in arm_c_pass131,
+            "pass 131 ARM32 must use saturated segment end arithmetic")
+    require("spectral_arm32_zero_output" in arm_c_pass131,
+            "pass 131 ARM32 must centralize bounded zero-output handling")
+    require("ctx->num_segments == 0u || !ctx->segments || !ctx->osc_lut" in arm_c_pass131,
+            "pass 131 ARM32 process must reject missing segment/LUT state before hot loops")
+    require("remaining = ctx->output_length - ctx->output_position;" in arm_c_pass131,
+            "pass 131 ARM32 process must clamp block length to remaining output duration")
+    require("seg->start + seg->length" not in arm_c_pass131 and
+            "seg_start + seg_length" not in arm_c_pass131,
+            "pass 131 ARM32 segment end math must not use raw unchecked addition")
+    require("num_segments > 0u && (!data || !ctx->segments)" in arm_c_pass131,
+            "pass 131 ARM32 load must allow empty loads but reject missing non-empty storage")
+
+
+    sim_c_pass132 = read("spectral_engine/synth/backends/sim/spectral_synth_simulation.c")
+    require("#include "spectral_contracts.h"" in sim_c_pass132,
+            "pass 132 simulation must use canonical segment contracts")
+    require("SynthPreflight pf = synth_preflight_float" in sim_c_pass132 and
+            "if (!pf.ok)" in sim_c_pass132,
+            "pass 132 simulation must use canonical synthesis preflight")
+    require("SYNTH_VALIDATE_FLOAT" not in sim_c_pass132,
+            "pass 132 simulation must not call removed legacy validation macro")
+    require("const SynthParams params = pf.params;" in sim_c_pass132,
+            "pass 132 simulation must reuse canonical derived synth params")
+    require("out_len > (size_t)UINT32_MAX" in sim_c_pass132,
+            "pass 132 simulation must reject output lengths that cannot fit uint32 block arithmetic")
+    require("static int segment_to_sim" in sim_c_pass132 and
+            "spectral_segment_valid_for_synth" in sim_c_pass132,
+            "pass 132 simulation segment conversion must be checked and contract-backed")
+    require("start_d > (double)UINT32_MAX" in sim_c_pass132 and
+            "sim_segs[i].start = (uint32_t)(sim_segs[i].start * stretch)" not in sim_c_pass132,
+            "pass 132 simulation must avoid unchecked stretched start casts")
 
     if FAILURES:
         for f in FAILURES:

@@ -20,6 +20,7 @@
 #define SPECTRAL_WINDOWS_H
 
 #include <stddef.h>
+#include "spectral_error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -119,7 +120,7 @@ const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id);
  * 
  * Convenience function for selecting window type at runtime.
  */
-void spectral_window_generate(float* window, size_t length, SpectralWindowType type);
+SpectralError spectral_window_generate(float* window, size_t length, SpectralWindowType type);
 
 /*
  * spectral_window_name: Get human-readable window name

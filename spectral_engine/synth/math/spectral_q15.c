@@ -14,6 +14,7 @@
 #include <arm_neon.h>
 
 void spectral_q31_to_q15_bulk(const q31_t* src, q15_t* dst, uint32_t count) {
+    if (count > 0u && (!src || !dst)) return;
     uint32_t i = 0;
     uint32_t count4 = count & ~3U;
 
@@ -32,6 +33,7 @@ void spectral_q31_to_q15_bulk(const q31_t* src, q15_t* dst, uint32_t count) {
 
 /* Bulk Q31 to Q15 with scaling (fused convert + amplitude in one pass) */
 void spectral_q31_to_q15_scaled(const q31_t* src, q15_t* dst, uint32_t count, q15_t scale) {
+    if (count > 0u && (!src || !dst)) return;
     uint32_t i = 0;
     uint32_t count4 = count & ~3U;
 
@@ -57,12 +59,14 @@ void spectral_q31_to_q15_scaled(const q31_t* src, q15_t* dst, uint32_t count, q1
 /* Portable fallback for non-NEON platforms */
 
 void spectral_q31_to_q15_bulk(const q31_t* src, q15_t* dst, uint32_t count) {
+    if (count > 0u && (!src || !dst)) return;
     for (uint32_t i = 0; i < count; i++) {
         dst[i] = spectral_q31_to_q15_sat(src[i]);
     }
 }
 
 void spectral_q31_to_q15_scaled(const q31_t* src, q15_t* dst, uint32_t count, q15_t scale) {
+    if (count > 0u && (!src || !dst)) return;
     for (uint32_t i = 0; i < count; i++) {
         q15_t sample = spectral_q31_to_q15_sat(src[i]);
         dst[i] = spectral_mul_q15(sample, scale);

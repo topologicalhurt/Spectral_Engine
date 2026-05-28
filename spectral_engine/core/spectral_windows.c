@@ -5,6 +5,7 @@
  */
 #include "spectral_windows.h"
 #include "spectral_config.h"
+#include "spectral_contracts.h"
 #include "spectral_fast_math.h"
 #include <math.h>
 #include <string.h>
@@ -163,14 +164,22 @@ const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id) {
     return NULL;
 }
 
-void spectral_window_generate(float* window, size_t length, SpectralWindowType type) {
+SpectralError spectral_window_generate(float* window, size_t length, SpectralWindowType type) {
     const SpectralWindowDescriptor* desc = spectral_window_descriptor(type);
+
+    if (!window || length == 0u) {
+        return SPECTRAL_ERR_PARAM;
+    }
     if (!desc || !desc->generate) {
-        desc = spectral_window_descriptor(SPECTRAL_WINDOW_RECTANGULAR);
+        return SPECTRAL_ERR_PARAM;
     }
-    if (desc && desc->generate) {
-        desc->generate(window, length);
+
+    desc->generate(window, length);
+    if (!spectral_f32_span_finite(window, length)) {
+        return SPECTRAL_ERR_PARAM;
     }
+
+    return SPECTRAL_OK;
 }
 
 const char* spectral_window_name(SpectralWindowType type) {

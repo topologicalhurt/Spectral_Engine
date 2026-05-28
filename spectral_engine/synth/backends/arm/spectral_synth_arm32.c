@@ -319,6 +319,21 @@ static inline void spectral_data_sync_barrier(void) {
 }
 #endif
 
+static inline uint32_t spectral_arm32_segment_end_sat_u32(uint32_t start, uint32_t length) {
+    if (length > UINT32_MAX - start) return UINT32_MAX;
+    return start + length;
+}
+
+static inline void spectral_arm32_zero_output(q15_t* out_left, q15_t* out_right, uint32_t num_samples) {
+#if SPECTRAL_USE_CMSIS
+    arm_fill_q15(0, out_left, num_samples);
+    if (out_right) arm_fill_q15(0, out_right, num_samples);
+#else
+    if (out_left) memset(out_left, 0, (size_t)num_samples * sizeof(q15_t));
+    if (out_right) memset(out_right, 0, (size_t)num_samples * sizeof(q15_t));
+#endif
+}
+
 /* Optimized LUT Lookup */
 
 #if SPECTRAL_ARM_M7
@@ -370,17 +385,18 @@ void spectral_arm32_reset(SpectralArm32Ctx* ctx) {
 
 void spectral_arm32_seek(SpectralArm32Ctx* ctx, uint32_t sample_pos) {
     if (!ctx) return;
-    
+    if (sample_pos > ctx->output_length) sample_pos = ctx->output_length;
+
     ctx->num_active = 0;
     ctx->output_position = sample_pos;
     ctx->next_seg_idx = 0;
-    
+
     uint32_t lo = 0;
     uint32_t hi = ctx->num_segments;
     while (lo < hi) {
         uint32_t mid = lo + ((hi - lo) >> 1);
         const SpectralSegmentQ15* seg = &ctx->segments[mid];
-        uint32_t seg_end = seg->start + seg->length;
+        uint32_t seg_end = spectral_arm32_segment_end_sat_u32(seg->start, seg->length);
         if (seg_end <= sample_pos) {
             lo = mid + 1;
         } else {
@@ -396,16 +412,19 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
                                      const SpectralSegmentQ15* data,
                                      uint32_t num_segments,
                                      uint32_t output_len) {
-    if (!ctx || !data) return SPECTRAL_ERR_PARAM;
+    if (!ctx) return SPECTRAL_ERR_PARAM;
     if (num_segments > ctx->segments_capacity) return SPECTRAL_ERR_OVERFLOW;
-    
-    memcpy((void*)ctx->segments, data, num_segments * sizeof(SpectralSegmentQ15));
+    if (num_segments > 0u && (!data || !ctx->segments)) return SPECTRAL_ERR_PARAM;
+
+    if (num_segments > 0u) {
+        memcpy((void*)ctx->segments, data, (size_t)num_segments * sizeof(SpectralSegmentQ15));
+    }
     ctx->num_segments = num_segments;
     ctx->output_length = output_len;
-    
+
     /* Ensure SDRAM writes are complete before synthesis */
     spectral_data_sync_barrier();
-    
+
     spectral_arm32_reset(ctx);
     return SPECTRAL_OK;
 }
@@ -592,33 +611,38 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                                    q15_t* out_right,
                                    uint32_t num_samples) {
     uint32_t perf_start = spectral_perf_process_start();
-    
-    if (SPECTRAL_UNLIKELY(!ctx || !out_left)) {
+    uint32_t out_pos = 0;
+    uint32_t out_end = 0;
+    uint32_t remaining = 0;
+
+    if (SPECTRAL_UNLIKELY(!ctx || !out_left || num_samples == 0u)) {
         spectral_perf_process_end(perf_start, 0, 0);
         return 0;
-    }
-    if (SPECTRAL_UNLIKELY(ctx->num_segments == 0 || ctx->output_position >= ctx->output_length)) {
-#if SPECTRAL_USE_CMSIS
-        arm_fill_q15(0, out_left, num_samples);
-        if (out_right) arm_fill_q15(0, out_right, num_samples);
-#else
-        memset(out_left, 0, num_samples * sizeof(q15_t));
-        if (out_right) memset(out_right, 0, num_samples * sizeof(q15_t));
-#endif
-        spectral_perf_process_end(perf_start, 0, 0);
-        return 0;
-    }
-    
-    if (SPECTRAL_UNLIKELY(num_samples > 256)) {
-        SPECTRAL_DBG("arm32: block size %u truncated to 256", (unsigned)num_samples);
-        num_samples = 256;
     }
 
-    const uint32_t out_pos = ctx->output_position;
-    const uint32_t out_end = out_pos + num_samples;
+    if (SPECTRAL_UNLIKELY(num_samples > 256u)) {
+        SPECTRAL_DBG("arm32: block size %u truncated to 256", (unsigned)num_samples);
+        num_samples = 256u;
+    }
+
+    if (SPECTRAL_UNLIKELY(ctx->output_position >= ctx->output_length ||
+                          ctx->num_segments == 0u || !ctx->segments || !ctx->osc_lut)) {
+        spectral_arm32_zero_output(out_left, out_right, num_samples);
+        spectral_perf_process_end(perf_start, 0, 0);
+        return 0;
+    }
+
+    remaining = ctx->output_length - ctx->output_position;
+    if (num_samples > remaining) num_samples = remaining;
+    if (SPECTRAL_UNLIKELY(num_samples == 0u)) {
+        spectral_perf_process_end(perf_start, 0, 0);
+        return 0;
+    }
+
+    out_pos = ctx->output_position;
+    out_end = out_pos + num_samples;
     const q15_t* restrict osc_lut = ctx->osc_lut;
     const q15_t master_amp = ctx->amplitude_q15;
-    
 
     /* Static accumulator in DTCM for zero wait-state access on Cortex-M7.
      * Safe for embedded: single-threaded audio callback, no reentrancy. */
@@ -654,7 +678,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         const SpectralSegmentQ15* seg = get_segment(ctx, ctx->next_seg_idx);
         uint32_t seg_start = seg->start;
         uint32_t seg_length = seg->length;
-        uint32_t seg_end = seg_start + seg_length;
+        uint32_t seg_end = spectral_arm32_segment_end_sat_u32(seg_start, seg_length);
         if (seg_start >= out_end) break;
 
         /* Prefetch next segment while processing this one */

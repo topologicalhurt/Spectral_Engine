@@ -13,6 +13,7 @@
 #include "spectral_perf_accounting.h"
 #include "spectral_perf_model.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include "oscillator.h"
 
 #include <stdlib.h>
@@ -119,39 +120,58 @@ typedef struct {
     int16_t  da_q15;
 } SimSegment;
 
-static void segment_to_sim(const Segment* src, SimSegment* dst,
-                           float amp_scale, float pitch_factor, float inv_stretch) {
-    const float inv_stretch_sq = inv_stretch * inv_stretch;
-    
-    dst->start = (uint32_t)src->start;
-    dst->length = (uint16_t)fminf(65535.0f, src->length);
-    
-    /* Frequency: compute Q31 phase increment per sample
-     * Apply pitch_factor (2^(semitones/12)) and inv_stretch to match desktop synth.
-     * omega is already in radians/sample, so: freq_inc = omega * pitch * inv_stretch * 2^32 / 2pi
-     * We use double precision to avoid overflow */
-    double freq_scaled = (double)spectral_segment_alpha_f32(src->omega, pitch_factor, inv_stretch);
-    double freq_inc = freq_scaled * SPECTRAL_Q31_PER_RAD;
-    dst->freq_inc = (q31_t)spectral_clamp_f64(freq_inc, (double)Q31_MIN, (double)Q31_MAX);
-    
+static int segment_to_sim(const Segment* src, SimSegment* dst,
+                          float amp_scale, const SynthParams* params, size_t out_len) {
+    double start_d = 0.0;
+    double length_d = 0.0;
+    double freq_inc = 0.0;
 #if SPECTRAL_HAS_CHIRP
-    /* Chirp (df): frequency change per sample, converted to Q31 increment delta
-     * Apply pitch_factor and inv_stretch^2 to match desktop synth */
-    double df_scaled = (double)spectral_segment_beta_f32(src->df, pitch_factor, inv_stretch_sq);
-    double df_inc = df_scaled * SPECTRAL_Q31_PER_RAD;
+    double df_inc = 0.0;
+#endif
+    float amp_scaled = 0.0f;
+    float da_scaled = 0.0f;
+
+    if (!src || !dst || !params || !spectral_segment_valid_for_synth(src) ||
+        !spectral_is_finite_positive_f32(amp_scale) || out_len == 0u) {
+        return 0;
+    }
+    *dst = (SimSegment){0};
+
+    start_d = (double)src->start * (double)params->stretch;
+    length_d = (double)src->length * (double)params->stretch;
+    if (!spectral_is_finite_f64(start_d) || !spectral_is_finite_f64(length_d) ||
+        start_d < 0.0 || start_d >= (double)out_len || start_d > (double)UINT32_MAX ||
+        length_d <= 0.0) {
+        return 0;
+    }
+    if (length_d > 65535.0) length_d = 65535.0;
+
+    dst->start = (uint32_t)start_d;
+    dst->length = (uint16_t)length_d;
+    if (dst->length == 0u) return 0;
+
+    /* Frequency: compute Q31 phase increment per sample.
+     * omega is already radians/sample, so: freq_inc = omega * pitch * inv_stretch * 2^32 / 2pi. */
+    freq_inc = (double)spectral_segment_alpha_f32(src->omega, params->pitch_factor, params->inv_stretch) *
+               (double)SPECTRAL_Q31_PER_RAD;
+    if (!spectral_is_finite_f64(freq_inc)) return 0;
+    dst->freq_inc = (q31_t)spectral_clamp_f64(freq_inc, (double)Q31_MIN, (double)Q31_MAX);
+
+#if SPECTRAL_HAS_CHIRP
+    df_inc = (double)spectral_segment_beta_f32(src->df, params->pitch_factor, params->inv_stretch_sq) *
+             (double)SPECTRAL_Q31_PER_RAD;
+    if (!spectral_is_finite_f64(df_inc)) return 0;
     dst->df_inc = (q31_t)spectral_clamp_f64(df_inc, (double)Q31_MIN, (double)Q31_MAX);
 #endif
-    
-    /* Phase: convert [0, 2pi) to signed Q15 [-pi, pi) representation */
+
     dst->phase_q15 = PHASE_RAD_TO_Q15(src->phase);
-    
-    /* Amplitude: scale and saturate to Q15 */
-    float amp_scaled = spectral_clamp_f32(src->amp * amp_scale, 0.0f, 1.0f);
+
+    amp_scaled = spectral_clamp_f32(src->amp * amp_scale, 0.0f, 1.0f);
     dst->amp_q15 = FLOAT_TO_Q15(amp_scaled);
-    
-    /* Amplitude delta per sample (also scaled by inv_stretch like desktop) */
-    float da_scaled = spectral_segment_d_amp_f32(src->da, inv_stretch) * amp_scale;
+
+    da_scaled = spectral_segment_d_amp_f32(src->da, params->inv_stretch) * amp_scale;
     dst->da_q15 = FLOAT_TO_Q15(spectral_clamp_f32(da_scaled, -1.0f, 1.0f));
+    return 1;
 }
 
 /* Oscillator LUT */
@@ -216,8 +236,14 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
     int64_t* accum = NULL;
     int continue_backend = 1;
     
-    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, &t_synth)) {
-        return SPECTRAL_OK;
+    SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
+    if (!pf.ok) {
+        return pf.error;
+    }
+    if (out_len > (size_t)UINT32_MAX) {
+        memset(out_buffer, 0, out_len * sizeof(float));
+        if (t_synth) *t_synth = 0;
+        return SPECTRAL_ERR_OVERFLOW;
     }
 
     result = spectral_handle_unsupported_timbre(
@@ -240,8 +266,7 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
 
     double start_time = spectral_get_time_sec();
     
-    float pitch_factor = SPECTRAL_PITCH_FACTOR(pitch);
-    float inv_stretch = 1.0f / stretch;
+    const SynthParams params = pf.params;
     EmbeddedTargetConfig* cfg = get_simulation_config();
     
     /* Find maximum amplitude for scaling all segments to fit in Q15 */
@@ -269,10 +294,9 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
     }
     
     for (size_t i = 0; i < sa.count; i++) {
-        segment_to_sim(&sa.segs[i], &sim_segs[i], amp_scale, pitch_factor, inv_stretch);
-        /* Apply stretch to timing */
-        sim_segs[i].start = (uint32_t)(sim_segs[i].start * stretch);
-        sim_segs[i].length = (uint16_t)fminf(65535.0f, sim_segs[i].length * stretch);
+        if (!segment_to_sim(&sa.segs[i], &sim_segs[i], amp_scale, &params, out_len)) {
+            sim_segs[i] = (SimSegment){0};
+        }
     }
     
     /* Debug: print first few segments */
