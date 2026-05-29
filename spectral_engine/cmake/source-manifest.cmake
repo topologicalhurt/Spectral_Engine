@@ -89,6 +89,20 @@ set(SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST
 set(SPECTRAL_SOURCES_CORE_OUT_KERNELS_EMBEDDED
     "${SPECTRAL_CORE_PORT_EMBEDDED_DIR}/spectral_out_kernels.c")
 
+# Per-profile GPU tile preprocessing (Phase E port-layer split): the segment->tile
+# mapping for Metal/CUDA dispatch that formerly lived behind #if !SPECTRAL_EMBEDDED
+# && !SPECTRAL_RESTRICTED_MODE inside core/spectral_synth_internal.c. Unlike the
+# other port files, the profile split here is host-only-capability, not host-vs-sim:
+# the real implementation rides ONLY with desktop (the sole target where the former
+# guard evaluated true — every simulation/embedded target defines SPECTRAL_EMBEDDED
+# and took the #else BACKEND_UNAVAIL arm). The embedded set is the stub returning
+# SPECTRAL_ERR_BACKEND_UNAVAIL and rides with the host CLI stack, covering every
+# non-desktop target that compiles spectral_synth_internal.c.
+set(SPECTRAL_SOURCES_CORE_GPU_TILE_HOST
+    "${SPECTRAL_CORE_PORT_HOST_DIR}/spectral_gpu_tile.c")
+set(SPECTRAL_SOURCES_CORE_GPU_TILE_EMBEDDED
+    "${SPECTRAL_CORE_PORT_EMBEDDED_DIR}/spectral_gpu_tile.c")
+
 set(SPECTRAL_SOURCES_RUNTIME
     "${SPECTRAL_RUNTIME_DIR}/spectral_utils.c"
     "${SPECTRAL_RUNTIME_DIR}/spectral_console.c")
@@ -143,7 +157,8 @@ set(SPECTRAL_SOURCES_HOST_CLI_STACK
     ${SPECTRAL_SOURCES_CORE}
     ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
     ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
-    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST})
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
+    ${SPECTRAL_SOURCES_CORE_GPU_TILE_EMBEDDED})
 
 set(SPECTRAL_SOURCES_HOST_Q15_STACK
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
@@ -165,6 +180,7 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
     ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
     ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
+    ${SPECTRAL_SOURCES_CORE_GPU_TILE_HOST}
     ${SPECTRAL_SOURCES_CORE_DESKTOP}
     ${SPECTRAL_SOURCES_MONITORING})
 
