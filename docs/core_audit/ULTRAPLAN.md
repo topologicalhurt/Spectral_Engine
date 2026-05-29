@@ -28,13 +28,17 @@ Phase A  ARM / embedded redesign            (immediate item: "arm code")
 Phase B  Contract / guarantee registry      (immediate item: "WOLA/COLA contract")
 Phase C  CTF / KISS adversarial sweep       (later item: "KISS pass")
 Phase D  Compiled harness + tooling feedback (immediate item: "testing"; Phase G)
+Phase E  Core port-layer separation          (later item: "refactor arches into files")
 ```
 
-The two "later" structural items — split arches into separate files, and remove
-ARM NEON / deprecated code — are folded into Phase A (A0) because they are the
-natural first step of the ARM redesign, not independent efforts. The LUT
-generator feedback loop is folded into Phase D, because the golden-vector oracle
-it depends on is built there.
+"Remove ARM NEON / deprecated code" was folded into Phase A (done, passes
+140-141). The other "later" structural item — "refactor arches into separate
+files" — turned out larger than first scoped: SIMD portability is a *capability*
+concern already handled by SIMDe, but the real mess is embedded (low-level /
+fixed-point) and host (float) implementations interleaved by #ifdef inside ~22
+core/analysis files, plus device-specific detail leaking into core. That is now
+its own stage, Phase E. The LUT generator feedback loop is folded into Phase D,
+because the golden-vector oracle it depends on is built there.
 
 ### Sequencing risk and mitigation
 
@@ -336,6 +340,85 @@ oracle.
 
 ---
 
+## Phase E — Core port-layer separation (embedded vs host; device-agnostic)
+
+Objective: stop interleaving embedded (low-level / fixed-point) and host (float)
+implementations inside shared core files. Today ~22 core/analysis files carry
+`#if SPECTRAL_EMBEDDED` / `SPECTRAL_ARM_M7` / emulator-guard branches (~70 guard
+lines in core/ alone), and device-specific detail has leaked into the core —
+`spectral_config.h` hardcodes STM32H7 memory sections (`.dtcm_data`,
+`.itcm_text`, `.sdram_data`). Refactor to the industry port-layer pattern: a
+device-agnostic core that distinguishes *execution profiles* (low-level/embedded
+vs host) through build-selected implementation files behind shared interfaces —
+not #ifdef soup, and never device names.
+
+Constraint (maintainer): the core MUST distinguish embedded/low-level from host
+(legitimate and required), but stays completely device-agnostic — no specific
+MCU/board anywhere in core. This is the faithful realization of the original
+"refactor arches into separate files" item (the Pass-140 note only addressed SIMD
+portability via SIMDe, a *capability* concern, not the embedded/host split).
+
+### Base the design on these (how others solve this exact problem)
+
+```text
+- FreeRTOS: a fixed interface (portable.h / portmacro.h) + per-port implementations
+  under portable/<toolchain>/<arch>/port.c, build-selected. The kernel never
+  #ifdefs the port; board/device specifics live in the BSP, not the kernel.
+- Linux: arch/<arch>/ implementations + include/asm-generic/ fallbacks, config-
+  selected; generic code includes <asm/...> abstractions, never arch specifics.
+- CMSIS: CMSIS-Core is device-AGNOSTIC (Cortex-M class); capability via feature
+  macros (__ARM_FEATURE_DSP); concrete MCUs ship in separate Device Family Packs.
+  This is precisely "distinguish low-level, stay device-agnostic".
+- SQLite: the OS layer is an interface (sqlite3_vfs) with os_unix.c / os_win.c
+  backends; the SQL core carries no platform #ifdefs.
+- musl libc: generic C with per-arch overrides under src/<subsys>/<arch>/.
+```
+
+### Target architecture for this repo
+
+```text
+- core/ = portable, profile-agnostic kernel: algorithms, contracts, interfaces.
+  No SPECTRAL_EMBEDDED / ARM_M7 branching in logic bodies; it depends on abstract
+  profile interfaces (the "what").
+- Per-profile implementations in build-selected files (the "how"), e.g.
+  core/port/host/<x>.c and core/port/embedded/<x>.c behind one shared header.
+  CMake targets pick the source set — exactly as synth/backends already does —
+  replacing in-file #if branches with file selection.
+- Capability gates (SIMD / DSP / FPU presence) stay feature-macro based (SIMDe on
+  host, CMSIS/feature on embedded). Capability is not device, so it stays portable.
+- DEVICE specifics leave core entirely. The STM32H7 memory-section macros become a
+  device-AGNOSTIC memory-class abstraction the core uses by intent
+  ("fast/tightly-coupled" vs "bulk/external"); the concrete binding (.dtcm_data,
+  linker script, DMA, cache maintenance) lives in the BSP/port under api/. Core
+  asks for a memory class; the board provides it. (Pass 142 gated the section
+  attrs to real ARM; Phase E moves the binding out of core.)
+```
+
+### Sequencing
+
+```text
+- Needs the verification foundation (A1b harness / Phase D seam) so each file
+  split is provably behavior-preserving (moves are byte- or tolerance-identical,
+  guarded by the harness/oracle).
+- Best before the deep ARM hot-loop redesign (A2/A3): a clean per-profile layout
+  makes that redesign localized instead of surgery through #ifdefs.
+- Large and cross-cutting; one module's split = one pass (move + verify), not a
+  big-bang. Final order at maintainer's direction.
+```
+
+### Phase E closure criteria
+
+```text
+- No SPECTRAL_EMBEDDED / SPECTRAL_ARM_M7 branching inside core algorithm bodies;
+  profile differences are build-selected implementation files behind shared headers.
+- No device name or device-specific section/peripheral detail anywhere in core;
+  memory-class and other device bindings are provided by the BSP/api.
+- Capability (SIMD/DSP/FPU) remains feature-detected and device-agnostic.
+- Every module split verified behavior-preserving by the harness/oracle.
+```
+
+---
+
 ## Cross-phase done definition
 
 ```text
@@ -344,4 +427,6 @@ oracle.
 - Kernel is swept clean of embarrassing-class defects, each pinned by a test.
 - A compiled, extensible harness is the source of behavioral truth, with the
   out-of-source generators validated by canonical in-repo golden vectors.
+- The core is device-agnostic: embedded vs host differences are build-selected
+  implementation files behind shared interfaces; device specifics live in the BSP.
 ```
