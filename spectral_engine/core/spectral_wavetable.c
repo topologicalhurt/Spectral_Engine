@@ -123,13 +123,7 @@ static int wavetable_file_expected_bytes(SpectralWavetableFormat format,
 static int wavetable_runtime_samples_valid(const spectral_sample_t* samples, uint32_t count)
 {
     if (count > 0u && !samples) return 0;
-#if SPECTRAL_EMBEDDED
-    (void)samples;
-    (void)count;
-    return 1;
-#else
-    return spectral_f32_span_finite(samples, count);
-#endif
+    return SPECTRAL_SAMPLE_SPAN_FINITE(samples, count);
 }
 
 
@@ -144,11 +138,8 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
     uint64_t file_size = 0;
     SpectralError fs_err = SPECTRAL_OK;
 
-#if SPECTRAL_EMBEDDED
-    const SpectralWavetableFormat runtime_format = WAVETABLE_FORMAT_Q15;
-#else
-    const SpectralWavetableFormat runtime_format = WAVETABLE_FORMAT_FLOAT;
-#endif
+    const SpectralWavetableFormat runtime_format =
+        SPECTRAL_SAMPLE_IS_FIXED ? WAVETABLE_FORMAT_Q15 : WAVETABLE_FORMAT_FLOAT;
 
     if (!bank || spectral_is_empty_string(filename)) return WAVETABLE_ERR_PARAM;
     if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
@@ -302,11 +293,7 @@ WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
     memset(&hdr, 0, sizeof(hdr));
     memcpy(hdr.magic, SPECTRAL_WAVETABLE_MAGIC, 4);
     hdr.version = SPECTRAL_WAVETABLE_VERSION;
-#if SPECTRAL_EMBEDDED
-    hdr.format = WAVETABLE_FORMAT_Q15;
-#else
-    hdr.format = WAVETABLE_FORMAT_FLOAT;
-#endif
+    hdr.format = SPECTRAL_SAMPLE_IS_FIXED ? WAVETABLE_FORMAT_Q15 : WAVETABLE_FORMAT_FLOAT;
     hdr.size = SPECTRAL_WAVETABLE_SIZE;
     hdr.timbre_id = timbre_id;
 
@@ -604,12 +591,7 @@ spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
     if (idx >= SPECTRAL_WAVETABLE_SIZE) idx = 0;
     spectral_sample_t s0 = table->samples[idx];
     spectral_sample_t s1 = table->samples[idx + 1];
-#if SPECTRAL_EMBEDDED
-    int32_t frac_q8 = (int32_t)(frac * 256.0f);
-    return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * frac_q8) >> 8));
-#else
-    return s0 + (s1 - s0) * frac;
-#endif
+    return spectral_sample_lerp_f(s0, s1, frac);
 }
 
 spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
@@ -621,12 +603,7 @@ spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
     if (frac_bits < 8) frac <<= (8 - frac_bits);
     spectral_sample_t s0 = table->samples[idx];
     spectral_sample_t s1 = table->samples[idx + 1];
-#if SPECTRAL_EMBEDDED
-    return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * (int32_t)frac) >> 8));
-#else
-    float frac_f = (float)frac / 256.0f;
-    return s0 + (s1 - s0) * frac_f;
-#endif
+    return spectral_sample_lerp_q8(s0, s1, frac);
 }
 
 spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank* bank,

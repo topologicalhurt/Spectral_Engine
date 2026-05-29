@@ -149,6 +149,17 @@ typedef int32_t  spectral_acc_t;
                          ((((int32_t)(a) * (int32_t)(b)) >> 15) < -32768 ? -32768 : \
                           (((int32_t)(a) * (int32_t)(b)) >> 15))))
 
+#define SPECTRAL_SAMPLE_IS_FIXED    1
+#define SPECTRAL_SAMPLE_SPAN_FINITE(s, n) ((void)(s), (void)(n), 1)
+
+static inline spectral_sample_t spectral_sample_lerp_f(spectral_sample_t s0, spectral_sample_t s1, float frac) {
+    int32_t fq8 = (int32_t)(frac * 256.0f);
+    return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * fq8) >> 8));
+}
+static inline spectral_sample_t spectral_sample_lerp_q8(spectral_sample_t s0, spectral_sample_t s1, uint32_t frac_q8) {
+    return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * (int32_t)frac_q8) >> 8));
+}
+
 #else  /* Desktop: float samples */
 
 typedef float    spectral_sample_t;
@@ -163,6 +174,17 @@ typedef double   spectral_acc_t;
 #define FLOAT_TO_SPECTRAL_SAMPLE(f) (f)
 #define SPECTRAL_SAMPLE_ADD(a, b)   ((a) + (b))
 #define SPECTRAL_SAMPLE_MUL(a, b)   ((a) * (b))
+
+#define SPECTRAL_SAMPLE_IS_FIXED    0
+#define SPECTRAL_SAMPLE_SPAN_FINITE(s, n) spectral_f32_span_finite((s), (n))
+
+static inline spectral_sample_t spectral_sample_lerp_f(spectral_sample_t s0, spectral_sample_t s1, float frac) {
+    return s0 + (s1 - s0) * frac;
+}
+static inline spectral_sample_t spectral_sample_lerp_q8(spectral_sample_t s0, spectral_sample_t s1, uint32_t frac_q8) {
+    float frac_f = (float)frac_q8 / 256.0f;
+    return s0 + (s1 - s0) * frac_f;
+}
 
 #endif
 
