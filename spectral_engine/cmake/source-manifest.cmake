@@ -43,13 +43,18 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_resource_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache.c"
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache_fs.c"
-    "${SPECTRAL_CORE_DIR}/spectral_segment_mt.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_parser.c"
-    "${SPECTRAL_CORE_DIR}/spectral_segment_pool.c"
     "${SPECTRAL_CORE_DIR}/spectral_synth_internal.c"
     "${SPECTRAL_CORE_DIR}/spectral_vector_ops.c"
     "${SPECTRAL_CORE_DIR}/spectral_wavetable.c"
     "${SPECTRAL_CORE_DIR}/spectral_windows.c")
+
+# Desktop/analysis-only core modules (host threading, segment pooling).
+# Build-selected: excluded from embedded and embedded-simulation builds, which is
+# why these .c files carry no SPECTRAL_EMBEDDED guard (Phase E).
+set(SPECTRAL_SOURCES_CORE_DESKTOP
+    "${SPECTRAL_CORE_DIR}/spectral_segment_mt.c"
+    "${SPECTRAL_CORE_DIR}/spectral_segment_pool.c")
 
 set(SPECTRAL_SOURCES_RUNTIME
     "${SPECTRAL_RUNTIME_DIR}/spectral_utils.c"
@@ -121,6 +126,7 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_ANALYSIS}
     ${SPECTRAL_SOURCES_SYNTH_CPU}
     ${SPECTRAL_SOURCES_CORE}
+    ${SPECTRAL_SOURCES_CORE_DESKTOP}
     ${SPECTRAL_SOURCES_MONITORING})
 
 set(SPECTRAL_SOURCES_TARGET_SIMULATE

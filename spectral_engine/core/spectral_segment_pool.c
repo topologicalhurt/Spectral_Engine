@@ -2,9 +2,7 @@
 #include "spectral_segment_pool.h"
 #include "spectral_utils.h"
 
-/* Segment pool is desktop/analysis-only */
-#if !SPECTRAL_EMBEDDED
-
+/* Segment pool is desktop/analysis-only (build-selected; see source-manifest). */
 #include <stdlib.h>
 #include <string.h>
 
@@ -94,5 +92,3 @@ void segment_pool_destroy(SegmentPool* pool) {
 void segment_pool_reset(SegmentPool* pool) {
     if (pool) pool->count = 0;
 }
-
-#endif /* !SPECTRAL_EMBEDDED */

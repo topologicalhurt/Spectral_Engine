@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !SPECTRAL_EMBEDDED
-
 SpectralError segment_array_mt_init(SegmentArrayMT* sa) {
     if (!sa) return SPECTRAL_ERR_PARAM;
     memset(sa, 0, sizeof(*sa));
@@ -77,5 +75,3 @@ SpectralError segment_array_mt_copy(SegmentArrayMT* sa, SegmentArray* out) {
     pthread_mutex_unlock(&sa->mutex);
     return SPECTRAL_OK;
 }
-
-#endif
