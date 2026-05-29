@@ -1,7 +1,12 @@
-/* spectral_vector_ops.c - SIMDe-based vector operations implementation */
+/* spectral_vector_ops.c (host profile) - SIMDe-based vector operations.
+ *
+ * Build-selected for host/simulation builds: SIMDe maps SSE2/AVX2 intrinsics to
+ * native NEON (macOS ARM), native SSE/AVX (Linux x86), or scalar fallback. Real
+ * Cortex-M (CMSIS) builds have no SIMD vector ops; callers there take scalar
+ * fallback paths gated by the spectral_vector_ops.h interface guard, so a future
+ * embedded counterpart would live in core/port/embedded/spectral_vector_ops.c.
+ * The __AVX2__ branches below are capability gates (SIMD width), not profiles. */
 #include "spectral_vector_ops.h"
-
-#if (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !defined(ARM_MATH_CM4) && !defined(ARM_MATH_CM7)
 
 #include "simde/x86/sse2.h"
 #ifdef __AVX2__
@@ -605,5 +610,3 @@ void spectral_magsq_split(const float* re, const float* im, float* dst, size_t l
         dst[i] = re[i] * re[i] + im[i] * im[i];
     }
 }
-
-#endif /* (!SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM) && !CMSIS */

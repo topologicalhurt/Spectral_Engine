@@ -47,7 +47,6 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_parser.c"
     "${SPECTRAL_CORE_DIR}/spectral_synth_internal.c"
-    "${SPECTRAL_CORE_DIR}/spectral_vector_ops.c"
     "${SPECTRAL_CORE_DIR}/spectral_wavetable.c"
     "${SPECTRAL_CORE_DIR}/spectral_windows.c")
 
@@ -67,6 +66,17 @@ set(SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST
     "${SPECTRAL_CORE_PORT_HOST_DIR}/oscillator_simd.c")
 set(SPECTRAL_SOURCES_CORE_OSC_SIMD_EMBEDDED
     "${SPECTRAL_CORE_PORT_EMBEDDED_DIR}/oscillator_simd.c")
+
+# Per-profile SIMD vector ops (Phase E port-layer split). The host (SIMDe) impl is
+# build-selected onto every host/simulation target — exactly where the former in-file
+# guard (!EMBEDDED || EMBEDDED_SIM) && !CMSIS evaluated true. All current targets are
+# host or simulation builds (the embedded_arm* targets compile with SPECTRAL_EMBEDDED_
+# SIMULATION, i.e. SPECTRAL_IS_EMBEDDED_SIM), so this set rides with the host CLI stack
+# and desktop, mirroring SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST. A real bare-metal Cortex-M
+# CMSIS vector-ops impl, when it exists, would live alongside as the EMBEDDED set; until
+# then CMSIS callers take scalar fallbacks gated by spectral_vector_ops.h.
+set(SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST
+    "${SPECTRAL_CORE_PORT_HOST_DIR}/spectral_vector_ops.c")
 
 set(SPECTRAL_SOURCES_RUNTIME
     "${SPECTRAL_RUNTIME_DIR}/spectral_utils.c"
@@ -120,7 +130,8 @@ set(SPECTRAL_SOURCES_HOST_CLI_STACK
     ${SPECTRAL_SOURCE_ENTRY_MAIN}
     ${SPECTRAL_SOURCES_CLI}
     ${SPECTRAL_SOURCES_CORE}
-    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST})
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
+    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST})
 
 set(SPECTRAL_SOURCES_HOST_Q15_STACK
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
@@ -140,6 +151,7 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_SYNTH_CPU}
     ${SPECTRAL_SOURCES_CORE}
     ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
+    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
     ${SPECTRAL_SOURCES_CORE_DESKTOP}
     ${SPECTRAL_SOURCES_MONITORING})
 
