@@ -11,8 +11,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-
 #include <stdio.h>
 
 typedef struct {
@@ -52,7 +50,4 @@ SpectralError spectral_seg_cache_fs_data_map_ro(const char* cache_dir,
                                                 size_t bytes,
                                                 SpectralSegCacheFsMapView* out_view);
 void spectral_seg_cache_fs_data_unmap(SpectralSegCacheFsMapView* view);
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */
-
 #endif /* SPECTRAL_SEG_CACHE_FS_H */

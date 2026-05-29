@@ -15,8 +15,6 @@
 #include "spectral_contracts.h"
 #include "spectral_log.h"
 
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -269,6 +267,3 @@ cleanup:
     free(loaded_segs);
     return err;
 }
-
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */

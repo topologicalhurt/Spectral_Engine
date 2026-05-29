@@ -15,8 +15,6 @@
 #include "spectral_contracts.h"
 #include "spectral_log.h"
 
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -745,5 +743,3 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
     free(entries);
     return err;
 }
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */

@@ -54,8 +54,6 @@ _Static_assert(sizeof(SpqFileHeader) == 32, "SpqFileHeader must be 32 bytes");
 #endif
 
 /* File I/O functions — desktop/simulation only (uses stdio, malloc) */
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-
 /* Save segments to binary file.
  * Returns SPECTRAL_OK on success, SPECTRAL_ERR_* on failure. */
 SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, float stretch, float pitch);
@@ -64,9 +62,6 @@ SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, fl
  * Allocates memory for sa->segs; caller must free() when done.
  * Returns SPECTRAL_OK on success, SPECTRAL_ERR_* on failure. */
 SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, float* out_stretch, float* out_pitch);
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */
-
 #ifdef __cplusplus
 }
 #endif

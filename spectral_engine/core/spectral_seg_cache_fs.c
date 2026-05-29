@@ -3,8 +3,6 @@
 #include "spectral_endian.h"
 #include "spectral_utils.h"
 
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -340,5 +338,3 @@ void spectral_seg_cache_fs_data_unmap(SpectralSegCacheFsMapView* view)
 {
     spectral_fs_unmap(view);
 }
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */
