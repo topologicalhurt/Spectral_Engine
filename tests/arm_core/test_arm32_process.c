@@ -107,12 +107,9 @@ static void test_single_tone(const q15_t* lut, uint32_t sr) {
     printf("  peak=%.4f dominant=%.0f Hz (nominal %.0f, quantized by Q8.8)\n",
            peak, best_f, nominal_f);
 
-    /* Absolute amplitude is NOT asserted to an exact level: the accumulator holds
-     * Q30 products (Q15*Q15) but spectral_q31_to_q15_* shifts by 16 (as if Q31),
-     * so a single 0.5-amp segment renders at ~0.25 (-6 dB). Whether that is
-     * deliberate polyphony headroom or an off-by-one vs the desktop float backend
-     * is an open question (see PASS143 follow-up); assert only audible+non-clipping. */
-    CHECK(peak > 0.05f && peak < 0.99f, "output should be audible and non-clipping (got %.4f)", peak);
+    /* A single amp=0.5 segment must render at peak ~0.5, matching the float CPU
+     * backend (out += amp*osc). Pass 145 fixed the Q30->Q15 conversion (>>15). */
+    CHECK(peak > 0.45f && peak < 0.52f, "peak should be ~0.5 (amp), got %.4f", peak);
     /* Q8.8 omega quantization at 1 kHz is ~14 Hz/LSB; allow generous slack. */
     CHECK(fabs(best_f - nominal_f) < 25.0, "dominant freq should track nominal (got %.0f)", best_f);
     free(out);

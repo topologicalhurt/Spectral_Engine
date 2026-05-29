@@ -1017,11 +1017,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     spectral_perf_oscillator_end(osc_start);
     spectral_perf_track_active(ctx->num_active);
     
-    /* 
-     * Convert Q31 accumulator to Q15 output with master gain
-     */
+    /* Convert the Q30 accumulator (sum of Q15*Q15 MAC products) to Q15 with the
+     * master gain. Q30 -> Q15 is a >>15 shift (see spectral_q30_to_q15_scaled). */
     uint32_t amp_start = spectral_perf_amplitude_start();
-    spectral_q31_to_q15_scaled(accum, out_left, num_samples, master_amp);
+    spectral_q30_to_q15_scaled(accum, out_left, num_samples, master_amp);
     
     if (out_right && out_right != out_left) {
 #if SPECTRAL_USE_CMSIS
