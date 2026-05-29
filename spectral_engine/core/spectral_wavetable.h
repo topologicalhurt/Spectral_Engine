@@ -12,8 +12,10 @@
  *   Float phase (0.0-1.0) for desktop synthesis
  *   Fixed phase (0-65535) for embedded synthesis
  *   Linear interpolation between adjacent samples
- * 
- * The sample type is determined at compile time by SPECTRAL_EMBEDDED.
+ *
+ * Samples are stored as the profile-selected spectral_sample_t (float on host,
+ * Q15 on the fixed-point profile); the wavetable code is written against that
+ * abstraction and the SPECTRAL_SAMPLE_* helpers, not against SPECTRAL_EMBEDDED.
  */
 #ifndef SPECTRAL_WAVETABLE_H
 #define SPECTRAL_WAVETABLE_H

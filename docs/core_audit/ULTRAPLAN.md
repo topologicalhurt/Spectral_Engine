@@ -417,6 +417,51 @@ portability via SIMDe, a *capability* concern, not the embedded/host split).
 - Every module split verified behavior-preserving by the harness/oracle.
 ```
 
+### Phase E status (passes 147–155)
+
+```text
+Core port-layer separation is complete; the verifiable closure criteria are met.
+
+DONE
+- Criterion 1 (no profile/device branching in core algorithm bodies): met. The
+  embedded/host-divergent kernels were extracted into build-selected port files
+  behind shared, unconditional headers:
+    pass 152  oscillator_simd      -> core/port/{host,embedded}/oscillator_simd.c
+    pass 153  spectral_vector_ops  -> core/port/host/spectral_vector_ops.c
+    pass 154  spectral_out kernels -> core/port/{host,embedded}/spectral_out_kernels.c
+    pass 155  gpu_tile_preprocess  -> core/port/{host,embedded}/spectral_gpu_tile.c
+  No SPECTRAL_EMBEDDED / SPECTRAL_ARM_M7 / SPECTRAL_RESTRICTED_MODE branch remains
+  inside any hand-written core .c algorithm body (only the generated resource-hash
+  table and the per-profile port files retain capability/profile selection, which
+  the criteria permit). Profile selection that stays is confined to the canonical
+  config/macros headers (e.g. SPECTRAL_FADE_SAMPLES_ACTIVE) and to capability- or
+  filesystem-driven type/layout choices in headers (spectral_resource_fs.h struct,
+  SPECTRAL_FORCEINLINE), not to algorithm logic.
+- Criterion 3 (capability feature-detected): met. OSC_SIMD_*, SPECTRAL_USE_CMSIS,
+  SPECTRAL_USE_VDSP, __ARM_FEATURE_DSP, SPECTRAL_HAS_FILE_IO are all feature macros.
+- Criterion 4 (each split behavior-preserving): met. Every pass verified against
+  the same triad — six green targets build, ctest arm32_process_correctness passes,
+  the sim oracle matches all 6 goldens, and the desktop render is byte-identical to
+  the pre-refactor binary (cmp-clean).
+- Pass 151 made the wavetable sample type a profile-selected spectral_sample_t
+  abstraction; pass 147 introduced the device-agnostic memory-class macros
+  (SPECTRAL_MEM_FAST / _FAST_CODE / _BULK, core/port/spectral_mem.h).
+
+OPEN (criterion 2 residual)
+- The concrete Cortex-M section-name binding (.dtcm_data / .itcm_text / .sdram_data)
+  still lives as a built-in default in core/port/spectral_mem.h. It is already
+  isolated to the port layer (no device detail in any algorithm file), abstracted
+  behind the memory-class intent macros, and overridable by a board via
+  SPECTRAL_BSP_MEM_HEADER; the default is gated to a real Cortex-M cross-compile
+  (__ARM_ARCH_7EM__), so it is inert on all six green targets.
+- Relocating that default into the api/ BSP (e.g. api/daisy_seed) is the final
+  step. It is deliberately deferred: the only consumer is the bare-metal daisy
+  firmware build (arm-none-eabi), which is NOT in the green target set and cannot
+  be exercised here, so removing the core default would be an unverifiable change
+  to firmware memory placement. Do it together with an embedded-toolchain build so
+  the move is verifiable rather than preprocessor-reasoned.
+```
+
 ---
 
 ## Cross-phase done definition
