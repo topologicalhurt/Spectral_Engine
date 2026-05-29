@@ -115,6 +115,31 @@ static void test_single_tone(const q15_t* lut, uint32_t sr) {
     free(out);
 }
 
+static void test_invalid_rejected(const q15_t* lut, uint32_t sr) {
+    printf("test_invalid_rejected:\n");
+    static SpectralSegmentQ15 segbuf[8];
+    SpectralArm32Ctx ctx;
+    spectral_arm32_init(&ctx, segbuf, 8, lut, sr);
+
+    /* start beyond output_len -> reject */
+    SpectralSegmentQ15 past;
+    memset(&past, 0, sizeof past);
+    past.start = 2000; past.length = 100;
+    past.freq_q88 = OMEGA_TO_Q88(0.1); past.amp_q15 = FLOAT_TO_Q15(0.5f);
+    CHECK(spectral_arm32_load(&ctx, &past, 1, 1000) != SPECTRAL_OK,
+          "segment starting beyond output_len should be rejected");
+
+    /* out-of-order pair -> reject */
+    SpectralSegmentQ15 ooo[2];
+    memset(ooo, 0, sizeof ooo);
+    ooo[0].start = 500; ooo[0].length = 100;
+    ooo[0].freq_q88 = OMEGA_TO_Q88(0.1); ooo[0].amp_q15 = FLOAT_TO_Q15(0.5f);
+    ooo[1].start = 100; ooo[1].length = 100;
+    ooo[1].freq_q88 = OMEGA_TO_Q88(0.1); ooo[1].amp_q15 = FLOAT_TO_Q15(0.5f);
+    CHECK(spectral_arm32_load(&ctx, ooo, 2, 1000) != SPECTRAL_OK,
+          "out-of-order segments should be rejected");
+}
+
 int main(void) {
     const uint32_t sr = 44100;
     static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
@@ -122,6 +147,7 @@ int main(void) {
 
     test_no_segments(lut, sr);
     test_single_tone(lut, sr);
+    test_invalid_rejected(lut, sr);
 
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;

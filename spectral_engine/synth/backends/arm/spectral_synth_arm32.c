@@ -517,10 +517,12 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
     if (num_segments > ctx->segments_capacity) return SPECTRAL_ERR_OVERFLOW;
     if (num_segments > 0u && (!data || !ctx->segments)) return SPECTRAL_ERR_PARAM;
 
-    for (uint32_t i = 0; i < num_segments; i++) {
-        if (!spectral_arm32_segment_chirp_supported(&data[i])) {
-            return SPECTRAL_ERR_PARAM;
-        }
+    /* Load is the segment boundary: validate payload overflow, monotonic
+     * ordering, output_len bound, simultaneous-active bound, and chirp support
+     * before copying (KERNEL_PATCHING_GUIDELINES: validate at file/cache load). */
+    {
+        SpectralError verr = spectral_arm32_validate_segment_data(data, num_segments, output_len);
+        if (verr != SPECTRAL_OK) return verr;
     }
 
     if (num_segments > 0u) {
