@@ -464,9 +464,12 @@ void spectral_arm32_init(SpectralArm32Ctx* ctx,
     ctx->segments_capacity = capacity;
     ctx->osc_lut = osc_lut;
     ctx->sample_rate = sample_rate;
-    ctx->freq_inc_scale_q24 = (sample_rate > 0)
-        ? (uint32_t)(((1u << 24) + (sample_rate / 2u)) / sample_rate)
-        : 0;
+    /* freq_q88 stores omega (rad/sample) * 256; phase is 0.32 turns (one cycle =
+     * 2^32). The per-sample increment is (omega/2pi)*2^32 = freq_q88 * 2^24/(2pi),
+     * INDEPENDENT of sample_rate. The previous 2^24/sample_rate divisor treated
+     * freq_q88 as Hz and rendered ~sample_rate/(2pi) too low (the desktop float
+     * backend and tests/arm_core both render the nominal frequency). */
+    ctx->freq_inc_scale_q24 = (uint32_t)((double)(1u << 24) / SPECTRAL_TWO_PI + 0.5);
     ctx->amplitude_q15 = Q15_MAX;
     
     /* Ensure caches are coherent after init */
