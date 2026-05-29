@@ -51,7 +51,7 @@ extern int  dma_transfer_complete(void);
 #endif
 
 #if SPECTRAL_ARM32_DMA_BUFFER_DTCM
-#define SPECTRAL_ARM32_DMA_BUFFER_ATTR SPECTRAL_DTCM
+#define SPECTRAL_ARM32_DMA_BUFFER_ATTR SPECTRAL_MEM_FAST
 #else
 #define SPECTRAL_ARM32_DMA_BUFFER_ATTR
 #endif
@@ -557,7 +557,7 @@ void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
 
 /* Core unrolled synthesis: accumulates samples from blk_start to blk_end.
  * No fade applied — used for sustain region and as building block for fade regions. */
-SPECTRAL_ITCM
+SPECTRAL_MEM_FAST_CODE
 static inline void synth_core_m7(
     q31_t* restrict accum,
     const q15_t* restrict osc_lut,
@@ -610,7 +610,7 @@ static inline void synth_core_m7(
  * fade_val/fade_step are Q15 ramp state (0->Q15_MAX for fade-in, Q15_MAX->0 for fade-out).
  * Backend parity note: envelope shape matches GPU/desktop fade semantics but uses
  * fixed-point arithmetic to preserve embedded determinism. */
-SPECTRAL_ITCM
+SPECTRAL_MEM_FAST_CODE
 static inline void synth_fade_m7(
     q31_t* restrict accum,
     const q15_t* restrict osc_lut,
@@ -638,7 +638,7 @@ static inline void synth_fade_m7(
  * seg_length: total segment length in samples
  * Backend parity note: this path preserves the same three-region fade partition
  * semantics used in desktop/GPU backends, but executes fully in Q15/Q31. */
-SPECTRAL_ITCM
+SPECTRAL_MEM_FAST_CODE
 static inline void synth_segment_m7(
     q31_t* restrict accum,
     const q15_t* restrict osc_lut,
@@ -714,7 +714,7 @@ static inline void synth_segment_m7(
 
 #endif /* SPECTRAL_ARM_M7 */
 
-SPECTRAL_ITCM
+SPECTRAL_MEM_FAST_CODE
 uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                                    q15_t* out_left,
                                    q15_t* out_right,
@@ -756,7 +756,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     /* Static accumulator in DTCM for zero wait-state access on Cortex-M7.
      * Safe for embedded: single-threaded audio callback, no reentrancy. */
 #if defined(__GNUC__) || defined(__clang__)
-    static q31_t accum[256] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_DTCM;
+    static q31_t accum[256] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
     static _Alignas(32) q31_t accum[256];
 #else

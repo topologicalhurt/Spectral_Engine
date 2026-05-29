@@ -58,8 +58,8 @@ typedef struct {
 #endif
 
 /* Recommended placement:
- *   SpectralArm32Ctx ctx SPECTRAL_DTCM;           -- active segments in DTCM
- *   SpectralSegmentQ15 segs[N] SPECTRAL_SDRAM;     -- segment data in SDRAM */
+ *   SpectralArm32Ctx ctx SPECTRAL_MEM_FAST;        -- active segments in fast memory
+ *   SpectralSegmentQ15 segs[N] SPECTRAL_MEM_BULK;  -- segment data in bulk memory */
 typedef struct SpectralArm32Ctx {
     const SpectralSegmentQ15* segments;  /* Points to SDRAM segment data */
     uint32_t num_segments;

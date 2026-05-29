@@ -539,45 +539,12 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #endif
 #endif
 
-/* ARM32 Embedded Configuration */
+/* ARM32 embedded configuration */
 
-#if SPECTRAL_ARM_M7
-
-/* STM32H7 Memory Regions:
- *   DTCM: 128KB @ 0x20000000 - Zero wait states
- *   ITCM: 64KB @ 0x00000000 - Instruction TCM
- *   AXI SRAM: 512KB - Cached */
-#define SPECTRAL_DTCM_SIZE_KB   128
-#define SPECTRAL_DTCM_SIZE      (SPECTRAL_DTCM_SIZE_KB * 1024)
-#define SPECTRAL_CACHE_LINE     32
-
-#endif /* SPECTRAL_ARM_M7 */
-
-/* Linker Section Annotations
- * SPECTRAL_DTCM  — Zero wait-state data memory (128KB on STM32H7)
- * SPECTRAL_ITCM  — Zero wait-state instruction memory (64KB)
- * SPECTRAL_SDRAM — External SDRAM (large, higher latency, prefetchable)
- * On non-embedded targets these expand to nothing. */
-#if SPECTRAL_ARM_M7 && SPECTRAL_EMBEDDED && (defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__))
-#define SPECTRAL_DTCM   __attribute__((section(".dtcm_data")))
-#define SPECTRAL_ITCM   __attribute__((section(".itcm_text")))
-#define SPECTRAL_SDRAM  __attribute__((section(".sdram_data")))
-#else
-/* Host (incl. forced-M7 host-sim): TCM/SDRAM sections are meaningless; no-op. */
-#define SPECTRAL_DTCM
-#define SPECTRAL_ITCM
-#define SPECTRAL_SDRAM
-#endif
-
-/* Fallback defaults for non-ARM platforms */
-#ifndef SPECTRAL_CACHE_LINE
-#define SPECTRAL_CACHE_LINE     64
-#endif
-#define SPECTRAL_CACHE_LINE_STRIDE (SPECTRAL_CACHE_LINE / sizeof(size_t))
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
-               "cache line must be multiple of size_t");
-#endif
+/* Memory-class placement (device-agnostic intent; the concrete device binding
+ * lives in a BSP, not here). Defines SPECTRAL_MEM_FAST / SPECTRAL_MEM_FAST_CODE /
+ * SPECTRAL_MEM_BULK / SPECTRAL_CACHE_LINE. */
+#include "port/spectral_mem.h"
 #ifndef SPECTRAL_ARM32_MAX_ACTIVE
 #define SPECTRAL_ARM32_MAX_ACTIVE    512
 #endif
