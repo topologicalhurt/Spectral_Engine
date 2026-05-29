@@ -78,6 +78,17 @@ set(SPECTRAL_SOURCES_CORE_OSC_SIMD_EMBEDDED
 set(SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST
     "${SPECTRAL_CORE_PORT_HOST_DIR}/spectral_vector_ops.c")
 
+# Per-profile audio-output kernels (Phase E port-layer split): the float
+# normalization + Q15 stereo bodies that formerly diverged by #if inside
+# core/spectral_out.c. Host (SIMDe / scalar) rides with the host CLI stack +
+# desktop, exactly like the other host port files; the bare-metal Cortex-M
+# (scalar / CMSIS / M7-DSP) counterpart is build-selectable but not compiled by
+# any current target (no green target builds spectral_out.c on real hardware).
+set(SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST
+    "${SPECTRAL_CORE_PORT_HOST_DIR}/spectral_out_kernels.c")
+set(SPECTRAL_SOURCES_CORE_OUT_KERNELS_EMBEDDED
+    "${SPECTRAL_CORE_PORT_EMBEDDED_DIR}/spectral_out_kernels.c")
+
 set(SPECTRAL_SOURCES_RUNTIME
     "${SPECTRAL_RUNTIME_DIR}/spectral_utils.c"
     "${SPECTRAL_RUNTIME_DIR}/spectral_console.c")
@@ -131,7 +142,8 @@ set(SPECTRAL_SOURCES_HOST_CLI_STACK
     ${SPECTRAL_SOURCES_CLI}
     ${SPECTRAL_SOURCES_CORE}
     ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
-    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST})
+    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST})
 
 set(SPECTRAL_SOURCES_HOST_Q15_STACK
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
@@ -152,6 +164,7 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_CORE}
     ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
     ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
     ${SPECTRAL_SOURCES_CORE_DESKTOP}
     ${SPECTRAL_SOURCES_MONITORING})
 
