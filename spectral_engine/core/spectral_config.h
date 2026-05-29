@@ -505,6 +505,16 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #ifndef SPECTRAL_FADE_SAMPLES_EMBEDDED
 #define SPECTRAL_FADE_SAMPLES_EMBEDDED 32
 #endif
+/* Active fade length for the current build profile. Profile selection lives here
+ * (the canonical profile header), not in each synthesis source, so the synthesis
+ * files stay free of SPECTRAL_EMBEDDED branching (Phase E). */
+#ifndef SPECTRAL_FADE_SAMPLES_ACTIVE
+#if SPECTRAL_EMBEDDED
+#define SPECTRAL_FADE_SAMPLES_ACTIVE SPECTRAL_FADE_SAMPLES_EMBEDDED
+#else
+#define SPECTRAL_FADE_SAMPLES_ACTIVE SPECTRAL_FADE_SAMPLES_DESKTOP
+#endif
+#endif
 /* Optimization level: 0=safe, 1=balanced (default), 2=aggressive, 3=reserved. */
 #ifndef SPECTRAL_OPT_LEVEL
 #define SPECTRAL_OPT_LEVEL      1

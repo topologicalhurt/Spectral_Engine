@@ -11,6 +11,8 @@ get_filename_component(SPECTRAL_ENGINE_ROOT "${SPECTRAL_ENGINE_ROOT}" ABSOLUTE)
 get_filename_component(SPECTRAL_MANIFEST_REPO_ROOT "${SPECTRAL_ENGINE_ROOT}/.." ABSOLUTE)
 
 set(SPECTRAL_CORE_DIR "${SPECTRAL_ENGINE_ROOT}/core")
+set(SPECTRAL_CORE_PORT_HOST_DIR "${SPECTRAL_CORE_DIR}/port/host")
+set(SPECTRAL_CORE_PORT_EMBEDDED_DIR "${SPECTRAL_CORE_DIR}/port/embedded")
 set(SPECTRAL_CMD_DIR "${SPECTRAL_ENGINE_ROOT}/cmd")
 set(SPECTRAL_CMD_CLI_DIR "${SPECTRAL_ENGINE_ROOT}/cmd/cli")
 set(SPECTRAL_ANALYSIS_DIR "${SPECTRAL_ENGINE_ROOT}/analysis")
@@ -28,7 +30,7 @@ set(SPECTRAL_SOURCE_CONVERT_SEGMENTS_ENTRY "${SPECTRAL_CMD_DIR}/convert_segments
 
 set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/oscillator.c"
-    "${SPECTRAL_CORE_DIR}/oscillator_simd.c"
+    "${SPECTRAL_CORE_DIR}/oscillator_dispatch.c"
     "${SPECTRAL_CORE_DIR}/spectral_backend.c"
     "${SPECTRAL_CORE_DIR}/spectral_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_common.c"
@@ -55,6 +57,16 @@ set(SPECTRAL_SOURCES_CORE
 set(SPECTRAL_SOURCES_CORE_DESKTOP
     "${SPECTRAL_CORE_DIR}/spectral_segment_mt.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_pool.c")
+
+# Per-profile SIMD oscillator implementation (Phase E port-layer split). The
+# device-agnostic dispatch state lives in core/oscillator_dispatch.c (in CORE);
+# the SIMD segment bodies are build-selected here behind oscillator_dispatch.h.
+# Every current target is a host (SIMDe) build, so each picks the HOST set; the
+# CMSIS-DSP body is selected only by a real Cortex-M cross-build.
+set(SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST
+    "${SPECTRAL_CORE_PORT_HOST_DIR}/oscillator_simd.c")
+set(SPECTRAL_SOURCES_CORE_OSC_SIMD_EMBEDDED
+    "${SPECTRAL_CORE_PORT_EMBEDDED_DIR}/oscillator_simd.c")
 
 set(SPECTRAL_SOURCES_RUNTIME
     "${SPECTRAL_RUNTIME_DIR}/spectral_utils.c"
@@ -107,7 +119,8 @@ set(SPECTRAL_SOURCES_DAISY_ENGINE
 set(SPECTRAL_SOURCES_HOST_CLI_STACK
     ${SPECTRAL_SOURCE_ENTRY_MAIN}
     ${SPECTRAL_SOURCES_CLI}
-    ${SPECTRAL_SOURCES_CORE})
+    ${SPECTRAL_SOURCES_CORE}
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST})
 
 set(SPECTRAL_SOURCES_HOST_Q15_STACK
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
@@ -126,6 +139,7 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_ANALYSIS}
     ${SPECTRAL_SOURCES_SYNTH_CPU}
     ${SPECTRAL_SOURCES_CORE}
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
     ${SPECTRAL_SOURCES_CORE_DESKTOP}
     ${SPECTRAL_SOURCES_MONITORING})
 
