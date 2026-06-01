@@ -98,7 +98,7 @@ void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_fr
     if (!mono || !stereo || num_frames == 0 || num_frames > SIZE_MAX / 2u) return;
 
 #if SPECTRAL_ARM_M7 && defined(__ARM_FEATURE_DSP)
-    size_t pairs = num_frames & ~1U;
+    size_t pairs = num_frames & ~(size_t)1;
     size_t i = 0;
     for (; i < pairs; i += 2) {
         size_t stereo_i = i * 2u;

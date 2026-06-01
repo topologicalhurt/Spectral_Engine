@@ -115,7 +115,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
         }
     }
     
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_DESKTOP);
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_ACTIVE);
     synth_segment_scalar(
         dst, len, lp->phase, lp->alpha, lp->beta,
         lp->amp, lp->d_amp, lp->width, &fp, timbre_table[timbre]
@@ -128,7 +128,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
 /* All constants injected from spectral_consts.h via METAL_CONST_* macros
  * defined in spectral_osc_formulas.h. Formulas must match the canonical
  * C implementations in spectral_osc_formulas.h exactly. */
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 4,
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 5,
     "oscillator_metal_source MSL strings are stale — mirror formula changes and bump version");
 const char* oscillator_metal_source =
 "#define TIMBRE_SINE     0\n"
@@ -179,7 +179,7 @@ const char* oscillator_metal_source =
 "        case TIMBRE_SAW:      return rads * -INV_PI;\n"
 "        case TIMBRE_SQUARE:   return (rads > 0.0f) ? 1.0f : -1.0f;\n"
 "        case TIMBRE_TRIANGLE: return (1.0f - abs(rads) * INV_PI) * 2.0f - 1.0f;\n"
-"        case TIMBRE_ASIN:     return asin(rads * INV_PI);\n"
+"        case TIMBRE_ASIN:     return asin(clamp(rads * INV_PI, -1.0f, 1.0f));\n"
 "        case TIMBRE_PARABOLA: return 1.0f - rads * rads * INV_PI_SQ;\n"
 "        default:              return oscillator_fast_sin(rads);\n"
 "    }\n"

@@ -290,6 +290,17 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     vDSP_ctoz((DSPComplex*)windowed, 2, &split, 1, n_fft / 2);
     vDSP_fft_zrip(setup, &split, 1, res->log2n, FFT_FORWARD);
 
+    /* vDSP_fft_zrip(FFT_FORWARD) emits the textbook DFT scaled by 2 (Apple's
+     * packed-real convention, uniform across DC realp[0], Nyquist imagp[0] and
+     * the interior bins). Undo it here so magnitudes match the textbook/FFTW
+     * branch and the window amp scales (PASS8: 2/Σwindow), which are derived for
+     * the unscaled DFT. Uniform on re+im, so phases are unaffected. */
+    {
+        float vdsp_half = 0.5f;
+        vDSP_vsmul(split.realp, 1, &vdsp_half, split.realp, 1, n_fft / 2);
+        vDSP_vsmul(split.imagp, 1, &vdsp_half, split.imagp, 1, n_fft / 2);
+    }
+
     {
         float dc = split.realp[0];
         out_magsq[0] = dc * dc;

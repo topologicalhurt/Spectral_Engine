@@ -8,6 +8,7 @@
 
 #include "spectral_common.h"
 #include "spectral_error.h"
+#include "spectral_endian.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +27,23 @@ typedef struct {
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(SegmentFileHeader) == 28, "SegmentFileHeader must be 28 bytes");
 #endif
+
+/* Swap a SegmentFileHeader between native and little-endian on-disk order.
+ * The .bin (SPEC) format is always stored little-endian; the swap is symmetric
+ * (its own inverse) and a no-op on little-endian hosts.  Single source of truth
+ * shared by segments_save/segments_load and the convert_segments tool (which
+ * does not link spectral_segment_parser.c, so the helper must be header-only).
+ * The char[4] magic is endian-independent and intentionally left untouched. */
+static inline void spectral_segment_file_header_swap_le(SegmentFileHeader* hdr)
+{
+    if (!hdr || !spectral_is_big_endian()) return;
+    hdr->version  = spectral_swap_u32(hdr->version);
+    hdr->sr       = spectral_swap_u32(hdr->sr);
+    hdr->stretch  = spectral_swap_float(hdr->stretch);
+    hdr->pitch    = spectral_swap_float(hdr->pitch);
+    hdr->count    = spectral_swap_u32(hdr->count);
+    hdr->reserved = spectral_swap_u32(hdr->reserved);
+}
 
 #define SEGMENT_FILE_MAGIC "SPEC"
 #define SEGMENT_FILE_VERSION 2

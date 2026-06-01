@@ -56,9 +56,12 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     }
 
     spectral_fft_resources_free(&res);
-    spectral_analysis_window_context_free(&window_ctx);
 
     {
+        /* window_ctx is freed AFTER this call: spectral_analysis_window_context_free
+         * zeroes the struct (descriptor -> NULL), so reading window_ctx.descriptor
+         * here would otherwise always take the fallback and silently substitute the
+         * HANN descriptor for whatever window was actually used. */
         SegmentArray result = spectral_track_peaks_with_window_descriptor(
             stft.magsq, stft.phases, max_magsq,
             n_frames, n_freqs,
@@ -67,6 +70,7 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
             window_ctx.descriptor ? window_ctx.descriptor : spectral_window_descriptor(SPECTRAL_WINDOW_HANN),
             SPECTRAL_PEAK_ESTIMATOR_AUTO,
             t_track);
+        spectral_analysis_window_context_free(&window_ctx);
         spectral_analysis_stft_matrix_free(&stft);
         return result;
     }

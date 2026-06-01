@@ -21,7 +21,7 @@
 /* Bump when any oscillator formula, fast_sin, normalize_phase, or
  * fade_envelope changes.  Metal shader (oscillator.c) duplicates these
  * as MSL strings and checks this version at compile time. */
-#define SPECTRAL_OSC_FORMULAS_VERSION 4
+#define SPECTRAL_OSC_FORMULAS_VERSION 5
 #include <math.h>
 #include <limits.h>
 
@@ -93,7 +93,15 @@ OSC_FORMULA_FUNC float spectral_osc_triangle(float rads, float width) {
 
 OSC_FORMULA_FUNC float spectral_osc_asin(float rads, float width) {
     (void)width;
-    return asinf(rads * SPECTRAL_INV_PI);
+    /* spectral_normalize_phase() can return a value a fraction of an ULP outside
+     * [-pi, pi) (catastrophic cancellation when reducing large accumulated phase),
+     * so rads*INV_PI can land just outside [-1, 1]. asinf() then returns NaN, which
+     * poisons the synthesized output via dst[j] += amp*wave. Clamp to asin's domain;
+     * the endpoints map to the correct +/- pi/2 boundary value. */
+    float a = rads * SPECTRAL_INV_PI;
+    if (a > 1.0f) a = 1.0f;
+    else if (a < -1.0f) a = -1.0f;
+    return asinf(a);
 }
 
 OSC_FORMULA_FUNC float spectral_osc_parabola(float rads, float width) {

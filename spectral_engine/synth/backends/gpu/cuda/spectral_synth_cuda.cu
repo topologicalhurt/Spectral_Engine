@@ -228,6 +228,7 @@ extern "C" SpectralError synth_cuda(
     cudaEvent_t ev_start = NULL;
     cudaEvent_t ev_stop = NULL;
     SpectralError return_err = SPECTRAL_OK;
+    float gpu_ms = 0.0f;
 
     return_err = spectral_gpu_dispatch_plan_init(&plan, sa, &pf.params, stretch, timbre, out_len);
     if (return_err != SPECTRAL_OK) goto cleanup;
@@ -329,7 +330,6 @@ extern "C" SpectralError synth_cuda(
         goto cleanup;
     }
 
-    float gpu_ms = 0.0f;
     if (cudaEventElapsedTime(&gpu_ms, ev_start, ev_stop) != cudaSuccess) {
         return_err = SPECTRAL_ERR_GPU_INIT;
         goto cleanup;

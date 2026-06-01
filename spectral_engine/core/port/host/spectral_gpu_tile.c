@@ -138,7 +138,12 @@ SpectralError gpu_tile_preprocess(
         }
     }
 
-    #pragma omp parallel
+    /* Pin the team to exactly n_threads: thread_counts is sized to n_threads
+     * (== spectral_omp_effective_thread_count(), clamped to SPECTRAL_MAX_THREADS).
+     * Without this clause the region would spawn omp_get_max_threads() threads,
+     * so on a host where that exceeds SPECTRAL_MAX_THREADS, omp_get_thread_num()
+     * would index thread_counts[tid] out of bounds. */
+    #pragma omp parallel num_threads(n_threads)
     {
 #ifdef _OPENMP
         int tid = omp_get_thread_num();

@@ -238,8 +238,11 @@ uint32_t spectral_debug_timing_end(SpectralDebugCtx* ctx) {
         ctx->timing.cycles_min = elapsed;
     }
     
-    /* IIR rolling average: avg = avg + (new - avg) / 16 */
-    ctx->timing.cycles_avg += (elapsed - ctx->timing.cycles_avg) >> 4;
+    /* IIR rolling average: avg += (new - avg) / 16. The delta is formed in signed
+     * arithmetic so a below-average sample lowers the mean; an unsigned (new - avg)
+     * would underflow and the logical >> would add ~2^28 instead of subtracting. */
+    int32_t avg_delta = (int32_t)elapsed - (int32_t)ctx->timing.cycles_avg;
+    ctx->timing.cycles_avg = (uint32_t)((int32_t)ctx->timing.cycles_avg + (avg_delta >> 4));
     
     /* Check for budget overrun */
     if (elapsed > ctx->timing.budget_cycles) {
@@ -416,11 +419,13 @@ void spectral_debug_sdcard_read(SpectralDebugCtx* ctx, uint32_t sectors, uint32_
     
     ctx->sdcard.sectors_read += sectors;
     
-    /* IIR average latency */
+    /* IIR average latency (signed delta: a faster-than-average sample must lower
+     * the mean, not underflow the unsigned subtraction). */
     if (ctx->sdcard.read_latency_us == 0) {
         ctx->sdcard.read_latency_us = latency_us;
     } else {
-        ctx->sdcard.read_latency_us += (latency_us - ctx->sdcard.read_latency_us) >> 3;
+        int32_t lat_delta = (int32_t)latency_us - (int32_t)ctx->sdcard.read_latency_us;
+        ctx->sdcard.read_latency_us = (uint32_t)((int32_t)ctx->sdcard.read_latency_us + (lat_delta >> 3));
     }
 }
 
@@ -429,11 +434,13 @@ void spectral_debug_sdcard_write(SpectralDebugCtx* ctx, uint32_t sectors, uint32
     
     ctx->sdcard.sectors_written += sectors;
     
-    /* IIR average latency */
+    /* IIR average latency (signed delta: a faster-than-average sample must lower
+     * the mean, not underflow the unsigned subtraction). */
     if (ctx->sdcard.write_latency_us == 0) {
         ctx->sdcard.write_latency_us = latency_us;
     } else {
-        ctx->sdcard.write_latency_us += (latency_us - ctx->sdcard.write_latency_us) >> 3;
+        int32_t lat_delta = (int32_t)latency_us - (int32_t)ctx->sdcard.write_latency_us;
+        ctx->sdcard.write_latency_us = (uint32_t)((int32_t)ctx->sdcard.write_latency_us + (lat_delta >> 3));
     }
 }
 

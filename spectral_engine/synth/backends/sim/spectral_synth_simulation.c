@@ -99,35 +99,22 @@ void embedded_sim_set_cold_start_reporting(int enabled) {
     get_simulation_config()->include_cold_start = enabled ? 1 : 0;
 }
 
-/* Simulation segment - matches SpectralSegmentQ15 in representation but uses
- * q31_t freq_inc for higher precision frequency during desktop simulation.
- * 
- * Phase representation: phase_q15 is signed Q15 where [-32768, 32767] maps to [-pi, pi).
- * This matches SpectralSegmentQ15.phase_q15 exactly.
- * 
- * The embedded synth converts phase_q15 to unsigned Q31 accumulator:
- *   phase_acc = (phase_q15 + 32768) << 16
- */
-typedef struct {
-    uint32_t start;
-    uint16_t length;
-    q31_t    freq_inc;
-#if SPECTRAL_HAS_CHIRP
-    q31_t    df_inc;
-#endif
-    int16_t  phase_q15;
-    int16_t  amp_q15;
-    int16_t  da_q15;
-} SimSegment;
-
-static int segment_to_sim(const Segment* src, SimSegment* dst,
+/* Float Segment -> embedded SpectralSegmentQ15 conversion.
+ *
+ * This is the desktop-side equivalent of cmd/convert_segments.c, but it also
+ * folds in the runtime stretch/pitch parameters because the real ARM32 backend
+ * applies neither at synthesis time (spectral_arm32_set_stretch() is a no-op;
+ * pitch/stretch are baked into start/length/frequency here):
+ *   - start/length  : scaled by stretch (length clamped to the 16-bit field)
+ *   - freq_q88       : omega*pitch*inv_stretch encoded as Q8.8 via OMEGA_TO_Q88
+ *   - amp_q15/da_q15 : scaled by amp_scale (Q15 headroom normalization)
+ *   - df_q15         : forced to 0 — the ARM32 hot path does not consume chirp
+ *                      and spectral_arm32_load() rejects df_q15 != 0.
+ * Returns 1 on a valid segment, 0 if the segment should be dropped. */
+static int segment_to_q15(const Segment* src, SpectralSegmentQ15* dst,
                           float amp_scale, const SynthParams* params, size_t out_len) {
     double start_d = 0.0;
     double length_d = 0.0;
-    double freq_inc = 0.0;
-#if SPECTRAL_HAS_CHIRP
-    double df_inc = 0.0;
-#endif
     float amp_scaled = 0.0f;
     float da_scaled = 0.0f;
 
@@ -135,7 +122,7 @@ static int segment_to_sim(const Segment* src, SimSegment* dst,
         !spectral_is_finite_positive_f32(amp_scale) || out_len == 0u) {
         return 0;
     }
-    *dst = (SimSegment){0};
+    *dst = (SpectralSegmentQ15){0};
 
     start_d = (double)src->start * (double)params->stretch;
     length_d = (double)src->length * (double)params->stretch;
@@ -150,20 +137,8 @@ static int segment_to_sim(const Segment* src, SimSegment* dst,
     dst->length = (uint16_t)length_d;
     if (dst->length == 0u) return 0;
 
-    /* Frequency: compute Q31 phase increment per sample.
-     * omega is already radians/sample, so: freq_inc = omega * pitch * inv_stretch * 2^32 / 2pi. */
-    freq_inc = (double)spectral_segment_alpha_f32(src->omega, params->pitch_factor, params->inv_stretch) *
-               (double)SPECTRAL_Q31_PER_RAD;
-    if (!spectral_is_finite_f64(freq_inc)) return 0;
-    dst->freq_inc = (q31_t)spectral_clamp_f64(freq_inc, (double)Q31_MIN, (double)Q31_MAX);
-
-#if SPECTRAL_HAS_CHIRP
-    df_inc = (double)spectral_segment_beta_f32(src->df, params->pitch_factor, params->inv_stretch_sq) *
-             (double)SPECTRAL_Q31_PER_RAD;
-    if (!spectral_is_finite_f64(df_inc)) return 0;
-    dst->df_inc = (q31_t)spectral_clamp_f64(df_inc, (double)Q31_MIN, (double)Q31_MAX);
-#endif
-
+    dst->freq_q88 = OMEGA_TO_Q88(
+        spectral_segment_alpha_f32(src->omega, params->pitch_factor, params->inv_stretch));
     dst->phase_q15 = PHASE_RAD_TO_Q15(src->phase);
 
     amp_scaled = spectral_clamp_f32(src->amp * amp_scale, 0.0f, 1.0f);
@@ -171,15 +146,16 @@ static int segment_to_sim(const Segment* src, SimSegment* dst,
 
     da_scaled = spectral_segment_d_amp_f32(src->da, params->inv_stretch) * amp_scale;
     dst->da_q15 = FLOAT_TO_Q15(spectral_clamp_f32(da_scaled, -1.0f, 1.0f));
+    /* df_q15 stays 0 (zero-initialized above): chirp is intentionally dropped. */
     return 1;
 }
 
-/* Oscillator LUT */
+/* Oscillator LUT — supplied to the real ARM32 context as ctx->osc_lut. */
 
 static const q15_t* get_simulation_lut(void) {
     static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
     static int initialized = 0;
-    
+
     if (!initialized) {
         spectral_lut_init_sine(lut);
         initialized = 1;
@@ -187,52 +163,7 @@ static const q15_t* get_simulation_lut(void) {
     return lut;
 }
 
-/* Active segment state - runtime state for simulation */
-
-typedef struct {
-    uint32_t seg_idx;
-    uq32_t   phase_acc;
-    q31_t    freq_inc;
-#if SPECTRAL_HAS_CHIRP
-    q31_t    df_inc;
-#endif
-    q15_t    amp;
-    q15_t    da;
-} SimActiveSegment;
-
 enum { SIMULATION_MAX_ACTIVE = SPECTRAL_ARM32_MAX_ACTIVE };
-
-static inline uq32_t spectral_sim_phase_acc_from_q15(q15_t phase_q15) {
-    return ((uint32_t)((int32_t)phase_q15 + 32768) << 16);
-}
-
-static inline uq32_t spectral_sim_phase_add_inc(uq32_t phase, q31_t inc) {
-    return phase + (uq32_t)inc;
-}
-
-static inline uq32_t spectral_sim_phase_add_scaled(uq32_t phase, q31_t inc, uint64_t n) {
-    return phase + (uq32_t)((uint64_t)(uint32_t)inc * n);
-}
-
-static inline q31_t spectral_sim_q31_add_scaled_sat(q31_t value, q31_t delta, uint32_t n) {
-    int64_t next = (int64_t)value + ((int64_t)delta * (int64_t)n);
-    if (next > (int64_t)Q31_MAX) return Q31_MAX;
-    if (next < (int64_t)Q31_MIN) return Q31_MIN;
-    return (q31_t)next;
-}
-
-
-/* Binary search: find first segment whose end > pos (for future seek support) */
-__attribute__((unused))
-static uint32_t find_first_segment_at(const SimSegment* segs, uint32_t count, uint32_t pos) {
-    uint32_t lo = 0, hi = count;
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        if (segs[mid].start + segs[mid].length <= pos) lo = mid + 1;
-        else hi = mid;
-    }
-    return lo;
-}
 
 static SpectralError simulation_timbre_fallback_invoke(
     SegmentArray sa, float* out_buffer, size_t out_len,
@@ -250,10 +181,10 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
                                      float stretch, float pitch, SpectralTimbre timbre,
                                      int n_threads, double* t_synth) {
     SpectralError result = SPECTRAL_OK;
-    size_t sim_segs_bytes = 0;
-    size_t accum_bytes = 0;
-    SimSegment* sim_segs = NULL;
-    int64_t* accum = NULL;
+    SpectralSegmentQ15* q15_src = NULL;   /* converted segments validated by load */
+    SpectralSegmentQ15* q15_ctx = NULL;   /* working copy owned by the ARM32 ctx */
+    SpectralArm32Ctx* ctx = NULL;
+    uint32_t* active_idx = NULL;          /* workload-model active set (indices) */
     int continue_backend = 1;
     
     SynthPreflight pf = synth_preflight_float(out_buffer, out_len, sa, stretch, pitch, &t_synth);
@@ -297,348 +228,173 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
     /* amp_scale brings max_amp to 1.0, with a bit of headroom */
     float amp_scale = (max_amp > 0.0f) ? (SPECTRAL_SIMULATION_HEADROOM / max_amp) : 1.0f;
     
-    /* Convert segments to simulation format */
-    if (!spectral_size_mul(sa.count, sizeof(*sim_segs), &sim_segs_bytes)) {
-        spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_OVERFLOW,
-                                "Simulation segment buffer overflow (segments=%zu)", sa.count);
-        result = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-    sim_segs = (SimSegment*)spectral_malloc_array(sa.count, sizeof(*sim_segs));
-    if (!sim_segs) {
-        spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_MEMORY,
-                                "Simulation segment buffer allocation failed (segments=%zu)",
-                                sa.count);
-        result = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    
-    for (size_t i = 0; i < sa.count; i++) {
-        if (!segment_to_sim(&sa.segs[i], &sim_segs[i], amp_scale, &params, out_len)) {
-            sim_segs[i] = (SimSegment){0};
+    /* Convert float segments to embedded Q15 form, dropping any that fail
+     * conversion so the strict ARM32 loader sees only loadable data. The array
+     * is compacted (invalid entries removed), preserving start ordering. */
+    uint32_t loaded = 0;
+    if (sa.count > 0) {
+        q15_src = (SpectralSegmentQ15*)spectral_malloc_array(sa.count, sizeof(*q15_src));
+        if (!q15_src) {
+            spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_MEMORY,
+                                    "Simulation segment buffer allocation failed (segments=%zu)",
+                                    sa.count);
+            result = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
+        }
+        for (size_t i = 0; i < sa.count; i++) {
+            SpectralSegmentQ15 tmp;
+            if (segment_to_q15(&sa.segs[i], &tmp, amp_scale, &params, out_len)) {
+                q15_src[loaded++] = tmp;
+            }
         }
     }
-    
-    /* Debug: print first few segments */
+
     const SpectralPerfModelProfile* perf_profile =
         spectral_perf_model_profile((SpectralPerfProfileId)cfg->perf_profile);
     const uint32_t cache_miss_threshold =
         perf_profile ? perf_profile->cache_miss_threshold_active : 24u;
     if (!perf_profile) perf_profile = spectral_perf_model_default_profile();
+
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
     if (cfg->verbose) {
-        SPECTRAL_DBG("max_amp=%.3f amp_scale=%.6f", max_amp, amp_scale);
-        SPECTRAL_DBG("First 5 segments:");
-        for (size_t i = 0; i < 5 && i < sa.count; i++) {
-            Segment* s = &sa.segs[i];
-            SimSegment* e = &sim_segs[i];
-            SPECTRAL_DBG("  [%zu] desktop: start=%.0f len=%.0f omega=%.6f phase=%.3f amp=%.6f da=%.6f",
-                   i, s->start, s->length, s->omega, s->phase, s->amp, s->da);
-                 SPECTRAL_DBG("       simulation: start=%u len=%u freq_inc=%d phase_q15=%d amp_q15=%d da_q15=%d",
-                   e->start, e->length, e->freq_inc, e->phase_q15, e->amp_q15, e->da_q15);
-        }
-    }
-    
-    /* Check amplitude distribution */
-    if (cfg->verbose) {
-        float sum_amp = 0;
-        for (size_t i = 0; i < sa.count; i++) {
-            sum_amp += sa.segs[i].amp;
-        }
-        float avg_amp = (sa.count > 0) ? (sum_amp / sa.count) : 0.0f;
-        SPECTRAL_DBG("Segment amp stats: max=%.6f avg=%.6f total=%.3f",
-               max_amp, avg_amp, sum_amp);
+        SPECTRAL_DBG("max_amp=%.3f amp_scale=%.6f loaded=%u/%zu",
+                     (double)max_amp, (double)amp_scale, loaded, sa.count);
     }
 #endif
-    
-    /* Get oscillator LUT */
+
+    /* Stand up the REAL ARM32 synthesis context. It owns a separate working copy
+     * of the segments (spectral_arm32_load() validates ordering / active-count /
+     * chirp constraints, then memcpy's into ctx->segments). All audio below comes
+     * from spectral_arm32_process() — there is no parallel oscillator anymore. */
     const q15_t* osc_lut = get_simulation_lut();
-#if SPECTRAL_DEBUG && !defined(NDEBUG)
-    if (cfg->verbose) {
-        SPECTRAL_DBG("Oscillator LUT size=%d (%d bits)", 
-               SPECTRAL_OSC_LUT_SIZE, SPECTRAL_OSC_LUT_BITS);
-    }
-#endif
-    
-    /* Allocate 64-bit accumulator buffer (prevents overflow with many segments) */
     const uint32_t block_size = cfg->block_size;
-    if (!spectral_size_mul((size_t)block_size, sizeof(*accum), &accum_bytes)) {
-        spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_OVERFLOW,
-                                "Simulation accumulator buffer overflow (samples=%u)", block_size);
-        result = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-    accum = (int64_t*)spectral_calloc_array((size_t)block_size, sizeof(*accum));
-    if (!accum) {
-        spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_MEMORY,
-                                "Simulation accumulator buffer allocation failed (samples=%u)",
-                                block_size);
+
+    ctx = (SpectralArm32Ctx*)spectral_malloc_array(1u, sizeof(*ctx));
+    if (!ctx) {
         result = SPECTRAL_ERR_MEMORY;
         goto cleanup;
     }
-    
-    /* Active segment tracking */
-    SimActiveSegment active[SIMULATION_MAX_ACTIVE];
+    if (loaded > 0) {
+        q15_ctx = (SpectralSegmentQ15*)spectral_malloc_array(loaded, sizeof(*q15_ctx));
+        if (!q15_ctx) {
+            result = SPECTRAL_ERR_MEMORY;
+            goto cleanup;
+        }
+    }
+    spectral_arm32_init(ctx, q15_ctx, loaded, osc_lut, cfg->sample_rate);
+    {
+        SpectralError lerr = spectral_arm32_load(ctx, q15_src, loaded, (uint32_t)out_len);
+        if (lerr != SPECTRAL_OK) {
+            spectral_log_warn_codef(SPECTRAL_ERROR_DOMAIN_CORE, lerr,
+                "ARM32 load rejected %u segment(s) (monotonic/active/chirp bound)", loaded);
+            result = lerr;
+            goto cleanup;
+        }
+    }
+
+    /* Workload-accounting model (MEASURED side). Walk the same per-block segment
+     * schedule that spectral_arm32_process() follows and tally the work — segment
+     * activations, scan length, peak active set, and the per-sample LUT / MAC /
+     * phase op counts that feed the cycle estimate. No samples are produced here;
+     * this populates EmbeddedOpCounts only. */
+    active_idx = (uint32_t*)spectral_malloc_array(SIMULATION_MAX_ACTIVE, sizeof(*active_idx));
+    if (!active_idx) {
+        result = SPECTRAL_ERR_MEMORY;
+        goto cleanup;
+    }
+
+    EmbeddedOpCounts ops;
+    spectral_perf_counters_reset(&ops);
     uint32_t num_active = 0;
     uint32_t peak_active = 0;
     uint32_t next_seg_idx = 0;
-    
-    /* Operation counting for accurate performance estimation */
-    EmbeddedOpCounts ops;
-    spectral_perf_counters_reset(&ops);
-    
-    /* Process output in blocks */
-    size_t out_pos = 0;
-    while (out_pos < out_len) {
-        uint32_t block_len = (out_len - out_pos > block_size) ? block_size : (uint32_t)(out_len - out_pos);
-        memset(accum, 0, block_len * sizeof(int64_t));
-        
+
+    for (size_t out_pos = 0; out_pos < out_len; out_pos += block_size) {
+        uint32_t block_len = (out_len - out_pos > block_size)
+            ? block_size : (uint32_t)(out_len - out_pos);
         uint32_t block_end = (uint32_t)out_pos + block_len;
-        
-        /* Activate new segments that start in this block */
+
+        /* Activate segments starting within this block. */
         uint32_t block_activations = 0;
         uint32_t scan_start_idx = next_seg_idx;
-        while (next_seg_idx < sa.count && num_active < SIMULATION_MAX_ACTIVE) {
-            SimSegment* seg = &sim_segs[next_seg_idx];
+        while (next_seg_idx < loaded && num_active < SIMULATION_MAX_ACTIVE) {
+            const SpectralSegmentQ15* seg = &q15_src[next_seg_idx];
             if (seg->start >= block_end) break;
-
             uint32_t seg_end = seg->start + seg->length;
             if (seg_end > out_pos) {
-                /* Activate this segment */
-                SimActiveSegment* act = &active[num_active];
-                act->seg_idx = next_seg_idx;
-                act->freq_inc = seg->freq_inc;
-#if SPECTRAL_HAS_CHIRP
-                act->df_inc = seg->df_inc;
-#endif
-                act->amp = seg->amp_q15;
-                act->da = seg->da_q15;
-
-                /* Initialize phase from stored Q15 value */
-                act->phase_acc = spectral_sim_phase_acc_from_q15(seg->phase_q15);
-
-                /* Advance phase if segment started before this block */
-                if (seg->start < out_pos) {
-                    uint32_t samples_in = (uint32_t)out_pos - seg->start;
-#if SPECTRAL_HAS_CHIRP
-                    /* With chirp: phase += n*freq + n*(n-1)/2 * df */
-                    uint64_t chirp_steps = ((uint64_t)samples_in * (uint64_t)(samples_in - 1u)) / 2u;
-                    act->phase_acc = spectral_sim_phase_add_scaled(act->phase_acc, act->freq_inc, samples_in);
-                    act->phase_acc = spectral_sim_phase_add_scaled(act->phase_acc, act->df_inc, chirp_steps);
-                    act->freq_inc = spectral_sim_q31_add_scaled_sat(act->freq_inc, act->df_inc, samples_in);
-#else
-                    act->phase_acc = spectral_sim_phase_add_scaled(act->phase_acc, act->freq_inc, samples_in);
-#endif
-                    /* Advance amplitude: use 32-bit intermediate to prevent overflow */
-                    q31_t amp_advance = (q31_t)act->da * (q31_t)samples_in;
-                    act->amp = spectral_ssat16((q31_t)act->amp + amp_advance);
-                }
-
-                num_active++;
+                active_idx[num_active++] = next_seg_idx;
                 block_activations++;
             }
             next_seg_idx++;
         }
 
-        /* Track SDRAM accesses and segment scan pressure. */
         spectral_perf_count_segment_activations(&ops, block_activations);
         spectral_perf_count_segment_scan(&ops, (uint32_t)(next_seg_idx - scan_start_idx));
-
         if (num_active > peak_active) peak_active = num_active;
-
-        /* Estimate cache misses when active set exceeds L1 capacity */
         spectral_perf_count_cache_pressure(&ops, num_active, cache_miss_threshold, block_len);
 
-        /* Per-block operation totals for worst-case model estimate. */
         uint64_t block_lut_lookups = 0;
         uint64_t block_mac_operations = 0;
         uint64_t block_phase_updates = 0;
         uint64_t block_loop_iterations = 0;
 
-        /* Process all active segments */
         uint32_t i = 0;
         while (i < num_active) {
-            SimActiveSegment* act = &active[i];
-            SimSegment* seg = &sim_segs[act->seg_idx];
+            const SpectralSegmentQ15* seg = &q15_src[active_idx[i]];
             uint32_t seg_end = seg->start + seg->length;
-
-            /* Remove expired segments */
             if (out_pos >= seg_end) {
-                active[i] = active[--num_active];
+                active_idx[i] = active_idx[--num_active];
                 continue;
             }
-
-            /* Compute block range for this segment */
             uint32_t blk_start = (seg->start > out_pos) ? (seg->start - (uint32_t)out_pos) : 0;
             uint32_t blk_end = (seg_end < block_end) ? (seg_end - (uint32_t)out_pos) : block_len;
             uint32_t len = blk_end - blk_start;
 
-            /* Count operations for performance estimation
-             * This models what spectral_synth_embedded.c does on real hardware */
             spectral_perf_count_segment_samples(&ops, len);
             block_lut_lookups += len;
             block_mac_operations += len;
             block_phase_updates += len;
             block_loop_iterations += spectral_perf_loop_iters_for_samples(len);
-            
-            uq32_t phase = act->phase_acc;
-            q31_t freq_inc = act->freq_inc;
-#if SPECTRAL_HAS_CHIRP
-            q31_t df_inc = act->df_inc;
-#endif
-            q15_t amp = act->amp;
-            q15_t da = act->da;
-
-            /* Compute fade envelope boundaries */
-            uint32_t seg_offset = ((uint32_t)out_pos + blk_start) - seg->start;
-            uint32_t seg_len = seg->length;
-            uint32_t fade_len = SPECTRAL_FADE_SAMPLES_EMBEDDED;
-            if (fade_len > seg_len / 2) fade_len = seg_len / 2;
-            if (fade_len == 0) fade_len = 1;
-            uint32_t seg_fo_start = seg_len - fade_len;
-
-            /* Map fade regions to block offsets */
-            uint32_t fi_end = blk_start;
-            if (seg_offset < fade_len) {
-                fi_end = blk_start + (fade_len - seg_offset);
-                if (fi_end > blk_end) fi_end = blk_end;
-            }
-            uint32_t fo_start = blk_end;
-            if (seg_offset + len > seg_fo_start) {
-                fo_start = (seg_fo_start > seg_offset)
-                    ? blk_start + (seg_fo_start - seg_offset) : blk_start;
-                if (fo_start < fi_end) fo_start = fi_end;
-            }
-
-            /* Fade-in region */
-            q15_t fade_val = (q15_t)((int32_t)seg_offset * SPECTRAL_FADE_STEP_Q15);
-            for (uint32_t j = blk_start; j < fi_end; j++) {
-                uq16_t lut_idx = (uq16_t)(phase >> 16);
-                q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
-                sample = spectral_mul_q15(sample, fade_val);
-                accum[j] += (int64_t)sample * amp;
-                phase += freq_inc;
-#if SPECTRAL_HAS_CHIRP
-                freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 1u);
-#endif
-                amp = spectral_qadd16(amp, da);
-                fade_val = spectral_qadd16(fade_val, SPECTRAL_FADE_STEP_Q15);
-            }
-
-            /* Sustain region (no fade) — 4-sample unrolled to match M7 hot path */
-            {
-                uint32_t j = fi_end;
-                uint32_t sustain_len = fo_start - fi_end;
-                uint32_t sustain_end4 = fi_end + (sustain_len & ~3U);
-
-                for (; j < sustain_end4; j += 4) {
-                    uq32_t p0 = phase;
-                    uq32_t p1 = spectral_sim_phase_add_inc(phase, freq_inc);
-                    uq32_t p2 = spectral_sim_phase_add_inc(p1, freq_inc);
-                    uq32_t p3 = spectral_sim_phase_add_inc(p2, freq_inc);
-
-                    q15_t a0 = amp;
-                    q15_t a1 = spectral_qadd16(amp, da);
-                    q15_t a2 = spectral_qadd16(a1, da);
-                    q15_t a3 = spectral_qadd16(a2, da);
-
-                    accum[j]     += (int64_t)spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut) * a0;
-                    accum[j + 1] += (int64_t)spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut) * a1;
-                    accum[j + 2] += (int64_t)spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut) * a2;
-                    accum[j + 3] += (int64_t)spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut) * a3;
-
-                    phase = spectral_sim_phase_add_inc(p3, freq_inc);
-                    amp = spectral_qadd16(a3, da);
-#if SPECTRAL_HAS_CHIRP
-                    freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 4u);
-#endif
-                }
-
-                /* Remainder */
-                for (; j < fo_start; j++) {
-                    uq16_t lut_idx = (uq16_t)(phase >> 16);
-                    q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
-                    accum[j] += (int64_t)sample * amp;
-                    phase = spectral_sim_phase_add_inc(phase, freq_inc);
-#if SPECTRAL_HAS_CHIRP
-                    freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 1u);
-#endif
-                    amp = spectral_qadd16(amp, da);
-                }
-            }
-
-            /* Fade-out region */
-            if (fo_start < blk_end) {
-                uint32_t fo_seg_pos = seg_offset + (fo_start - blk_start);
-                uint32_t into_fade = fo_seg_pos - seg_fo_start;
-                fade_val = Q15_MAX - (q15_t)((int32_t)into_fade * SPECTRAL_FADE_STEP_Q15);
-                for (uint32_t j = fo_start; j < blk_end; j++) {
-                    uq16_t lut_idx = (uq16_t)(phase >> 16);
-                    q15_t sample = spectral_lut_sin(lut_idx, osc_lut);
-                    sample = spectral_mul_q15(sample, fade_val);
-                    accum[j] += (int64_t)sample * amp;
-                    phase = spectral_sim_phase_add_inc(phase, freq_inc);
-#if SPECTRAL_HAS_CHIRP
-                    freq_inc = spectral_sim_q31_add_scaled_sat(freq_inc, df_inc, 1u);
-#endif
-                    amp = spectral_qadd16(amp, da);
-                    fade_val = spectral_qadd16(fade_val, -SPECTRAL_FADE_STEP_Q15);
-                }
-            }
-
-            act->phase_acc = phase;
-            act->freq_inc = freq_inc;
-            act->amp = amp;
             i++;
         }
-        
-        /* Conservative per-block estimate used for worst-case envelope tracking. */
+
         uint64_t block_cycles = spectral_perf_model_estimate_block_cycles(
-            perf_profile,
-            block_len,
-            num_active,
-            block_activations,
+            perf_profile, block_len, num_active, block_activations,
             (uint32_t)(next_seg_idx - scan_start_idx),
-            block_lut_lookups,
-            block_mac_operations,
-            block_phase_updates,
-            block_loop_iterations);
-
-        /* Track worst-case block */
+            block_lut_lookups, block_mac_operations,
+            block_phase_updates, block_loop_iterations);
         spectral_perf_record_peak_block(&ops, block_cycles, num_active);
-
-        /* Convert accumulator to float output
-         * accum contains sum of (Q15 * Q15) = Q30 products */
-        const double scale = SPECTRAL_INV_Q30_SCALE;
-        for (uint32_t j = 0; j < block_len; j++) {
-            out_buffer[out_pos + j] = (float)((double)accum[j] * scale);
-        }
-        
-#if SPECTRAL_DEBUG && !defined(NDEBUG)
-        /* Debug: print first block accumulator stats */
-        if (out_pos == 0 && cfg->verbose) {
-            int64_t min_acc = 0, max_acc = 0;
-            for (uint32_t j = 0; j < block_len; j++) {
-                if (accum[j] < min_acc) min_acc = accum[j];
-                if (accum[j] > max_acc) max_acc = accum[j];
-            }
-            SPECTRAL_DBG("first block: num_active=%u min_acc=%lld max_acc=%lld",
-                   num_active, min_acc, max_acc);
-        }
-#endif
-        
-        out_pos += block_len;
     }
-    
+
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
     if (cfg->verbose) {
         SPECTRAL_DBG("peak_active=%u (max allowed=%d)", peak_active, SIMULATION_MAX_ACTIVE);
     }
 #endif
-    
+
+    /* Audio generation (the real code). Drive spectral_arm32_process() across the
+     * whole buffer in <=256-sample chunks (its hard block cap) and widen each Q15
+     * result to float. With no segments loaded the process zeroes every chunk and
+     * returns 0, so 'want' still advances the cursor (no infinite loop). */
+    {
+        q15_t qblk[256];
+        size_t pos = 0;
+        while (pos < out_len) {
+            uint32_t want = (out_len - pos > 256u) ? 256u : (uint32_t)(out_len - pos);
+            uint32_t got = spectral_arm32_process(ctx, qblk, NULL, want);
+            uint32_t n = (got > 0u) ? got : want;
+            for (uint32_t j = 0; j < n; j++) {
+                out_buffer[pos + j] = Q15_TO_FLOAT(qblk[j]);
+            }
+            pos += n;
+        }
+    }
+
 cleanup:
-    free(accum);
-    free(sim_segs);
+    free(active_idx);
+    free(ctx);
+    free(q15_ctx);
+    free(q15_src);
 
     if (result != SPECTRAL_OK) {
         memset(out_buffer, 0, out_len * sizeof(float));
@@ -650,15 +406,13 @@ cleanup:
         double elapsed = spectral_get_time_sec() - start_time;
         *t_synth = elapsed;
 
-        /* Calculate and print embedded target performance estimates using actual op counts */
+        /* Embedded-target perf/memory estimate over the loaded segment set. */
         EmbeddedPerfEstimate est = embedded_perf_estimate(
-            cfg, &ops, out_len, sa.count, peak_active, elapsed);
-
+            cfg, &ops, out_len, loaded, peak_active, elapsed);
         embedded_perf_print(cfg, &est);
 
-        /* Print exact memory usage */
         EmbeddedMemoryUsage mem = embedded_memory_usage(
-            sa.count,
+            loaded,
             block_size,
             SPECTRAL_OSC_LUT_BITS,
             SIMULATION_MAX_ACTIVE,

@@ -540,6 +540,18 @@ int spectral_cli_validate(SpectralCliOptions* opts) {
         return 0;
     }
 
+    /* Mirror spectral_config_validate(): every stretch consumer (synth dispatch,
+     * seg-cache, segment parser, gpu_tile) rejects stretch > SPECTRAL_MAX_STRETCH,
+     * so reject it at the CLI boundary too — otherwise an over-cap stretch passes
+     * validation, wastes the full analysis pass, then fails deep in synthesis. */
+    if (opts->stretch > SPECTRAL_MAX_STRETCH) {
+        char expected[CLI_VALUE_MESSAGE_MAX] = {0};
+        snprintf(expected, sizeof(expected), "finite float in (0, %.0f]",
+                 (double)SPECTRAL_MAX_STRETCH);
+        snprintf(actual, sizeof(actual), "%.6g", (double)opts->stretch);
+        return cli_fail_expected_actual(opts, "stretch", expected, actual);
+    }
+
     if (!spectral_is_finite_f32(opts->start_sec)) {
         snprintf(actual, sizeof(actual), "%.6g", (double)opts->start_sec);
         return cli_fail_expected_actual(opts, "start_sec", "finite float", actual);

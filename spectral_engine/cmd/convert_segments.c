@@ -13,6 +13,7 @@
 #include "spectral_config.h"
 #include "spectral_q15.h"
 #include "spectral_segment_parser.h"
+#include "spectral_endian.h"
 #include "spectral_common.h"
 #include "spectral_log.h"
 #include "spectral_utils.h"
@@ -92,6 +93,10 @@ static int load_and_validate_header(FILE* fin, SegmentFileHeader* header) {
         SPECTRAL_LOG_ERROR_STDERR("Error: invalid format (expected %s)", SEGMENT_FILE_MAGIC);
         return 0;
     }
+    /* The .bin (SPEC) format is stored little-endian; convert the header to
+     * native order before validating its fields (magic is endian-independent).
+     * No-op on little-endian hosts. */
+    spectral_segment_file_header_swap_le(header);
     if (header->version != SEGMENT_FILE_VERSION) {
         SPECTRAL_LOG_ERROR_STDERR("Error: unsupported segment version %u (expected %u)",
                                   header->version, (unsigned)SEGMENT_FILE_VERSION);
@@ -295,6 +300,14 @@ int main(int argc, char** argv) {
                 SPECTRAL_LOG_WARN("Warning: read %zu of %u segments", read_count, requested_count);
             }
             stats.output_count = (uint32_t)read_count;
+
+            /* Segments are stored little-endian on disk; convert to native order
+             * before reading their float fields. No-op on little-endian hosts. */
+            if (spectral_is_big_endian()) {
+                for (size_t i = 0; i < read_count; i++) {
+                    spectral_segment_swap_endian(&float_segs[i]);
+                }
+            }
         }
     }
 

@@ -21,8 +21,6 @@ typedef uint32_t uq32_t;
 #define Q15_ZERO    ((q15_t)0)
 #define Q31_MAX     ((q31_t)2147483647L)
 #define Q31_MIN     ((q31_t)-2147483648L)
-/* Canonical embedded fade step used by Q15 synthesis paths. */
-#define SPECTRAL_FADE_STEP_Q15 ((q15_t)(Q15_MAX / SPECTRAL_FADE_SAMPLES_EMBEDDED))
 
 static inline q15_t spectral_float_to_q15(float f) {
     if (!isfinite(f)) return Q15_ZERO;
@@ -52,6 +50,9 @@ static inline q15_t spectral_phase_rad_to_q15(float rad) {
     n = fmodf(rad, (float)SPECTRAL_TWO_PI) / (float)SPECTRAL_TWO_PI;
     if (!isfinite(n)) return Q15_ZERO;
     if (n < 0.0f) n += 1.0f;
+    /* n += 1.0f can round a tiny negative up to exactly 1.0f; keep n in [0,1)
+     * so (n-0.5)*65536 stays < 32768 and the int16 cast cannot be out of range. */
+    if (n >= 1.0f) n -= 1.0f;
     return (q15_t)((n - 0.5f) * 65536.0f);
 }
 
@@ -137,7 +138,10 @@ static inline q15_t spectral_q31_to_q15_sat(q31_t q) {
     return (shifted > Q15_MAX) ? Q15_MAX : (shifted < Q15_MIN) ? Q15_MIN : (q15_t)shifted;
 }
 static inline q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1) {
-    return acc + ((q31_t)a0 * b0) + ((q31_t)a1 * b1);
+    /* Wrap in uint32 to match the ARM __smlad (non-saturating) accumulator and
+     * avoid signed-overflow UB: two Q15 products can sum past INT32_MAX. */
+    uint32_t prod = (uint32_t)((q31_t)a0 * b0) + (uint32_t)((q31_t)a1 * b1);
+    return (q31_t)((uint32_t)acc + prod);
 }
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return (q31_t)a * (q31_t)b;

@@ -597,6 +597,7 @@ void spectral_magsq_only(const float* interleaved,
 }
 
 void spectral_magsq_split(const float* re, const float* im, float* dst, size_t len) {
+    if (!re || !im || !dst || len == 0) return;
     size_t i = 0;
     for (; i + 4 <= len; i += 4) {
         simde__m128 vr = simde_mm_loadu_ps(&re[i]);

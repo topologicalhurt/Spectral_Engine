@@ -557,10 +557,15 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #endif
 #endif
 
+/* Default: Accelerate/vDSP on Apple, portable elsewhere. A build may force the
+ * portable path by pre-defining SPECTRAL_USE_VDSP=0 (e.g. to exercise the
+ * source-visible window/FFT formulas without linking Accelerate). */
+#ifndef SPECTRAL_USE_VDSP
 #ifdef __APPLE__
 #define SPECTRAL_USE_VDSP       1
 #else
 #define SPECTRAL_USE_VDSP       0
+#endif
 #endif
 /* CMSIS-DSP availability (arm_math.h expected when enabled). */
 #ifndef SPECTRAL_USE_CMSIS

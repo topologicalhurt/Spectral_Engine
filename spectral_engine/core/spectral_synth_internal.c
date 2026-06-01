@@ -81,13 +81,6 @@ SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t
 }
 
 
-static void synth_zero_output_if_valid(void* out_buffer, size_t out_len, size_t elem_size) {
-    size_t out_bytes = 0;
-    if (out_buffer && elem_size != 0 && spectral_size_mul(out_len, elem_size, &out_bytes)) {
-        memset(out_buffer, 0, out_bytes);
-    }
-}
-
 static double g_synth_timing_dummy = 0;
 static SPECTRAL_THREAD_LOCAL int g_effective_timbre_tls = TIMBRE_SINE;
 

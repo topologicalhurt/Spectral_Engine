@@ -12,6 +12,7 @@
 #include "spectral_fast_math.h"
 #include "spectral_osc_formulas.h"
 #include <math.h>
+#include <float.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -155,23 +156,51 @@ static inline simde__m128 wave_quantized_4(simde__m128 rads, const void* ctx) {
     simde__m128 v_width = simde_mm_set1_ps(width);
     simde__m128 v_inv_w = simde_mm_set1_ps(1.0f / width);
     simde__m128 scaled = simde_mm_mul_ps(rads, v_width);
+    /* Mirror the canonical spectral_osc_quantized() domain guard: it returns 0
+     * when `scaled` is non-finite or falls outside [INT_MIN, INT_MAX]. Without
+     * this, simde_mm_cvttps_epi32() saturates such lanes to INT_MIN (0x80000000)
+     * and emits INT_MIN*inv_w (an out-of-[-1,1] value), diverging from both the
+     * scalar contract and this segment's own fade-region scalar lane
+     * (wave_quantized_1) for finite-but-large widths from deserialized segments.
+     * The >=/<= comparisons also reject NaN/Inf (all NaN compares are false). */
+    simde__m128 in_range = simde_mm_and_ps(
+        simde_mm_cmpge_ps(scaled, simde_mm_set1_ps((float)INT_MIN)),
+        simde_mm_cmple_ps(scaled, simde_mm_set1_ps((float)INT_MAX)));
     simde__m128 truncated = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(scaled));
-    return simde_mm_mul_ps(truncated, v_inv_w);
+    return simde_mm_and_ps(in_range, simde_mm_mul_ps(truncated, v_inv_w));
 }
 
 static inline simde__m128 wave_pwm_4(simde__m128 rads, const void* ctx) {
     float width = *(const float*)ctx;
-    if (width <= 0.0f) return simde_mm_set1_ps(1.0f);
-    simde__m128 v_pi = simde_mm_set1_ps(SPECTRAL_PI);
-    simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-    simde__m128 v_width = simde_mm_set1_ps(width);
-    simde__m128 v_one = simde_mm_set1_ps(1.0f);
-    simde__m128 v_neg_one = simde_mm_set1_ps(-1.0f);
-    simde__m128 norm = simde_mm_mul_ps(simde_mm_add_ps(rads, v_pi), v_inv_2pi);
-    simde__m128 cmp = simde_mm_cmplt_ps(norm, v_width);
-    return simde_mm_or_ps(
-        simde_mm_and_ps(cmp, v_one),
-        simde_mm_andnot_ps(cmp, v_neg_one));
+    /* Mirror the canonical spectral_osc_pwm() domain guard, exactly as
+     * wave_quantized_4 mirrors spectral_osc_quantized(). The scalar contract is
+     *   !isfinite(rads) || !isfinite(width) -> 0;  width <= 0 -> 1;  else +/-1.
+     * Without this the SIMD sustain lane emits +/-1 where both the scalar
+     * contract and this segment's own fade-region lane (wave_pwm_1) emit 0 for a
+     * non-finite phase (reachable when a deserialized segment's finite-but-huge
+     * omega overflows the accumulated phase to +/-Inf -> NaN after
+     * normalization), seam-splitting a single PWM segment. */
+    simde__m128 wave;
+    if (!isfinite(width)) return simde_mm_setzero_ps();
+    if (width <= 0.0f) {
+        wave = simde_mm_set1_ps(1.0f);
+    } else {
+        simde__m128 v_pi = simde_mm_set1_ps(SPECTRAL_PI);
+        simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
+        simde__m128 v_width = simde_mm_set1_ps(width);
+        simde__m128 v_one = simde_mm_set1_ps(1.0f);
+        simde__m128 v_neg_one = simde_mm_set1_ps(-1.0f);
+        simde__m128 norm = simde_mm_mul_ps(simde_mm_add_ps(rads, v_pi), v_inv_2pi);
+        simde__m128 cmp = simde_mm_cmplt_ps(norm, v_width);
+        wave = simde_mm_or_ps(
+            simde_mm_and_ps(cmp, v_one),
+            simde_mm_andnot_ps(cmp, v_neg_one));
+    }
+    /* Per-lane finite-rads mask: |rads| <= FLT_MAX rejects NaN (unordered
+     * compare is false) and +/-Inf, forcing those lanes to 0 like the scalar. */
+    simde__m128 abs_rads = simde_mm_andnot_ps(simde_mm_set1_ps(-0.0f), rads);
+    simde__m128 finite = simde_mm_cmple_ps(abs_rads, simde_mm_set1_ps(FLT_MAX));
+    return simde_mm_and_ps(finite, wave);
 }
 
 /* Fused single-pass synthesis: inline phase computation, waveform, envelope,

@@ -20,34 +20,6 @@
 #include <stdint.h>
 #include <math.h>
 
-/* Swap header fields to/from little-endian (symmetric). */
-static void header_to_le(SegmentFileHeader* hdr) {
-    if (!spectral_is_big_endian()) return;
-    hdr->version  = spectral_swap_u32(hdr->version);
-    hdr->sr       = spectral_swap_u32(hdr->sr);
-    hdr->stretch  = spectral_swap_float(hdr->stretch);
-    hdr->pitch    = spectral_swap_float(hdr->pitch);
-    hdr->count    = spectral_swap_u32(hdr->count);
-    hdr->reserved = spectral_swap_u32(hdr->reserved);
-}
-
-static void header_from_le(SegmentFileHeader* hdr) {
-    header_to_le(hdr);
-}
-
-/* Returns 1 if segment values are finite and in valid range, 0 if corrupt */
-static int segment_validate(const Segment* seg) {
-    if (!spectral_is_finite_f32(seg->omega) || seg->omega < 0.0f) return 0;
-    if (!spectral_is_finite_f32(seg->amp)) return 0;
-    if (!spectral_is_finite_f32(seg->start) || seg->start < 0.0f) return 0;
-    if (!spectral_is_finite_f32(seg->length) || seg->length < 0.0f) return 0;
-    if (!spectral_is_finite_f32(seg->df)) return 0;
-    if (!spectral_is_finite_f32(seg->da)) return 0;
-    if (!spectral_is_finite_f32(seg->phase)) return 0;
-    if (!spectral_is_finite_f32(seg->width)) return 0;
-    return 1;
-}
-
 /* Validate entire segment array, report first corrupt segment index */
 static int segments_validate_all(const Segment* segs, uint32_t count, uint32_t* bad_idx)
 {
@@ -122,7 +94,7 @@ SpectralError segments_save(const char* path, const SegmentArray* sa, int sr, fl
         .reserved = 0
     };
 
-    header_to_le(&hdr);
+    spectral_segment_file_header_swap_le(&hdr);
 
     err = spectral_fs_write_exact(f, &hdr, sizeof(hdr), SPECTRAL_ERR_FILE_WRITE);
     if (err != SPECTRAL_OK) goto cleanup;
@@ -175,7 +147,7 @@ SpectralError segments_load(const char* path, SegmentArray* sa, int* out_sr, flo
     }
 
     /* Convert header from little-endian file format */
-    header_from_le(&hdr);
+    spectral_segment_file_header_swap_le(&hdr);
 
     /* Version compatibility check */
     if (hdr.version != SEGMENT_FILE_VERSION) {

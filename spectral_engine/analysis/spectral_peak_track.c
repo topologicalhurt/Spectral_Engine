@@ -741,11 +741,12 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
         return NULL;
     }
 
+    if (n_threads < 1) n_threads = 1;
+    if (n_threads > SPECTRAL_MAX_THREADS) return NULL;
+
     SpectralTracker* tracker = (SpectralTracker*)malloc(sizeof(SpectralTracker));
     if (!tracker) return NULL;
 
-    if (n_threads < 1) n_threads = 1;
-    if (n_threads > SPECTRAL_MAX_THREADS) return NULL;
     tracker->n_threads = n_threads;
     tracker->n_freqs = n_freqs;
     tracker->seg_arrays = NULL;
@@ -1376,7 +1377,7 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
         return peak_track_return_empty(t_track);
     }
 
-    int n_threads = omp_get_max_threads();
+    int n_threads = spectral_omp_effective_thread_count();
     SpectralPeakModel peak_model = spectral_peak_model_for_window(
         window_desc ? window_desc : spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 
@@ -1594,6 +1595,8 @@ int spectral_tracker_run_fused_frame(
             local_failed = 1;
         }
     }
-    
-    return local_failed;
+
+    /* Success-truthy, matching the sibling tracker helpers (queue/flush/
+     * process_bitmask): the fused caller does `if (!run_fused_frame(...))`. */
+    return !local_failed;
 }

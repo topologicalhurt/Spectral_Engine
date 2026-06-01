@@ -310,13 +310,13 @@ static inline void spectral_perf_amplitude_end(uint32_t start_cycles) {
  * Backend parity note: this intentionally diverges from float
  * spectral_segment_phase_at_f32() by operating on fixed-point phase
  * accumulators for deterministic embedded timing and throughput. */
-static inline void spectral_phase_batch4(q31_t phase,
-                                         q31_t freq_inc,
-                                         q31_t* p0,
-                                         q31_t* p1,
-                                         q31_t* p2,
-                                         q31_t* p3) {
-    const q31_t inc2 = freq_inc << 1;
+static inline void spectral_phase_batch4(uint32_t phase,
+                                         uint32_t freq_inc,
+                                         uint32_t* p0,
+                                         uint32_t* p1,
+                                         uint32_t* p2,
+                                         uint32_t* p3) {
+    const uint32_t inc2 = freq_inc << 1;
     *p0 = phase;
     *p1 = phase + freq_inc;
     *p2 = phase + inc2;
@@ -563,9 +563,9 @@ static inline void synth_core_m7(
     const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
-    q31_t* restrict phase,
+    uint32_t* restrict phase,
     q15_t* restrict amp,
-    q31_t freq_inc,
+    uint32_t freq_inc,
     q15_t amp_delta
 ) {
     uint32_t j = blk_start;
@@ -577,7 +577,7 @@ static inline void synth_core_m7(
     for (; j < end4; j += 4) {
         SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
 
-        q31_t p0, p1, p2, p3;
+        uint32_t p0, p1, p2, p3;
         spectral_phase_batch4(*phase, freq_inc, &p0, &p1, &p2, &p3);
 
         q15_t a0, a1, a2, a3;
@@ -616,9 +616,9 @@ static inline void synth_fade_m7(
     const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
-    q31_t* restrict phase,
+    uint32_t* restrict phase,
     q15_t* restrict amp,
-    q31_t freq_inc,
+    uint32_t freq_inc,
     q15_t amp_delta,
     q15_t fade_val,
     q15_t fade_step
@@ -644,22 +644,30 @@ static inline void synth_segment_m7(
     const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
-    q31_t phase_start,
-    q31_t freq_inc,
+    uint32_t phase_start,
+    uint32_t freq_inc,
     q15_t amp_start,
     q15_t amp_delta,
-    q31_t* phase_out,
+    uint32_t* phase_out,
     q15_t* amp_out,
     uint32_t seg_offset,
     uint32_t seg_length,
     uint32_t fade_len
 ) {
-    q31_t phase = phase_start;
+    uint32_t phase = phase_start;
     q15_t amp = amp_start;
 
     uint32_t seg_fade_out_start = seg_length - fade_len;
     uint32_t blk_len = blk_end - blk_start;
     uint32_t seg_end_in_blk = seg_offset + blk_len;
+
+    /* Per-segment fade step: the ramp must span [0, Q15_MAX] over the ACTUAL
+     * fade_len, which the activator clamps to seg_length/2 (down to 1) for short
+     * segments. A fixed step (Q15_MAX/SPECTRAL_FADE_SAMPLES_EMBEDDED) would leave
+     * the ramp short of full scale on segments < 2*SPECTRAL_FADE_SAMPLES_EMBEDDED,
+     * producing an amplitude discontinuity at the fade/sustain boundary. fade_len
+     * is guaranteed >= 1 at activation, so the divide is safe. */
+    q15_t fade_step = (q15_t)(Q15_MAX / fade_len);
 
     /* Compute 3 block-local boundaries: [blk_start, fi_end) [fi_end, fo_start) [fo_start, blk_end)
      * All offsets are relative to accumulator index space */
@@ -686,10 +694,10 @@ static inline void synth_segment_m7(
 
     /* Fade-in region */
     if (fi_end > orig_blk_start) {
-        q15_t fade_val = (q15_t)((int32_t)seg_offset * SPECTRAL_FADE_STEP_Q15);
+        q15_t fade_val = (q15_t)((int32_t)seg_offset * fade_step);
         synth_fade_m7(accum, osc_lut, orig_blk_start, fi_end,
                       &phase, &amp, freq_inc, amp_delta,
-                      fade_val, SPECTRAL_FADE_STEP_Q15);
+                      fade_val, fade_step);
     }
 
     /* Sustain region: no fade, full unrolled path */
@@ -702,10 +710,10 @@ static inline void synth_segment_m7(
     if (fo_start < blk_end) {
         uint32_t fo_seg_pos = seg_offset + (fo_start - orig_blk_start);
         uint32_t samples_into_fade = fo_seg_pos - seg_fade_out_start;
-        q15_t fade_val = Q15_MAX - (q15_t)((int32_t)samples_into_fade * SPECTRAL_FADE_STEP_Q15);
+        q15_t fade_val = Q15_MAX - (q15_t)((int32_t)samples_into_fade * fade_step);
         synth_fade_m7(accum, osc_lut, fo_start, blk_end,
                       &phase, &amp, freq_inc, amp_delta,
-                      fade_val, -SPECTRAL_FADE_STEP_Q15);
+                      fade_val, (q15_t)-fade_step);
     }
 
     *phase_out = phase;
@@ -713,6 +721,46 @@ static inline void synth_segment_m7(
 }
 
 #endif /* SPECTRAL_ARM_M7 */
+
+/* Drop active segments that have ended at or before out_pos.
+ *
+ * This MUST run before the activation scan: the loader bounds simultaneous-active
+ * segments with a half-open overlap model (spectral_arm32_validate_segment_data
+ * counts only segments whose end is strictly past a new segment's start), so a
+ * segment ending exactly at out_pos does not count toward SPECTRAL_ARM32_MAX_ACTIVE.
+ * If its slot were still occupied when the activation loop runs, a new segment
+ * starting at the same out_pos could be refused once num_active hits the cap and
+ * then be skipped entirely — a dropped partial / lost onset the validator allowed.
+ * Pruning first keeps runtime occupancy consistent with that validated model. */
+static inline void spectral_arm32_prune_expired_active(SpectralArm32Ctx* ctx, uint32_t out_pos) {
+    uint16_t i = 0;
+    while (i < ctx->num_active) {
+#if SPECTRAL_SOA_ACTIVE
+        if (out_pos >= ctx->active_soa.seg_end[i]) {
+            uint16_t last = --ctx->num_active;
+            ctx->active_soa.phase_acc[i]   = ctx->active_soa.phase_acc[last];
+            ctx->active_soa.freq_inc[i]    = ctx->active_soa.freq_inc[last];
+            ctx->active_soa.amp_current[i] = ctx->active_soa.amp_current[last];
+            ctx->active_soa.amp_delta[i]   = ctx->active_soa.amp_delta[last];
+            ctx->active_soa.seg_start[i]   = ctx->active_soa.seg_start[last];
+            ctx->active_soa.seg_end[i]     = ctx->active_soa.seg_end[last];
+            ctx->active_soa.seg_length[i]  = ctx->active_soa.seg_length[last];
+            ctx->active_soa.fade_len[i]    = ctx->active_soa.fade_len[last];
+            ctx->active_soa.seg_idx[i]     = ctx->active_soa.seg_idx[last];
+#if SPECTRAL_HAS_CHIRP
+            ctx->active_soa.freq_delta[i]  = ctx->active_soa.freq_delta[last];
+#endif
+            continue;
+        }
+#else
+        if (out_pos >= ctx->active[i].seg_end) {
+            ctx->active[i] = ctx->active[--ctx->num_active];
+            continue;
+        }
+#endif
+        i++;
+    }
+}
 
 SPECTRAL_MEM_FAST_CODE
 uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
@@ -780,6 +828,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     }
 #endif
     
+    /* Free slots held by segments that ended at or before this block so the
+     * activation scan sees the same occupancy the loader validated against. */
+    spectral_arm32_prune_expired_active(ctx, out_pos);
+
     /* Activate new segments that start within this block */
     SpectralPerfSegScanState seg_scan_state = spectral_perf_segment_scan_start(ctx);
     while (ctx->next_seg_idx < ctx->num_segments &&
@@ -809,14 +861,17 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             /* Backend parity note:
              * This is the fixed-point counterpart of spectral_segment_alpha_f32().
              * Q8.8 frequency is mapped to Q31 phase increment for embedded synthesis. */
-            q31_t freq_inc = (q31_t)((uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24);
-            q31_t phase_acc = ((q31_t)seg->phase_q15 + 32768) << 16;
+            uint32_t freq_inc = (uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24;
+            uint32_t phase_acc = ((uint32_t)((int32_t)seg->phase_q15 + 32768)) << 16;
             q15_t amp_cur;
 
             if (sample_offset > 0) {
                 phase_acc += sample_offset * freq_inc;
-                q31_t amp_advance = (q31_t)seg->da_q15 * (q31_t)sample_offset;
-                amp_cur = spectral_ssat16((q31_t)seg->amp_q15 + amp_advance);
+                int64_t amp_target = (int64_t)seg->amp_q15 +
+                                     (int64_t)seg->da_q15 * (int64_t)sample_offset;
+                amp_cur = (amp_target > Q15_MAX) ? Q15_MAX
+                        : (amp_target < Q15_MIN) ? Q15_MIN
+                        : (q15_t)amp_target;
             } else {
                 amp_cur = seg->amp_q15;
             }
@@ -873,28 +928,8 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         uint32_t fade_len = act->fade_len;
 #endif
 
-        /* Remove expired segments */
-        if (SPECTRAL_UNLIKELY(out_pos >= seg_end)) {
-#if SPECTRAL_SOA_ACTIVE
-            /* SoA removal: copy last element's fields into slot i */
-            uint16_t last = --ctx->num_active;
-            ctx->active_soa.phase_acc[i]   = ctx->active_soa.phase_acc[last];
-            ctx->active_soa.freq_inc[i]    = ctx->active_soa.freq_inc[last];
-            ctx->active_soa.amp_current[i] = ctx->active_soa.amp_current[last];
-            ctx->active_soa.amp_delta[i]   = ctx->active_soa.amp_delta[last];
-            ctx->active_soa.seg_start[i]   = ctx->active_soa.seg_start[last];
-            ctx->active_soa.seg_end[i]     = ctx->active_soa.seg_end[last];
-            ctx->active_soa.seg_length[i]  = ctx->active_soa.seg_length[last];
-            ctx->active_soa.fade_len[i]    = ctx->active_soa.fade_len[last];
-            ctx->active_soa.seg_idx[i]     = ctx->active_soa.seg_idx[last];
-#if SPECTRAL_HAS_CHIRP
-            ctx->active_soa.freq_delta[i]  = ctx->active_soa.freq_delta[last];
-#endif
-#else
-            *act = ctx->active[--ctx->num_active];
-#endif
-            continue;
-        }
+        /* Expired segments were pruned before activation, so every active here
+         * satisfies seg_end > out_pos and renders a non-empty block range. */
 
         /* Compute block range */
         uint32_t blk_start = (seg_start > out_pos) ? (seg_start - out_pos) : 0;
@@ -904,13 +939,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
         /* Read current state */
 #if SPECTRAL_SOA_ACTIVE
-        q31_t phase = ctx->active_soa.phase_acc[i];
-        q31_t freq_inc = ctx->active_soa.freq_inc[i];
+        uint32_t phase = ctx->active_soa.phase_acc[i];
+        uint32_t freq_inc = (uint32_t)ctx->active_soa.freq_inc[i];
         q15_t amp = ctx->active_soa.amp_current[i];
         q15_t d_amp = ctx->active_soa.amp_delta[i];
 #else
-        q31_t phase = act->phase_acc;
-        q31_t freq_inc = act->freq_inc;
+        uint32_t phase = act->phase_acc;
+        uint32_t freq_inc = (uint32_t)act->freq_inc;
         q15_t amp = act->amp_current;
         q15_t d_amp = act->amp_delta;
 #endif
@@ -932,6 +967,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             uint32_t seg_fo_start = seg_len - fade_len;
             uint32_t blk_len = len;
 
+            /* Per-segment fade step (see synth_segment_m7): ramp spans [0, Q15_MAX]
+             * over the ACTUAL clamped fade_len, not a fixed Q15_MAX/32. */
+            q15_t fade_step = (q15_t)(Q15_MAX / fade_len);
+
             /* Map fade regions to block offsets */
             uint32_t fi_end = blk_start;
             if (seg_offset < fade_len) {
@@ -946,14 +985,14 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             }
 
             /* Fade-in */
-            q15_t fade_val = (q15_t)((int32_t)seg_offset * SPECTRAL_FADE_STEP_Q15);
+            q15_t fade_val = (q15_t)((int32_t)seg_offset * fade_step);
             for (uint32_t j = blk_start; j < fi_end; j++) {
                 q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                 sample = spectral_mul_q15(sample, fade_val);
                 accum[j] = spectral_mac_q15(accum[j], sample, amp);
                 phase += freq_inc;
                 amp = spectral_qadd16(amp, d_amp);
-                fade_val = spectral_qadd16(fade_val, SPECTRAL_FADE_STEP_Q15);
+                fade_val = spectral_qadd16(fade_val, fade_step);
             }
 
             /* Sustain - 4 samples at a time */
@@ -964,7 +1003,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
             SPECTRAL_UNROLL_4
             for (; j < end4; j += 4) {
-                q31_t p0, p1, p2, p3;
+                uint32_t p0, p1, p2, p3;
                 spectral_phase_batch4(phase, freq_inc, &p0, &p1, &p2, &p3);
 
                 q15_t a0, a1, a2, a3;
@@ -992,14 +1031,14 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             if (fo_start < blk_end) {
                 uint32_t fo_seg_pos = seg_offset + (fo_start - blk_start);
                 uint32_t into_fade = fo_seg_pos - seg_fo_start;
-                fade_val = Q15_MAX - (q15_t)((int32_t)into_fade * SPECTRAL_FADE_STEP_Q15);
+                fade_val = Q15_MAX - (q15_t)((int32_t)into_fade * fade_step);
                 for (; j < blk_end; j++) {
                     q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                     sample = spectral_mul_q15(sample, fade_val);
                     accum[j] = spectral_mac_q15(accum[j], sample, amp);
                     phase += freq_inc;
                     amp = spectral_qadd16(amp, d_amp);
-                    fade_val = spectral_qadd16(fade_val, -SPECTRAL_FADE_STEP_Q15);
+                    fade_val = spectral_qadd16(fade_val, (q15_t)-fade_step);
                 }
             }
         }
