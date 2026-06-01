@@ -115,6 +115,61 @@ static void test_single_tone(const q15_t* lut, uint32_t sr) {
     free(out);
 }
 
+/* Short-segment fade continuity (pass 168).
+ *
+ * The fade ramp must span [0, full-scale] over the ACTUAL fade_len, which the
+ * activator clamps to seg_length/2 (down to 1) for segments shorter than
+ * 2*SPECTRAL_FADE_SAMPLES_EMBEDDED. The pre-fix code used a fixed step
+ * (Q15_MAX/SPECTRAL_FADE_SAMPLES_EMBEDDED) decoupled from fade_len, so a short
+ * segment's fade-in stopped well short of full scale and then jumped to the
+ * sustain/fade-out level -> an audible click.
+ *
+ * Probe: freeze the oscillator at its positive peak (freq=0, phase at the
+ * quarter turn) with amp=1.0, so each rendered sample reads back the fade
+ * envelope value directly. fade_len = len/2 for a short segment, so the
+ * envelope rises over [0, len/2), peaks at len/2 (fade-out starts at full
+ * scale), then falls over [len/2, len). */
+static void test_short_segment_fade(const q15_t* lut, uint32_t sr) {
+    const uint32_t len = 32u;                 /* < 2*FADE_SAMPLES -> fade_len = len/2 */
+    const uint32_t fade_len = (SPECTRAL_FADE_SAMPLES_EMBEDDED > len / 2u)
+                                  ? len / 2u : (uint32_t)SPECTRAL_FADE_SAMPLES_EMBEDDED;
+    printf("test_short_segment_fade (len=%u fade_len=%u):\n", len, fade_len);
+
+    SpectralSegmentQ15 seg;
+    memset(&seg, 0, sizeof seg);
+    seg.start = 0;
+    seg.length = (uint16_t)len;
+    seg.freq_q88 = 0;                         /* frozen oscillator */
+    seg.phase_q15 = (q15_t)-16384;            /* quarter turn -> sin peak (+full scale) */
+    seg.amp_q15 = Q15_MAX;                    /* unity, so output == envelope */
+    seg.da_q15 = 0;
+
+    static SpectralSegmentQ15 segbuf[8];
+    SpectralArm32Ctx ctx;
+    spectral_arm32_init(&ctx, segbuf, 8, lut, sr);
+    CHECK(spectral_arm32_load(&ctx, &seg, 1, len) == SPECTRAL_OK, "load(short seg) should be OK");
+
+    float out[32];
+    uint32_t got = render(&ctx, out, len);
+    CHECK(got == len, "should render all %u samples (got %u)", len, got);
+
+    /* Envelope readback: osc pinned near +full scale, so out[i] ~ fade_val[i]. */
+    float fade_in_end = out[fade_len - 1u];   /* last rising sample */
+    float peak_sample = out[fade_len];        /* fade-out start == full scale */
+    float fade_out_end = out[len - 1u];       /* last falling sample */
+    float boundary_jump = fabsf(peak_sample - fade_in_end);
+    printf("  fade_in_end=%.3f peak=%.3f fade_out_end=%.3f jump=%.3f\n",
+           fade_in_end, peak_sample, fade_out_end, boundary_jump);
+
+    /* With the fix the ramp reaches ~full scale over fade_len: fade_in_end ~0.94,
+     * jump ~0.06, fade_out_end ~0.06. The pre-fix fixed step gives fade_in_end
+     * ~0.47, jump ~0.53, fade_out_end ~0.53 (the click). */
+    CHECK(peak_sample > 0.95f, "envelope must reach full scale at fade midpoint (got %.3f)", peak_sample);
+    CHECK(fade_in_end > 0.80f, "fade-in must approach full scale by its end (got %.3f)", fade_in_end);
+    CHECK(boundary_jump < 0.15f, "no discontinuity at fade-in/fade-out boundary (jump %.3f)", boundary_jump);
+    CHECK(fade_out_end < 0.20f, "fade-out must approach zero by segment end (got %.3f)", fade_out_end);
+}
+
 static void test_invalid_rejected(const q15_t* lut, uint32_t sr) {
     printf("test_invalid_rejected:\n");
     static SpectralSegmentQ15 segbuf[8];
@@ -147,6 +202,7 @@ int main(void) {
 
     test_no_segments(lut, sr);
     test_single_tone(lut, sr);
+    test_short_segment_fade(lut, sr);
     test_invalid_rejected(lut, sr);
 
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");

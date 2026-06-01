@@ -187,6 +187,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/convert-segments.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/utilities.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/arm-core-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/core-contracts-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/core-guarantees-test.cmake")
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")
