@@ -87,6 +87,18 @@ USAGE
   Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm
   Backends: 0=auto 1=cpu 2=metal 3=cuda 4=export
 
+  Named options:
+  -w <file>              Use wavetable file (.spwt/.bin/.raw/.hex)
+  -pm, --proc-mask <s>   Processing chain mask (comma-separated names or integer bitmask)
+  --cache                Prewarm backend and cache analyzed segments for this input
+  -q, --quality <mode>   Anti-alias oscillator quality (CPU float path):
+                         naive (default), polyblep, additive, oversample
+  -S, --simd             CPU oscillator uses SIMD (default; ~1.8x on saw/square, <=1 ULP vs scalar)
+  --scalar               Force the scalar reference oscillator (parity/debug)
+  --q15                  Opt into the Q15 fixed-point compute domain (forces CPU backend):
+                         packed 8-wide SIMD Q15 on saw/square/tri/para (~1.4-1.6x over
+                         float-SIMD), scalar Q15 under --scalar; float is the default
+
 STRUCTURE
 
   spectral_engine/    Core analysis and synthesis
