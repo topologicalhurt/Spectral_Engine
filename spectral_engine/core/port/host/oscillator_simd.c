@@ -94,12 +94,15 @@ int osc_simd_available(SpectralTimbre timbre) {
  * The throughput twin of the scalar synth_segment_q15: an opt-in desktop kernel
  * that renders the 8x16-bit Q15 waveform of one 128-bit register per iteration
  * (vs 4 floats in a 128-bit / 8 in a 256-bit register), then widens to float for
- * the UNCHANGED float amp ramp + accumulate. bench_q15_pack8 measured ~1.35-1.5x
- * over the production float-SIMD path on the four algebraic timbres; sine LOSES
- * (its 8x serial LUT gather has no SIMD form) so it is NOT routed here -- it stays
- * on the scalar Q15 path. Phase is the integer NCO (scalar x8 per block); the
- * vectorized uint32 NCO that bench_q15_pack8 probed is a deferred follow-up
- * (extra ~10%, needs its own precision re-validation).
+ * the UNCHANGED float amp ramp + accumulate. bench_q15_pack8 measures ~1.4-1.6x
+ * over the production float-SIMD path on the four algebraic timbres. Sine is ALSO
+ * routed here (B1 re-validation): its eval has no vector form -- an 8x serial LUT
+ * gather, bit-identical to the scalar spectral_osc_q15_sine -- but with the
+ * vectorized phase + float widen/amp/accumulate around it, pack8 sine (0.74 ns/sample)
+ * still beats both the scalar Q15 sine it replaces under --q15 and production
+ * float-SIMD (0.93), at <=1 LSB of the scalar oracle. Phase is the integer NCO:
+ * the vectorized uint32 NCO (SpectralPhaseNco8) when c3==0, scalar x8 per block when
+ * the cubic term is present.
  *
  * The 8-wide Q15 eval matches the scalar spectral_osc_q15_* evaluators to <=1 LSB.
  * Two corners the bench probe glossed over are fixed here so the kernel is correct
@@ -142,10 +145,21 @@ static inline q15_t osc_q15_vnco_next(SpectralPhaseNco8* v, int16_t* buf, int* p
 }
 
 /* 8-wide Q15 waveform eval -- SIMD twin of the scalar spectral_osc_q15_* set. Pure
- * fixed point (no float between the markers); pq is pre-clamped so neither abs nor
- * the squaring multiply can overflow int16 at the -1.0 phase corner. */
+ * fixed point (no float between the markers). Sine has no vector form, so it is an
+ * 8x serial LUT gather, bit-identical to scalar spectral_osc_q15_sine, taken BEFORE
+ * the algebraic clamp (the LUT index is exact for every pq incl. -32768). The
+ * algebraic cases pre-clamp pq so neither abs nor the squaring multiply can overflow
+ * int16 at the -1.0 phase corner. */
 // SPECTRAL_Q_DOMAIN BEGIN
-static inline simde__m128i osc_q15_pack8_eval(simde__m128i pq, SpectralTimbre timbre) {
+static inline simde__m128i osc_q15_pack8_eval(simde__m128i pq, SpectralTimbre timbre,
+                                              const q15_t* lut) {
+    if (timbre == TIMBRE_SINE) {
+        q15_t idx[8], out[8];
+        simde_mm_storeu_si128((simde__m128i*)idx, pq);
+        for (int k = 0; k < 8; k++)
+            out[k] = spectral_lut_sin((uq16_t)(uint16_t)idx[k], lut);
+        return simde_mm_loadu_si128((const simde__m128i*)out);
+    }
     const simde__m128i zero = simde_mm_setzero_si128();
     const simde__m128i qmax = simde_mm_set1_epi16(Q15_MAX);
     pq = simde_mm_max_epi16(pq, simde_mm_set1_epi16((int16_t)(Q15_MIN + 1)));
@@ -170,9 +184,12 @@ static inline simde__m128i osc_q15_pack8_eval(simde__m128i pq, SpectralTimbre ti
 // SPECTRAL_Q_DOMAIN END
 
 int osc_simd_q15_available(SpectralTimbre timbre) {
-    /* The algebraic Q15 timbres only. Sine has a Q15 path but its serial LUT loses
-     * to float here, so it is excluded and dispatch keeps it on scalar Q15. */
-    return timbre == TIMBRE_SAW || timbre == TIMBRE_SQUARE ||
+    /* The 4 algebraic timbres plus sine. Sine's eval is a serial LUT gather (no
+     * vector form), but B1 re-measured it: with the vectorized phase + float
+     * widen/amp/accumulate around the gather, pack8 sine beats both the scalar Q15
+     * sine it replaces under --q15 and production float-SIMD, at <=1 LSB of the
+     * scalar oracle (bench_q15_pack8 / q15_simd_parity). */
+    return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW || timbre == TIMBRE_SQUARE ||
            timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
 }
 
@@ -222,7 +239,7 @@ void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
     for (; j + 8 <= sustain_end; j += 8) {
         simde__m128i idx = use_vec ? spectral_phase_nco8_step(&vphase)
                                    : osc_q15_nco_pack8(&nco);
-        simde__m128i wq = osc_q15_pack8_eval(idx, timbre);
+        simde__m128i wq = osc_q15_pack8_eval(idx, timbre, sine_lut);
         simde__m128 wf_lo = simde_mm_mul_ps(
             simde_mm_cvtepi32_ps(simde_mm_cvtepi16_epi32(wq)), invv);
         simde__m128 wf_hi = simde_mm_mul_ps(

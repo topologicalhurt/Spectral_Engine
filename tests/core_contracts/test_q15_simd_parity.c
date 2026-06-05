@@ -13,9 +13,10 @@
  * eval matches the scalar spectral_osc_q15_* evaluators to <=1 LSB everywhere (the
  * triangle double-subtract and the pq pre-clamp keep the saturating corners bounded),
  * so any regression that breaks a lane op, the widen, or the amp ramp (>> 1 LSB) is
- * caught with room to spare. The four timbres are osc_simd_q15_available()'s set
- * (saw/square/triangle/parabola); sine has no SIMD Q15 path (serial LUT) and renders
- * identically through scalar Q15 on both dispatches, so it is not exercised here.
+ * caught with room to spare. The five timbres are osc_simd_q15_available()'s set
+ * (saw/square/triangle/parabola + sine). Sine's SIMD path is a serial LUT gather --
+ * bit-identical to scalar spectral_osc_q15_sine -- so its only SIMD-vs-scalar delta
+ * is the <=1 LSB vec-phase rounding, the same floor as the algebraic timbres.
  *
  * Run: cmake --build build --target q15_simd_parity_test \
  *      && ctest --test-dir build -R q15_simd_parity
@@ -47,6 +48,7 @@ typedef struct {
 } Q15Timbre;
 
 static Q15Timbre k_timbres[] = {
+    { TIMBRE_SINE,     "sine",     -84.0 },
     { TIMBRE_SAW,      "saw",      -84.0 },
     { TIMBRE_SQUARE,   "square",   -84.0 },
     { TIMBRE_TRIANGLE, "triangle", -84.0 },

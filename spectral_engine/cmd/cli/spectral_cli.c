@@ -695,7 +695,7 @@ void spectral_cli_print_usage(void) {
     SPECTRAL_LOG_INFO("  --scalar                  Force the scalar reference oscillator (parity/debug)");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("  --q15                     Opt into the Q15 fixed-point compute domain (CPU path; forces CPU backend)");
-    SPECTRAL_LOG_INFO("      Packed 8-wide SIMD Q15 on saw/square/triangle/parabola (~1.4-1.6x over float-SIMD); scalar Q15 under --scalar");
+    SPECTRAL_LOG_INFO("      Packed 8-wide SIMD Q15 on sine + saw/square/triangle/parabola (~1.3-1.6x over float-SIMD); scalar Q15 under --scalar");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=%d hop=%d thresh=%.1f",
                       SPECTRAL_DEFAULT_N_FFT, SPECTRAL_DEFAULT_HOP, SPECTRAL_DEFAULT_DB_THRESH);
