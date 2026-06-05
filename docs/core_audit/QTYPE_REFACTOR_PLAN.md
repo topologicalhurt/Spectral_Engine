@@ -141,10 +141,12 @@ ramp + WAV write are inherently float). "Q15 everywhere" is the wrong target and
 
 Work items:
 
-- **B1 — Sine pack8 SIMD-Q15 re-validation** (the already-open deferred follow-up #2). With the
-  Bv vec phase, sine's pack8 (0.761 ns/sample) now *edges* production float-SIMD (0.876) but stays
-  excluded via `osc_simd_q15_available` pending precision re-validation of the serial-LUT SIMD-Q15
-  sine. Measure dBFS vs the scalar oracle; route it in only if it clears the per-path budget.
+- **B1 — Sine pack8 SIMD-Q15 re-validation** (the already-open deferred follow-up #2). **[LANDED —
+  PASS217]** Re-measured: pack8 sine ~0.74 ns/sample vs production float-SIMD ~0.93 (~1.26× faster)
+  and strictly faster than the scalar Q15 sine it replaces. Precision is bit-identical to scalar
+  `spectral_osc_q15_sine` (same LUT gather); only delta is the ≤1 LSB vec-phase rounding —
+  `q15_simd_parity` sine = −125.6 dBFS vs −84 budget. Cleared both axes → routed in via
+  `osc_simd_q15_available` + the LUT-gather case in `osc_q15_pack8_eval`.
 - **B2 — Full-Q15 accumulate experiment.** Today the island breaks at the amp ramp: the kernel
   widens Q15→float and does a float FMA-accumulate. PASS213 noted the theoretical 2× needs
   "full-Q15 accumulate and/or native 256-bit-int." Measure-first: does keeping the amp ramp +
