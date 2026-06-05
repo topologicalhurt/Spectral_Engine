@@ -31,6 +31,7 @@
  *
  * Run: cmake --build build --target bench_q15_pack8 && build/bench_q15_pack8
  */
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -315,6 +316,102 @@ static double bench_pack8_f(SpectralTimbre timbre, const q15_t* lut, int phase_m
     }
     return 0.0;
 }
+
+/* ===== B2 experiment: amp ramp + scale folded into Q15 (mulhrs) ============
+ * The shipping kernel (bench_pack8_f / osc_simd_q15_segment) widens Q15->float
+ * THEN does amp*wave + accumulate in float -- 2 float muls per 8 samples plus a
+ * float amp-ramp carry. This variant folds the amp into ONE 8-wide mulhrs in Q15
+ * BEFORE the widen, so the only float left is the (unavoidable, float-dst) load/
+ * add/store accumulate. Question: does keeping the scale in Q close the gap to 2x?
+ * Cost: the amp ramp is now an int16 carry (ampq += astep), so d_amp quantizes to
+ * a whole Q15 LSB per block -- qamp_precision() measures that drift vs the float
+ * amp. Phase = vec NCO (the shipping c3==0 path), so Bq/Bv is the apples-to-apples
+ * throughput read. amp assumed in [0,1] here (Q15-representable); a production amp
+ * >1.0 would overflow Q15 and is part of the decline-on-data risk. */
+static inline simde__m128i qamp_init8(void) {
+    return simde_mm_set_epi16(
+        (int16_t)lrintf((SEG_AMP0 + 7*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 6*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 5*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 4*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 3*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 2*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 1*SEG_DAMP) * 32768.0f),
+        (int16_t)lrintf((SEG_AMP0 + 0*SEG_DAMP) * 32768.0f));
+}
+
+static double bench_pack8_qamp(SpectralTimbre timbre, const q15_t* lut, double* sink) {
+    float buf[SEG_LEN];
+    const simde__m128 inv = simde_mm_set1_ps(Q15_TO_FLOAT((q15_t)1));
+    const simde__m128i astepv = simde_mm_set1_epi16((int16_t)lrintf(8.0f * SEG_DAMP * 32768.0f));
+    for (int warm = 0; warm < 2; warm++) {
+    struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
+    double chk = 0.0;
+    int iters = warm ? ITERS : 64;
+    for (int it = 0; it < iters; it++) {
+        memset(buf, 0, sizeof(buf));
+        Nco8 v8; nco8_init(&v8, SEG_PHASE0, SEG_ALPHA, 0.0f, 0.0f);
+        simde__m128i ampq = qamp_init8();
+        for (int j = 0; j < SEG_LEN; j += 8) {
+            simde__m128i wq = pack8_eval(nco8_step(&v8), timbre, lut);
+            simde__m128i sq = simde_mm_mulhrs_epi16(wq, ampq);  /* amp*wave in Q15, 8-wide */
+            simde__m128 wf_lo, wf_hi;
+            q15x8_to_floatx8(sq, inv, &wf_lo, &wf_hi);
+            simde_mm_storeu_ps(&buf[j],     simde_mm_add_ps(simde_mm_loadu_ps(&buf[j]),     wf_lo));
+            simde_mm_storeu_ps(&buf[j + 4], simde_mm_add_ps(simde_mm_loadu_ps(&buf[j + 4]), wf_hi));
+            ampq = simde_mm_adds_epi16(ampq, astepv);
+        }
+        chk += consume_buf(buf);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    if (warm) { *sink += chk;
+        return ns_per_sample((double)(t1.tv_sec - t0.tv_sec) * 1e9 + (double)(t1.tv_nsec - t0.tv_nsec)); }
+    }
+    return 0.0;
+}
+
+/* B2 precision: Q15-amp vs float-amp (SAME Q15 wave + vec phase) over one segment.
+ * Isolates the cost of quantizing the amp ramp to Q15 -> max abs diff in dBFS. */
+static void qamp_precision(SpectralTimbre timbre, const q15_t* lut,
+                           double* max_dbfs, double* rms_dbfs) {
+    float bf[SEG_LEN], bq[SEG_LEN];
+    memset(bf, 0, sizeof(bf)); memset(bq, 0, sizeof(bq));
+    const simde__m128 inv = simde_mm_set1_ps(Q15_TO_FLOAT((q15_t)1));
+    {   /* float-amp reference (matches bench_pack8_f vec path) */
+        Nco8 v8; nco8_init(&v8, SEG_PHASE0, SEG_ALPHA, 0.0f, 0.0f);
+        simde__m128 amp = simde_mm_set_ps(SEG_AMP0 + 3*SEG_DAMP, SEG_AMP0 + 2*SEG_DAMP,
+                                          SEG_AMP0 + SEG_DAMP, SEG_AMP0);
+        simde__m128 amp_hi = simde_mm_add_ps(amp, simde_mm_set1_ps(4.0f * SEG_DAMP));
+        const simde__m128 ampstep = simde_mm_set1_ps(8.0f * SEG_DAMP);
+        for (int j = 0; j < SEG_LEN; j += 8) {
+            simde__m128 lo, hi; q15x8_to_floatx8(pack8_eval(nco8_step(&v8), timbre, lut), inv, &lo, &hi);
+            simde_mm_storeu_ps(&bf[j],     simde_mm_mul_ps(amp,    lo));
+            simde_mm_storeu_ps(&bf[j + 4], simde_mm_mul_ps(amp_hi, hi));
+            amp = simde_mm_add_ps(amp, ampstep); amp_hi = simde_mm_add_ps(amp_hi, ampstep);
+        }
+    }
+    {   /* Q15-amp */
+        Nco8 v8; nco8_init(&v8, SEG_PHASE0, SEG_ALPHA, 0.0f, 0.0f);
+        simde__m128i ampq = qamp_init8();
+        const simde__m128i astepv = simde_mm_set1_epi16((int16_t)lrintf(8.0f * SEG_DAMP * 32768.0f));
+        for (int j = 0; j < SEG_LEN; j += 8) {
+            simde__m128i sq = simde_mm_mulhrs_epi16(pack8_eval(nco8_step(&v8), timbre, lut), ampq);
+            simde__m128 lo, hi; q15x8_to_floatx8(sq, inv, &lo, &hi);
+            simde_mm_storeu_ps(&bq[j], lo); simde_mm_storeu_ps(&bq[j + 4], hi);
+            ampq = simde_mm_adds_epi16(ampq, astepv);
+        }
+    }
+    double ma = 0.0, ss_d = 0.0, ss_s = 0.0;
+    for (int i = 0; i < SEG_LEN; i++) {
+        double d = (double)bq[i] - (double)bf[i];
+        if (fabs(d) > ma) ma = fabs(d);
+        ss_d += d * d; ss_s += (double)bf[i] * (double)bf[i];
+    }
+    double rms_d = sqrt(ss_d / SEG_LEN);
+    *max_dbfs = (ma > 0.0) ? 20.0 * log10(ma) : -300.0;
+    *rms_dbfs = (rms_d > 0.0) ? 20.0 * log10(rms_d) : -300.0;
+    (void)ss_s;
+}
 #endif /* OSC_SIMD_GENERIC */
 
 int main(void) {
@@ -342,6 +439,21 @@ int main(void) {
                k_timbres[t].name, a, a8, b, bv, b0, b/a8, bv/a8);
     }
     printf("(ratios < 1.00x = pack8 faster than the FAIR lean 8-wide float kernel; sink=%.3e)\n", sink);
+
+    /* ---- B2 experiment: amp ramp + scale folded into Q15 (mulhrs) ---- */
+    printf("\n== B2: Q15-amp (mulhrs) vs float-amp pack8 [both vec phase] ==\n");
+    printf("  Bv = shipping float-amp (vec ph); Bq = amp folded into Q15. Bq/Bv < 1.00x = faster.\n");
+    printf("  %-9s %9s %9s   %8s   %10s %10s\n",
+           "timbre", "Bv float", "Bq Q15", "Bq/Bv", "amp maxErr", "amp rmsErr");
+    for (size_t t = 0; t < N_TIMBRES; t++) {
+        SpectralTimbre tb = k_timbres[t].timbre;
+        double bv = bench_pack8_f(tb, sine_lut, 1, &sink);
+        double bq = bench_pack8_qamp(tb, sine_lut, &sink);
+        double maxe, rmse; qamp_precision(tb, sine_lut, &maxe, &rmse);
+        printf("  %-9s %9.3f %9.3f   %7.2fx   %7.1f dB %7.1f dB\n",
+               k_timbres[t].name, bv, bq, bq/bv, maxe, rmse);
+    }
+    printf("(amp err = Q15-amp vs float-amp over the segment; sink=%.3e)\n", sink);
     return 0;
 #endif
 }

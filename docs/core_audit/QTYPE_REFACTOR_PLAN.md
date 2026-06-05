@@ -147,13 +147,15 @@ Work items:
   `spectral_osc_q15_sine` (same LUT gather); only delta is the ≤1 LSB vec-phase rounding —
   `q15_simd_parity` sine = −125.6 dBFS vs −84 budget. Cleared both axes → routed in via
   `osc_simd_q15_available` + the LUT-gather case in `osc_q15_pack8_eval`.
-- **B2 — Full-Q15 accumulate experiment.** Today the island breaks at the amp ramp: the kernel
-  widens Q15→float and does a float FMA-accumulate. PASS213 noted the theoretical 2× needs
-  "full-Q15 accumulate and/or native 256-bit-int." Measure-first: does keeping the amp ramp +
-  accumulate in Q close the gap? **Risk:** Q15 accumulation overflow/precision over a segment —
-  carries a measured dBFS justification. **Decline-on-data** if the float widen is already near
-  the ceiling or precision regresses. **Decision point — needs sign-off** (precision risk on a
-  shipping path).
+- **B2 — Full-Q15 accumulate experiment. [DECLINED on data — PASS218]** Measured (bench_q15_pack8
+  B2 block, maintainer-authorized): folding the amp into one 8-wide Q15 `mulhrs` before the widen
+  makes the 4 algebraic timbres *slower* (Bq/Bv 1.03–1.10×; sine ties 0.97× within noise) AND
+  regresses precision ~35 dB — the int16 amp ramp quantizes `d_amp` to a whole Q15 LSB/block →
+  ~−49 dB max error vs the −84 budget. BOTH plan decline criteria met: the float widen is
+  structurally unavoidable (float `dst`/WAV) and already near the ceiling, and precision regresses.
+  Cross-segment "full-Q15 accumulate" is separately blocked (additive partials exceed ±1.0 →
+  Q15 saturates). The real 2× density axis is **Thread C** (16×Q15@256 on AVX2), not amp-in-Q.
+  Bench kept in-tree as the evidence (PASS210 pattern). See PATCH_NOTES_PASS218.
 - **B3 — Island audit (anti-myopia deliverable).** Enumerate every desktop hot path and classify
   each as a *contiguous Q-island candidate* vs. *inherently float* (the FFT/magsq/phase analysis
   path is float by nature; final WAV is float). Document *why* each is in or out. This is what
