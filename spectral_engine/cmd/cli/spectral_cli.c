@@ -385,6 +385,9 @@ void spectral_cli_init(SpectralCliOptions* opts) {
     opts->db_thresh = SPECTRAL_DEFAULT_DB_THRESH;
     opts->n_threads = omp_get_max_threads();
     opts->backend = BACKEND_AUTO;
+    opts->osc_quality = SPECTRAL_OSC_QUALITY_NAIVE;
+    opts->osc_force_scalar = 0;   /* SIMD is the default CPU oscillator path */
+    opts->enable_q15 = 0;         /* float is the default compute domain */
     opts->processing_mask = SPECTRAL_PROC_NONE;
     opts->enable_cache = 0;
     opts->start_sec = 0.0f;
@@ -463,6 +466,35 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
         if (strcmp(argv[i], "--cache") == 0) {
             opts->enable_cache = 1;
             skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--scalar") == 0) {
+            opts->osc_force_scalar = 1;   /* force the scalar reference oscillator */
+            skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--simd") == 0 || strcmp(argv[i], "-S") == 0) {
+            opts->osc_force_scalar = 0;   /* explicit affirmative of the SIMD default */
+            skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--q15") == 0) {
+            opts->enable_q15 = 1;   /* opt into the Q15 fixed-point compute domain */
+            skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quality") == 0) {
+            if (i + 1 >= argc) {
+                cli_fail(opts, "Missing mode after -q/--quality");
+                goto fail;
+            }
+            if (!osc_quality_parse(argv[i + 1], &opts->osc_quality)) {
+                cli_fail(opts, "Invalid oscillator quality. Use naive|polyblep|additive|oversample (aliases blep/add/os) or 0..3");
+                goto fail;
+            }
+            skip[i] = 1;
+            skip[i + 1] = 1;
+            i++;
             continue;
         }
     }
@@ -654,6 +686,16 @@ void spectral_cli_print_usage(void) {
     SPECTRAL_LOG_INFO("      Special: none, default, all");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("  --cache                   Prewarm backend and cache analyzed segments for this input");
+    SPECTRAL_LOG_INFO("");
+    SPECTRAL_LOG_INFO("  -q, --quality <mode>      Anti-alias ('musical') oscillator quality (CPU float path)");
+    SPECTRAL_LOG_INFO("      Modes: naive (default), polyblep, additive, oversample (aliases: blep, add, os; 0..3)");
+    SPECTRAL_LOG_INFO("      Non-naive modes force the CPU backend; default is bit-identical to the point-sampled path");
+    SPECTRAL_LOG_INFO("");
+    SPECTRAL_LOG_INFO("  -S, --simd                CPU oscillator uses SIMD (default; ~1.8x on saw/square, <=1 ULP vs scalar)");
+    SPECTRAL_LOG_INFO("  --scalar                  Force the scalar reference oscillator (parity/debug)");
+    SPECTRAL_LOG_INFO("");
+    SPECTRAL_LOG_INFO("  --q15                     Opt into the Q15 fixed-point compute domain (CPU path; forces CPU backend)");
+    SPECTRAL_LOG_INFO("      Packed 8-wide SIMD Q15 on saw/square/triangle/parabola (~1.4-1.6x over float-SIMD); scalar Q15 under --scalar");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=%d hop=%d thresh=%.1f",
                       SPECTRAL_DEFAULT_N_FFT, SPECTRAL_DEFAULT_HOP, SPECTRAL_DEFAULT_DB_THRESH);

@@ -2,6 +2,7 @@
 #include "spectral_cli_pipeline.h"
 #include "spectral_cli.h"
 #include "spectral_synth.h"
+#include "oscillator.h"
 #include "spectral_segment_parser.h"
 #include "spectral_seg_cache.h"
 #include "spectral_hash_xx32_xx3.h"
@@ -635,6 +636,8 @@ static PipelineError pipeline_analyze_from_input(
 static PipelineError pipeline_apply_processing_mask(
     SegmentArray* segments,
     int sample_rate,
+    int hop,
+    int n_fft,
     uint32_t processing_mask)
 {
     SpectralProcessReport proc_report = {0};
@@ -642,7 +645,7 @@ static PipelineError pipeline_apply_processing_mask(
 
     if (!segments) return PIPELINE_ERR_INPUT;
 
-    proc_err = spectral_process_chain_apply(segments, sample_rate, processing_mask, &proc_report);
+    proc_err = spectral_process_chain_apply(segments, sample_rate, hop, n_fft, processing_mask, &proc_report);
     if (proc_err != SPECTRAL_OK) {
         spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, proc_err,
                                  "Processing chain failed (sample_rate=%d, mask=0x%08x)",
@@ -688,7 +691,7 @@ static PipelineError pipeline_run_synthesis_stage(
     result = pipeline_maybe_load_wavetable(opts, &wt_bank, &wt_bank_ptr);
     if (result != PIPELINE_OK) return result;
 
-    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->processing_mask);
+    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->hop, opts->n_fft, opts->processing_mask);
     if (result != PIPELINE_OK) return result;
 
     if (n_samples == 0) {
@@ -752,7 +755,7 @@ static PipelineError pipeline_try_run_export_backend(
     if (!opts || !resources || !timing || !out_handled) return PIPELINE_ERR_INPUT;
     if (opts->backend != BACKEND_EXPORT) return PIPELINE_OK;
 
-    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->processing_mask);
+    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->hop, opts->n_fft, opts->processing_mask);
     if (result != PIPELINE_OK) return result;
     result = pipeline_export_segments(opts, &resources->segments, sample_rate);
     if (result != PIPELINE_OK) return result;
@@ -1152,13 +1155,56 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
                                    SpectralWavetableBank* wt_bank, double* t_synth) {
     SynthBackend effective_backend = BACKEND_CPU;
     SpectralTimbre effective_timbre = opts->timbre;
+
+    /* Anti-alias oscillator quality is a CPU-float-path feature; the GPU (Metal/
+     * CUDA) and Q15-native backends ignore osc_get_quality().  To let the user
+     * actually audition a non-naive mode, force the CPU backend for it.  NAIVE
+     * leaves the requested backend untouched (and renders bit-identically). */
+    osc_set_quality(opts->osc_quality);
+
+    /* CPU oscillator execution strategy: SIMD by default (~1.8x on saw/square,
+     * <=1 ULP vs scalar), scalar reference on --scalar.  Only affects the CPU
+     * float path; GPU and Q15-native backends have their own kernels. */
+    osc_set_dispatch(opts->osc_force_scalar ? OSC_DISPATCH_ALL_SCALAR
+                                            : OSC_DISPATCH_ALL_SIMD);
+
+    SynthBackend req_backend = opts->backend;
+    if (opts->osc_quality != SPECTRAL_OSC_QUALITY_NAIVE) {
+        req_backend = BACKEND_CPU;
+        SPECTRAL_LOG_INFO("Oscillator quality: %s (CPU float path; forcing CPU backend)",
+                          osc_quality_name(opts->osc_quality));
+    }
+
+    /* Opt-in Q15 fixed-point compute domain (--q15). The Q15 kernels (packed
+     * 8xQ15 SIMD, or scalar Q15 under --scalar) live on the CPU float-synth
+     * dispatch — GPU backends have their own kernels and ignore the mask — so,
+     * like the quality modes, enabling it forces the CPU backend. A render uses a
+     * single timbre, so only that timbre's bit matters; timbres without a Q15
+     * path (asin/quantized/pwm) stay on float. */
+    if (opts->enable_q15) {
+        if (osc_q15_available(opts->timbre)) {
+            osc_set_q15_enable(OSC_Q15_BIT(opts->timbre));
+            req_backend = BACKEND_CPU;
+            int packed = 0;
+#if defined(OSC_SIMD_GENERIC)
+            packed = !opts->osc_force_scalar && osc_simd_q15_available(opts->timbre);
+#endif
+            SPECTRAL_LOG_INFO("Q15 compute domain: ENABLED for %s (%s; forcing CPU backend)",
+                              timbre_name(opts->timbre),
+                              packed ? "packed 8-wide SIMD Q15" : "scalar Q15");
+        } else {
+            SPECTRAL_LOG_INFO("Q15 compute domain requested but unavailable for %s; rendering float",
+                              timbre_name(opts->timbre));
+        }
+    }
+
     SPECTRAL_LOG_INFO("Rendering request=%s (%u segs, timbre=%s, threads=%d)%s...",
-                      spectral_backend_name(opts->backend), sa.count, timbre_name(opts->timbre),
+                      spectral_backend_name(req_backend), sa.count, timbre_name(opts->timbre),
                       opts->n_threads, wt_bank ? " (wavetable)" : "");
 
     SpectralError err = spectral_synth_dispatch_ex(sa, out_buf, out_len,
                                                    opts->stretch, opts->pitch, opts->timbre,
-                                                   opts->backend, wt_bank,
+                                                   req_backend, wt_bank,
                                                    opts->n_threads, t_synth,
                                                    &effective_backend, &effective_timbre);
     if (err == SPECTRAL_OK) {
