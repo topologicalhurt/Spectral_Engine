@@ -16,6 +16,12 @@
 #   is pure fixed point: no `float`/`double` token may appear inside — the
 #   "Q kernel does float arithmetic" failure. Markers must balance.
 #
+#   RULE 3 — literal-scale confinement. The bare float forms of the same scale
+#   constants — 32768.0 (Q15), 65536.0 (phase), 2147483648.0 (Q31) — may not
+#   appear in a `* literal` / `/ literal` conversion outside the allowlist
+#   either. This closes the gap where a kernel sidesteps RULE 1 by hardcoding
+#   the magic number instead of naming SPECTRAL_*_SCALE.
+#
 # Implementation note: lines are walked with string(FIND/SUBSTRING) on a quoted
 # string, never `foreach(x ${content})`. C source contains `;`, `[`, `]`, and `\`
 # which CMake's list re-parse would mangle (a `[` opens a bracket argument; `;`
@@ -29,19 +35,30 @@ if(NOT DEFINED SPECTRAL_Q_CONTRACT_ROOT)
 endif()
 
 # Files permitted to reference the raw scale constants (matched by basename):
-#   spectral_consts.h  — defines the constants
-#   spectral_q15.h     — FLOAT_TO_Q15 / Q15_TO_FLOAT / FLOAT_TO_Q31 / Q31_TO_FLOAT
-#   spectral_config.h  — SPECTRAL_SAMPLE_TO_FLOAT / FLOAT_TO_SPECTRAL_SAMPLE
+#   spectral_consts.h   — defines the constants
+#   spectral_q15.h      — FLOAT_TO_Q15 / Q15_TO_FLOAT / FLOAT_TO_Q31 / Q31_TO_FLOAT
+#   spectral_config.h   — SPECTRAL_SAMPLE_TO_FLOAT / FLOAT_TO_SPECTRAL_SAMPLE
+#   spectral_osc_q15.h  — spectral_osc_q15_phase_from_rads, a dedicated rads/pi
+#                         -> Q15 boundary helper (different centering than
+#                         PHASE_RAD_TO_Q15, so it names SPECTRAL_Q15_SCALE itself)
 set(_allow
     "spectral_consts.h"
     "spectral_q15.h"
-    "spectral_config.h")
+    "spectral_config.h"
+    "spectral_osc_q15.h")
 
 set(_scale_consts
     "SPECTRAL_INV_Q15_SCALE"
     "SPECTRAL_Q15_SCALE"
     "SPECTRAL_INV_Q31_SCALE"
     "SPECTRAL_Q31_SCALE")
+
+# Bare float forms of the scale constants (RULE 3). Matched only in a
+# `* literal` / `/ literal` conversion, never in prose (see the per-line block).
+set(_scale_literals
+    "32768.0"
+    "65536.0"
+    "2147483648.0")
 
 file(GLOB_RECURSE _sources
     "${SPECTRAL_Q_CONTRACT_ROOT}/*.c"
@@ -81,6 +98,15 @@ foreach(_file IN LISTS _sources)
                 break()
             endif()
         endforeach()
+        if(NOT _has_scale)
+            foreach(_l IN LISTS _scale_literals)
+                string(FIND "${_content}" "${_l}" _sp)
+                if(NOT _sp EQUAL -1)
+                    set(_has_scale TRUE)
+                    break()
+                endif()
+            endforeach()
+        endif()
     endif()
     if(NOT _has_marker AND NOT _has_scale)
         continue()
@@ -111,6 +137,21 @@ foreach(_file IN LISTS _sources)
                         "  ${_file}:${_lineno}: raw '${_c}' outside a boundary macro (use FLOAT_TO_Q15/Q15_TO_FLOAT/SPECTRAL_SAMPLE_TO_FLOAT/...)")
                 endif()
             endforeach()
+        endif()
+
+        # RULE 3 — bare float-scale literals (the magic-number bypass of RULE 1).
+        # Only a `* literal` / `/ literal` conversion counts; comment-led lines
+        # (incl. doxygen ` * ` continuations) are skipped so prose mentioning the
+        # number is not mistaken for a conversion.
+        if(_check_scale AND _has_scale)
+            string(REGEX MATCH "^[ \t]*(//|/\\*|\\*)" _is_comment "${_line}")
+            if(_is_comment STREQUAL "")
+                string(REGEX MATCH "[*/][ \t]*(32768|65536|2147483648)\\.0" _lm "${_line}")
+                if(NOT _lm STREQUAL "")
+                    list(APPEND _violations
+                        "  ${_file}:${_lineno}: raw Q-scale literal '${_lm}' (name SPECTRAL_*_SCALE / route through a boundary macro, not the magic number)")
+                endif()
+            endif()
         endif()
 
         # RULE 2 — region markers + float/double purity inside a region.
@@ -159,4 +200,4 @@ endif()
 message(STATUS
     "Q-domain contract OK: ${_files_scanned} files scanned, "
     "${_regions_scanned} Q-domain region(s) verified pure, "
-    "scale constants confined to boundary macros.")
+    "scale constants and literals confined to boundary macros.")

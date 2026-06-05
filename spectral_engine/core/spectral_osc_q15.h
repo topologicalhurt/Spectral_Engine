@@ -41,7 +41,7 @@ static inline q15_t spectral_osc_q15_phase_from_rads(float rads) {
     float n = rads * SPECTRAL_INV_PI;     /* [-1, 1) */
     if (n >= 1.0f) n = 0.99996948f;       /* clamp below +1.0 so the cast stays in range */
     if (n < -1.0f) n = -1.0f;
-    return (q15_t)(n * 32768.0f);
+    return (q15_t)(n * SPECTRAL_Q15_SCALE);
 }
 
 /* Build the gain-matched FULL-SCALE (peak Q15_MAX) sine table for the Q15
