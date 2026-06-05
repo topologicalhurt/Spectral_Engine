@@ -191,14 +191,29 @@ is already maximal there. *Every* width tier above 128 is **x86-only and unmeasu
 machine.** We will not ship a 256/512 kernel we never ran — Thread C's wider tiers are gated on an
 x86 build/CI being available to validate them.
 
+**Status (PASS220):** the **locally-doable** Thread C work is exhausted. C2 (the float
+`spectral_vector_ops.c` audit) is **declined on evidence** — it is already at max width on both
+targets. C1 (the wider Q15 kernel) and C3 (AVX-512) are both **hard-gated** on x86 / AVX-512
+CI that this NEON-128 Mac cannot stand in for, so they are handed back rather than authored
+speculatively. With Thread A complete and Thread B complete, the Q-type refactor is **closed on
+this machine**; what remains is x86-CI-gated and awaits the maintainer + hardware.
+
 Work items:
 
 - **C1 — Width-parameterize the packed Q15 kernel** (8×Q15@128 → 16×Q15@256 on AVX2), keyed off
   `SIMDE_NATURAL_INT_VECTOR_SIZE`, reusing the Q2 `.inc`-templating pattern. This is the largest
-  width opportunity (the Q15 kernel is currently hard-pinned 8-wide). Measure x86 speedup —
-  **blocked on x86 validation** (can't run on NEON).
-- **C2 — `spectral_vector_ops.c` width audit.** Measure-first whether parameterizing it pays;
-  decline if the scalar fallback already auto-vectorizes to max width under `-march=native`.
+  width opportunity (the Q15 kernel is currently hard-pinned 8-wide). **[GATED on x86 CI.]** The
+  correctness of a wider tier is locally provable via SIMDe AVX2 emulation (the Q2 `osc_width_parity`
+  precedent), but the *deliverable is throughput*, which is unmeasurable on this NEON-128 Mac — and
+  the standing rule (§3) is "we will not ship a 256/512 kernel we never ran." So C1 is not authored
+  speculatively; it waits on an x86 (AVX2) build/CI to measure speedup and gate default promotion
+  ([[faster-path-should-default]]: can't measure the win ⇒ can't promote).
+- **C2 — `spectral_vector_ops.c` width audit. [DECLINED on evidence — PASS220].** Audited:
+  every *called* hot op is already hand-parameterized to **both** the 128-bit `simde__m128`
+  and 256-bit AVX2 `simde__m256` tiers + scalar tail (dev Mac runs the 128 tier at native
+  NEON = maximal; x86 runs the 256 tier = the `-mno-avx512f` cap). The only two ops without a
+  256-bit tier (`spectral_deinterleave`, `spectral_magsq_split`) are **dead — zero callers**.
+  Next tier up is AVX-512 = C3. Nothing to parameterize; no code change pays.
 - **C3 — AVX-512 decision.** Lift `-mno-avx512f` and add a 512 tier? Requires AVX-512 silicon to
   validate. **Decision point — needs sign-off**, and gated on x86/AVX-512 hardware access. FMV/
   runtime dispatch stays out of scope (caveat 3).
@@ -223,8 +238,10 @@ Work items:
 |----|----------|------------------|
 | A2 | ~~Contract-test rigor (keep grep vs. clang/AST)~~ | **RESOLVED: keep grep + close literal gap (RULE 3)** |
 | A4 | ~~C++ newtype for tooling/tests~~ | **RESOLVED: declined on data — discipline + contract suffices** |
-| B2 | Full-Q15 accumulate on a shipping path | precision risk vs. throughput gain |
+| B2 | ~~Full-Q15 accumulate on a shipping path~~ | **RESOLVED: declined on data (PASS218) — slower + ~35 dB precision loss** |
+| C2 | ~~Width-parameterize `spectral_vector_ops.c`~~ | **RESOLVED: declined on evidence (PASS220) — already 128+256(AVX2); un-256'd ops are dead** |
 | C3 | Lift `-mno-avx512f` / add 512 tier | needs AVX-512 hardware; portability stance |
+| C1 | Author + promote 16×Q15@256 kernel | gated on x86 (AVX2) CI to measure throughput |
 | — | Acquire x86 (+AVX-512) CI to validate Thread C | otherwise wide tiers are unvalidatable |
 
 ---
