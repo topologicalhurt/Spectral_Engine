@@ -75,6 +75,8 @@ typedef struct {
     float psychoacoustic_margin_db;
     uint32_t adaptive_max_segments;
     float adaptive_keep_ratio;
+    int hop;    /* STFT hop size (samples); 0 if unknown */
+    int n_fft;  /* STFT length (samples); 0 if unknown */
 } SpectralProcessParams;
 
 void spectral_process_params_default(SpectralProcessParams* params);
@@ -85,6 +87,8 @@ void spectral_process_mask_to_string(SpectralProcessMask mask, char* out, size_t
 SpectralError spectral_process_chain_apply(
     SegmentArray* sa,
     int sample_rate,
+    int hop,
+    int n_fft,
     SpectralProcessMask mask,
     SpectralProcessReport* report);
 

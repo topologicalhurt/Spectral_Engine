@@ -5,41 +5,76 @@
 #include "spectral_envelope.h"
 #include "spectral_fast_math.h"
 #include "spectral_osc_formulas.h"
+#include "spectral_osc_bandlimited.h"
+#include "spectral_osc_q15.h"
+#include "spectral_phase_nco.h"
 #include "spectral_utils.h"
 #include <math.h>
 
-static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SCALAR;
+/* SIMD is the default CPU execution strategy: the host/embedded osc_simd_segment_*
+ * paths are written op-for-op against the scalar oscillator and measure ~1.8x
+ * faster on the vectorizable timbres (saw/square/triangle/parabola), ~1.1x on
+ * sine (sinf-bound).  Output is <=1 ULP from scalar (FMA-contraction only under
+ * -ffast-math), not byte-identical; the scalar reference stays reachable via the
+ * CLI --scalar flag (osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR)).  Timbres without
+ * a SIMD path (e.g. asin) fall through to scalar via osc_simd_available(). */
+static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SIMD;
 
 void osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
 OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 
-typedef float (*TimbreFunc)(float rads, float width);
+/* Opt-in Q15 compute domain (Q3b). Float is the default — this mask is 0 unless
+ * a caller explicitly enables a path, so the default build moves no bytes. */
+static uint16_t g_osc_q15_enable = 0;
+static q15_t g_osc_q15_sine_lut[SPECTRAL_OSC_LUT_SIZE + 1];
+static int g_osc_q15_sine_lut_ready = 0;
 
-static const TimbreFunc timbre_table[TIMBRE_COUNT] = {
-    spectral_osc_sine,
-    spectral_osc_saw,
-    spectral_osc_square,
-    spectral_osc_triangle,
-    spectral_osc_asin,
-    spectral_osc_parabola,
-    spectral_osc_quantized,
-    spectral_osc_pwm
-};
+int osc_q15_available(SpectralTimbre timbre) {
+    switch (timbre) {
+    case TIMBRE_SINE: case TIMBRE_SAW: case TIMBRE_SQUARE:
+    case TIMBRE_TRIANGLE: case TIMBRE_PARABOLA:
+        return 1;
+    default:
+        return 0;   /* asin/quantized/pwm: no Q15 path (PASS208 scope) */
+    }
+}
+
+void osc_set_q15_enable(uint16_t mask) {
+    g_osc_q15_enable = mask;
+    /* Build the sine table once here (single-threaded setup call, like
+     * osc_set_dispatch) so the per-segment OMP render loop only reads it —
+     * no lazy-init race on the hot path. */
+    if ((mask & OSC_Q15_BIT(TIMBRE_SINE)) && !g_osc_q15_sine_lut_ready) {
+        spectral_osc_q15_init_sine_lut(g_osc_q15_sine_lut);
+        g_osc_q15_sine_lut_ready = 1;
+    }
+}
+uint16_t osc_get_q15_enable(void) { return g_osc_q15_enable; }
 
 float timbre_oscillator(float p, float a, SpectralTimbre timbre, float width) {
-    unsigned int idx = (unsigned int)timbre;
-    if (idx >= TIMBRE_COUNT) {
-        idx = TIMBRE_SINE;
+    /* Single-sample API — not hot — uses the L1 kernel directly. Out-of-range
+     * timbre folds to sine in its default case, matching the old clamp. */
+    return a * spectral_osc_eval(p, (int)timbre, width);
+}
+
+typedef float (*TimbreFunc)(float rads, float width);
+
+/* Host-hoisted specialization of the spectral_osc_eval() map: resolve the timbre
+ * to its fixed L0 waveform ONCE per segment so the inner sample loop calls a
+ * single waveform (and the compiler can inline/vectorize it) rather than running
+ * the loop-invariant 8-way dispatch per sample. Same map as the L1 switch via the
+ * shared SPECTRAL_OSC_TIMBRE_LIST X-macro, so the two can never drift. */
+static inline TimbreFunc osc_waveform_fn(SpectralTimbre timbre) {
+    switch (timbre) {
+#define SPECTRAL_OSC_FN_CASE(T, FN) case T: return FN;
+        SPECTRAL_OSC_TIMBRE_LIST(SPECTRAL_OSC_FN_CASE)
+#undef SPECTRAL_OSC_FN_CASE
+        default: return spectral_osc_sine;
     }
-
-    /* Canonical phase normalization — must match spectral_normalize_phase() */
-    float rads = spectral_normalize_phase(p);
-
-    return a * timbre_table[idx](rads, width);
 }
 
 static void synth_segment_scalar(
-    float* dst, size_t len, float phase0, float alpha, float beta,
+    float* dst, size_t len, float phase0, float alpha, float c2, float c3,
     float amp0, float d_amp, float width, const FadeParams* fp, TimbreFunc osc_fn
 ) {
     size_t fade_in_end = fp->fade_len;
@@ -47,7 +82,7 @@ static void synth_segment_scalar(
 
     /* Fade-in region */
     for (size_t j = 0; j < fade_in_end && j < len; j++) {
-        float p = spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
+        float p = spectral_segment_phase_at_cubic_f32(phase0, alpha, c2, c3, (float)j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
         float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_in(j, fp->inv_fade);
@@ -56,7 +91,7 @@ static void synth_segment_scalar(
 
     /* Sustain region (envelope = 1.0, no branching) */
     for (size_t j = fade_in_end; j < fade_out_start && j < len; j++) {
-        float p = spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
+        float p = spectral_segment_phase_at_cubic_f32(phase0, alpha, c2, c3, (float)j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
         float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
@@ -65,9 +100,67 @@ static void synth_segment_scalar(
 
     /* Fade-out region */
     for (size_t j = (fade_out_start > fade_in_end ? fade_out_start : fade_in_end); j < len; j++) {
-        float p = spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
+        float p = spectral_segment_phase_at_cubic_f32(phase0, alpha, c2, c3, (float)j);
         float rads = phase_to_rads(p);
         float wave = osc_fn(rads, width);
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_out(j, len, fp->inv_fade);
+        dst[j] += amp * wave;
+    }
+}
+
+/* Loop-invariant Q15 waveform selector. A scalar oracle: it resolves the timbre
+ * per sample, which the SIMD Q15 kernel (Q3b step 2) will specialize away. */
+static inline q15_t osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
+    switch (timbre) {
+    case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
+    case TIMBRE_SAW:      return spectral_osc_q15_saw(pq);
+    case TIMBRE_SQUARE:   return spectral_osc_q15_square(pq);
+    case TIMBRE_TRIANGLE: return spectral_osc_q15_triangle(pq);
+    case TIMBRE_PARABOLA: return spectral_osc_q15_parabola(pq);
+    default:              return Q15_ZERO;
+    }
+}
+
+/* Scalar Q15-compute sustain path (Q3b oracle, Q5b integer-NCO phase). Op-for-op
+ * the float synth_segment_scalar above, except (a) the Q15 phase index is produced
+ * by the integer-NCO cubic forward-difference accumulator (spectral_phase_nco.h) —
+ * 3 integer adds per sample, no float and no per-sample float->Q15 conversion on the
+ * phase path — and (b) the WAVEFORM is evaluated in Q15, then converted back to float
+ * for the (unchanged, float) amplitude + fade envelope and accumulation. Q5a
+ * characterized this integer phase at/below the Q15-eval floor (PASS211: tighter than
+ * float-cubic, square bit-identical), so it drops in for the old float-cubic phase +
+ * spectral_osc_q15_phase_from_rads pipeline with no audible change.
+ *
+ * The NCO is stepped exactly ONCE per sample. The three fade regions below together
+ * cover [0,len) contiguously and in sample order in every case (normal, overlapping
+ * fades, or len shorter than a fade), so stepping the (stateful) forward-difference
+ * chain once per loop body reproduces the exact per-sample phase the float path
+ * recomputed from j — the step order IS the sample order. */
+static void synth_segment_q15(
+    float* dst, size_t len, float phase0, float alpha, float c2, float c3,
+    float amp0, float d_amp, const FadeParams* fp, SpectralTimbre timbre,
+    const q15_t* sine_lut
+) {
+    size_t fade_in_end = fp->fade_len;
+    size_t fade_out_start = fp->fade_out_start;
+
+    SpectralPhaseNco nco;
+    spectral_phase_nco_init(&nco, phase0, alpha, c2, c3);
+
+    for (size_t j = 0; j < fade_in_end && j < len; j++) {
+        float wave = Q15_TO_FLOAT(osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_in(j, fp->inv_fade);
+        dst[j] += amp * wave;
+    }
+
+    for (size_t j = fade_in_end; j < fade_out_start && j < len; j++) {
+        float wave = Q15_TO_FLOAT(osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
+        dst[j] += amp * wave;
+    }
+
+    for (size_t j = (fade_out_start > fade_in_end ? fade_out_start : fade_in_end); j < len; j++) {
+        float wave = Q15_TO_FLOAT(osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
         float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_out(j, len, fp->inv_fade);
         dst[j] += amp * wave;
     }
@@ -95,13 +188,56 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
     
     const size_t len = lp->length;
     if (len == 0) return;
-    
+
+    /* Band-limited ("musical") quality modes (PolyBLEP / additive / oversample).
+     * Default is NAIVE, which returns 0 here so the point-sampled path below runs
+     * unchanged (bit-identical default build).  A non-naive mode renders the
+     * segment itself and returns 1, except for timbre/mode pairs it does not
+     * support (e.g. asin under PolyBLEP), which return 0 to fall through to naive. */
+    SpectralOscQuality osc_quality = osc_get_quality();
+    if (osc_quality != SPECTRAL_OSC_QUALITY_NAIVE &&
+        osc_bandlimited_synth_segment(dst, lp, timbre, osc_quality)) {
+        return;
+    }
+
+    /* Opt-in Q15 compute domain (Q3b): a domain choice orthogonal to the
+     * float scalar/SIMD dispatch below. Engaged only when this timbre's bit is
+     * set AND it has a Q15 path; otherwise fall through to the float dispatch.
+     * The point-sampled (NAIVE) path only — band-limited quality already
+     * returned above. */
+    if ((g_osc_q15_enable & OSC_Q15_BIT(timbre)) && osc_q15_available(timbre)) {
+#if defined(OSC_SIMD_GENERIC)
+        /* Packed 8xQ15 SIMD twin (Q5c): the Q15 compute domain composes with the
+         * float scalar/SIMD axis. When this timbre's dispatch resolves to SIMD and
+         * it is one of the algebraic Q15 timbres, render it 8-wide (sine's serial
+         * LUT loses, so it stays on the scalar Q15 path below). --scalar honoured. */
+        OscDispatchMode q15_mode = OSC_GET_MODE(g_osc_dispatch, timbre);
+        if (q15_mode == OSC_MODE_FALLBACK) {
+            q15_mode = osc_simd_q15_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
+        }
+        if (q15_mode == OSC_MODE_CPU_SIMD && osc_simd_q15_available(timbre)) {
+            osc_simd_q15_segment(dst, lp, timbre, g_osc_q15_sine_lut);
+            return;
+        }
+#endif
+        FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_ACTIVE);
+        synth_segment_q15(
+            dst, len, lp->phase, lp->alpha, lp->c2, lp->c3,
+            lp->amp, lp->d_amp, &fp, timbre, g_osc_q15_sine_lut
+        );
+        return;
+    }
+
     OscDispatchMode dispatch_mode = OSC_GET_MODE(g_osc_dispatch, timbre);
-    
+
     if (dispatch_mode == OSC_MODE_FALLBACK) {
         dispatch_mode = osc_simd_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
     }
-    
+
+    /* Cubic phase (SPECTRAL_PRECISE_PHASE) needs no special redirect: the host
+     * SIMD oscillator evaluates the cubic Horner under the same flag, and every
+     * scalar path uses spectral_segment_phase_at_cubic_f32() directly, so c2/c3
+     * are honoured whichever path is dispatched. */
     if (dispatch_mode == OSC_MODE_CPU_SIMD && osc_simd_available(timbre)) {
         switch (timbre) {
         case TIMBRE_SINE:      osc_simd_segment_sine(dst, lp);      return;
@@ -117,72 +253,20 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
     
     FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_ACTIVE);
     synth_segment_scalar(
-        dst, len, lp->phase, lp->alpha, lp->beta,
-        lp->amp, lp->d_amp, lp->width, &fp, timbre_table[timbre]
+        dst, len, lp->phase, lp->alpha, lp->c2, lp->c3,
+        lp->amp, lp->d_amp, lp->width, &fp, osc_waveform_fn(timbre)
     );
 }
 
-/* Metal shader source */
-#if defined(__APPLE__) && !defined(__CUDACC__)
-
-/* All constants injected from spectral_consts.h via METAL_CONST_* macros
- * defined in spectral_osc_formulas.h. Formulas must match the canonical
- * C implementations in spectral_osc_formulas.h exactly. */
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 5,
-    "oscillator_metal_source MSL strings are stale — mirror formula changes and bump version");
-const char* oscillator_metal_source =
-"#define TIMBRE_SINE     0\n"
-"#define TIMBRE_SAW      1\n"
-"#define TIMBRE_SQUARE   2\n"
-"#define TIMBRE_TRIANGLE 3\n"
-"#define TIMBRE_ASIN     4\n"
-"#define TIMBRE_PARABOLA 5\n"
-"\n"
-"#define TWO_PI " SPECTRAL_STR(SPECTRAL_TWO_PI) "\n"
-"#define INV_TWO_PI " SPECTRAL_STR(SPECTRAL_INV_TWO_PI) "\n"
-"#define INV_PI " SPECTRAL_STR(SPECTRAL_INV_PI) "\n"
-"#define INV_PI_SQ " SPECTRAL_STR(SPECTRAL_INV_PI_SQ) "\n"
-"#define PI " SPECTRAL_STR(SPECTRAL_PI) "\n"
-"\n"
-"/* Must match spectral_fast_sin_inline() in spectral_osc_formulas.h */\n"
-"inline float oscillator_fast_sin(float x) {\n"
-"    return sin(x);\n"
-"}\n"
-"\n"
-"/* Must match spectral_normalize_phase() in spectral_osc_formulas.h */\n"
-"inline float oscillator_normalize_phase(float p) {\n"
-"    return p - TWO_PI * floor(p * INV_TWO_PI + 0.5f);\n"
-"}\n"
-"\n"
-"#define FADE_SAMPLES " SPECTRAL_STR(SPECTRAL_FADE_SAMPLES_DESKTOP) "\n"
-"\n"
-"/* Must match spectral_fade_envelope_gpu() in spectral_osc_formulas.h */\n"
-"inline float fade_envelope(float j, float seg_len) {\n"
-"    float fade_len = min(seg_len * 0.25f, (float)FADE_SAMPLES);\n"
-"    if (fade_len < 1.0f) fade_len = 1.0f;\n"
-"    float inv_fade = 1.0f / fade_len;\n"
-"    if (j < fade_len) {\n"
-"        return 0.5f * (1.0f + oscillator_fast_sin((j * inv_fade - 0.5f) * PI));\n"
-"    }\n"
-"    float from_end = seg_len - 1.0f - j;\n"
-"    if (from_end < fade_len) {\n"
-"        return 0.5f * (1.0f + oscillator_fast_sin((from_end * inv_fade - 0.5f) * PI));\n"
-"    }\n"
-"    return 1.0f;\n"
-"}\n"
-"\n"
-"/* Must match spectral_osc_* waveforms in spectral_osc_formulas.h */\n"
-"inline float oscillator(float phase, uint timbre) {\n"
-"    float rads = oscillator_normalize_phase(phase);\n"
-"    switch (timbre) {\n"
-"        case TIMBRE_SINE:     return oscillator_fast_sin(rads);\n"
-"        case TIMBRE_SAW:      return rads * -INV_PI;\n"
-"        case TIMBRE_SQUARE:   return (rads > 0.0f) ? 1.0f : -1.0f;\n"
-"        case TIMBRE_TRIANGLE: return (1.0f - abs(rads) * INV_PI) * 2.0f - 1.0f;\n"
-"        case TIMBRE_ASIN:     return asin(clamp(rads * INV_PI, -1.0f, 1.0f));\n"
-"        case TIMBRE_PARABOLA: return 1.0f - rads * rads * INV_PI_SQ;\n"
-"        default:              return oscillator_fast_sin(rads);\n"
-"    }\n"
-"}\n";
-
-#endif /* __APPLE__ && !__CUDACC__ */
+/* Metal shader source — generated from the C synthesis contract
+ * (spectral_osc_formulas.h / spectral_segment_math.h / SPECTRAL_OSC_TIMBRE_LIST)
+ * by tools/spectral_tools/generators/metal_osc.py.  The generated header defines
+ * both oscillator_metal_source and spectral_segment_math_metal_source under the
+ * Apple/non-CUDA guard, with constant *values* still injected by the C
+ * preprocessor via SPECTRAL_STR (single source = spectral_consts.h).
+ *
+ * The old hand-mirrored MSL string + _Static_assert version lock are gone: the
+ * CMake verify_metal_osc target regenerates this header from the C formulas every
+ * build and fails if the committed copy drifts, so the Metal shader can no longer
+ * silently diverge from the CPU/CUDA backends. */
+#include "spectral_osc_metal_generated.h"

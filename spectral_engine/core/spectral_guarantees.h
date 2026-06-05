@@ -87,7 +87,7 @@ static inline const spectral_guarantee_info_t* spectral_guarantee_table(size_t* 
 {
     static const spectral_guarantee_info_t table[] = {
         { SPECTRAL_GUARANTEE_IEEE_STRICT_FP,          "ieee_strict_fp",          "SPECTRAL_CUSTOM_FAST_MATH_MODE",          "project-wide -ffast-math: reassociation, no-signed-zero, reciprocal, fp-contract=fast" },
-        { SPECTRAL_GUARANTEE_EXACT_TRIG,              "exact_trig",              "SPECTRAL_ENABLE_APPROX_TRIG",             "libm sinf -> bounded odd-Taylor poly in oscillator + peak estimator" },
+        { SPECTRAL_GUARANTEE_EXACT_TRIG,              "exact_trig",              "SPECTRAL_ENABLE_APPROX_TRIG",             "libm sinf -> degree-9 odd minimax fold in oscillator + peak estimator (relaxed by default)" },
         { SPECTRAL_GUARANTEE_EXACT_ATAN2,             "exact_atan2",             "SPECTRAL_ENABLE_APPROX_ATAN2",            "atan2f -> rational poly in phase extraction" },
         { SPECTRAL_GUARANTEE_EXACT_INV_SQRT,          "exact_inv_sqrt",          "SPECTRAL_ENABLE_APPROX_INV_SQRT",         "1/sqrtf -> Quake rsqrt (two Newton steps) in magnitude/normalization" },
         { SPECTRAL_GUARANTEE_EXACT_PEAK_LOG,          "exact_peak_log",          "SPECTRAL_ENABLE_APPROX_PEAK_LOG",         "logf -> atanh series (z^11) in peak-dB interpolation" },

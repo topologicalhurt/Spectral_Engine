@@ -35,13 +35,16 @@ static int g_fail = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
 
 /* Measured worst case (build with all APPROX_* on):
- *   sin   1.75e-06 abs over [-4pi,4pi]
+ *   sin   8.26e-07 abs over [-4pi,4pi]  (degree-9 odd minimax quadrant fold;
+ *                                        ~1.4 ULP over the [-pi,pi] operating
+ *                                        range, the 4-period sweep adds reduction
+ *                                        error the oscillator never sees)
  *   atan2 2.03e-04 rad
  *   rsqrt 4.71e-06 rel over [1e-3,1e3]
  *   log   6.80e-07 abs over [1e-4,1e4]
  * Budgets are loose multiples so float-FP variance across platforms is allowed
  * but a real polynomial regression is caught. */
-#define BUDGET_SIN       5.0e-6
+#define BUDGET_SIN       2.0e-6
 #define BUDGET_ATAN2     5.0e-4
 #define BUDGET_RSQRT_REL 1.0e-5
 #define BUDGET_PEAK_LOG  2.0e-6

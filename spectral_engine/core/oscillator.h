@@ -3,6 +3,7 @@
 #define OSCILLATOR_H
 
 #include "oscillator_dispatch.h"
+#include "spectral_osc_formulas.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +18,45 @@ extern "C" {
 /* SegmentLoopParams defined in spectral_synth_internal.h */
 struct SegmentLoopParams;
 
+/* THE canonical timbre -> L0-waveform map. Single source of truth, expanded in
+ * two places that must never drift: the spectral_osc_eval() switch below
+ * (single-sample + CUDA device path) and the host-side osc_waveform_fn() pointer
+ * selector in oscillator.c (hot per-segment scalar loop). One list, two
+ * expansions, zero divergence. */
+#define SPECTRAL_OSC_TIMBRE_LIST(X)        \
+    X(TIMBRE_SINE,      spectral_osc_sine)      \
+    X(TIMBRE_SAW,       spectral_osc_saw)       \
+    X(TIMBRE_SQUARE,    spectral_osc_square)    \
+    X(TIMBRE_TRIANGLE,  spectral_osc_triangle)  \
+    X(TIMBRE_ASIN,      spectral_osc_asin)      \
+    X(TIMBRE_PARABOLA,  spectral_osc_parabola)  \
+    X(TIMBRE_QUANTIZED, spectral_osc_quantized) \
+    X(TIMBRE_PWM,       spectral_osc_pwm)
+
+/* L1 per-sample oscillator kernel — THE single dispatch point shared by the
+ * single-sample timbre_oscillator(), the CUDA tile kernel, and (mirrored) Metal.
+ * Normalizes the phase once via the canonical L0 formula, then selects the L0
+ * waveform.  Same float op sequence the former per-backend switches ran, so the
+ * CUDA path is bit-faithful and the host single-sample API is byte-identical.
+ * Compiles as `static inline` in C and `__device__ __forceinline__` under nvcc
+ * via OSC_FORMULA_FUNC.
+ *
+ * NOTE: the hot host *segment* loop does NOT call this per sample — it hoists
+ * the timbre dispatch out of the loop via osc_waveform_fn() (oscillator.c), so
+ * the inner loop is a tight call to one fixed L0 waveform.  Calling this switch
+ * per sample measured ~1.6x slower on the scalar/asin paths (the loop-invariant
+ * dispatch was not unswitched).  Both forms are byte-identical; this one is the
+ * portable single source, that one is its host-hoisted specialization. */
+OSC_FORMULA_FUNC float spectral_osc_eval(float phase, int timbre, float width) {
+    float rads = spectral_normalize_phase(phase);
+    switch (timbre) {
+#define SPECTRAL_OSC_EVAL_CASE(T, FN) case T: return FN(rads, width);
+        SPECTRAL_OSC_TIMBRE_LIST(SPECTRAL_OSC_EVAL_CASE)
+#undef SPECTRAL_OSC_EVAL_CASE
+        default: return spectral_osc_sine(rads, width);
+    }
+}
+
 OSC_HOT float timbre_oscillator(float p, float a, SpectralTimbre timbre, float width);
 
 /* Segment synthesis with backend dispatch */
@@ -25,31 +65,34 @@ OSC_HOT void timbre_synth_segment(float* __restrict__ dst, const struct SegmentL
 void osc_set_dispatch(OscDispatchWord dispatch);
 OscDispatchWord osc_get_dispatch(void);
 
-/* CUDA oscillator — delegates to canonical formulas in spectral_osc_formulas.h */
-#ifdef __CUDACC__
+/* Per-timbre opt-in Q15 *compute* domain (Q3b, QTYPE_DOMAIN_PLAN.md §5).
+ * Bit (1u << timbre) set => that timbre's point-sampled sustain renders via the
+ * Q15 evaluators (spectral_osc_q15.h) instead of float.  Float is the DEFAULT
+ * (mask 0); Q15 is lossy (~-85..-92 dBFS vs float, PASS208) and engaged only
+ * when explicitly enabled.  Only sine/saw/square/triangle/parabola have a Q15
+ * path (osc_q15_available); the bit is ignored for any other timbre. */
+#define OSC_Q15_BIT(timbre) ((uint16_t)(1u << (timbre)))
+void osc_set_q15_enable(uint16_t mask);
+uint16_t osc_get_q15_enable(void);
+int osc_q15_available(SpectralTimbre timbre);
 
-#include "spectral_osc_formulas.h"
+/* CUDA oscillator — thin wrapper over the shared L1 kernel above. */
+#ifdef __CUDACC__
 
 #define oscillator_normalize_phase_cuda spectral_normalize_phase
 #define oscillator_fast_sin_cuda        spectral_fast_sin_inline
 
 __device__ __forceinline__ float oscillator_cuda(float phase, int timbre) {
-    float rads = spectral_normalize_phase(phase);
-    switch (timbre) {
-        case TIMBRE_SINE:     return spectral_osc_sine(rads, 0);
-        case TIMBRE_SAW:      return spectral_osc_saw(rads, 0);
-        case TIMBRE_SQUARE:   return spectral_osc_square(rads, 0);
-        case TIMBRE_TRIANGLE: return spectral_osc_triangle(rads, 0);
-        case TIMBRE_ASIN:     return spectral_osc_asin(rads, 0);
-        case TIMBRE_PARABOLA: return spectral_osc_parabola(rads, 0);
-        default:              return spectral_osc_sine(rads, 0);
-    }
+    return spectral_osc_eval(phase, timbre, 0.0f);
 }
 
 #endif
 
 #if defined(__APPLE__) && !defined(__CUDACC__)
+/* Both defined in core/spectral_osc_metal_generated.h (codegen from the C
+ * synthesis contract), included by oscillator.c. */
 extern const char* oscillator_metal_source;
+extern const char* spectral_segment_math_metal_source;
 #endif
 
 #ifdef __cplusplus

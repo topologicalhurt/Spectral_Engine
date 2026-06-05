@@ -42,8 +42,14 @@
  * Keep these disabled by default. Enable them only with dedicated error-bound
  * and perceptual-regression tests for the target backend.
  */
+/* TRIG is the exception: the canonical sine is a degree-9 odd minimax fold
+ * (spectral_fast_sin_inline), default-ON because it is both faster and
+ * SIMD-vectorizable while staying within ~1.4 ULP of libm over the oscillator's
+ * operating range (8.3e-7 worst case over [-4pi,4pi]); see the EXACT_TRIG
+ * guarantee in spectral_guarantees.h and PATCH_NOTES_PASS201. Set to 0 to
+ * restore exact libm sinf (reproducible/parity builds). */
 #ifndef SPECTRAL_ENABLE_APPROX_TRIG
-#define SPECTRAL_ENABLE_APPROX_TRIG 0
+#define SPECTRAL_ENABLE_APPROX_TRIG 1
 #endif
 #ifndef SPECTRAL_ENABLE_APPROX_ATAN2
 #define SPECTRAL_ENABLE_APPROX_ATAN2 0
@@ -56,6 +62,16 @@
 #endif
 #ifndef SPECTRAL_METAL_FAST_MATH
 #define SPECTRAL_METAL_FAST_MATH 0
+#endif
+/* Precise (cubic) MQ phase reconstruction gate.
+ * When 0 (default) the synthesis phase model is the canonical per-interval
+ * quadratic phase (McAulay-Quatieri 1986 per-frame interpolation); the cubic
+ * coefficients reduce to (c2=beta, c3=0) so the synth path is bit-identical.
+ * When 1, the adaptive_track_density stage may annotate segments with
+ * cross-frame cubic phase coefficients (smooth C1 phase across hops) which the
+ * synth path consumes. Opt-in and tested against a signed-off golden. */
+#ifndef SPECTRAL_PRECISE_PHASE
+#define SPECTRAL_PRECISE_PHASE 0
 #endif
 /* Restricted profiling gate (single ownership).
  * Enabled only when restricted mode is active and restricted debug profiling

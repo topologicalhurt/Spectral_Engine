@@ -1,4 +1,38 @@
-/* spectral_q15.h - Q15 fixed-point types and arithmetic */
+/* spectral_q15.h - Q15 fixed-point types and arithmetic
+ *
+ * CANONICAL Q-DOMAIN HEADER (all targets). This is the single source of truth
+ * for the fixed-point types (q15_t/q31_t/uq16_t/uq32_t), their saturating
+ * primitives, and the float<->Q boundary macros. It compiles host-side as well
+ * as embedded, so desktop hot paths may select the Q domain too.
+ *
+ * TWO LAYERS (keep them separate — see QTYPE_DOMAIN_PLAN.md §2):
+ *   1. Storage / transport packing. Boundaries that are *already* int16 (final
+ *      PCM out, segment storage, sine LUT). Packing to Q15 here is free and
+ *      lossless at the boundary — a throughput/bandwidth win at no precision
+ *      cost.
+ *   2. Compute-in-Q15 intermediates. Lossy: Q15 has a ~92 dB SNR ceiling vs the
+ *      float oscillator's -155 dBFS, so computing audio *in* Q15 spends ~60 dB
+ *      of headroom. Opt-in, per-path, only where 15 bits is provably enough and
+ *      the path is throughput-bound. Float stays the default domain.
+ *
+ * THE BOUNDARY-MACRO RULE (enforced by the q_domain_contract CTest):
+ *   Every float<->Q conversion goes through a NAMED boundary macro — never an
+ *   ad-hoc multiply by a raw scale constant. The sanctioned macros are
+ *   FLOAT_TO_Q15 / Q15_TO_FLOAT / FLOAT_TO_Q31 / Q31_TO_FLOAT / PHASE_RAD_TO_Q15
+ *   / OMEGA_TO_Q88 here, plus SPECTRAL_SAMPLE_TO_FLOAT / FLOAT_TO_SPECTRAL_SAMPLE
+ *   (the PCM-sample boundary) in spectral_config.h. The raw scale constants
+ *   (SPECTRAL_Q15_SCALE / SPECTRAL_INV_Q15_SCALE / SPECTRAL_Q31_SCALE /
+ *   SPECTRAL_INV_Q31_SCALE) may ONLY appear inside those macro definitions; the
+ *   contract test fails the build if they leak into any other file.
+ *
+ * THE Q-DOMAIN REGION MARKER:
+ *   Pure fixed-point compute blocks are bracketed by
+ *     // SPECTRAL_Q_DOMAIN BEGIN   ...   // SPECTRAL_Q_DOMAIN END
+ *   markers. The contract test rejects any `float`/`double` token inside such a
+ *   region — that is the "no float arithmetic in a Q kernel" half of the
+ *   no-mixing rule. Wrap future vectorized Q15 kernels (Q3) in these markers so
+ *   they inherit enforcement; keep boundary conversions OUTSIDE the region.
+ */
 #ifndef SPECTRAL_Q15_H
 #define SPECTRAL_Q15_H
 
@@ -149,7 +183,10 @@ static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
 
 #endif /* __ARM_FEATURE_DSP */
 
-/* Higher-level Q15 operations (always portable, call inline primitives above) */
+/* Higher-level Q15 operations (always portable, call inline primitives above).
+ * Pure fixed-point: no float/double may appear between the markers below — the
+ * q_domain_contract CTest enforces it. Conversions stay outside the region. */
+// SPECTRAL_Q_DOMAIN BEGIN
 static inline q15_t spectral_mul_q15(q15_t a, q15_t b) {
     return spectral_ssat16(spectral_smulbb(a, b) >> 15);
 }
@@ -159,6 +196,7 @@ static inline q31_t spectral_mac_q15(q31_t acc, q15_t a, q15_t b) {
 static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
     return spectral_mul_q15(sample, amplitude);
 }
+// SPECTRAL_Q_DOMAIN END
 
 /* Q30 accumulator (sum of Q15*Q15 MAC products) -> Q15 output with master
  * scaling, via a >>15 shift. See spectral_q15.c / pass 145. */

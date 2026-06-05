@@ -251,7 +251,7 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
             return WAVETABLE_ERR_SIZE;
         }
         for (size_t i = 0; i < hdr.size; i++) {
-            float sample_f = (float)temp[i] * SPECTRAL_INV_Q15_SCALE;
+            float sample_f = SPECTRAL_SAMPLE_TO_FLOAT(temp[i]);
             table->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE(sample_f);
         }
         free(temp);

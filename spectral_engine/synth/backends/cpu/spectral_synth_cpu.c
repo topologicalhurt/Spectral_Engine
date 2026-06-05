@@ -28,6 +28,13 @@ typedef struct {
     int    n_threads;
     size_t buf_stride;  /* Distance between thread buffers (aligned) */
     size_t buf_size;    /* Actual used size per buffer */
+    /* Output-tiling (O1-B): each partition's segments occupy a contiguous output
+     * span [span_lo, span_lo+span_len).  Per-thread buffers are sized to the
+     * widest span (buf_size) instead of the full output, and the combine pass
+     * sums each span back at its offset — eliminating the O(threads*out_len)
+     * private-buffer footprint and full reduce pass.  Borrowed, driver-owned. */
+    const size_t* span_lo;   /* per-partition output start offset (samples) */
+    const size_t* span_len;  /* per-partition span length (samples) */
 } ThreadBuffers;
 
 static int synth_partition_count(size_t seg_count, int n_threads) {
@@ -164,18 +171,31 @@ static void thread_buffers_free(ThreadBuffers* tb) {
 
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
-static SpectralError thread_buffers_reduce_float(const ThreadBuffers* tb, float* out_buffer,
-                                                 size_t out_len, size_t out_bytes) {
+static SpectralError thread_buffers_combine_float(const ThreadBuffers* tb, float* __restrict__ out_buffer,
+                                                  size_t out_len, size_t out_bytes) {
     if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
         return SPECTRAL_ERR_PARAM;
     }
-    if (tb->buf_size < out_bytes) {
-        return SPECTRAL_ERR_OVERFLOW;
+    if (!tb->span_lo || !tb->span_len) {
+        return SPECTRAL_ERR_PARAM;
     }
 
-    memcpy(out_buffer, tb->bufs[0], out_bytes);
-    for (int t = 1; t < tb->n_threads; t++) {
-        spectral_vadd(out_buffer, (float*)tb->bufs[t], out_buffer, out_len);
+    /* Partitions tile the output: zero the whole buffer, then add each span back
+     * at its offset in ascending partition order.  This reproduces the legacy
+     * reduce exactly — a partition contributes 0 outside its span (an exact IEEE
+     * identity under +), and the per-element accumulation order is unchanged. */
+    memset(out_buffer, 0, out_bytes);
+    for (int t = 0; t < tb->n_threads; t++) {
+        const size_t lo = tb->span_lo[t];
+        const size_t len = tb->span_len[t];
+        if (len == 0u) continue;
+        if (lo > out_len || len > out_len - lo) {
+            return SPECTRAL_ERR_OVERFLOW;
+        }
+        if (len > tb->buf_size / sizeof(float)) {
+            return SPECTRAL_ERR_OVERFLOW;
+        }
+        spectral_vadd(out_buffer + lo, (float*)tb->bufs[t], out_buffer + lo, len);
     }
     if (!spectral_f32_span_finite(out_buffer, out_len)) {
         return SPECTRAL_ERR_PARAM;
@@ -185,22 +205,31 @@ static SpectralError thread_buffers_reduce_float(const ThreadBuffers* tb, float*
 
 #endif
 
-static SpectralError thread_buffers_reduce_native(const ThreadBuffers* tb, spectral_sample_t* out_buffer,
-                                                  size_t out_len, size_t out_bytes) {
+static SpectralError thread_buffers_combine_native(const ThreadBuffers* tb, spectral_sample_t* __restrict__ out_buffer,
+                                                   size_t out_len, size_t out_bytes) {
     if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
         return SPECTRAL_ERR_PARAM;
     }
-    if (tb->buf_size < out_bytes) {
-        return SPECTRAL_ERR_OVERFLOW;
+    if (!tb->span_lo || !tb->span_len) {
+        return SPECTRAL_ERR_PARAM;
     }
 
-    #pragma omp parallel for schedule(static)
-    for (size_t j = 0; j < out_len; j++) {
-        spectral_sample_t sum = ((spectral_sample_t*)tb->bufs[0])[j];
-        for (int t = 1; t < tb->n_threads; t++) {
-            sum = SPECTRAL_SAMPLE_ADD(sum, ((spectral_sample_t*)tb->bufs[t])[j]);
+    memset(out_buffer, 0, out_bytes);
+    for (int t = 0; t < tb->n_threads; t++) {
+        const size_t lo = tb->span_lo[t];
+        const size_t len = tb->span_len[t];
+        if (len == 0u) continue;
+        if (lo > out_len || len > out_len - lo) {
+            return SPECTRAL_ERR_OVERFLOW;
         }
-        out_buffer[j] = sum;
+        if (len > tb->buf_size / sizeof(spectral_sample_t)) {
+            return SPECTRAL_ERR_OVERFLOW;
+        }
+        const spectral_sample_t* __restrict__ src = (const spectral_sample_t*)tb->bufs[t];
+        spectral_sample_t* __restrict__ dst = out_buffer + lo;
+        for (size_t j = 0; j < len; j++) {
+            dst[j] = SPECTRAL_SAMPLE_ADD(dst[j], src[j]);
+        }
     }
     return SPECTRAL_OK;
 }
@@ -223,24 +252,91 @@ static SpectralError synth_cpu_driver(
     SpectralError reduce_err = SPECTRAL_OK;
     int n_parts = synth_partition_count(sa.count, n_threads);
     ThreadBuffers tb = {0};
+    size_t* span_lo = NULL;
+    size_t* span_len = NULL;
+    size_t max_span = 0;
 
     if (!spectral_size_mul(out_len, elem_size, &out_bytes)) {
         *t_synth = 0;
         return SPECTRAL_ERR_OVERFLOW;
     }
 
-    tb = thread_buffers_alloc(n_parts, out_len, elem_size, &tb_err);
+    /* O1-B output tiling: each partition owns segments by contiguous INDEX range;
+     * those segments write a contiguous output window [span_lo, span_lo+span_len).
+     * Sizing per-thread buffers to the widest window (max_span) instead of the
+     * full output replaces the O(threads*out_len) private-buffer footprint with
+     * O(threads*max_span), and the combine pass adds each window back at its
+     * offset.  Bit-identical: outside its window a partition contributes exactly
+     * +0.0 (an exact additive identity), and the ascending-partition combine
+     * order matches the legacy full reduce. */
+    span_lo = spectral_calloc_array((size_t)n_parts, sizeof(size_t));
+    span_len = spectral_calloc_array((size_t)n_parts, sizeof(size_t));
+    if (!span_lo || !span_len) {
+        free(span_lo);
+        free(span_len);
+        memset(out_buffer, 0, out_bytes);
+        *t_synth = 0;
+        return SPECTRAL_ERR_MEMORY;
+    }
+
+    /* Span pre-pass: same partitioning and same segment_loop_params_init as the
+     * synth loop below, so the window bounds it derives exactly contain every
+     * write that loop performs. */
+    #pragma omp parallel for schedule(static) num_threads(n_parts)
+    for (int p = 0; p < n_parts; p++) {
+        size_t seg_start = ((size_t)p * sa.count) / (size_t)n_parts;
+        size_t seg_end = ((size_t)(p + 1) * sa.count) / (size_t)n_parts;
+        size_t lo = out_len;   /* sentinel: empty partition -> hi(0) <= lo(out_len) */
+        size_t hi = 0;
+
+        for (size_t i = seg_start; i < seg_end; i++) {
+            SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
+            if (!lp.valid) continue;   /* valid => length>=1, start_idx<out_len */
+            size_t s = lp.start_idx;
+            size_t e = lp.start_idx + lp.length;   /* clamped so e <= out_len */
+            if (s < lo) lo = s;
+            if (e > hi) hi = e;
+        }
+
+        if (hi > lo) {
+            span_lo[p] = lo;
+            span_len[p] = hi - lo;
+        } else {
+            span_lo[p] = 0;
+            span_len[p] = 0;
+        }
+    }
+
+    for (int p = 0; p < n_parts; p++) {
+        if (span_len[p] > max_span) max_span = span_len[p];
+    }
+
+    if (max_span == 0) {
+        /* Every partition is empty (all segments rejected): output is silence. */
+        memset(out_buffer, 0, out_bytes);
+        free(span_lo);
+        free(span_len);
+        *t_synth = omp_get_wtime() - synth_start;
+        return SPECTRAL_OK;
+    }
+
+    tb = thread_buffers_alloc(n_parts, max_span, elem_size, &tb_err);
     if (!tb.bufs) {
         memset(out_buffer, 0, out_bytes);
+        free(span_lo);
+        free(span_len);
         *t_synth = 0;
         return tb_err != SPECTRAL_OK ? tb_err : SPECTRAL_ERR_MEMORY;
     }
+    tb.span_lo = span_lo;
+    tb.span_len = span_len;
 
     #pragma omp parallel for schedule(static) num_threads(n_parts)
     for (int p = 0; p < n_parts; p++) {
         size_t seg_start = ((size_t)p * sa.count) / (size_t)n_parts;
         size_t seg_end = ((size_t)(p + 1) * sa.count) / (size_t)n_parts;
         char* dst_base = (char*)tb.bufs[p];
+        size_t lo = span_lo[p];
 
         for (size_t i = seg_start; i < seg_end; i++) {
             if (i + 4 < seg_end) SPECTRAL_PREFETCH_READ(&sa.segs[i + 4]);
@@ -248,7 +344,7 @@ static SpectralError synth_cpu_driver(
             SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
             if (!lp.valid) continue;
 
-            void* dst = dst_base + lp.start_idx * elem_size;
+            void* dst = dst_base + (lp.start_idx - lo) * elem_size;
             segment_fn(dst, &lp, fn_ctx);
         }
     }
@@ -257,22 +353,26 @@ static SpectralError synth_cpu_driver(
     if (reduce_err != SPECTRAL_OK) {
         memset(out_buffer, 0, out_bytes);
         thread_buffers_free(&tb);
+        free(span_lo);
+        free(span_len);
         *t_synth = 0;
         return reduce_err;
     }
     thread_buffers_free(&tb);
+    free(span_lo);
+    free(span_len);
     *t_synth = omp_get_wtime() - synth_start;
     return SPECTRAL_OK;
 }
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static SpectralError reduce_float_wrapper(const ThreadBuffers* tb, void* out, size_t len, size_t out_bytes) {
-    return thread_buffers_reduce_float(tb, (float*)out, len, out_bytes);
+    return thread_buffers_combine_float(tb, (float*)out, len, out_bytes);
 }
 #endif
 
 static SpectralError reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len, size_t out_bytes) {
-    return thread_buffers_reduce_native(tb, (spectral_sample_t*)out, len, out_bytes);
+    return thread_buffers_combine_native(tb, (spectral_sample_t*)out, len, out_bytes);
 }
 
 /* Per-segment callbacks */
@@ -294,7 +394,7 @@ static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, c
     float* out = (float*)dst;
     FadeParams fp = fade_params_init(lp->length, SPECTRAL_SYNTH_CPU_FADE_SAMPLES);
     for (size_t j = 0; j < lp->length; j++) {
-        float p = spectral_segment_phase_at_f32(lp->phase, lp->alpha, lp->beta, (float)j);
+        float p = spectral_segment_phase_at_cubic_f32(lp->phase, lp->alpha, lp->c2, lp->c3, (float)j);
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
         float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         spectral_sample_t sample = spectral_wavetable_lookup_f(wc->table, phase_norm);
@@ -308,7 +408,7 @@ static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, con
     spectral_sample_t* out = (spectral_sample_t*)dst;
     FadeParams fp = fade_params_init(lp->length, SPECTRAL_SYNTH_CPU_FADE_SAMPLES);
     for (size_t j = 0; j < lp->length; j++) {
-        float p = spectral_segment_phase_at_f32(lp->phase, lp->alpha, lp->beta, (float)j);
+        float p = spectral_segment_phase_at_cubic_f32(lp->phase, lp->alpha, lp->c2, lp->c3, (float)j);
         float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         float sample_f = timbre_oscillator(p, amp, tc->timbre, lp->width);
         out[j] = SPECTRAL_SAMPLE_ADD(out[j], FLOAT_TO_SPECTRAL_SAMPLE(sample_f));
@@ -320,7 +420,7 @@ static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, 
     spectral_sample_t* out = (spectral_sample_t*)dst;
     FadeParams fp = fade_params_init(lp->length, SPECTRAL_SYNTH_CPU_FADE_SAMPLES);
     for (size_t j = 0; j < lp->length; j++) {
-        float p = spectral_segment_phase_at_f32(lp->phase, lp->alpha, lp->beta, (float)j);
+        float p = spectral_segment_phase_at_cubic_f32(lp->phase, lp->alpha, lp->c2, lp->c3, (float)j);
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
         float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         spectral_sample_t sample = spectral_wavetable_lookup_f(nwc->table, phase_norm);

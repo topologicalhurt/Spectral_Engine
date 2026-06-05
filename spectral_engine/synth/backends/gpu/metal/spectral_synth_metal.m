@@ -12,19 +12,16 @@
 #include "spectral_utils.h"
 #include "oscillator.h"
 #include "spectral_omp.h"
-#include "spectral_segment_math.h"
-#include "spectral_osc_formulas.h"
 
-/* Compile-time parity guard: if the canonical C formulas change, bump their
- * version constant and update the MSL strings below to match.  A mismatch
- * here means the Metal shader is out of sync with CPU/CUDA backends. */
-_Static_assert(SPECTRAL_SEGMENT_MATH_VERSION == 1,
-    "Metal segment_math MSL strings are stale — update metalKernelCode and bump version");
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 5,
-    "Metal oscillator MSL strings are stale — update oscillator_metal_source and bump version");
+/* The oscillator and segment-math MSL functions are CODEGEN'd from the canonical
+ * C contract (spectral_osc_formulas.h / spectral_segment_math.h) into
+ * core/spectral_osc_metal_generated.h by tools/.../generators/metal_osc.py and
+ * exposed as oscillator_metal_source + spectral_segment_math_metal_source.  The
+ * CMake verify_metal_osc target enforces they match the C formulas every build,
+ * which replaces the old _Static_assert(VERSION==N) drift reminders. */
 
 /* Metal kernel source - struct definitions and synthesis kernel.
- * Oscillator functions come from oscillator_metal_source (defined in oscillator.c).
+ * Oscillator + segment-math functions come from the generated MSL strings.
  * Uses SegmentGpu (32 bytes) for parity with CUDA — doubles threadgroup cache. */
 static const char* metalKernelStructs = 
 "#include <metal_stdlib>\n"
@@ -64,30 +61,8 @@ static const char* metalKernelCode =
 "#define SEGMENT_CACHE_SIZE " SPECTRAL_STR(SPECTRAL_GPU_SEG_CACHE_SIZE) "\n"
 "/* 32-byte SegmentGpu = 2x entries in same threadgroup budget */\n"
 "\n"
-"/* Backend parity note:\n"
-" * MSL source is compiled from this runtime string, so it cannot include\n"
-" * core/spectral_segment_math.h directly.  Keep these helpers in lockstep\n"
-" * with spectral_segment_{alpha,beta,d_amp,phase_at,amp_at}_f32 formulas.\n"
-" *\n"
-" * WARNING: any change to spectral_segment_math.h MUST be mirrored here.\n"
-" * CUDA includes the header directly; Metal cannot.  If formulas drift,\n"
-" * Metal output will silently differ from CPU/CUDA. */\n"
-"inline float segment_alpha(float omega, float pitch_factor, float inv_stretch) {\n"
-"    return omega * pitch_factor * inv_stretch;\n"
-"}\n"
-"inline float segment_beta(float df, float pitch_factor, float inv_stretch_sq) {\n"
-"    return df * pitch_factor * inv_stretch_sq;\n"
-"}\n"
-"inline float segment_d_amp(float da, float inv_stretch) {\n"
-"    return da * inv_stretch;\n"
-"}\n"
-"inline float segment_phase_at(float phase0, float alpha, float beta, float sample_offset) {\n"
-"    return phase0 + sample_offset * (alpha + beta * sample_offset);\n"
-"}\n"
-"inline float segment_amp_at(float amp0, float d_amp, float sample_offset) {\n"
-"    return amp0 + d_amp * sample_offset;\n"
-"}\n"
-" \n"
+"/* segment_alpha/beta/d_amp/phase_at/amp_at are provided by the generated\n"
+" * spectral_segment_math_metal_source string (prepended at compile time). */\n"
 "kernel void synthesize_tile_parallel(\n"
 "    device const SegmentGpu* segments [[buffer(0)]],\n"
 "    device const uint* tile_segment_ids [[buffer(1)]],\n"
@@ -208,15 +183,18 @@ void metal_init(void) {
 #endif
         options.languageVersion = MTLLanguageVersion2_4;
         
-        if (!oscillator_metal_source) {
-            SPECTRAL_WARN("Metal: oscillator_metal_source is NULL (oscillator.c not linked?)");
+        if (!oscillator_metal_source || !spectral_segment_math_metal_source) {
+            SPECTRAL_WARN("Metal: generated MSL source is NULL (oscillator.c not linked?)");
             return;
         }
 
-        /* Combine shader sources: structs + oscillator (from oscillator.c) + kernel */
-        NSString* source = [NSString stringWithFormat:@"%s%s%s",
+        /* Combine shader sources: structs + generated oscillator + generated
+         * segment math + kernel.  The two middle strings are codegen'd from the
+         * C contract (spectral_osc_metal_generated.h). */
+        NSString* source = [NSString stringWithFormat:@"%s%s%s%s",
                            metalKernelStructs,
-                           oscillator_metal_source,  /* From oscillator.c */
+                           oscillator_metal_source,
+                           spectral_segment_math_metal_source,
                            metalKernelCode];
         id<MTLLibrary> library = [metalDevice newLibraryWithSource:source options:options error:&error];
         if (error) {

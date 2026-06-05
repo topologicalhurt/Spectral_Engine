@@ -322,10 +322,29 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
         return lp;
     }
 
+    /* Cubic phase coefficients.  Default is the quadratic model (c2=beta, c3=0)
+     * which makes the cubic evaluator bit-identical to the quadratic helper.
+     * When a track-linkage stage annotated this segment (and the precise-phase
+     * build is enabled) the analysis-domain cubic coeffs are transformed into
+     * the synth (pitch/stretch) domain the same way alpha/beta are. */
+    float c2 = beta;
+    float c3 = 0.0f;
+#if SPECTRAL_PRECISE_PHASE
+    if (spectral_segment_has_cubic(s)) {
+        const float inv_stretch_cubed = p->inv_stretch_sq * p->inv_stretch;
+        c2 = spectral_segment_beta_f32(spectral_segment_cubic_c2(s), p->pitch_factor, p->inv_stretch_sq);
+        c3 = spectral_segment_cubic_c3(s) * p->pitch_factor * inv_stretch_cubed;
+        if (!spectral_is_finite_f32(c2) || !spectral_is_finite_f32(c3)) {
+            lp.valid = 0;
+            return lp;
+        }
+    }
+#endif
+
     {
         const float last = (float)last_offset_d;
-        const float phase0 = spectral_segment_phase_at_f32(s->phase, alpha, beta, 0.0f);
-        const float phase1 = spectral_segment_phase_at_f32(s->phase, alpha, beta, last);
+        const float phase0 = spectral_segment_phase_at_cubic_f32(s->phase, alpha, c2, c3, 0.0f);
+        const float phase1 = spectral_segment_phase_at_cubic_f32(s->phase, alpha, c2, c3, last);
         const float amp0 = spectral_segment_amp_at_f32(s->amp, d_amp, 0.0f);
         const float amp1 = spectral_segment_amp_at_f32(s->amp, d_amp, last);
 
@@ -340,6 +359,8 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
     lp.alpha = alpha;
     lp.beta = beta;
+    lp.c2 = c2;
+    lp.c3 = c3;
     lp.d_amp = d_amp;
     lp.phase = s->phase;
     lp.amp = s->amp;

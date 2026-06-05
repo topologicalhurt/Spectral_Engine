@@ -28,6 +28,28 @@ typedef struct __attribute__((aligned(64))) {
 _Static_assert(sizeof(Segment) == 64, "Segment size");
 #endif
 
+/* Cubic MQ phase annotation lives in the 64-byte Segment's spare pad words.
+ * Layout (only the desktop/GPU 64B Segment has room; embedded 32B does not):
+ *   _pad_w[0] = c2 (quadratic phase coeff, == beta when no cross-frame linkage)
+ *   _pad_w[1] = c3 (cubic phase coeff, 0 when no cross-frame linkage)
+ *   _pad_w[2] = annotation flag (non-zero => c2/c3 valid). finalize() memsets
+ *               _pad_w to 0, so an un-annotated segment reads back as absent. */
+static inline int spectral_segment_has_cubic(const Segment* seg) {
+    return seg && seg->_pad_w[2] != 0.0f;
+}
+static inline void spectral_segment_set_cubic(Segment* seg, float c2, float c3) {
+    if (!seg) return;
+    seg->_pad_w[0] = c2;
+    seg->_pad_w[1] = c3;
+    seg->_pad_w[2] = 1.0f;
+}
+static inline float spectral_segment_cubic_c2(const Segment* seg) {
+    return seg->_pad_w[0];
+}
+static inline float spectral_segment_cubic_c3(const Segment* seg) {
+    return seg->_pad_w[1];
+}
+
 /* 32-byte segment (embedded) - see Segment for field documentation */
 typedef struct __attribute__((aligned(4))) {
     float start, length, phase, omega, df, amp, da;

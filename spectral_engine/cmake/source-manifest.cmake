@@ -31,6 +31,7 @@ set(SPECTRAL_SOURCE_CONVERT_SEGMENTS_ENTRY "${SPECTRAL_CMD_DIR}/convert_segments
 set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/oscillator.c"
     "${SPECTRAL_CORE_DIR}/oscillator_dispatch.c"
+    "${SPECTRAL_CORE_DIR}/spectral_osc_bandlimited.c"
     "${SPECTRAL_CORE_DIR}/spectral_backend.c"
     "${SPECTRAL_CORE_DIR}/spectral_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_common.c"

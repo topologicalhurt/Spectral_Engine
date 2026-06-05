@@ -81,6 +81,16 @@ void osc_simd_segment_pwm(float* dst, const struct SegmentLoopParams* lp);
 /* Query if SIMD is available for a timbre (some timbres may not have SIMD paths) */
 int osc_simd_available(SpectralTimbre timbre);
 
+#if defined(OSC_SIMD_GENERIC)
+/* Packed 8xQ15 SIMD oscillator (Q5c) - host/SIMDe only, opt-in via the Q15
+ * compute domain. osc_simd_q15_available() advertises the algebraic timbres
+ * (saw/square/triangle/parabola); sine stays on the scalar Q15 path. sine_lut is
+ * unused by those timbres but kept in the signature for a uniform call site. */
+int osc_simd_q15_available(SpectralTimbre timbre);
+void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
+                          SpectralTimbre timbre, const int16_t* sine_lut);
+#endif
+
 /* Native backend availability */
 int osc_native_available(void);
 void osc_set_native_available(int available);

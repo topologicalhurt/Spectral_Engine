@@ -46,6 +46,8 @@ void spectral_process_params_default(SpectralProcessParams* params) {
     params->psychoacoustic_margin_db = 3.0f;
     params->adaptive_max_segments = 0;
     params->adaptive_keep_ratio = 1.0f;
+    params->hop = 0;
+    params->n_fft = 0;
 }
 
 static int token_equal_ci(const char* a, const char* b) {
@@ -192,6 +194,8 @@ void spectral_process_mask_to_string(SpectralProcessMask mask, char* out, size_t
 SpectralError spectral_process_chain_apply(
     SegmentArray* sa,
     int sample_rate,
+    int hop,
+    int n_fft,
     SpectralProcessMask mask,
     SpectralProcessReport* report)
 {
@@ -200,6 +204,8 @@ SpectralError spectral_process_chain_apply(
 
     SpectralProcessParams params;
     spectral_process_params_default(&params);
+    params.hop = hop;
+    params.n_fft = n_fft;
 
     SpectralProcessReport local = {0};
     local.requested = mask;

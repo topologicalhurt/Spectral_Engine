@@ -12,11 +12,15 @@ def text(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_fast_sine_default_is_exact() -> None:
+def test_fast_sine_default_is_minimax_poly() -> None:
+    # PASS201 re-baseline: the default sine is a degree-9 quadrant-folded minimax
+    # polynomial (APPROX_TRIG==1), shared bit-for-bit by the scalar and SIMD paths.
+    # APPROX_TRIG==0 restores the exact libm sinf reference.
     src = text("spectral_engine/core/spectral_osc_formulas.h")
-    assert "#define SPECTRAL_OSC_FORMULAS_VERSION 3" in src
+    assert "#define SPECTRAL_OSC_FORMULAS_VERSION 6" in src
     assert "#if SPECTRAL_ENABLE_APPROX_TRIG" in src
-    assert "return sinf(x);" in src
+    assert "floorf(x * SPECTRAL_INV_PI + 0.5f)" in src  # quadrant fold
+    assert "return sinf(x);" in src                     # exact branch preserved
 
 
 def test_old_pade_endpoint_error_would_have_failed_contract() -> None:

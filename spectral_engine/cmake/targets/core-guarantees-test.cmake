@@ -5,11 +5,13 @@
 # (B1 manifest drift). The SAME source is built twice so the budgets are pinned
 # against the actually-relaxed code path:
 #
-#   core_guarantees_test        - default gates: every "exact" guarantee active;
-#                                 fast_* delegate to libm (drift ~= float epsilon).
-#   core_guarantees_drift_test  - SPECTRAL_ENABLE_APPROX_* forced on: asserts those
-#                                 bits are cleared in SPECTRAL_ACTIVE_GUARANTEES AND
-#                                 each approximation stays within its budget.
+#   core_guarantees_test        - default gates. atan2/inv_sqrt/peak_log stay
+#                                 exact (libm); TRIG is the one approximation that
+#                                 is default-ON (degree-9 minimax sine), so its
+#                                 EXACT_TRIG bit is cleared here too.
+#   core_guarantees_drift_test  - SPECTRAL_ENABLE_APPROX_* all forced on: asserts
+#                                 those bits are cleared in SPECTRAL_ACTIVE_GUARANTEES
+#                                 AND each approximation stays within its budget.
 #
 # Run: cmake --build build --target core_guarantees_test core_guarantees_drift_test \
 #      && ctest --test-dir build -R 'core_guarantees'

@@ -1,9 +1,16 @@
-/* oscillator_simd.c (host profile) - SIMDe SSE oscillator synthesis.
+/* oscillator_simd.c (host profile) - SIMDe SSE/AVX oscillator synthesis.
  *
- * Build-selected for host builds: SIMDe maps SSE2 intrinsics to native NEON
- * (macOS ARM), native SSE (Linux x86), or scalar fallback. The CMSIS (ARM
- * Cortex-M) counterpart lives in core/port/embedded/oscillator_simd.c. Both
- * implement the oscillator_dispatch.h SIMD segment interface. */
+ * Build-selected for host builds: SIMDe maps the intrinsics to native NEON
+ * (macOS ARM), native SSE/AVX (Linux x86), or scalar fallback. The CMSIS
+ * (ARM Cortex-M) counterpart lives in core/port/embedded/oscillator_simd.c.
+ * Both implement the oscillator_dispatch.h SIMD segment interface.
+ *
+ * The vector sustain kernel is width-templated in oscillator_simd_kernel.inc and
+ * instantiated here at the machine's natural float vector width (Q2 of
+ * QTYPE_DOMAIN_PLAN.md): 8-wide __m256 on a 256-bit-float AVX2 target, 4-wide
+ * __m128 everywhere else (SSE2, NEON). The scalar single-sample lanes used in
+ * the fade regions are width-independent and live in
+ * oscillator_simd_scalar_waves.h. */
 #include "oscillator_dispatch.h"
 #include "oscillator.h"
 #include "spectral_config.h"
@@ -11,299 +18,67 @@
 #include "spectral_envelope.h"
 #include "spectral_fast_math.h"
 #include "spectral_osc_formulas.h"
+#include "oscillator_simd_scalar_waves.h"
 #include <math.h>
 #include <float.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
-static inline simde__m128 simde_floor_ps_portable(simde__m128 x) {
-#if defined(SIMDE_X86_SSE4_1_NATIVE) || defined(SIMDE_X86_SSE4_1_NO_NATIVE)
-    return simde_mm_floor_ps(x);
-#else
-    simde_float32 lanes[4];
-    simde_mm_storeu_ps(lanes, x);
-    lanes[0] = floorf(lanes[0]);
-    lanes[1] = floorf(lanes[1]);
-    lanes[2] = floorf(lanes[2]);
-    lanes[3] = floorf(lanes[3]);
-    return simde_mm_loadu_ps(lanes);
+#if defined(OSC_SIMD_GENERIC)
+#include "spectral_osc_q15.h"           /* Q15 waveform evaluators + sine LUT */
+#include "spectral_phase_nco.h"         /* scalar integer-NCO cubic phase */
+#include "spectral_phase_nco8.h"        /* vectorized uint32 8-wide NCO (c3==0 fast phase) */
+#include "simde/x86/ssse3.h"            /* abs_epi16 / mulhrs_epi16 */
+#include "simde/x86/sse4.1.h"           /* cvtepi16_epi32 (1-op sign-extend) */
 #endif
-}
 
-/* Canonical SIMD phase normalization:
- * mirrors spectral_normalize_phase() in spectral_osc_formulas.h exactly. */
-
-static inline simde__m128 simde_normalize_phase_ps(simde__m128 phase) {
-    const simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-    const simde__m128 v_2pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
-    const simde__m128 v_half = simde_mm_set1_ps(0.5f);
-    simde__m128 cycles = simde_mm_add_ps(simde_mm_mul_ps(phase, v_inv_2pi), v_half);
-    simde__m128 n = simde_floor_ps_portable(cycles);
-    return simde_mm_sub_ps(phase, simde_mm_mul_ps(v_2pi, n));
-}
-
-/* Vectorized Padé [5/4] sine approximation — matches fast_sin() but 4-wide */
-static inline simde__m128 simde_fast_sin_ps(simde__m128 x) {
-#if SPECTRAL_ENABLE_APPROX_TRIG
-    const simde__m128 inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-    const simde__m128 two_pi = simde_mm_set1_ps(SPECTRAL_TWO_PI);
-    const simde__m128 half = simde_mm_set1_ps(0.5f);
-    simde__m128 n = simde_floor_ps_portable(
-        simde_mm_add_ps(simde_mm_mul_ps(x, inv_2pi), half));
-    x = simde_mm_sub_ps(x, simde_mm_mul_ps(n, two_pi));
-
-    simde__m128 x2 = simde_mm_mul_ps(x, x);
-    simde__m128 c15 = simde_mm_set1_ps(-0.0000000000007647163731819816f);
-    simde__m128 c13 = simde_mm_set1_ps( 0.00000000016059043836821613f);
-    simde__m128 c11 = simde_mm_set1_ps(-0.00000002505210838544172f);
-    simde__m128 c9  = simde_mm_set1_ps( 0.0000027557319223985893f);
-    simde__m128 c7  = simde_mm_set1_ps(-0.0001984126984126984f);
-    simde__m128 c5  = simde_mm_set1_ps( 0.008333333333333333f);
-    simde__m128 c3  = simde_mm_set1_ps(-0.16666666666666666f);
-    simde__m128 one = simde_mm_set1_ps(1.0f);
-
-    simde__m128 p = c15;
-    p = simde_mm_add_ps(c13, simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(c11, simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(c9,  simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(c7,  simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(c5,  simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(c3,  simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(one, simde_mm_mul_ps(x2, p));
-    return simde_mm_mul_ps(x, p);
+/* Width tier. SIMDe auto-detects the machine's max native width via
+ * SIMDE_NATURAL_FLOAT_VECTOR_SIZE; pair it with __AVX2__ (which guarantees the
+ * 256-bit intrinsics map to native AVX/AVX2 codegen and that avx2.h is in
+ * scope). On Apple Silicon and any SSE2-only x86, neither holds, so the kernel
+ * stays 4-wide - byte-for-byte the pre-parameterization __m128 code. Only an
+ * AVX2 x86 build (which today wastes the upper 128 bits of every YMM register)
+ * gets the 8-wide instantiation. */
+#if defined(__AVX2__) && SIMDE_NATURAL_FLOAT_VECTOR_SIZE_GE(256)
+  #define OSC_KERNEL_W 8
+  #include "simde/x86/avx2.h"
 #else
-    simde_float32 lanes[4];
-    simde_mm_storeu_ps(lanes, x);
-    lanes[0] = sinf(lanes[0]);
-    lanes[1] = sinf(lanes[1]);
-    lanes[2] = sinf(lanes[2]);
-    lanes[3] = sinf(lanes[3]);
-    return simde_mm_loadu_ps(lanes);
+  #define OSC_KERNEL_W 4
 #endif
-}
 
-/* Scalar waveform functions for fade regions (avoids wasteful SIMD broadcast) */
-
-typedef float (*WaveformFn1)(float rads, const void* ctx);
-typedef simde__m128 (*WaveformFn4)(simde__m128 phase, const void* ctx);
-
-static inline float wave_saw_1(float rads, const void* ctx) {
-    (void)ctx;
-    return spectral_osc_saw(rads, 0.0f);
-}
-static inline float wave_square_1(float rads, const void* ctx) {
-    (void)ctx;
-    return spectral_osc_square(rads, 0.0f);
-}
-static inline float wave_triangle_1(float rads, const void* ctx) {
-    (void)ctx;
-    return spectral_osc_triangle(rads, 0.0f);
-}
-static inline float wave_parabola_1(float rads, const void* ctx) {
-    (void)ctx;
-    return spectral_osc_parabola(rads, 0.0f);
-}
-static inline float wave_sine_1(float rads, const void* ctx) {
-    (void)ctx;
-    return spectral_osc_sine(rads, 0.0f);
-}
-static inline float wave_quantized_1(float rads, const void* ctx) {
-    float width = *(const float*)ctx;
-    return spectral_osc_quantized(rads, width);
-}
-static inline float wave_pwm_1(float rads, const void* ctx) {
-    float width = *(const float*)ctx;
-    return spectral_osc_pwm(rads, width);
-}
-
-static inline simde__m128 wave_saw_4(simde__m128 rads, const void* ctx) {
-    (void)ctx;
-    return simde_mm_mul_ps(rads, simde_mm_set1_ps(-SPECTRAL_INV_PI));
-}
-
-static inline simde__m128 wave_square_4(simde__m128 rads, const void* ctx) {
-    (void)ctx;
-    simde__m128 zero = simde_mm_setzero_ps();
-    simde__m128 mask = simde_mm_cmpgt_ps(rads, zero);
-    return simde_mm_or_ps(
-        simde_mm_and_ps(mask, simde_mm_set1_ps(1.0f)),
-        simde_mm_andnot_ps(mask, simde_mm_set1_ps(-1.0f)));
-}
-
-static inline simde__m128 wave_triangle_4(simde__m128 rads, const void* ctx) {
-    (void)ctx;
-    simde__m128 scaled = simde_mm_mul_ps(rads, simde_mm_set1_ps(SPECTRAL_INV_PI));
-    simde__m128 abs_scaled = simde_mm_andnot_ps(simde_mm_set1_ps(-0.0f), scaled);
-    return simde_mm_add_ps(simde_mm_set1_ps(1.0f),
-                           simde_mm_mul_ps(simde_mm_set1_ps(-2.0f), abs_scaled));
-}
-
-static inline simde__m128 wave_parabola_4(simde__m128 rads, const void* ctx) {
-    (void)ctx;
-    simde__m128 sq = simde_mm_mul_ps(rads, rads);
-    return simde_mm_add_ps(simde_mm_set1_ps(1.0f),
-                           simde_mm_mul_ps(sq, simde_mm_set1_ps(-SPECTRAL_INV_PI_SQ)));
-}
-
-static inline simde__m128 wave_sine_4(simde__m128 rads, const void* ctx) {
-    (void)ctx;
-    return simde_fast_sin_ps(rads);
-}
-
-static inline simde__m128 wave_quantized_4(simde__m128 rads, const void* ctx) {
-    float width = *(const float*)ctx;
-    if (width <= 0.0f) return simde_mm_setzero_ps();
-    simde__m128 v_width = simde_mm_set1_ps(width);
-    simde__m128 v_inv_w = simde_mm_set1_ps(1.0f / width);
-    simde__m128 scaled = simde_mm_mul_ps(rads, v_width);
-    /* Mirror the canonical spectral_osc_quantized() domain guard: it returns 0
-     * when `scaled` is non-finite or falls outside [INT_MIN, INT_MAX]. Without
-     * this, simde_mm_cvttps_epi32() saturates such lanes to INT_MIN (0x80000000)
-     * and emits INT_MIN*inv_w (an out-of-[-1,1] value), diverging from both the
-     * scalar contract and this segment's own fade-region scalar lane
-     * (wave_quantized_1) for finite-but-large widths from deserialized segments.
-     * The >=/<= comparisons also reject NaN/Inf (all NaN compares are false). */
-    simde__m128 in_range = simde_mm_and_ps(
-        simde_mm_cmpge_ps(scaled, simde_mm_set1_ps((float)INT_MIN)),
-        simde_mm_cmple_ps(scaled, simde_mm_set1_ps((float)INT_MAX)));
-    simde__m128 truncated = simde_mm_cvtepi32_ps(simde_mm_cvttps_epi32(scaled));
-    return simde_mm_and_ps(in_range, simde_mm_mul_ps(truncated, v_inv_w));
-}
-
-static inline simde__m128 wave_pwm_4(simde__m128 rads, const void* ctx) {
-    float width = *(const float*)ctx;
-    /* Mirror the canonical spectral_osc_pwm() domain guard, exactly as
-     * wave_quantized_4 mirrors spectral_osc_quantized(). The scalar contract is
-     *   !isfinite(rads) || !isfinite(width) -> 0;  width <= 0 -> 1;  else +/-1.
-     * Without this the SIMD sustain lane emits +/-1 where both the scalar
-     * contract and this segment's own fade-region lane (wave_pwm_1) emit 0 for a
-     * non-finite phase (reachable when a deserialized segment's finite-but-huge
-     * omega overflows the accumulated phase to +/-Inf -> NaN after
-     * normalization), seam-splitting a single PWM segment. */
-    simde__m128 wave;
-    if (!isfinite(width)) return simde_mm_setzero_ps();
-    if (width <= 0.0f) {
-        wave = simde_mm_set1_ps(1.0f);
-    } else {
-        simde__m128 v_pi = simde_mm_set1_ps(SPECTRAL_PI);
-        simde__m128 v_inv_2pi = simde_mm_set1_ps(SPECTRAL_INV_TWO_PI);
-        simde__m128 v_width = simde_mm_set1_ps(width);
-        simde__m128 v_one = simde_mm_set1_ps(1.0f);
-        simde__m128 v_neg_one = simde_mm_set1_ps(-1.0f);
-        simde__m128 norm = simde_mm_mul_ps(simde_mm_add_ps(rads, v_pi), v_inv_2pi);
-        simde__m128 cmp = simde_mm_cmplt_ps(norm, v_width);
-        wave = simde_mm_or_ps(
-            simde_mm_and_ps(cmp, v_one),
-            simde_mm_andnot_ps(cmp, v_neg_one));
-    }
-    /* Per-lane finite-rads mask: |rads| <= FLT_MAX rejects NaN (unordered
-     * compare is false) and +/-Inf, forcing those lanes to 0 like the scalar. */
-    simde__m128 abs_rads = simde_mm_andnot_ps(simde_mm_set1_ps(-0.0f), rads);
-    simde__m128 finite = simde_mm_cmple_ps(abs_rads, simde_mm_set1_ps(FLT_MAX));
-    return simde_mm_and_ps(finite, wave);
-}
-
-/* Fused single-pass synthesis: inline phase computation, waveform, envelope,
- * and accumulation with zero temp buffers. Handles fade-in, sustain, and
- * fade-out regions. */
-
-static void osc_simd_fused_sustain(float* dst, const SegmentLoopParams* lp,
-                                    WaveformFn4 wave_fn4, WaveformFn1 wave_fn1,
-                                    const void* ctx) {
-    const size_t len = lp->length;
-    if (len == 0) return;
-
-    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_ACTIVE);
-    const float phase0 = lp->phase;
-    const float alpha = lp->alpha;
-    const float beta = lp->beta;
-    const float amp0 = lp->amp;
-    const float d_amp = lp->d_amp;
-
-    const size_t fade_in_end = fp.fade_len;
-    const size_t fade_out_start = fp.fade_out_start;
-
-    /* Fade-in region: scalar */
-    for (size_t j = 0; j < fade_in_end && j < len; j++) {
-        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
-        float amp = (amp0 + d_amp * (float)j) * fade_envelope_in(j, fp.inv_fade);
-        dst[j] += amp * wave_fn1(rads, ctx);
-    }
-
-    /* Sustain region: fused vectorized path (no temp buffers) */
-    {
-        const simde__m128 v_alpha = simde_mm_set1_ps(alpha);
-        const simde__m128 v_beta = simde_mm_set1_ps(beta);
-        const simde__m128 v_phase0 = simde_mm_set1_ps(phase0);
-        const simde__m128 v_amp0 = simde_mm_set1_ps(amp0);
-        const simde__m128 v_d_amp = simde_mm_set1_ps(d_amp);
-        const simde__m128 v_four = simde_mm_set1_ps(4.0f);
-
-        size_t sustain_end = (fade_out_start < len) ? fade_out_start : len;
-        size_t j = fade_in_end;
-        simde__m128 v_j = simde_mm_set_ps((float)(j+3), (float)(j+2), (float)(j+1), (float)j);
-
-        for (; j + 4 <= sustain_end; j += 4) {
-            /* Phase: p = phase0 + j*(alpha + beta*j) */
-            simde__m128 bj = simde_mm_mul_ps(v_beta, v_j);
-            simde__m128 ab = simde_mm_add_ps(v_alpha, bj);
-            simde__m128 raw = simde_mm_add_ps(v_phase0, simde_mm_mul_ps(v_j, ab));
-
-            simde__m128 rads = simde_normalize_phase_ps(raw);
-
-            /* Waveform + amplitude + accumulate */
-            simde__m128 wave = wave_fn4(rads, ctx);
-            simde__m128 amp = simde_mm_add_ps(v_amp0, simde_mm_mul_ps(v_d_amp, v_j));
-            simde__m128 existing = simde_mm_loadu_ps(&dst[j]);
-            simde_mm_storeu_ps(&dst[j],
-                simde_mm_add_ps(existing, simde_mm_mul_ps(amp, wave)));
-
-            v_j = simde_mm_add_ps(v_j, v_four);
-        }
-        /* Scalar tail for sustain */
-        for (; j < sustain_end; j++) {
-            float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
-            dst[j] += (amp0 + d_amp * (float)j) * wave_fn1(rads, ctx);
-        }
-    }
-
-    /* Fade-out region: scalar */
-    size_t fo_start = (fade_out_start > fade_in_end) ? fade_out_start : fade_in_end;
-    for (size_t j = fo_start; j < len; j++) {
-        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
-        float amp = (amp0 + d_amp * (float)j) * fade_envelope_out(j, len, fp.inv_fade);
-        dst[j] += amp * wave_fn1(rads, ctx);
-    }
-}
+#define OSC_VW   OSC_KERNEL_W
+#define OSC_VSUF _impl
+#include "oscillator_simd_kernel.inc"
 
 void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_sine_4, wave_sine_1, NULL);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_sine_v), wave_sine_1, NULL);
 }
 
 void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_saw_4, wave_saw_1, NULL);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_saw_v), wave_saw_1, NULL);
 }
 
 void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_square_4, wave_square_1, NULL);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_square_v), wave_square_1, NULL);
 }
 
 void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_triangle_4, wave_triangle_1, NULL);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_triangle_v), wave_triangle_1, NULL);
 }
 
 void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
-    osc_simd_fused_sustain(dst, lp, wave_parabola_4, wave_parabola_1, NULL);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_parabola_v), wave_parabola_1, NULL);
 }
 
 void osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) {
     float width = lp->width;
-    osc_simd_fused_sustain(dst, lp, wave_quantized_4, wave_quantized_1, &width);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_quantized_v), wave_quantized_1, &width);
 }
 
 void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) {
     float width = lp->width;
-    osc_simd_fused_sustain(dst, lp, wave_pwm_4, wave_pwm_1, &width);
+    OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_pwm_v), wave_pwm_1, &width);
 }
 
 int osc_simd_available(SpectralTimbre timbre) {
@@ -312,3 +87,176 @@ int osc_simd_available(SpectralTimbre timbre) {
            timbre == TIMBRE_PARABOLA || timbre == TIMBRE_QUANTIZED ||
            timbre == TIMBRE_PWM;
 }
+
+#if defined(OSC_SIMD_GENERIC)
+/* ===== Packed 8xQ15 SIMD oscillator (Q5c, QTYPE_DOMAIN_PLAN.md) ============
+ *
+ * The throughput twin of the scalar synth_segment_q15: an opt-in desktop kernel
+ * that renders the 8x16-bit Q15 waveform of one 128-bit register per iteration
+ * (vs 4 floats in a 128-bit / 8 in a 256-bit register), then widens to float for
+ * the UNCHANGED float amp ramp + accumulate. bench_q15_pack8 measured ~1.35-1.5x
+ * over the production float-SIMD path on the four algebraic timbres; sine LOSES
+ * (its 8x serial LUT gather has no SIMD form) so it is NOT routed here -- it stays
+ * on the scalar Q15 path. Phase is the integer NCO (scalar x8 per block); the
+ * vectorized uint32 NCO that bench_q15_pack8 probed is a deferred follow-up
+ * (extra ~10%, needs its own precision re-validation).
+ *
+ * The 8-wide Q15 eval matches the scalar spectral_osc_q15_* evaluators to <=1 LSB.
+ * Two corners the bench probe glossed over are fixed here so the kernel is correct
+ * (not just fast): (a) the probe's triangle subtracted a SATURATED 2|pq|, clamping
+ * the whole |pq|>0.5 half to 0 -- the double-subtract MAX-|pq|-|pq| keeps the full
+ * q31 range; (b) at pq == -32768 (phase exactly -pi) abs/mulhrs overflow int16 and
+ * flip triangle/parabola to +full-scale, so pq is pre-clamped to [-32767, 32767]
+ * (a single max, touching only that one phase value -> <=1 LSB). */
+
+/* Scalar Q15 eval for the per-sample fade regions (bit-identical to the scalar
+ * synth_segment_q15). Mirrors oscillator.c's osc_q15_eval; sine kept for safety
+ * even though sine never reaches this file. */
+static inline q15_t osc_q15_wave_scalar(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
+    switch (timbre) {
+    case TIMBRE_SAW:      return spectral_osc_q15_saw(pq);
+    case TIMBRE_SQUARE:   return spectral_osc_q15_square(pq);
+    case TIMBRE_TRIANGLE: return spectral_osc_q15_triangle(pq);
+    case TIMBRE_PARABOLA: return spectral_osc_q15_parabola(pq);
+    case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
+    default:              return Q15_ZERO;
+    }
+}
+
+/* 8 scalar integer-NCO steps -> one packed 8xQ15 phase-index register. */
+static inline simde__m128i osc_q15_nco_pack8(SpectralPhaseNco* nco) {
+    q15_t idx[8];
+    for (int k = 0; k < 8; k++) idx[k] = spectral_phase_nco_step(nco);
+    return simde_mm_loadu_si128((const simde__m128i*)idx);
+}
+
+/* Pull ONE Q15 index from the vectorized NCO, refilling its 8-lane buffer when drained.
+ * Lets the per-sample fade/tail regions draw from the SAME vec phase chain the SIMD blocks
+ * use, so the whole [fade_in_end, len) span stays vec-sourced and phase-continuous. */
+static inline q15_t osc_q15_vnco_next(SpectralPhaseNco8* v, int16_t* buf, int* pos) {
+    if (*pos >= 8) {
+        simde_mm_storeu_si128((simde__m128i*)buf, spectral_phase_nco8_step(v));
+        *pos = 0;
+    }
+    return (q15_t)buf[(*pos)++];
+}
+
+/* 8-wide Q15 waveform eval -- SIMD twin of the scalar spectral_osc_q15_* set. Pure
+ * fixed point (no float between the markers); pq is pre-clamped so neither abs nor
+ * the squaring multiply can overflow int16 at the -1.0 phase corner. */
+// SPECTRAL_Q_DOMAIN BEGIN
+static inline simde__m128i osc_q15_pack8_eval(simde__m128i pq, SpectralTimbre timbre) {
+    const simde__m128i zero = simde_mm_setzero_si128();
+    const simde__m128i qmax = simde_mm_set1_epi16(Q15_MAX);
+    pq = simde_mm_max_epi16(pq, simde_mm_set1_epi16((int16_t)(Q15_MIN + 1)));
+    switch (timbre) {
+    case TIMBRE_SAW:                            /* -pq, saturating negate */
+        return simde_mm_subs_epi16(zero, pq);
+    case TIMBRE_SQUARE: {                       /* sign(pq): +MAX / -... */
+        simde__m128i gt = simde_mm_cmpgt_epi16(pq, zero);
+        return simde_mm_or_si128(simde_mm_and_si128(gt, qmax),
+                                 simde_mm_andnot_si128(gt, simde_mm_set1_epi16(Q15_MIN)));
+    }
+    case TIMBRE_TRIANGLE: {                      /* MAX - 2|pq|, no mid clamp */
+        simde__m128i a = simde_mm_abs_epi16(pq);
+        return simde_mm_subs_epi16(simde_mm_subs_epi16(qmax, a), a);
+    }
+    case TIMBRE_PARABOLA:                        /* MAX - (pq/MAX)^2 */
+        return simde_mm_subs_epi16(qmax, simde_mm_mulhrs_epi16(pq, pq));
+    default:
+        return zero;
+    }
+}
+// SPECTRAL_Q_DOMAIN END
+
+int osc_simd_q15_available(SpectralTimbre timbre) {
+    /* The algebraic Q15 timbres only. Sine has a Q15 path but its serial LUT loses
+     * to float here, so it is excluded and dispatch keeps it on scalar Q15. */
+    return timbre == TIMBRE_SAW || timbre == TIMBRE_SQUARE ||
+           timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
+}
+
+void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
+                          SpectralTimbre timbre, const q15_t* sine_lut) {
+    const size_t len = lp->length;
+    if (len == 0) return;
+
+    const FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_ACTIVE);
+    const size_t fade_in_end = fp.fade_len;
+    const size_t fade_out_start = fp.fade_out_start;
+    const float amp0 = lp->amp;
+    const float d_amp = lp->d_amp;
+    const float inv_fade = fp.inv_fade;
+    const float inv_q15 = Q15_TO_FLOAT((q15_t)1);
+
+    SpectralPhaseNco nco;
+    spectral_phase_nco_init(&nco, lp->phase, lp->alpha, lp->c2, lp->c3);
+
+    /* Fade-in: scalar Q15 (per-sample envelope), bit-identical to synth_segment_q15. */
+    size_t j = 0;
+    for (; j < fade_in_end && j < len; j++) {
+        float wave = Q15_TO_FLOAT(osc_q15_wave_scalar(spectral_phase_nco_step(&nco), timbre, sine_lut));
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_in(j, inv_fade);
+        dst[j] += amp * wave;
+    }
+
+    /* Vectorized uint32 8-wide phase replaces the serial scalar phase for the whole
+     * [fade_in_end, len) span -- but ONLY when the cubic term is absent (c3==0). There its
+     * 16 fractional bits hold the Q15 index to <=1 LSB of the scalar uint64 NCO
+     * (phase_nco_precision Part 3: <=-120 dBFS); with c3!=0 the narrowed third difference
+     * drifts (tens of LSB), so we keep the serial scalar pack8 there. Seeded ONCE from the
+     * scalar NCO at the sustain start, it is then the SOLE phase source (SIMD blocks pull
+     * whole registers; the per-sample tail/fade pull one index at a time via vbuf), so phase
+     * stays continuous without re-stepping the scalar NCO 8x per block. */
+    const int use_vec = (lp->c3 == 0.0f) && (j < len);
+    SpectralPhaseNco8 vphase;
+    int16_t vbuf[8];
+    int vpos = 8;
+    if (use_vec) vphase = spectral_phase_nco8_seed(&nco);
+
+    /* Sustain: packed 8xQ15 blocks. amp = amp0 + d_amp*j per lane (matches scalar). */
+    const size_t sustain_end = (fade_out_start < len) ? fade_out_start : len;
+    const simde__m128 invv = simde_mm_set1_ps(inv_q15);
+    const simde__m128 amp0v = simde_mm_set1_ps(amp0);
+    const simde__m128 dampv = simde_mm_set1_ps(d_amp);
+    for (; j + 8 <= sustain_end; j += 8) {
+        simde__m128i idx = use_vec ? spectral_phase_nco8_step(&vphase)
+                                   : osc_q15_nco_pack8(&nco);
+        simde__m128i wq = osc_q15_pack8_eval(idx, timbre);
+        simde__m128 wf_lo = simde_mm_mul_ps(
+            simde_mm_cvtepi32_ps(simde_mm_cvtepi16_epi32(wq)), invv);
+        simde__m128 wf_hi = simde_mm_mul_ps(
+            simde_mm_cvtepi32_ps(simde_mm_cvtepi16_epi32(simde_mm_srli_si128(wq, 8))), invv);
+
+        simde__m128 jlo = simde_mm_set_ps((float)(j + 3), (float)(j + 2), (float)(j + 1), (float)j);
+        simde__m128 jhi = simde_mm_set_ps((float)(j + 7), (float)(j + 6), (float)(j + 5), (float)(j + 4));
+        simde__m128 amp_lo = simde_mm_add_ps(amp0v, simde_mm_mul_ps(dampv, jlo));
+        simde__m128 amp_hi = simde_mm_add_ps(amp0v, simde_mm_mul_ps(dampv, jhi));
+
+        simde__m128 b_lo = simde_mm_loadu_ps(&dst[j]);
+        simde__m128 b_hi = simde_mm_loadu_ps(&dst[j + 4]);
+        b_lo = simde_mm_add_ps(b_lo, simde_mm_mul_ps(amp_lo, wf_lo));
+        b_hi = simde_mm_add_ps(b_hi, simde_mm_mul_ps(amp_hi, wf_hi));
+        simde_mm_storeu_ps(&dst[j], b_lo);
+        simde_mm_storeu_ps(&dst[j + 4], b_hi);
+    }
+    /* Sustain scalar tail (< 8 remaining). Phase from the vec buffer when use_vec, so the
+     * tail stays on the same chain as the SIMD blocks (no scalar re-step). */
+    for (; j < sustain_end; j++) {
+        q15_t pidx = use_vec ? osc_q15_vnco_next(&vphase, vbuf, &vpos)
+                             : spectral_phase_nco_step(&nco);
+        float wave = Q15_TO_FLOAT(osc_q15_wave_scalar(pidx, timbre, sine_lut));
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
+        dst[j] += amp * wave;
+    }
+
+    /* Fade-out: scalar Q15. Same vec buffer continues across the tail->fade boundary. */
+    for (; j < len; j++) {
+        q15_t pidx = use_vec ? osc_q15_vnco_next(&vphase, vbuf, &vpos)
+                             : spectral_phase_nco_step(&nco);
+        float wave = Q15_TO_FLOAT(osc_q15_wave_scalar(pidx, timbre, sine_lut));
+        float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_out(j, len, inv_fade);
+        dst[j] += amp * wave;
+    }
+}
+#endif /* OSC_SIMD_GENERIC */

@@ -18,6 +18,8 @@ typedef struct SegmentLoopParams {
     size_t length;
     float alpha;    /* phase increment per sample */
     float beta;     /* chirp rate (phase acceleration) */
+    float c2;       /* cubic phase coeff of offset^2 (== beta when no linkage) */
+    float c3;       /* cubic phase coeff of offset^3 (0 when no linkage) */
     float d_amp;    /* amplitude delta per sample */
     float phase;
     float amp;
