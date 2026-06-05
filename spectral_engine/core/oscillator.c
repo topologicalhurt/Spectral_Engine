@@ -26,8 +26,17 @@ OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 /* Opt-in Q15 compute domain (Q3b). Float is the default — this mask is 0 unless
  * a caller explicitly enables a path, so the default build moves no bytes. */
 static uint16_t g_osc_q15_enable = 0;
+/* The desktop Q15 compute path (and its ~8 KB sine LUT) is a host-only
+ * optimisation: real embedded firmware synthesises Q15 in spectral_synth_arm32.c
+ * (integer NCO) and never reaches this dispatch, so the LUT and the scalar/SIMD
+ * Q15 segment helpers are pure .bss/.text waste there.  Compile them out of
+ * embedded targets.  The mask, its setter/getter, and osc_q15_available() stay
+ * in every build because the CLI pipeline (run_synthesis) references them
+ * unconditionally — only the LUT-bearing body is conditional. */
+#if !SPECTRAL_EMBEDDED
 static q15_t g_osc_q15_sine_lut[SPECTRAL_OSC_LUT_SIZE + 1];
 static int g_osc_q15_sine_lut_ready = 0;
+#endif
 
 int osc_q15_available(SpectralTimbre timbre) {
     switch (timbre) {
@@ -41,6 +50,7 @@ int osc_q15_available(SpectralTimbre timbre) {
 
 void osc_set_q15_enable(uint16_t mask) {
     g_osc_q15_enable = mask;
+#if !SPECTRAL_EMBEDDED
     /* Build the sine table once here (single-threaded setup call, like
      * osc_set_dispatch) so the per-segment OMP render loop only reads it —
      * no lazy-init race on the hot path. */
@@ -48,6 +58,7 @@ void osc_set_q15_enable(uint16_t mask) {
         spectral_osc_q15_init_sine_lut(g_osc_q15_sine_lut);
         g_osc_q15_sine_lut_ready = 1;
     }
+#endif
 }
 uint16_t osc_get_q15_enable(void) { return g_osc_q15_enable; }
 
@@ -108,6 +119,7 @@ static void synth_segment_scalar(
     }
 }
 
+#if !SPECTRAL_EMBEDDED
 /* Loop-invariant Q15 waveform selector. A scalar oracle: it resolves the timbre
  * per sample, which the SIMD Q15 kernel (Q3b step 2) will specialize away. */
 static inline q15_t osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
@@ -165,6 +177,7 @@ static void synth_segment_q15(
         dst[j] += amp * wave;
     }
 }
+#endif /* !SPECTRAL_EMBEDDED */
 
 void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParams* lp, SpectralTimbre timbre) {
     if ((unsigned int)timbre >= TIMBRE_COUNT) {
@@ -204,7 +217,9 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
      * float scalar/SIMD dispatch below. Engaged only when this timbre's bit is
      * set AND it has a Q15 path; otherwise fall through to the float dispatch.
      * The point-sampled (NAIVE) path only — band-limited quality already
-     * returned above. */
+     * returned above. Host-only (the LUT and Q15 segment helpers above are
+     * compiled out of embedded, which synthesises Q15 via spectral_synth_arm32.c). */
+#if !SPECTRAL_EMBEDDED
     if ((g_osc_q15_enable & OSC_Q15_BIT(timbre)) && osc_q15_available(timbre)) {
 #if defined(OSC_SIMD_GENERIC)
         /* Packed 8xQ15 SIMD twin (Q5c): the Q15 compute domain composes with the
@@ -227,6 +242,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
         );
         return;
     }
+#endif /* !SPECTRAL_EMBEDDED */
 
     OscDispatchMode dispatch_mode = OSC_GET_MODE(g_osc_dispatch, timbre);
 

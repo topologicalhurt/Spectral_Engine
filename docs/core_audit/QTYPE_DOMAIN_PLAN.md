@@ -297,10 +297,15 @@ Two hard nuances baked into this header:
     1.56, parabola 1.42), up from the PASS213 1.25–1.39×. The `q15_simd_parity` cubic-stress row
     (c3=3e-7) is the CI lock on the scope gate: a misroute would jump to −25.9 dBFS, far past the
     −84 budget. Default byte-identical, host-only.
-    - **Deferred follow-ups (decline-on-data as warranted):** (1) the ~8 KB `g_osc_q15_sine_lut`
-      `#if !SPECTRAL_EMBEDDED` footprint guard — an embedded-footprint item on the *existing scalar
-      sine* path, independent of this host-only SIMD kernel; (2) **new** — with the vec phase, sine's
-      pack8 (0.761) now edges production float-SIMD (0.876); sine stays excluded
+    - **Deferred follow-ups (decline-on-data as warranted):** (1) **LANDED (PASS216)** — the
+      ~8 KB `g_osc_q15_sine_lut` `#if !SPECTRAL_EMBEDDED` footprint guard. `oscillator.c`'s whole
+      desktop Q15 body (LUT storage + init, the scalar `osc_q15_eval`/`synth_segment_q15`, and the
+      packed-SIMD dispatch) is now host-compiled only; real embedded firmware (which does Q15 in
+      `spectral_synth_arm32.c`) carries none of it — 8194 bytes of `.bss` + the segment text removed.
+      `osc_q15_available`/`osc_set_q15_enable`/`osc_get_q15_enable` stay in every build (the restricted
+      CLI's `run_synthesis` references them). Desktop object code unchanged; `simulate` + `simulate_daisy`
+      (EMBEDDED, +RESTRICTED) compile/link clean; ctest 11/11. (2) **still open** — with the vec phase,
+      sine's pack8 (0.761) now edges production float-SIMD (0.876); sine stays excluded
       (`osc_simd_q15_available`) pending its own serial-LUT SIMD-Q15 re-validation.
   - **`--q15` CLI exposure — LANDED (PASS215).** The Q15 kernels were compiled into every desktop
     binary but unreachable from the shipped CLI (dispatch gated by `g_osc_q15_enable`, default 0,
