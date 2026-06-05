@@ -156,11 +156,14 @@ Work items:
   Cross-segment "full-Q15 accumulate" is separately blocked (additive partials exceed ±1.0 →
   Q15 saturates). The real 2× density axis is **Thread C** (16×Q15@256 on AVX2), not amp-in-Q.
   Bench kept in-tree as the evidence (PASS210 pattern). See PATCH_NOTES_PASS218.
-- **B3 — Island audit (anti-myopia deliverable).** Enumerate every desktop hot path and classify
-  each as a *contiguous Q-island candidate* vs. *inherently float* (the FFT/magsq/phase analysis
-  path is float by nature; final WAV is float). Document *why* each is in or out. This is what
-  stops "leverage Q15 on every path" from becoming a net-negative scattershot — it makes the
-  coverage decision evidence-based and reviewable.
+- **B3 — Island audit (anti-myopia deliverable). [LANDED — PASS219]** Delivered as
+  docs/core_audit/QTYPE_ISLAND_AUDIT.md (code-cited). Findings: the pipeline is FFT→Track→Synth→
+  Norm→Write; 4 of 5 stages are inherently float (FFT/Track by information content — wide dynamic
+  range + atan2 + sub-bin interp; Norm/Write by structure — additive headroom >±1.0 + float WAV).
+  The ONE Q-island is in Synth (`integer phase → 8×Q15 eval → widen`), already shipped under --q15;
+  its boundaries are structural (B1 widened it to sine, B2 proved it can't extend past the widen).
+  Conclusion: the island is fully captured; the only remaining lever is lane COUNT (Thread C
+  16×Q15@256), not island EXTENT. **Thread B COMPLETE.**
 
 ---
 
