@@ -44,6 +44,34 @@
 extern "C" {
 #endif
 
+/* THE Q-DOMAIN MAP -- every fixed-point quantity in the engine: its carrier
+ * type, binary-point format, value range, wrap behavior, and where it lives.
+ * The binary-point location *is* the type -- the same int16 carries an
+ * amplitude (Q1.15) and a phase index (full circle == 2^16), so the carrier
+ * alone is not the contract; read the format column. Conversions between any
+ * two rows, or to/from float, go ONLY through the named boundary macros below.
+ *
+ *   quantity           carrier    format   range / meaning              wrap
+ *   -----------------  ---------  -------  ---------------------------  --------------
+ *   amplitude/sample   q15_t      Q1.15    [-1, +1)  (+1 not exact)     saturate
+ *   phase index        q15_t      signed   full circle == 2^16,         free (int16
+ *                                 index    [-pi,+pi) -> [-32768,32767]  wraps)
+ *   phase accumulator  uq32_t     UQ0.32   full circle == 2^32; top 16  free mod-2^32
+ *                                          bits = the phase index       (= 2pi, no fmod)
+ *   phase acc (narrow) uq16_t     UQ0.16   full circle == 2^16          free mod-2^16
+ *   frequency (omega)  uint16_t   UQ8.8    rad/sample, [0, 255.99];     -
+ *                      ("q88")             values > 255 pre-scaled /4
+ *   phase increment    q31_t      Q1.31    per-sample step added to     free (wraps
+ *                                          phase_acc                    with the acc)
+ *   chirp slope        q31_t      Q1.31    per-sample step of freq_inc  -
+ *   MAC accumulator    q31_t      Q2.30    sum of Q15*Q15 products;     saturate on
+ *                      ("q30")             >>15 + master scale -> q15    final pack
+ *
+ * NAMING: a field/var suffix states the format -- *_q15, *_q88 (freq_q88),
+ * phase_acc, freq_inc/freq_delta. q88 (frequency) and q30 (the MAC accumulator)
+ * have NO dedicated typedef yet -- they ride uint16_t and q31_t, and the suffix
+ * is the only contract. Promoting them to named typedefs is a Thread-A
+ * follow-up (see QTYPE_REFACTOR_PLAN.md). */
 typedef int16_t  q15_t;
 typedef int32_t  q31_t;
 typedef uint16_t uq16_t;
