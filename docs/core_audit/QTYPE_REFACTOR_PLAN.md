@@ -98,16 +98,25 @@ Work items (each refine-at-execution):
   semantics, intended quantity (amplitude / phase / omega / intermediate), and the *only* legal
   boundary conversions to/from float and to/from other Q types. This "domain map" is the
   design-pattern deliverable — it's what makes the separation legible and maintainable.
-- **A2 — Harden the contract test.** Today it's a token-grep with a comment false-match gotcha.
-  Decide (measure-first: count real leaks caught vs. false positives) how much rigor is worth it:
-  keep the cheap scan, or move to a clang-based / AST check that understands comments and scopes.
-  **Decision point — needs maintainer sign-off** (rigor vs. build-time/complexity cost).
-- **A3 — Audit boundary-macro coverage.** Verify *every* float↔Q conversion in the tree routes
-  through a named macro (extend the contract test's RULE 1 from scale-constants to all conversion
-  sites). Fix any raw conversions found (byte-neutral, like the Q0 `wavetable.c:254` fix).
-- **A4 — (Optional) C++ strong-typedef wrapper for desktop tooling/tests only.** Go/no-go on data:
-  does it catch real domain-mixing bugs the contract test misses? **Likely decline** unless
-  demonstrated value. Never enters the kernels.
+- **A2 — Harden the contract test. [LANDED — pass A2]** Maintainer chose *keep the cheap scan,
+  close the literal gap* over a clang/AST rewrite (rigor not worth the build-time/complexity cost
+  when the gap was a single idiom). Added **RULE 3 — literal-scale confinement**: bare float forms
+  of the scale constants (`32768.0` / `65536.0` / `2147483648.0`) used in a `* literal` / `/ literal`
+  conversion are now flagged outside the allowlist, with comment-led lines (incl. doxygen ` * `
+  continuations) skipped so prose can't false-trip. Tripwire proven both directions.
+- **A3 — Audit boundary-macro coverage. [LANDED — folded into A2]** Swept the tree for raw
+  float↔Q conversions: structurally clean except one seam, `spectral_osc_q15_phase_from_rads`
+  (`spectral_osc_q15.h:44`), which hardcoded `32768.0f` to dodge RULE 1. Closed by allowlisting
+  that dedicated rads/pi→Q15 boundary helper and swapping its literal to `SPECTRAL_Q15_SCALE`
+  (byte-identical; q15 parity ctests unchanged). RULE 3 now guards against regressions.
+- **A4 — (Optional) C++ strong-typedef wrapper for desktop tooling/tests only. [DECLINED]**
+  Maintainer declined on data. A C++ newtype (fpm / P0037 / Rust-fixed style) would add real
+  ergonomics + safety, but only in C++, and it still cannot vectorize wrapper arrays — so it
+  never enters the kernels (the actual mixing risk), would duplicate the engine's C types in a
+  parallel C++ shadow, and catches little the RULE 1/2/3 source scan doesn't already cover. The
+  separation stays a documented + CI-enforced *discipline* (A1 domain map + A2/A3 contract), which
+  is the correct answer for a C codebase where safety and SIMD-packability are structurally in
+  tension. Not built; no code.
 
 **Output:** a clean, documented, CI-enforced Q-domain with no float/Q mixing outside named
 boundaries — the "robustness + maintainability" the maintainer asked for, achieved by discipline
@@ -205,8 +214,8 @@ Work items:
 
 | ID | Decision | Why it needs you |
 |----|----------|------------------|
-| A2 | Contract-test rigor (keep grep vs. clang/AST) | rigor vs. build-time/complexity trade |
-| A4 | C++ newtype for tooling/tests | scope creep risk; likely decline |
+| A2 | ~~Contract-test rigor (keep grep vs. clang/AST)~~ | **RESOLVED: keep grep + close literal gap (RULE 3)** |
+| A4 | ~~C++ newtype for tooling/tests~~ | **RESOLVED: declined on data — discipline + contract suffices** |
 | B2 | Full-Q15 accumulate on a shipping path | precision risk vs. throughput gain |
 | C3 | Lift `-mno-avx512f` / add 512 tier | needs AVX-512 hardware; portability stance |
 | — | Acquire x86 (+AVX-512) CI to validate Thread C | otherwise wide tiers are unvalidatable |
