@@ -1067,6 +1067,12 @@ oracle.
 - No test asserts on source substrings except deliberate dangerous-pattern lints.
 ```
 
+> Cross-reference (additive, non-conflicting): the optimisation track in
+> `docs/core_audit/OPTIMISATION_PLAN.md` consumes this phase's harness + golden
+> oracle as its verification gate. It introduces no new test philosophy and does
+> not alter Phase D scope, ordering, or closure criteria — the goldens here freeze
+> the current numerical contract that the optimisation work is verified against.
+
 ---
 
 ## Phase E — Core port-layer separation (embedded vs host; device-agnostic)

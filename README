@@ -4,15 +4,24 @@
 #                                                                        #
 ##########################################################################
 
-Real-time spectral analysis and resynthesis engine for macOS/Linux & baremetal ARM Cortex-M/A targets, with acceleration support available for Metal & CUDA platforms.
+Real-time spectral analysis and resynthesis engine for macOS/Linux & ARM Cortex-M/A targets, with acceleration support available for Metal & CUDA platforms.
 
 With planned support for the following:
 
-[] OpenGL
-[] Subset of RISC-V for baremetal embedded targets
+[] OpenGL / Vulkan
+[] RISC-V
 [] FreeRTOS
+[] openBSD
 
 If you are interested in a more detailed project description see spectral_engine/README.md
+
+PRE-REQS
+
+- CMake ≥ 3.x and a C/C++ toolchain (Clang or GCC)
+- `libomp` and `libsndfile`
+
+macOS: ```brew install libomp libsndfile```
+Linux: install `libomp-dev` (or `libgomp`) and `libsndfile1-dev`
 
 BUILD
 
@@ -37,10 +46,7 @@ make embedded_arm_restricted   # host build with embedded constraints
 make daisy                     # Cortex-M firmware build (Daisy Seed)
 ```
 
-We also support a very primitive simulator which is designed to give a *very* rough estimate of the ARM-M7 chip's
-performance on the native target.
-
-[!NOTE that In future releases this will be deprecated in favour of a much more reliable QEMU emulation of the cross-compiled code.!]
+We also support a very primitive simulator which is designed to give a *very* rough estimate of the ARM-M7 chip's performance on the native target.
 
 Simulation build (for modeling cross-compiled code on desktop)
 ```
