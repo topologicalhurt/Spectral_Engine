@@ -199,6 +199,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-simd-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-throughput-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-pack8-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")

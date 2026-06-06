@@ -989,7 +989,9 @@ the debug-instrumentation + optional-processing-chain surface, and the Daisy fir
 command protocol) now audited. TWO bounded, unverifiable-on-host observations are recorded (deferred,
 maintainer-directed: the GPU fade-tail-under-time-stretch non-monotonicity, and the Daisy SD `.spq`
 load skipping segment re-validation — both memory-safe, both await the relevant toolchain/golden-vector
-loop). Phase D next (compiled harness + LUT golden-vector loop). No host-verifiable open leads.
+loop). Phase D IN PROGRESS: D0 (harness infra) done ahead of schedule + D1 (full/fused parity)
+LANDED PASS221 (12/12 ctest green, full==fused 0-ULP on 6 fixtures); D2 golden-vector oracle NEXT
+(maintainer sign-off on frozen fixtures/tolerances), D3/D4/D5 pending. See PATCH_NOTES_PASS221.md.
 ```
 
 ---
@@ -1058,11 +1060,30 @@ oracle.
   new harness.
 ```
 
+### Phase D status (pass 221)
+
+```text
+- D0 (harness infra): DONE ahead of schedule. enable_testing() (root CMakeLists.txt:12)
+  + 11 compiled per-component CTest runners + 2 benches accreted across the
+  oscillator/Q-type sub-campaign (passes 194-220). No new D0 work needed.
+- D1 (full/fused parity): LANDED (PASS221). tests/core_contracts/test_full_fused_parity.c
+  + cmake/targets/full-fused-parity-test.cmake. Drives analyze_audio_with_path_mode()
+  under PATH_FULL vs PATH_FUSED over 6 deterministic fixtures, sorts by (start,omega,amp),
+  compares per-field within FULL_FUSED_PARITY_HARNESS.md tolerances, nonzero on fail.
+  Result: bit-identical (0 ULP) on all 6 fixtures. ctest 12/12 green; desktop builds clean.
+  Supersedes the role of the test_core_pass119_*_spec.py string-matcher (its deletion = D4).
+- D2 golden-vector oracle: NEXT. Wants maintainer sign-off on the fixture set + frozen
+  tolerances (this defines the numerical contract).
+- D3 LUT generator feedback loop, D4 retire ~131 string-grep py tests + fix CI
+  (.github/workflows/c-cpp.yml broken: debian-latest + make check/distcheck undefined;
+  HIGH blast radius — deletes tests + edits CI, wants explicit go-ahead), D5 backfill: pending.
+```
+
 ### Phase D closure criteria
 
 ```text
 - ctest is green and run by CI on a real runner.
-- Full/fused parity harness compiled and passing within documented tolerances.
+- Full/fused parity harness compiled and passing within documented tolerances. [D1 DONE — PASS221]
 - Golden-vector oracle validates the C LUT and the Python generator together.
 - No test asserts on source substrings except deliberate dangerous-pattern lints.
 ```
