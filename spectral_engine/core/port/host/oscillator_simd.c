@@ -31,6 +31,12 @@
 #include "spectral_phase_nco8.h"        /* vectorized uint32 8-wide NCO (c3==0 fast phase) */
 #include "simde/x86/ssse3.h"            /* abs_epi16 / mulhrs_epi16 */
 #include "simde/x86/sse4.1.h"           /* cvtepi16_epi32 (1-op sign-extend) */
+/* Pin the Q15 waveform contract: the pack8 8xQ15 kernel below (osc_simd_q15_segment)
+ * is written op-for-op against the v1 spectral_osc_q15_<timbre> evaluators and must
+ * stay <=1 LSB of them. A contract bump fails this build until the kernel is
+ * re-validated against q15_simd_parity and the pin updated. */
+_Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
+               "spectral_osc_q15.h contract changed; re-validate pack8 Q15 kernel");
 #endif
 
 /* Width tier. SIMDe auto-detects the machine's max native width via

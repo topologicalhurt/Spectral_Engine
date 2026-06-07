@@ -10,6 +10,7 @@
 #include "spectral_envelope.h"
 #include "spectral_fast_math.h"
 #include "spectral_osc_formulas.h"
+#include "spectral_osc_q15.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -212,6 +213,104 @@ void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) { (void)dst; 
 int osc_simd_available(SpectralTimbre timbre) {
     return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW ||
            timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
+}
+
+/* ===== CMSIS-Q15 oscillator (Phase 2, OSCILLATOR_BACKEND_CONTRACT_PLAN.md) =====
+ *
+ * The embedded Q15 compute twin of the float osc_simd_segment_* above, and the
+ * CMSIS sibling of the host pack8 osc_simd_q15_segment (port/host/oscillator_simd.c).
+ * It renders the WAVEFORM through the SAME canonical spectral_osc_q15_<timbre>
+ * evaluators the scalar-Q15 (oscillator.c) and pack8-SIMDe-Q15 paths use -- ONE
+ * versioned contract (SPECTRAL_OSC_Q15_VERSION), no 4th Q15 world. So CMSIS-Q15 is
+ * bit-parity with scalar-Q15 / SIMDe-Q15 BY CONSTRUCTION (shared evaluator), and the
+ * host q15_simd_parity / q15_compute_precision CTests already pin the waveform numerics.
+ *
+ * The directive's "Q15 + float math to maximally saturate the FPU and the integer
+ * unit" is realised structurally: the INTEGER unit evaluates the Q15 waveform
+ * (qsub16 / ssat16 / mul_q15 / spectral_lut_sin) while the FPU runs the float
+ * quadratic phase, the fade envelope, the Q15->float widen, and the amp ramp +
+ * accumulate (CMSIS-DSP arm_q15_to_float / arm_mult_f32 / arm_add_f32 over 4-sample
+ * blocks). Whether that dual-issue actually pays on M7 is a CYCLE measurement, and
+ * is hardware-gated (see below) -- the structure is in place; the number is not yet.
+ *
+ * arm_sin_q15 is deliberately NOT used for sine: it is CMSIS-DSP's own Q15 sine
+ * table, i.e. a SECOND Q15 sine that would fork from the canonical spectral_lut_sin
+ * -- exactly the cross-backend drift this whole initiative exists to prevent. Sine
+ * goes through spectral_osc_q15_sine like every other backend; the contract version
+ * pin makes a silent canonical-evaluator edit fail this build too. Phase model is
+ * quadratic-only, same constraint and rationale as the float path above (32-byte
+ * embedded Segment, c3 == 0).
+ *
+ * VERIFICATION IS HARDWARE-GATED. OSC_SIMD_CMSIS is set only on real Cortex-M
+ * (ARM_MATH_CM7, daisy-config.cmake); none of the host/sim builds compile this
+ * branch, and the dev environment has no arm_math.h / libDaisy, so this body is
+ * neither built nor run locally -- it is type-checked against an arm_math.h shim and
+ * mirrors the already-shipping float CMSIS path above. NOTE: it also has no LIVE
+ * caller yet -- oscillator.c's Q15 dispatch is #if !SPECTRAL_EMBEDDED (PASS216), so
+ * embedded Q15 oscillator synthesis is owned by spectral_synth_arm32.c today. Wiring
+ * this into the live embedded dispatch reverses that deliberate guard and changes
+ * shipped embedded behavior, so it is surfaced as a maintainer decision (plan Phase 2). */
+#define SPECTRAL_OSC_Q15_VERSION_CMSIS_PIN 1
+_Static_assert(SPECTRAL_OSC_Q15_VERSION == SPECTRAL_OSC_Q15_VERSION_CMSIS_PIN,
+               "spectral_osc_q15.h contract changed; re-validate CMSIS-Q15 oscillator");
+
+/* WAVEFORM in Q15 (integer unit), one switch over the canonical v1 evaluators --
+ * the embedded sibling of oscillator.c osc_q15_eval and host osc_q15_wave_scalar. */
+static inline q15_t osc_cmsis_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
+    switch (timbre) {
+    case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
+    case TIMBRE_SAW:      return spectral_osc_q15_saw(pq);
+    case TIMBRE_SQUARE:   return spectral_osc_q15_square(pq);
+    case TIMBRE_TRIANGLE: return spectral_osc_q15_triangle(pq);
+    case TIMBRE_PARABOLA: return spectral_osc_q15_parabola(pq);
+    default:              return Q15_ZERO;
+    }
+}
+
+/* The 5 canonical Q15 timbres (matches the host pack8 contract). Square is included:
+ * unlike the float path (no vector sign primitive -> scalar) the Q15 square is a cheap
+ * integer select, so the whole canonical set is uniform across the Q15 backends. */
+int osc_simd_q15_available(SpectralTimbre timbre) {
+    return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW || timbre == TIMBRE_SQUARE ||
+           timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
+}
+
+void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
+                          SpectralTimbre timbre, const q15_t* sine_lut) {
+    const size_t len = lp->length;
+    if (len == 0) return;
+
+    FadeParams fp = fade_params_init(len, SPECTRAL_FADE_SAMPLES_ACTIVE);
+    const float phase0 = lp->phase;
+    const float alpha = lp->alpha;
+    const float beta = lp->beta;
+    const float amp0 = lp->amp;
+    const float d_amp = lp->d_amp;
+
+    size_t j = 0;
+    q15_t wq[4];
+    float32_t wf[4], amps_v[4], results[4];
+
+    for (; j + 4 <= len; j += 4) {
+        /* Scalar pre-pass: float quadratic phase -> Q15 phase (the lone float->Q
+         * boundary), Q15 waveform on the integer unit, float enveloped amplitude. */
+        for (int k = 0; k < 4; k++) {
+            float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)(j + k)));
+            wq[k] = osc_cmsis_q15_eval(spectral_osc_q15_phase_from_rads(rads), timbre, sine_lut);
+            amps_v[k] = (amp0 + d_amp * (float)(j + k)) * fade_envelope(j + k, &fp, len);
+        }
+        /* FPU body: widen Q15 waveform -> float, amp*wave, accumulate onto output. */
+        arm_q15_to_float(wq, wf, 4);
+        arm_mult_f32(wf, amps_v, results, 4);
+        arm_add_f32(dst + j, results, dst + j, 4);
+    }
+
+    for (; j < len; j++) {
+        float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
+        float wave = Q15_TO_FLOAT(osc_cmsis_q15_eval(spectral_osc_q15_phase_from_rads(rads), timbre, sine_lut));
+        float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
+        dst[j] += amp * wave;
+    }
 }
 
 #endif /* OSC_SIMD_CMSIS */

@@ -11,6 +11,13 @@
 #include "spectral_utils.h"
 #include <math.h>
 
+/* Pin the Q15 waveform contract: this TU's scalar-Q15 dispatch
+ * (synth_segment_q15 -> spectral_osc_q15_<timbre>) was validated against v1.
+ * A contract bump (SPECTRAL_OSC_Q15_VERSION) fails this build until the Q15
+ * path here is re-validated and the pin updated. */
+_Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
+               "spectral_osc_q15.h contract changed; re-validate oscillator.c Q15 path");
+
 /* SIMD is the default CPU execution strategy: the host/embedded osc_simd_segment_*
  * paths are written op-for-op against the scalar oscillator and measure ~1.8x
  * faster on the vectorizable timbres (saw/square/triangle/parabola), ~1.1x on

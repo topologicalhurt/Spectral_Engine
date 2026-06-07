@@ -30,6 +30,17 @@
 extern "C" {
 #endif
 
+/* Contract version for the Q15 oscillator waveform evaluators + boundary
+ * helpers in this header.  Bump on ANY change to spectral_osc_q15_phase_from_rads,
+ * spectral_osc_q15_init_sine_lut, or any spectral_osc_q15_<timbre> evaluator.
+ * Production consumers (oscillator.c scalar-Q15 and port/host/oscillator_simd.c
+ * pack8) pin this with _Static_assert, so a silent contract edit fails their
+ * build -- the Q15 twin of SPECTRAL_OSC_FORMULAS_VERSION (spectral_osc_formulas.h).
+ *
+ * v1 (2026-06-06): five evaluators (sine/saw/square/triangle/parabola), the
+ *   rads->Q15 boundary helper, and the full-scale (Q15_MAX) sine-LUT builder. */
+#define SPECTRAL_OSC_Q15_VERSION 1
+
 /* float rads in [-pi, pi) -> signed Q15 phase (rads/pi -> [-1, 1)).
  *
  * This is the lone float->Q boundary of the Q15 oscillator; it stays OUTSIDE
