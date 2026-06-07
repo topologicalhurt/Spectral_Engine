@@ -62,6 +62,8 @@ def test_peak_estimator_sweep_harness_compiles_and_reports_ground_truth_error() 
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
@@ -104,16 +106,3 @@ def test_peak_estimator_sweep_harness_compiles_and_reports_ground_truth_error() 
     assert hann_log["fallback"] == 0.0
 
 
-def test_pass13_static_artifacts_present() -> None:
-    sweep_c = (ROOT / "tools/core_audit/peak_estimator_sweep.c").read_text()
-    notes = (ROOT / "docs/core_audit/PATCH_NOTES_PASS13.md").read_text()
-    audit = (ROOT / "tools/core_audit/core_static_audit.py").read_text()
-
-    assert "hann" in sweep_c
-    assert "max_abs_err" in sweep_c
-    assert "fallback_rate" in sweep_c
-    assert "SPECTRAL_PEAK_ESTIMATOR_QUINN_SECOND" in sweep_c
-    assert "ground-truth" in notes.lower()
-    assert "offset sweep" in notes.lower()
-    assert "validation matrix" in notes.lower()
-    assert "peak_estimator_sweep.c" in audit

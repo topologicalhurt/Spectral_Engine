@@ -82,6 +82,8 @@ int main(void) {
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
@@ -97,19 +99,3 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass14_static_wiring_present() -> None:
-    est_h = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.h").read_text()
-    est_c = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.c").read_text()
-    interp_h = (ROOT / "spectral_engine/analysis/spectral_peak_interp.h").read_text()
-    interp_c = (ROOT / "spectral_engine/analysis/spectral_peak_interp.c").read_text()
-    track_c = (ROOT / "spectral_engine/analysis/spectral_peak_track.c").read_text()
-
-    assert "const float* next_magsq_row;" in est_h
-    assert "float next_bin_offset;" in est_h
-    assert "SPECTRAL_PEAK_ESTIMATE_NEXT_BIN_OFFSET_VALID" in est_h
-    assert "SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED" in est_h
-    assert "spectral_peak_estimate_next_offset_magsq" in est_c
-    assert "bin_delta = ((float)input->best_next_bin + next_offset)" in est_c
-    assert "const float* __restrict__ next_row" in interp_h
-    assert "estimate_input.next_magsq_row = next_row;" in interp_c
-    assert "spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row" in track_c

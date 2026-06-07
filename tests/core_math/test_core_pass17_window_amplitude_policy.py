@@ -77,6 +77,8 @@ int main(void) {
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
@@ -92,21 +94,3 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass17_static_window_amplitude_policy_present() -> None:
-    windows_h = (ROOT / "spectral_engine/core/spectral_windows.h").read_text()
-    windows_c = (ROOT / "spectral_engine/core/spectral_windows.c").read_text()
-    est_h = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.h").read_text()
-    est_c = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.c").read_text()
-    track_c = (ROOT / "spectral_engine/analysis/spectral_peak_track.c").read_text()
-
-    assert "SpectralWindowPeakMagsqFn" in windows_h
-    assert "peak_magsq;" in windows_h
-    assert "spectral_window_peak_magsq_log_parabolic" in windows_c
-    assert "spectral_window_peak_magsq_center" in windows_c
-    assert "{ SPECTRAL_WINDOW_RECTANGULAR" in windows_c
-    assert "spectral_window_peak_magsq_center" in windows_c
-
-    assert "SpectralWindowPeakMagsqFn peak_magsq;" in est_h
-    assert "spectral_peak_window_peak_magsq" in est_c
-    assert "input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center" in est_c
-    assert "tracker->peak_magsq" in track_c

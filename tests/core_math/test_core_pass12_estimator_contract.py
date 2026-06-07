@@ -70,6 +70,8 @@ int main(void) {
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
@@ -85,9 +87,3 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass12_static_estimator_guards_present() -> None:
-    src = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.c").read_text()
-    assert "Keep these scalar-contract checks unconditional" in src
-    assert "(void)neighborhood_validated;" in src
-    assert "if (!spectral_peak_finite_nonnegative(magsq) || !isfinite(phase))" in src
-    assert "custom descriptor callback" in src

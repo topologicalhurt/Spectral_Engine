@@ -202,6 +202,24 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-pack8-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 
+# Build every compiled CTest executable at once. All test exes are
+# EXCLUDE_FROM_ALL, so a plain build skips them; CI uses this before ctest.
+# The cmake -P source-scan tests (q_domain_contract, osc_backend_contract) need
+# no build. Usage: cmake --build build --target tests_all && ctest --test-dir build
+add_custom_target(tests_all)
+add_dependencies(tests_all
+    arm_core_test
+    core_contracts_test
+    core_guarantees_test
+    core_guarantees_drift_test
+    osc_parity_test
+    osc_width_parity_test
+    q15_compute_precision_test
+    q15_production_parity_test
+    q15_simd_parity_test
+    phase_nco_precision_test
+    full_fused_parity_test)
+
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")
 message(STATUS "  simulate target: ${TARGET_SIMULATION}")

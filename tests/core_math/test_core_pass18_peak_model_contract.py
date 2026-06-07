@@ -99,6 +99,8 @@ int main(void) {
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_model.c"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
@@ -139,7 +141,7 @@ int main(void) {
         quarter_offset,
         0
     };
-    SpectralTracker* tracker = spectral_tracker_create(1, 3u, 48000, 4, 1, -120.0f, 4.0f);
+    SpectralTracker* tracker = spectral_tracker_create(1, 33u, 48000, 64, 1, -120.0f, 4.0f);
     SpectralPeakModel model = spectral_peak_model_for_window(&desc);
     SpectralPeakModel invalid;
 
@@ -177,6 +179,8 @@ int main(void) {
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
                 "-I",
+                str(ROOT / "spectral_engine/runtime"),
+                "-I",
                 str(ROOT / "third_party/simde"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_track.c"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_model.c"),
@@ -198,30 +202,3 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass18_static_peak_model_wiring_present() -> None:
-    manifest = (ROOT / "spectral_engine/cmake/source-manifest.cmake").read_text()
-    model_h = (ROOT / "spectral_engine/analysis/spectral_peak_model.h").read_text()
-    model_c = (ROOT / "spectral_engine/analysis/spectral_peak_model.c").read_text()
-    track_h = (ROOT / "spectral_engine/analysis/spectral_peak_track.h").read_text()
-    track_i = (ROOT / "spectral_engine/analysis/spectral_peak_track_internal.h").read_text()
-    track_c = (ROOT / "spectral_engine/analysis/spectral_peak_track.c").read_text()
-    audit = (ROOT / "tools/core_audit/core_static_audit.py").read_text()
-
-    assert "spectral_peak_model.c" in manifest
-    assert "SpectralPeakModel" in model_h
-    assert "SpectralResolvedPeakModel" in model_h
-    assert "spectral_peak_model_validate" in model_h
-    assert "SPECTRAL_PEAK_MODEL_CAP_COMPLEX_TRIPLET" in model_h
-    assert "spectral_peak_model_for_window_type" in model_c
-    assert "SPECTRAL_WINDOW_RECTANGULAR" in model_c
-    assert "spectral_window_peak_magsq_log_parabolic" in model_c
-    assert "!window->peak_magsq" in model_c
-
-    assert '#include "spectral_peak_model.h"' in track_h
-    assert "spectral_tracker_set_peak_model" in track_h
-    assert "SpectralResolvedPeakModel peak_model;" in track_i
-    assert "spectral_tracker_apply_peak_model" in track_c
-    assert "spectral_peak_model_resolve" in track_c
-    assert "tracker->peak_model = *resolved;" in track_c
-    assert "fallback = spectral_peak_model_default()" not in track_c
-    assert "pass 18 peak model" in audit

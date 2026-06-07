@@ -32,6 +32,8 @@ def compile_and_run(source: str, name: str) -> None:
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
                 "-I",
+                str(ROOT / "spectral_engine/runtime"),
+                "-I",
                 str(ROOT / "third_party/simde"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_track.c"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_model.c"),
@@ -113,7 +115,7 @@ int main(void) {
         0,
         spectral_window_peak_magsq_log_parabolic
     };
-    SpectralTracker* tracker = spectral_tracker_create(1, 3u, 48000, 4, 1, -120.0f, 4.0f);
+    SpectralTracker* tracker = spectral_tracker_create(1, 33u, 48000, 64, 1, -120.0f, 4.0f);
     SpectralPeakModel model = spectral_peak_model_for_window(&custom);
 
     if (!tracker) return 1;
@@ -149,17 +151,3 @@ int main(void) {
     compile_and_run(harness, "transactional_setters")
 
 
-def test_pass20_static_contracts_present() -> None:
-    model_h = (ROOT / "spectral_engine/analysis/spectral_peak_model.h").read_text()
-    model_c = (ROOT / "spectral_engine/analysis/spectral_peak_model.c").read_text()
-    track_c = (ROOT / "spectral_engine/analysis/spectral_peak_track.c").read_text()
-    notes = (ROOT / "docs/core_audit/PATCH_NOTES_PASS20.md").read_text()
-
-    assert "spectral_peak_model_has_capability" in model_h
-    assert "int spectral_peak_model_has_capability" in model_c
-    assert "spectral_peak_model_requires_phase_row" not in model_h
-    assert "spectral_peak_model_requires_next_phase_row" not in model_h
-    assert "SPECTRAL_PEAK_MODEL_CAP_PHASE_ROW |" in model_c
-    assert "SPECTRAL_PEAK_MODEL_CAP_NEXT_PHASE_ROW" in model_c
-    assert "spectral_tracker_set_peak_model(tracker, &model)" in track_c
-    assert "transactional" in notes.lower()

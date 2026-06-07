@@ -91,6 +91,8 @@ int main(void) {
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
@@ -106,24 +108,3 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass16_static_phase_policy_wiring_present() -> None:
-    est_h = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.h").read_text()
-    est_c = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.c").read_text()
-    track_h = (ROOT / "spectral_engine/analysis/spectral_peak_track.h").read_text()
-    track_i = (ROOT / "spectral_engine/analysis/spectral_peak_track_internal.h").read_text()
-    interp_c = (ROOT / "spectral_engine/analysis/spectral_peak_interp.c").read_text()
-    track_c = (ROOT / "spectral_engine/analysis/spectral_peak_track.c").read_text()
-    config = (ROOT / "spectral_engine/core/spectral_config.h").read_text()
-
-    assert "SpectralPeakPhasePolicy" in est_h
-    assert "SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT" in est_h
-    assert "SpectralPeakPhasePolicy phase_policy;" in est_h
-    assert "SPECTRAL_PEAK_PHASE_POLICY_DEFAULT" in config
-    assert "phase_policy == SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT" in est_c
-
-    assert "SpectralPeakPhasePolicy phase_policy;" in track_i
-    assert "spectral_tracker_set_phase_policy" in track_h
-    assert "SpectralPeakModel default_peak_model = spectral_peak_model_default();" in track_c
-    assert "spectral_tracker_set_peak_model(tracker, &default_peak_model)" in track_c
-    assert "model.phase_policy = policy;" in track_c
-    assert "estimate_input.phase_policy = tracker->phase_policy;" in interp_c

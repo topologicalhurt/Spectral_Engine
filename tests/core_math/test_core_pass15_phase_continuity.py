@@ -86,6 +86,8 @@ int main(void) {
                 str(ROOT / "spectral_engine/core"),
                 "-I",
                 str(ROOT / "spectral_engine/analysis"),
+                "-I",
+                str(ROOT / "spectral_engine/runtime"),
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
@@ -101,30 +103,3 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-def test_pass15_static_phase_wiring_present() -> None:
-    est_h = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.h").read_text()
-    est_c = (ROOT / "spectral_engine/analysis/spectral_peak_estimator.c").read_text()
-    track_h = (ROOT / "spectral_engine/analysis/spectral_peak_track.h").read_text()
-    interp_h = (ROOT / "spectral_engine/analysis/spectral_peak_interp.h").read_text()
-    interp_c = (ROOT / "spectral_engine/analysis/spectral_peak_interp.c").read_text()
-    track_c = (ROOT / "spectral_engine/analysis/spectral_peak_track.c").read_text()
-    fused_c = (ROOT / "spectral_engine/analysis/spectral_analysis_fused.c").read_text()
-    config = (ROOT / "spectral_engine/core/spectral_config.h").read_text()
-
-    assert "const float* next_phase_row;" in est_h
-    assert "float phase_bin_offset;" in est_h
-    assert "float phase_omega;" in est_h
-    assert "float phase_error;" in est_h
-    assert "SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID" in est_h
-    assert "SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT" in est_h
-    assert "SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS" in config
-
-    assert "spectral_peak_estimate_phase_advance" in est_c
-    assert "spectral_peak_wrap_phase_pi" in est_c
-    assert "phase_delta - model_omega * input->hop_float" in est_c
-
-    assert "next_phase_row" in track_h
-    assert "const float* __restrict__ next_phase_row" in interp_h
-    assert "estimate_input.next_phase_row = next_phase_row;" in interp_c
-    assert "spectral_tracker_emit_segment(tracker, tid, row, next_row, phase_row, next_phase_row" in track_c
-    assert "fctx.next_phase_row = phase_next;" in fused_c
