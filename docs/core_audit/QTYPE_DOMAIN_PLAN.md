@@ -17,7 +17,7 @@ live Q15-op block wrapped). New `q_domain_contract` CTest (pure `cmake -P` scan,
 no compiler/Python) enforces both no-mixing directions: RULE 1 confines the raw
 scale constants to allowlisted boundary sites; RULE 2 forbids float/double inside
 a Q-domain region. One real leak fixed (`wavetable.c:254` → `SPECTRAL_SAMPLE_TO_FLOAT`,
-byte-identical). Tripwire proven both directions. See PATCH_NOTES_PASS206.
+byte-identical). Tripwire proven both directions. See CHANGELOG Pass 206.
 
 ## What the user asked for (verbatim intent, 2026-06-03)
 
@@ -161,7 +161,7 @@ Two hard nuances baked into this header:
   construction** — the W=4 macro expansion is token-equivalent to the pre-Q2 hand-written
   `simde_mm_*` kernel; `osc_parity` reports the captured baseline to every digit (sine
   5.960e-08, quantized 2.384e-07, RMS -155.1 dBFS). x86-only speedup; no precision change.
-  See PATCH_NOTES_PASS207.
+  See CHANGELOG Pass 207.
 - **Q3 — opt-in Q15 *compute* domain for throughput-bound kernels.** Add the Q15 L1
   twin behind a per-path flag, keyed off `SIMDE_NATURAL_INT_VECTOR_SIZE`, with `__smlad`/
   `__qadd16` packing (8×Q15@128 / 16×Q15@256). Each enabled path carries a measured
@@ -204,7 +204,7 @@ Two hard nuances baked into this header:
     below the floor since fades scale both paths down). Waveform-in-Q15 only; phase NCO stays
     float (deferred). Scalar path is the oracle for the SIMD kernel. **Default byte-identical
     by construction** (opt-in default-0, hot-path branch is control-flow only, no CLI wires it).
-    See PATCH_NOTES_PASS209.
+    See CHANGELOG Pass 209.
   - **Q3b slice 2 CLOSED — measure-first, SIMD Q15 kernel (#73) DECLINED on data (PASS210).**
     Did #75 first: `bench_q15_throughput` (EXCLUDE_FROM_ALL manual probe) renders the real
     production path under float-scalar / q15-scalar / float-simd. Result (ns/sample, Apple
@@ -218,7 +218,7 @@ Two hard nuances baked into this header:
     (the lone scalar winner) loses hardest vectorized (8-way LUT gather, no efficient NEON
     form). So #73 is declined; the bench stays in-tree as reproducible evidence + the gate for
     any future integer-NCO attempt. ctest 9/9 + desktop/simulate/simulate-daisy green; default
-    byte-identical (bench is EXCLUDE_FROM_ALL). See PATCH_NOTES_PASS210.
+    byte-identical (bench is EXCLUDE_FROM_ALL). See CHANGELOG Pass 210.
   - **Re-scoped follow-up — integer-NCO phase axis (deferred):** the prerequisite for any real
     Q15 throughput win (integer phase → 8-wide Q15 packing, no float↔Q conversions).
     `bench_q15_throughput` is its measurement gate if/when scoped. Footprint refinement still

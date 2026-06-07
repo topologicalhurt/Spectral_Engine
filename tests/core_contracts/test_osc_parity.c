@@ -11,8 +11,8 @@
  *
  *   (2) RMS-dBFS GUARD - aggregated over all rendered samples, the RMS of the
  *       (SIMD - scalar) difference stays far below full scale and far below the
- *       signal itself. This is the automated form of the manual measurement in
- *       PATCH_NOTES_PASS200 (full-mix RMS error ~ -159 dBFS).
+ *       signal itself. This is the automated form of a manual full-mix
+ *       measurement (RMS error ~ -159 dBFS).
  *
  * Both paths are driven through the REAL production dispatch, timbre_synth_segment()
  * under osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR | OSC_DISPATCH_ALL_SIMD) - no

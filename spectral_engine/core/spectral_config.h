@@ -46,7 +46,7 @@
  * (spectral_fast_sin_inline), default-ON because it is both faster and
  * SIMD-vectorizable while staying within ~1.4 ULP of libm over the oscillator's
  * operating range (8.3e-7 worst case over [-4pi,4pi]); see the EXACT_TRIG
- * guarantee in spectral_guarantees.h and PATCH_NOTES_PASS201. Set to 0 to
+ * guarantee in spectral_guarantees.h. Set to 0 to
  * restore exact libm sinf (reproducible/parity builds). */
 #ifndef SPECTRAL_ENABLE_APPROX_TRIG
 #define SPECTRAL_ENABLE_APPROX_TRIG 1

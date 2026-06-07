@@ -46,7 +46,7 @@
 > (half/Q15 slower on NEON). **GO-candidate, surfaced as a maintainer decision, NOT wired:** land OPT-IN
 > behind a quality flag (not a default flip — GPU is fp32-exact today, ~−67 dBFS is not ≤1 ULP).
 > `docs/core_audit/GPU_Q15_DOUBLEPACK_AUDIT.md`, harness `tests/core_contracts/bench_metal_q15pack.m`,
-> PATCH_NOTES_PASS226. **This closes the proposed Phase 0→5 order.** Remaining open cells (CMSIS-Q15 live
+> CHANGELOG Pass 226. **This closes the proposed Phase 0→5 order.** Remaining open cells (CMSIS-Q15 live
 > wiring, GPU-Metal/CMSIS runtime parity, LUT-scale convergence) are hardware-/maintainer-gated.
 > All landed work is additive/byte-identical on every locally-buildable target: the 5 standard
 > product builds are green (desktop, simulate, simulate_daisy, embedded_arm, embedded_arm_float);

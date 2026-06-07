@@ -1,0 +1,230 @@
+# Core audit changelog
+
+One line per audit pass. Full rationale/diffs are in git history
+(the per-pass note files were consolidated here). Newer work uses terse
+per-commit messages, not per-pass note files (see AI_CANON Rule 18).
+
+## Campaign 1 — host-kernel audit (passes 1–137)
+
+- Pass 1 — foundational math and fast-math cleanup
+- Pass 2 — approximation gates and validation workflow
+- Pass 3 — fused-frame pair contract
+- Pass 4 — kernel API hardening
+- Pass 5 — GPU tile-span canonicalization
+- Pass 6 — FFT resource ownership hardening
+- Pass 7 — FFT allocator boundary safety
+- Pass 8 — STFT window registry and magnitude calibration
+- Pass 9 — window metric validity flags
+- Pass 10 — window-aware peak interpolation
+- Pass 11 — peak estimator module
+- Pass 12 — estimator contract hardening
+- Pass 13 — estimator validation harness
+- Pass 14 — sub-bin temporal slope for `df`
+- Pass 15 — phase-advance diagnostics
+- Pass 16 — phase-consistency policy
+- Pass 17 — window-aware amplitude estimation
+- Pass 18 — validated peak-model profile
+- Pass 19 — estimator safety and audit bump
+- Pass 20 — peak-model integration audit
+- Pass 21 — kernel alias and wrapper slimming
+- Pass 22 — synthesis output-size overflow contract
+- Pass 23 — CPU synth thread-arena stride overflow
+- Pass 24 — tracker segment-storage allocation overflow
+- Pass 25 — tracker error propagation preserves root cause
+- Pass 26 — segment cache index insertion overflow
+- Pass 27 — segment cache append blob byte-count contract
+- Pass 28 — segment cache index load count/file-size contract
+- Pass 29 — segment cache lookup metadata and data extent contract
+- Pass 30 — segment cache key and store scalar metadata contract
+- Pass 31 — segment cache input identity contract
+- Pass 32 — hash file full-direct size and capability contract
+- Pass 33 — segment file metadata and shape contract
+- Pass 34 — wavetable .spwt file shape and sample contract
+- Pass 35 — wavetable raw/hex/buffer ingestion contract
+- Pass 36 — audio file frame-count representability contract
+- Pass 37 — audio file finite-sample contract
+- Pass 38 — WAV PEAK scrubber chunk extent contract
+- Pass 39 — synthesis derived-parameter finiteness contract
+- Pass 40 — segment cache payload validity contract
+- Pass 41 — segment loop derived-scalar contract
+- Pass 42 — GPU synth parameter packing contract
+- Pass 43 — CUDA event lifecycle contract
+- Pass 44 — Metal dispatch completion contract
+- Pass 45 — GPU tile fill cursor contract
+- Pass 46 — CUDA async transfer and timing contract
+- Pass 47 — segment loop sample-offset float representability contract
+- Pass 48 — GPU tile preprocess segment-ID narrowing contract
+- Pass 49 — zero-reference GPU tile dispatch contract
+- Pass 50 — GPU tile cache validation contract
+- Pass 51 — CPU synth reduction byte-count contract
+- Pass 52 — float normalization finite-state contract
+- Pass 53 — audio window time-domain contract
+- Pass 54 — wavetable HEX record shape contract
+- Pass 55 — hash file reset lifecycle contract
+- Pass 56 — Q15 normalization CMSIS length contract
+- Pass 57 — mono-to-stereo index-domain contract
+- Pass 58 — WAV RIFF declared-extent contract
+- Pass 59 — vector complex-interleaved index contract
+- Pass 60 — vector primitive null/span contract
+- Pass 61 — FFT frame dispatch range/thread contract
+- Pass 62 — FFT magnitude scaling finite-output contract
+- Pass 63 — hash consume-file lifecycle contract
+- Pass 64 — hash oneshot null-span contract
+- Pass 65 — window metric finite-input contract
+- Pass 66 — fused-analysis scratch allocation byte-count contract
+- Pass 67 — fused-analysis OpenMP resource-thread contract
+- Pass 68 — fused-analysis frame-time float contract
+- Pass 69 — FFT single-frame helper boundary contract
+- Pass 70 — analysis OpenMP thread-count domain contract
+- Pass 71 — tracker scalar-domain derivation contract
+- Pass 72 — tracker process matrix and frame-time contract
+- Pass 73 — tracker candidate-batch bounds contract
+- Pass 74 — peak amplitude gain-bound finite-product contract
+- Pass 75 — peak phase-advance finite-product contract
+- Pass 76 — Jacobsen/Candan complex-offset finite-product contract
+- Pass 77 — Quinn second estimator finite-product contract
+- Pass 78 — magnitude-parabolic estimator finite-product contract
+- Pass 79 — peak window callback neighborhood contract
+- Pass 80 — fast sqrt finite-input contract
+- Pass 81 — tracker emitted-segment validity contract
+- Pass 82 — tracker stats accumulation overflow contract
+- Pass 83 — tracker creation thread/frequency index-domain contract
+- Pass 84 — tracker byte-estimate STFT accounting overflow contract
+- Pass 85 — tracker candidate best-next integer-domain contract
+- Pass 86 — synthesis segment payload preflight contract
+- Pass 87 — GPU segment cache one-shot identity contract
+- Pass 88 — GPU tile cache one-shot layout identity contract
+- Pass 89 — oscillator width and quantized-cast contract
+- Pass 90 — CPU synth finite-output postcondition
+- Pass 91 — contract routing and alias-wrapper removal
+- Pass 92 — synthesis preflight consolidation and legacy API removal
+- Pass 93 — analysis window context consolidation
+- Pass 94 — fused-analysis scratch row ownership
+- Pass 95 — tracker peak-model mutation consolidation
+- Pass 96 — shared OpenMP effective-thread contract
+- Pass 97 — FFT frame dispatch consolidation
+- Pass 98 — full-analysis STFT matrix ownership
+- Pass 99 — tracker frame-time helper consolidation
+- Pass 100 — peak offset clamp consolidation
+- Pass 101 — tracker stats accumulation helper consolidation
+- Pass 102 — peak clamp consolidation regression repair
+- Pass 103 — peak magnitude triplet helper consolidation
+- Pass 104 — analysis shape contract consolidation
+- Pass 105 — checked accumulation contract promotion
+- Pass 106 — architecture cleanup status and next-step handoff
+- Pass 107 — prepared GPU dispatch plan
+- Pass 108 — Metal prepared GPU dispatch wiring
+- Pass 109 — CUDA prepared GPU dispatch wiring
+- Pass 110 — GPU cache lookup encapsulation
+- Pass 111 — Phase D completion status
+- Pass 112 — tracker candidate batch owner
+- Pass 113 — tracker frame-context constructor
+- Pass 114 — tracker worker-stats context
+- Pass 115 — tracker flush API encapsulation
+- Pass 116 — Phase E candidate-context status
+- Pass 117 — analysis path policy object
+- Pass 118 — explicit analysis path-mode entry point
+- Pass 119 — full/fused parity harness specification
+- Pass 120 — master-plan closure criteria
+- Pass 121 — Phase F seam completion status
+- Pass 128 — Window generation status contract
+- Pass 129 — Fixed-point finite narrowing contract
+- Pass 130 — LUT lookup domain contract
+- Pass 131 — ARM32 process/load bounds
+- Pass 132 — ARM simulation preflight and conversion bounds
+- Pass 133 — ARM32 chirp contract
+- Pass 135 — ARM32 load invariants
+- Pass 136 — ARM32 DMA placement/coherency contract
+- Pass 137 — ARM simulation unsigned phase parity
+
+## Campaign 2 — ARM / contract / CTF / harness (passes 138+)
+
+- Pass 138 — fix self-referential analysis path-decision struct
+- Pass 139 — interim ARM-synth behavior oracle
+- Pass 140 — remove hand-written ARM NEON from spectral_q15.c
+- Pass 141 — ARM A1 cleanups (LUT-reader dedup, uq32_t); freq-units verified
+- Pass 142 — make the M7 codepath host-buildable (ARM verification enabler)
+- Pass 143 — CTest correctness harness over the REAL ARM process
+- Pass 144 — fix ARM frequency scaling (rendered ~sr/2pi too low)
+- Pass 145 — fix ARM output amplitude (Q30 accumulator read as Q31, -6 dB)
+- Pass 146 — wire load-path segment validation; add rejection test
+- Pass 147 — device-agnostic memory-class placement (Phase E, increment 1)
+- Pass 148 — build-select desktop-only core modules (Phase E)
+- Pass 149 — remove redundant host/sim whole-file guards (Phase E)
+- Pass 150 — fs.c — drop dead embedded stub branch + guard (Phase E)
+- Pass 151 — wavetable.c device-agnostic sample abstraction (Phase E)
+- Pass 152 — oscillator_simd.c port-layer split (Phase E)
+- Pass 153 — spectral_vector_ops.c port-layer relocation (Phase E)
+- Pass 154 — spectral_out.c kernel port-layer split (Phase E)
+- Pass 155 — spectral_synth_internal.c GPU-tile port-layer split (Phase E)
+- Pass 157 — sim becomes a perf model over the REAL spectral_arm32_process (Phase A / A1b#3)
+- Pass 158 — retire the interim ARM oracle (Phase A / A1b#4 closure)
+- Pass 159 — COLA/WOLA reconstruction invariant + test (Phase B0)
+- Pass 160 — guarantee manifest + self-report API (Phase B1+B2)
+- Pass 161 — CTF sweep increment 1 — fixed-point UB cluster (Phase C)
+- Pass 162 — CTF sweep increment 2 — analysis/peak-track tracker cluster (Phase C)
+- Pass 163 — CTF sweep increment 3 — port/SIMD/out cluster (Phase C)
+- Pass 164 — CTF sweep increment 4 — hashing/parsing/path cluster (Phase C)
+- Pass 165 — CTF sweep increment 5 — DSP-math / FFT-scaling cluster (Phase C)
+- Pass 166 — CTF sweep increment 6 — synth backends + analysis orchestration (Phase C)
+- Pass 167 — CTF sweep increment 7 — CLI / orchestration cluster (Phase C)
+- Pass 168 — CTF sweep increment 8 — embedded fade envelope (Phase C)
+- Pass 169 — CTF sweep increment 9 — core synth dispatch / internal helpers (Phase C)
+- Pass 170 — CTF sweep increment 10 — binary deserialization / converter cluster (Phase C)
+- Pass 171 — CTF sweep increment 11 — host GPU-tile preprocess concurrency (Phase C)
+- Pass 172 — CTF sweep increment 12 — oscillator asin NaN injection (Phase C)
+- Pass 173 — CTF sweep increment 13 — host SIMD quantized domain-guard parity (Phase C)
+- Pass 174 — CTF sweep increment 14 — file-I/O + CLI boundary cluster (clean audit) (Phase C)
+- Pass 175 — CTF sweep increment 15 — peak frequency-estimation cluster (clean audit) (Phase C)
+- Pass 176 — CTF sweep increment 16 — SpectralTracker lifecycle / per-thread storage / OpenMP reduction (clean audit) (Phase C)
+- Pass 177 — CTF sweep increment 17 — STFT analysis FFT driver + orchestration cluster (clean audit) (Phase C)
+- Pass 178 — CTF sweep increment 18 — CPU additive-synthesis + wavetable + oscillator-math cluster (defect fixed: host SIMD PWM non-finite divergence) (Phase C)
+- Pass 179 — CTF sweep increment 19 — GPU synthesis dispatch cluster + cross-backend timbre gate (clean audit) (Phase C)
+- Pass 180 — CTF sweep increment 20 — segment-cache persistence cluster (spectral_seg_cache.c, clean audit) (Phase C)
+- Pass 181 — CTF sweep increment 21 — Q15 ARM32 fixed-point synth cluster (defect fixed: expired-segment prune ordering drops boundary-aligned partials) (Phase C)
+- Pass 182 — CTF sweep increment 22 — host file-I/O layer (spectral_fs.c + spectral_seg_cache_fs.c, clean audit) (Phase C)
+- Pass 183 — CTF sweep increment 23 — CUDA tile-parallel synth backend (defect fixed: goto bypasses scalar initializer → ill-formed C++) (Phase C)
+- Pass 184 — CTF sweep increment 24 — segment storage + Q15 LUT + CPU fade-envelope + resource bridge (clean audit) (Phase C)
+- Pass 185 — CTF sweep increment 25 — support/utility math cluster: hash lifecycle + resource-path canonicalization + alloc/overflow helpers + perf cost-model + Q15 primitives + error/peak-model (clean audit) (Phase C)
+- Pass 186 — CTF sweep increment 26 — synthesis backend dispatch + wavetable bank (load/HEX-parse/lookup interpolation) (clean audit) (Phase C)
+- Pass 187 — CTF sweep increment 27 — ARM DWT/ITM debug instrumentation: unsigned-EWMA underflow fix (×3) + analysis-proc / processing-chain / console / log / audio-in audit (Phase C)
+- Pass 188 — CTF sweep increment 28 — Daisy Seed firmware glue + UART command protocol (clean audit; one deferred SD-load validation observation) (Phase C)
+- Pass 189 — CTF sweep increment 29 — tree-wide defect-class cross-cut (unsigned-underflow-shift / integer div-by-zero / computed-size memcpy) + remaining inline-logic headers (clean audit) (Phase C)
+- Pass 190 — CTF sweep increment 30 — tree-wide defect-class cross-cut round 2 (float→int out-of-range conversion / signed-left-shift UB / transcendental-domain NaN injection) (clean audit) (Phase C)
+- Pass 191 — CTF sweep increment 31 — tree-wide defect-class cross-cut round 3 (strict-aliasing type-pun / signed-integer-overflow in arithmetic) (clean audit) (Phase C)
+- Pass 192 — CTF sweep increment 32 — concurrency / floating-point-determinism cross-cut of every OpenMP parallel region (clean audit; one accurately-characterised non-defect note) (Phase C)
+- Pass 193 — CTF sweep increment 33 — memory-safety lifecycle cross-cut (use-after-free / double-free / leak-on-error-path / uninitialized read) at the highest-risk cleanup sites (clean audit) (Phase C)
+- Pass 194 — Optimisation track F1+F3 — MQ track linkage + cubic-phase interpolation (double-gated, default bit-identical)
+- Pass 195 — Optimisation track O4-B — restrict hints on the CPU reduce path (bit-identical)
+- Pass 196 — Optimisation track O1-B — CPU output tiling replacing the full private-buffer reduce (bit-identical)
+- Pass 197 — Optimisation track O4-A — REJECTED-as-specified (the `df_q15` chirp source quantises to 0 for every realisable input)
+- Pass 198 — SIMD oscillator — cubic MQ phase, intuitive comments, and a parity/seam audit
+- Pass 199 — Band-limited ("musical") oscillator quality modes
+- Pass 200 — SIMD becomes the default CPU oscillator path
+- Pass 201 — degree-9 minimax sine becomes the default (scalar + SIMD)
+- Pass 202 — U1c — single L1 oscillator kernel (spectral_osc_eval)
+- Pass 203 — U1d — codegen the Metal MSL from the C contract
+- Pass 204 — U3 — optimize the oversample band-limited renderer
+- Pass 205 — U2 — adversarial audit of the optimized band-limited file
+- Pass 206 — Q0 — Q-domain type discipline + contract CTest
+- Pass 207 — Q2 — width-parameterize the float L1 SIMD oscillator
+- Pass 208 — Q3a — Q15-compute precision characterization (measure-first)
+- Pass 209 — Q3b slice 1 — opt-in Q15 compute plumbing + production parity lock
+- Pass 210 — Q3b slice 2 — measure-first, SIMD Q15 kernel declined on data
+- Pass 211 — Q5a — integer-NCO cubic phase primitive + measure-first gate (PASSED)
+- Pass 212 — Q5b — integer-NCO phase wired into the production Q15 path
+- Pass 213 — Q5c — packed 8×Q15 SIMD oscillator (the double-lane density win)
+- Pass 214 — Bv — vectorized uint32 8-wide NCO phase (the deferred Q5c follow-up, scoped on c3==0)
+- Pass 215 — expose the desktop Q15 compute domain via `--q15` (make the opt-in kernel reachable)
+- Pass 216 — guard the desktop Q15 sine LUT + compute path out of embedded firmware
+- Pass 217 — route sine into the packed 8×Q15 SIMD kernel (refactor Thread B1)
+- Pass 218 — B2 full-Q15 amp-scale experiment — DECLINED on data (refactor Thread B2)
+- Pass 219 — Q-island audit (refactor Thread B3)
+- Pass 220 — C2 `spectral_vector_ops` width audit — DECLINED on evidence (refactor Thread C2)
+- Pass 221 — full/fused analysis parity harness (ULTRAPLAN Phase D — D1)
+- Pass 222 — oscillator backend matrix + Q15 contract versioning (Oscillator-Backend-Contract Phase 0 + 1a/1d)
+- Pass 223 — CMSIS-Q15 oscillator kernel on the canonical contract (Oscillator-Backend-Contract Phase 2)
+- Pass 224 — oscillator backend-contract pin-completeness gate (Oscillator-Backend-Contract Phase 3)
+- Pass 225 — vDSP / Accelerate math-acceleration audit (Oscillator-Backend-Contract Phase 4)
+- Pass 226 — GPU Q15 / fp16 double-pack audit (Oscillator-Backend-Contract Phase 5)
+

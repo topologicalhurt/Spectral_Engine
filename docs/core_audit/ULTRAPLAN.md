@@ -9,9 +9,8 @@ contract/guarantee, adversarial-correctness, and tooling-feedback workstreams.
 ## Governance (applies to every pass)
 
 ```text
-- One change per pass, recorded in docs/core_audit/PATCH_NOTES_PASS<N>.md.
-- Pass numbering is monotonic and numeric; next pass is 138. No letter suffixes.
-- Every pass must justify itself as one of: real bug, real ownership cleanup,
+- One focused change per commit, recorded as a terse line in docs/core_audit/CHANGELOG.md.
+- Every change must justify itself as one of: real bug, real ownership cleanup,
   real API-surface reduction, real test/harness improvement, real perf-path
   simplification (KERNEL_PATCHING_GUIDELINES.md §7).
 - Correctness before performance (AI_CANON §13). A faster wrong kernel is worse
@@ -990,8 +989,8 @@ command protocol) now audited. TWO bounded, unverifiable-on-host observations ar
 maintainer-directed: the GPU fade-tail-under-time-stretch non-monotonicity, and the Daisy SD `.spq`
 load skipping segment re-validation — both memory-safe, both await the relevant toolchain/golden-vector
 loop). Phase D IN PROGRESS: D0 (harness infra) done ahead of schedule + D1 (full/fused parity)
-LANDED PASS221 (12/12 ctest green, full==fused 0-ULP on 6 fixtures); D2 golden-vector oracle NEXT
-(maintainer sign-off on frozen fixtures/tolerances), D3/D4/D5 pending. See PATCH_NOTES_PASS221.md.
+landed (12/12 ctest green, full==fused 0-ULP on 6 fixtures); D2 golden-vector oracle NEXT
+(maintainer sign-off on frozen fixtures/tolerances), D3/D4/D5 pending.
 ```
 
 ---

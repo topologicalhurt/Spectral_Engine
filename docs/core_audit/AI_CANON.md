@@ -187,29 +187,24 @@ For array allocation, use the kernel helpers by default. `spectral_size_add()`,
 `count * sizeof(T)`, `strlen(x) + 1`, or `calloc(1, bytes)` patterns need a
 specific platform or ABI reason.
 
-## 18. Patch notes are the canonical pass record
+## 18. Change record: terse per-commit notes, not per-pass files
 
-Patch audit notes must use one numeric filename per pass:
+The change record is the git log plus one rolling digest at
+`docs/core_audit/CHANGELOG.md`. Do not create a markdown file per change. (The
+former one-file-per-pass scheme produced ~218 `PATCH_NOTES_PASS<N>.md` files
+and the static tests that policed them; both were consolidated into the
+changelog and deleted.)
 
-```text
-docs/core_audit/PATCH_NOTES_PASS<N>.md
-```
-
-Do not create letter-suffixed pass numbers such as `PASS17B`, interim pass-note
-names, or sidecar validation files that duplicate the pass note. If a pass has
-a validation matrix, source table, benchmark interpretation, or failure
-contract, put it in that pass note unless it is a long-lived cross-pass
-reference such as `AI_CANON.md` or `ACADEMIC_SOURCES.md`.
-
-Expected invariants:
-
-- pass-note filenames are numeric and monotonic;
-- the H1 is `# Core audit pass <N>: ...`;
-- tests and audit scripts read the pass note directly;
-- deleting a sidecar file cannot break core tests;
-- docs updates that change the contract update `AI_CANON.md`,
-  `ACADEMIC_SOURCES.md`, and `DISCIPLINE_FINDINGS.md` when those documents are
-  affected.
+- Commit messages are terse and factual: what changed and why, measured not
+  asserted. No prose narrating the process.
+- No AI/prompt/planning-referential text anywhere — code, commits, or docs. No
+  "as discussed", "per the plan", pass/phase narration. State the fact, not the
+  process that produced it.
+- When a change alters a contract, update the affected canon doc in the same
+  commit (`AI_CANON.md`, `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md`,
+  `DISCIPLINE_FINDINGS.md`).
+- No test, audit, or doc may be load-bearing on source text or doc prose. Tests
+  assert behavior; deleting any doc must not break a test.
 
 ## 19. Alias wrappers are not architecture
 

@@ -155,7 +155,7 @@ Work items:
   structurally unavoidable (float `dst`/WAV) and already near the ceiling, and precision regresses.
   Cross-segment "full-Q15 accumulate" is separately blocked (additive partials exceed ±1.0 →
   Q15 saturates). The real 2× density axis is **Thread C** (16×Q15@256 on AVX2), not amp-in-Q.
-  Bench kept in-tree as the evidence (PASS210 pattern). See PATCH_NOTES_PASS218.
+  Bench kept in-tree as the evidence (PASS210 pattern). See CHANGELOG Pass 218.
 - **B3 — Island audit (anti-myopia deliverable). [LANDED — PASS219]** Delivered as
   docs/core_audit/QTYPE_ISLAND_AUDIT.md (code-cited). Findings: the pipeline is FFT→Track→Synth→
   Norm→Write; 4 of 5 stages are inherently float (FFT/Track by information content — wide dynamic

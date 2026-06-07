@@ -157,9 +157,10 @@ descriptor is invalid.
 
 ### Audit docs
 
-Patch notes are the durable review record. Per-pass validation matrices and
-contract explanations should live inside the matching `PATCH_NOTES_PASS<N>.md`
-file so tests, audits and reviewers do not depend on stale sidecar files.
+The durable review record is the git log plus `docs/core_audit/CHANGELOG.md`.
+Validation matrices and contract explanations live in the relevant canon doc
+(`CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md`), not in per-change sidecar files
+that tests or audits could come to depend on.
 
 ### Global state
 

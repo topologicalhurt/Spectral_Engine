@@ -216,7 +216,7 @@ U1b  WIRE the dormant SIMD path as the DEFAULT (Decision A = wire, NOT delete;
      spilled to 4×sinf — is resolved in PASS201: a degree-9 quadrant-folded
      minimax sine is now the default (SPECTRAL_ENABLE_APPROX_TRIG default 0→1),
      shared bit-for-bit by scalar + SIMD, lifting sine to 1.88× end-to-end. See
-     PATCH_NOTES_PASS201. The per-timbre "dispatch" rename still remains for U1c.
+     CHANGELOG Pass 201. The per-timbre "dispatch" rename still remains for U1c.
                                                           [biggest readability +
                                                            unblocks the perf win]
      → STOP and re-evaluate L1 with the maintainer (their chosen scope boundary).
@@ -249,7 +249,7 @@ CPU-float quality path only; opt-in; **not** a golden contract. Measure first.
 - polyblep: profiled (5.4x naive) — already branch-light per-sample; left
   untouched (byte-identical).
 - Default NAIVE byte-identical; 5 builds + ctest 5/5 green; MT-safe (thread-local).
-  See PATCH_NOTES_PASS204.
+  See CHANGELOG Pass 204.
 ```
 
 ### Phase U2 — AUDIT the band-limited file (request #2, after U3)  ✓ DONE (PASS205)
@@ -261,7 +261,7 @@ slope slipped the [1e-6,0.5] clamp → poisoned floorf(0.5/dt) in additive); the
 thread-local-scratch retention tradeoff documented; decimation index/alignment,
 alloc-failure, fallback matrix, overflow, and division paths all confirmed sound.
 Finite-path output byte-identical after the fix; 5 builds + ctest 5/5.
-See PATCH_NOTES_PASS205.
+See CHANGELOG Pass 205.
 
 ---
 

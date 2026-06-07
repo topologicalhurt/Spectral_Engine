@@ -287,7 +287,7 @@ O1-B  CPU output tiling instead of private-buffer reduce       Tier1  regime: os
       Replace O(threads×len) private buffers + reduce pass (spectral_synth_cpu.c:188-254)
       with disjoint output-range tiles, one write/sample — port the engine's own GPU
       tiler. Independent of F1/F2 (improves the osc-bank path either way). ≤1 ULP FP
-      reorder (PATCH_NOTES_PASS192). Flag: none (strict win). Risk: low-med.
+      reorder (CHANGELOG Pass 192). Flag: none (strict win). Risk: low-med.
 
 O2-A  Default vectorised sine + SPECTRAL_PRECISE_TRIG flag      Tier2  regime: osc-bank
       Wire dispatch (osc_set_dispatch is NEVER called, oscillator.c:13) and make the 4-wide
