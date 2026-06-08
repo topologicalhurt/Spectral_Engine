@@ -7,6 +7,7 @@
  * embedded counterpart would live in core/port/embedded/spectral_vector_ops.c.
  * The __AVX2__ branches below are capability gates (SIMD width), not profiles. */
 #include "spectral_vector_ops.h"
+#include "spectral_fast_math.h"
 
 #include "simde/x86/sse2.h"
 #ifdef __AVX2__
@@ -297,14 +298,7 @@ void spectral_vatan2(const float* y, const float* x, float* dst, size_t len) {
     }
 
     for (; i < len; i++) {
-        float abs_x = fabsf(x[i]), abs_y = fabsf(y[i]);
-        float a = (abs_x < abs_y) ? abs_x / (abs_y + SPECTRAL_ATAN2_EPS) : abs_y / (abs_x + SPECTRAL_ATAN2_EPS);
-        float s = a * a;
-        float r = ((SPECTRAL_ATAN2_A0 * s + SPECTRAL_ATAN2_A1) * s + SPECTRAL_ATAN2_A2) * s * a + a;
-        if (abs_y > abs_x) r = SPECTRAL_HALF_PI - r;
-        if (x[i] < 0) r = SPECTRAL_PI_F - r;
-        if (y[i] < 0) r = -r;
-        dst[i] = r;
+        dst[i] = spectral_atan2_poly(y[i], x[i]);
     }
 }
 
@@ -502,14 +496,7 @@ void spectral_magsq_phase(const float* interleaved,
         magsq[i] = msq;
         if (msq > m) m = msq;
 
-        float abs_x = fabsf(re), abs_y = fabsf(im);
-        float a = (abs_x < abs_y) ? abs_x / (abs_y + SPECTRAL_ATAN2_EPS) : abs_y / (abs_x + SPECTRAL_ATAN2_EPS);
-        float s = a * a;
-        float r = ((SPECTRAL_ATAN2_A0 * s + SPECTRAL_ATAN2_A1) * s + SPECTRAL_ATAN2_A2) * s * a + a;
-        if (abs_y > abs_x) r = SPECTRAL_HALF_PI - r;
-        if (re < 0) r = SPECTRAL_PI_F - r;
-        if (im < 0) r = -r;
-        phase[i] = r;
+        phase[i] = spectral_atan2_poly(im, re);
     }
 
     *max_magsq = m;

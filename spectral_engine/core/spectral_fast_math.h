@@ -28,6 +28,22 @@ FAST_MATH_HOT float fast_peak_log(float x);
 float fast_atan2(float y, float x);
 float phase_to_rads(float p);
 
+/* Polynomial atan2(y, x), ALWAYS approximate (no exact-mode gate). This is the
+ * single scalar reference shared by fast_atan2()'s approximate branch and the
+ * scalar tails of the SIMD vatan2 / magsq_phase kernels, so the tail can never
+ * drift from the vectorized body. Coefficients live in spectral_consts.h. */
+static inline float spectral_atan2_poly(float y, float x) {
+    float abs_x = fabsf(x), abs_y = fabsf(y);
+    float a = (abs_x < abs_y) ? abs_x / (abs_y + SPECTRAL_ATAN2_EPS)
+                              : abs_y / (abs_x + SPECTRAL_ATAN2_EPS);
+    float s = a * a;
+    float r = ((SPECTRAL_ATAN2_A0 * s + SPECTRAL_ATAN2_A1) * s + SPECTRAL_ATAN2_A2) * s * a + a;
+    if (abs_y > abs_x) r = SPECTRAL_HALF_PI - r;
+    if (x < 0.0f)      r = SPECTRAL_PI_F - r;
+    if (y < 0.0f)      r = -r;
+    return r;
+}
+
 #ifdef __cplusplus
 }
 #endif
