@@ -9,8 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 TWO_PI = 2.0 * math.pi
 HANN_LOG_PARABOLIC_MAX_ERROR_BINS = 0.02
@@ -183,66 +181,78 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
-@pytest.mark.xfail(
-    reason="Harness uses a 4-point FFT; omega/amp asserts assume n_fft=4, which is "
-    "below SPECTRAL_MIN_FFT_SIZE (64). Redesign with a valid FFT size and "
-    "independently-derived window-amplitude scaling in Macro-2 L2.",
-    strict=False,
-)
 def test_raw_tracker_descriptor_changes_single_shot_omega() -> None:
     cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
     assert cc, "no C compiler available"
 
+    # n_fft = 64 (>= SPECTRAL_MIN_FFT_SIZE); n_freqs = 33; two frames each carrying a
+    # symmetric (1,4,1) magnitude-squared peak at interior bin 8. The symmetric triplet
+    # gives a parabolic sub-bin offset of exactly 0, so the default omega is
+    # 8*(2*pi/64); the custom descriptor's constant quarter_offset adds +0.25 bin, so its
+    # omega is 8.25*(2*pi/64). The offset is a FREQUENCY refinement, so the center-magsq-
+    # driven amplitude must be identical for default and custom; the bad descriptor (null
+    # offset and peak fns) must be rejected. omega/amp are derived independently of the
+    # implementation, so this is a behavioural contract, not a change-detector.
     harness = r'''
 #include "spectral_peak_track.h"
 #include "spectral_windows.h"
+#include "spectral_consts.h"
 #include <math.h>
 
+#define N_FFT    64
+#define N_FREQS  33            /* N_FFT/2 + 1 */
+#define N_FRAMES 2u
+#define PEAK_BIN 8             /* interior trackable bin (not DC or Nyquist) */
+
 static float quarter_offset(float left, float center, float right) {
-    (void)left;
-    (void)center;
-    (void)right;
-    return 0.25f;
+    (void)left; (void)center; (void)right;
+    return 0.25f;              /* constant sub-bin offset, independent of the triplet */
 }
 
 int main(void) {
-    float magsq[6] = {1.0f, 4.0f, 1.0f, 1.0f, 4.0f, 1.0f};
-    float phase[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    double t_default = 0.0;
-    double t_custom = 0.0;
-    double t_bad = 0.0;
-    const float bin_step = SPECTRAL_PI * 0.5f;
+    float magsq[N_FREQS * 2] = {0};
+    float phase[N_FREQS * 2] = {0};
+    for (unsigned f = 0; f < N_FRAMES; f++) {
+        float* row = magsq + (size_t)f * N_FREQS;
+        row[PEAK_BIN - 1] = 1.0f;
+        row[PEAK_BIN]     = 4.0f;   /* local max -> the tracked peak */
+        row[PEAK_BIN + 1] = 1.0f;
+    }
+    const float bin_step = SPECTRAL_TWO_PI / (float)N_FFT;   /* omega per bin = 2*pi/n_fft */
+    double t_default = 0.0, t_custom = 0.0, t_bad = 0.0;
+
     SpectralWindowDescriptor desc = {
-        SPECTRAL_WINDOW_HANN,
-        "test-quarter",
-        "Test Quarter",
-        0,
-        quarter_offset,
-        0
+        SPECTRAL_WINDOW_HANN, "test-quarter", "Test Quarter", 0, quarter_offset, 0
     };
     SpectralWindowDescriptor bad_desc = {
-        SPECTRAL_WINDOW_HANN,
-        "bad",
-        "Bad",
-        0,
-        0,
-        0
+        SPECTRAL_WINDOW_HANN, "bad", "Bad", 0, 0, 0
     };
+
     SegmentArray default_segments = spectral_track_peaks(
-        magsq, phase, 4.0f, 2u, 3u, 48000, 4, 1, -120.0f, &t_default);
+        magsq, phase, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f, &t_default);
     SegmentArray custom_segments = spectral_track_peaks_with_window_descriptor(
-        magsq, phase, 4.0f, 2u, 3u, 48000, 4, 1, -120.0f,
+        magsq, phase, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
         &desc, SPECTRAL_PEAK_ESTIMATOR_AUTO, &t_custom);
     SegmentArray bad_segments = spectral_track_peaks_with_window_descriptor(
-        magsq, phase, 4.0f, 2u, 3u, 48000, 4, 1, -120.0f,
+        magsq, phase, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
         &bad_desc, SPECTRAL_PEAK_ESTIMATOR_AUTO, &t_bad);
 
     if (default_segments.count != 1u || !default_segments.segs) return 1;
     if (custom_segments.count != 1u || !custom_segments.segs) return 2;
-    if (fabsf(default_segments.segs[0].omega - bin_step) > 1.0e-5f) return 3;
-    if (fabsf(custom_segments.segs[0].omega - (1.25f * bin_step)) > 1.0e-5f) return 4;
-    if (fabsf(custom_segments.segs[0].amp - 2.0f) > 1.0e-5f) return 5;
-    if (bad_segments.count != 0u || bad_segments.segs) return 6;
+
+    /* symmetric (1,4,1) -> parabolic offset 0 -> omega = bin * bin_step */
+    if (fabsf(default_segments.segs[0].omega - (float)PEAK_BIN * bin_step) > 1.0e-4f) return 3;
+    /* quarter_offset shifts the sub-bin position by +0.25 bin */
+    if (fabsf(custom_segments.segs[0].omega - ((float)PEAK_BIN + 0.25f) * bin_step) > 1.0e-4f) return 4;
+
+    /* Frequency offset must not move the (center-magsq-driven) amplitude. */
+    float amp_default = default_segments.segs[0].amp;
+    float amp_custom  = custom_segments.segs[0].amp;
+    if (!(amp_default > 0.0f) || !isfinite(amp_default)) return 5;
+    if (fabsf(amp_custom - amp_default) > 1.0e-4f * amp_default) return 6;
+
+    /* Null offset and peak fns -> descriptor rejected -> no segments emitted. */
+    if (bad_segments.count != 0u || bad_segments.segs) return 7;
 
     spectral_segment_array_free(&default_segments);
     spectral_segment_array_free(&custom_segments);
