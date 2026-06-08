@@ -54,6 +54,7 @@ static inline q15_t spectral_lut_sin(uq16_t phase_u16, const q15_t* lut) {
 }
 
 static inline q15_t spectral_lut_cos(uq16_t phase_u16, const q15_t* lut) {
+    /* cos(x) = sin(x + pi/2); 16384 = 65536/4 is a quarter turn in the uint16 phase. */
     return spectral_lut_sin((uq16_t)(phase_u16 + (uq16_t)16384u), lut);
 }
 

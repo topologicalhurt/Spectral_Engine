@@ -29,6 +29,9 @@ float fast_inv_sqrt(float x) {
     union { float f; uint32_t i; } conv;
     float x2 = x * 0.5f, y = x;
     conv.f = y;
+    /* 0x5f3759df: the Quake III fast inverse-sqrt magic constant -- an initial guess
+     * from IEEE-754 bit layout, refined below by Newton steps. Gated approximation;
+     * exact 1.0/sqrtf is the default (see the #else branch). */
     conv.i = 0x5f3759df - (conv.i >> 1);
     y = conv.f;
     y = y * (1.5f - (x2 * y * y));
