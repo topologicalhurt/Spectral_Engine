@@ -134,6 +134,18 @@ set(SPECTRAL_SIMULATION_DAISY_DEFINES
     SPECTRAL_RESTRICTED_MODE=1
     SPECTRAL_SIMULATION_TARGET_DAISY=1)
 
+# Extra defines layered on top of SPECTRAL_SIMULATION_DEFINES for the embedded
+# host variants (see cmake/targets/embedded.cmake). Without these the variables
+# expand to empty and embedded_arm_float silently equals embedded_arm while
+# embedded_arm_restricted fails to link (its CLI pipeline pulls in analyze_audio
+# and perf_*, which RESTRICTED_MODE/NO_PERF guard out).
+set(SPECTRAL_EMBEDDED_FLOAT_DEFINES
+    SPECTRAL_EMBEDDED_FLOAT=1)
+
+set(SPECTRAL_EMBEDDED_RESTRICTED_DEFINES
+    SPECTRAL_RESTRICTED_MODE=1
+    SPECTRAL_NO_PERF=1)
+
 # --- CACHE HEURISTICS ---
 set(L3_SIZE_KB 0)
 
