@@ -154,8 +154,13 @@ static inline q15_t osc_q15_vnco_next(SpectralPhaseNco8* v, int16_t* buf, int* p
  * fixed point (no float between the markers). Sine has no vector form, so it is an
  * 8x serial LUT gather, bit-identical to scalar spectral_osc_q15_sine, taken BEFORE
  * the algebraic clamp (the LUT index is exact for every pq incl. -32768). The
- * algebraic cases pre-clamp pq so neither abs nor the squaring multiply can overflow
- * int16 at the -1.0 phase corner. */
+ * algebraic cases pre-clamp pq so neither abs nor the squaring multiply overflows
+ * int16 at the pq == -32768 (phase -pi) corner. By default (exact mode) triangle and
+ * parabola then restore the exact corner value with a masked fix-up, so the SIMD
+ * output is bit-identical to the scalar/float reference for EVERY pq. Under
+ * SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY the fix-up is dropped (1 LSB at that one corner)
+ * to save two ops -- the canonical "exact default, cheap approximation only when gated"
+ * example (AI_CANON rule 3). SAW and SQUARE are already exact at the corner. */
 // SPECTRAL_Q_DOMAIN BEGIN
 static inline simde__m128i osc_q15_pack8_eval(simde__m128i pq, SpectralTimbre timbre,
                                               const q15_t* lut) {
@@ -168,26 +173,62 @@ static inline simde__m128i osc_q15_pack8_eval(simde__m128i pq, SpectralTimbre ti
     }
     const simde__m128i zero = simde_mm_setzero_si128();
     const simde__m128i qmax = simde_mm_set1_epi16(Q15_MAX);
+#if !SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY
+    /* Lanes exactly on the -1.0 phase corner, captured before the clamp rewrites
+     * pq == Q15_MIN to Q15_MIN+1. Used to restore the exact triangle/parabola value. */
+    const simde__m128i at_corner = simde_mm_cmpeq_epi16(pq, simde_mm_set1_epi16(Q15_MIN));
+#endif
     pq = simde_mm_max_epi16(pq, simde_mm_set1_epi16((int16_t)(Q15_MIN + 1)));
     switch (timbre) {
-    case TIMBRE_SAW:                            /* -pq, saturating negate */
+    case TIMBRE_SAW:                            /* -pq, saturating negate (exact at corner) */
         return simde_mm_subs_epi16(zero, pq);
-    case TIMBRE_SQUARE: {                       /* sign(pq): +MAX / -... */
+    case TIMBRE_SQUARE: {                       /* sign(pq): +MAX / -MIN (exact at corner) */
         simde__m128i gt = simde_mm_cmpgt_epi16(pq, zero);
         return simde_mm_or_si128(simde_mm_and_si128(gt, qmax),
                                  simde_mm_andnot_si128(gt, simde_mm_set1_epi16(Q15_MIN)));
     }
-    case TIMBRE_TRIANGLE: {                      /* MAX - 2|pq|, no mid clamp */
+    case TIMBRE_TRIANGLE: {                      /* MAX - 2|pq| */
         simde__m128i a = simde_mm_abs_epi16(pq);
-        return simde_mm_subs_epi16(simde_mm_subs_epi16(qmax, a), a);
+        simde__m128i r = simde_mm_subs_epi16(simde_mm_subs_epi16(qmax, a), a);
+#if !SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY
+        /* triangle(-pi) = -1.0 exactly; the clamp yielded Q15_MIN+1, restore Q15_MIN. */
+        r = simde_mm_or_si128(simde_mm_andnot_si128(at_corner, r),
+                              simde_mm_and_si128(at_corner, simde_mm_set1_epi16(Q15_MIN)));
+#endif
+        return r;
     }
-    case TIMBRE_PARABOLA:                        /* MAX - (pq/MAX)^2 */
+    case TIMBRE_PARABOLA: {                      /* MAX - (pq/MAX)^2 */
+#if SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY
+        /* Cheap: rounding mulhrs. Differs from the scalar truncating multiply by 1 LSB
+         * across ~half the domain, plus 1 LSB at the -pi corner. */
         return simde_mm_subs_epi16(qmax, simde_mm_mulhrs_epi16(pq, pq));
+#else
+        /* Exact: truncating (pq*pq) >> 15 -- reconstructed from the lo/hi halves so it
+         * is bit-for-bit the scalar spectral_mul_q15 (smulbb >> 15) for every pq -- then
+         * restore parabola(-pi) = 0 at the clamped corner. (pq*pq >= 0, so the >>15 is a
+         * plain truncation: (hi << 1) | (lo >> 15).) */
+        simde__m128i lo = simde_mm_mullo_epi16(pq, pq);
+        simde__m128i hi = simde_mm_mulhi_epi16(pq, pq);
+        simde__m128i sq = simde_mm_or_si128(simde_mm_slli_epi16(hi, 1),
+                                            simde_mm_srli_epi16(lo, 15));
+        return simde_mm_andnot_si128(at_corner, simde_mm_subs_epi16(qmax, sq));
+#endif
+    }
     default:
         return zero;
     }
 }
 // SPECTRAL_Q_DOMAIN END
+
+#ifdef SPECTRAL_EXPOSE_Q15_PACK8_FOR_TEST
+/* Test-only external handle on the static-inline packed eval, so the SIMD-vs-scalar
+ * parity test can sweep it directly across all 65536 phase indices. Defined in no
+ * production target. */
+simde__m128i spectral_q15_pack8_eval_for_test(simde__m128i pq, SpectralTimbre timbre,
+                                              const q15_t* lut) {
+    return osc_q15_pack8_eval(pq, timbre, lut);
+}
+#endif
 
 int osc_simd_q15_available(SpectralTimbre timbre) {
     /* The 4 algebraic timbres plus sine. Sine's eval is a serial LUT gather (no

@@ -30,6 +30,13 @@
 #include "oscillator_dispatch.h"
 #include "spectral_synth_internal.h"
 #include "spectral_common.h"
+#include "spectral_osc_q15.h"   /* scalar Q15 evaluators -- the SIMD oracle */
+#include "simde/x86/sse2.h"
+
+/* Test-only handle on the static-inline packed SIMD eval (oscillator_simd.c built
+ * with SPECTRAL_EXPOSE_Q15_PACK8_FOR_TEST). */
+simde__m128i spectral_q15_pack8_eval_for_test(simde__m128i pq, SpectralTimbre timbre,
+                                              const q15_t* lut);
 
 static int g_fail = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
@@ -147,9 +154,53 @@ static void test_q15_simd_parity(void) {
     }
 }
 
+/* EXHAUSTIVE bit-exact lock: in the default exact mode the packed 8xQ15 SIMD eval must
+ * equal the scalar Q15 evaluator for EVERY phase index pq in [-32768, 32767], and the
+ * saturating phase = -pi corner (pq == Q15_MIN) must equal the float reference --
+ * triangle = -1.0 (Q15_MIN), parabola = 0. This pins the SIMD int16 overflow-corner fix;
+ * under SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY the corner is allowed to drift 1 LSB. */
+static void test_q15_simd_exhaustive_parity(void) {
+    q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1u];
+    spectral_osc_q15_init_sine_lut(lut);
+
+    const SpectralTimbre timbres[] = { TIMBRE_SAW, TIMBRE_SQUARE, TIMBRE_TRIANGLE, TIMBRE_PARABOLA };
+    const char* names[] = { "saw", "square", "triangle", "parabola" };
+
+    for (size_t t = 0; t < 4; t++) {
+        long mism = 0;
+        for (int p = Q15_MIN; p <= Q15_MAX; p++) {
+            q15_t pq = (q15_t)p;
+            q15_t scalar;
+            switch (timbres[t]) {
+            case TIMBRE_SAW:      scalar = spectral_osc_q15_saw(pq);      break;
+            case TIMBRE_SQUARE:   scalar = spectral_osc_q15_square(pq);   break;
+            case TIMBRE_TRIANGLE: scalar = spectral_osc_q15_triangle(pq); break;
+            default:              scalar = spectral_osc_q15_parabola(pq); break;
+            }
+            simde__m128i r = spectral_q15_pack8_eval_for_test(simde_mm_set1_epi16(pq), timbres[t], lut);
+            q15_t simd = (q15_t)simde_mm_extract_epi16(r, 0);
+            if (simd != scalar) {
+                if (mism < 3) printf("  %s pq=%d : SIMD %d != scalar %d\n", names[t], pq, simd, scalar);
+                mism++;
+            }
+        }
+        CHECK(mism == 0, "%s: %ld of 65536 pq diverge SIMD-vs-scalar (exact mode must be bit-identical)",
+              names[t], mism);
+        if (mism == 0) printf("  %-9s 65536/65536 pq bit-identical (SIMD == scalar)\n", names[t]);
+    }
+
+    /* The corner the fix exists for: must equal the float reference, not the cheap clamp. */
+    CHECK(spectral_osc_q15_triangle(Q15_MIN) == Q15_MIN,
+          "triangle(-pi) must be -1.0 (Q15_MIN=%d), got %d", Q15_MIN, spectral_osc_q15_triangle(Q15_MIN));
+    CHECK(spectral_osc_q15_parabola(Q15_MIN) == 0,
+          "parabola(-pi) must be 0, got %d", spectral_osc_q15_parabola(Q15_MIN));
+}
+
 int main(void) {
     printf("== packed 8xQ15 SIMD vs scalar Q15 parity (per-path dBFS) ==\n");
     test_q15_simd_parity();
+    printf("== exhaustive SIMD-vs-scalar Q15 eval parity (all 65536 pq) ==\n");
+    test_q15_simd_exhaustive_parity();
     printf("RESULT: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }

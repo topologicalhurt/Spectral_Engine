@@ -60,6 +60,16 @@
 #ifndef SPECTRAL_ENABLE_APPROX_PEAK_LOG
 #define SPECTRAL_ENABLE_APPROX_PEAK_LOG 0
 #endif
+/* Q15 oscillator phase-corner approximation. Default 0 = the packed 8x SIMD Q15
+ * triangle/parabola evaluators reproduce the scalar/float result exactly at the
+ * pq == Q15_MIN (phase = -pi) corner. Set to 1 in a fast/approximate build to skip
+ * the exact-corner correction and accept the cheap 1-LSB overflow-guard clamp there.
+ * This is the canonical example of the "exact default, cheap approximation only when
+ * gated" policy (see AI_CANON rule 3): the int16 SIMD ops overflow at -32768, so the
+ * default does a tiny masked corner fix-up while the gate trades 1 LSB for two fewer ops. */
+#ifndef SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY
+#define SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY 0
+#endif
 #ifndef SPECTRAL_METAL_FAST_MATH
 #define SPECTRAL_METAL_FAST_MATH 0
 #endif
