@@ -276,6 +276,8 @@ int main(int argc, char** argv) {
     }
     if ((size_t)requested_count > opts.pool_max_segments) {
         SPECTRAL_LOG_WARN("Warning: truncating to %zu (pool limit)", opts.pool_max_segments);
+        /* Safe narrowing: this branch only runs when pool_max_segments < requested_count,
+         * and requested_count is uint32_t, so pool_max_segments < UINT32_MAX here. */
         requested_count = (uint32_t)opts.pool_max_segments;
     }
 

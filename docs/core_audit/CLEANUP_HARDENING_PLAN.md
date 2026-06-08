@@ -32,7 +32,19 @@ iteratively (kernel/patch style). Maintainer-directed order; decisions locked be
 | C6 | API maturation: resolve draft vs real surfaces; version & freeze public contract | after C5 |
 | C7 | `AI.md`: tight, codebase-tailored, from `AI_CANON` + findings | finalize last |
 
-## Macro-2 — logical-error audit (each finding that spans the program lifecycle → strong C test suite)
+## Liminal — constants & magic-number consolidation (C8)
+Runs between Macro-2 passes. Single source of truth for every constant:
+- Math/DSP constants live in `core/spectral_consts.h`; build/limits/feature flags in
+  `core/spectral_config.h`. No duplicate `#define` of the same value across files.
+- A file-local literal is allowed only if it is genuinely local AND either self-evident
+  or explained inline. Specific magic numbers (thresholds, scales, tuned coefficients)
+  must be named in the right header or carry an inline derivation/units comment.
+- No silent re-derivation of a value that already has a canonical name.
+
+## Macro-2 — logical-error audit (iterative; each lifecycle-spanning finding → strong C test suite)
+Pass 1 (done): build-flag breakage fixed (embedded matrix); packed SIMD Q15 osc made
+bit-exact to scalar, locked by an exhaustive 65536-pq test. Deeper, more adversarial
+passes ongoing.
 | ID | Area |
 |----|------|
 | L1 | DSP / audio correctness |

@@ -26,6 +26,7 @@
 
 #include "spectral_guarantees.h"
 #include "spectral_fast_math.h"
+#include "spectral_osc_formulas.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -161,11 +162,40 @@ static void test_drift(void) {
     CHECK(m <= BUDGET_PEAK_LOG, "fast_peak_log drift %.3e > budget %.1e", m, BUDGET_PEAK_LOG);
 }
 
+/* Large accumulated phase (long sustained segments: phase = phase0 + alpha*j grows with
+ * the segment-relative sample index j) reduces through spectral_normalize_phase with float
+ * catastrophic cancellation, so the wrapped value loses precision and can land a fraction
+ * of an ULP outside [-pi, pi). The dangerous consequence is asinf's domain (NaN), guarded by
+ * a clamp in spectral_osc_asin. This locks the guarantee that EVERY timbre stays finite and
+ * within full scale at very large phase, so that clamp (and the wrap) cannot silently regress. */
+static void test_large_phase_safety(void) {
+    /* up to ~1.6e7 rad: a high partial sustained for minutes. */
+    const float ps[] = { 2.765e4f, 2.765e5f, 1.0e6f, 5.0e6f, 1.6e7f };
+    for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) {
+        float rads = spectral_normalize_phase(ps[i]);
+        CHECK(fabsf(rads) <= (float)M_PI + 1.0e-3f,
+              "normalize_phase(%.3e) = %.6f outside [-pi, pi]", (double)ps[i], (double)rads);
+        const float w[6] = {
+            spectral_osc_sine(rads, 0.5f),     spectral_osc_saw(rads, 0.5f),
+            spectral_osc_square(rads, 0.5f),   spectral_osc_triangle(rads, 0.5f),
+            spectral_osc_parabola(rads, 0.5f), spectral_osc_asin(rads, 0.5f),
+        };
+        const char* nm[6] = { "sine", "saw", "square", "triangle", "parabola", "asin" };
+        for (int k = 0; k < 6; k++) {
+            CHECK(isfinite(w[k]) && fabsf(w[k]) <= 1.0001f,
+                  "timbre %s at phase %.3e -> %g (must be finite, |w| <= 1)",
+                  nm[k], (double)ps[i], (double)w[k]);
+        }
+    }
+    printf("large-phase safety: all timbres finite and within full scale up to 1.6e7 rad\n");
+}
+
 int main(void) {
     printf("== guarantee manifest / self-report (B1/B2) ==\n");
     test_bitset_wiring();
     test_fail_closed();
     test_drift();
+    test_large_phase_safety();
     printf("RESULT: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }
