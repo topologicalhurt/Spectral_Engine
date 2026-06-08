@@ -45,10 +45,6 @@ static inline char spectral_hex_nibble(unsigned n)
  * will silently fail.  Any change here must be reflected in compress_path().
  * ---------------------------------------------------------------------------*/
 
-/* Worst-case RLE expansion is 2x (a run-of-2 encodes as 4 bytes).
- * A 512-byte normalized path produces at most a 1024-byte canonical form. */
-#define SPECTRAL_CANONICAL_PATH_SIZE 1024u
-
 /* Phase 1+2+3: lowercase, strip controls, normalize separators into scratch[]. */
 static size_t spectral_path_p1(const char* path, char* scratch, size_t sz)
 {

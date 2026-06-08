@@ -178,7 +178,7 @@ static int osc_bl_polyblep(float* dst, const SegmentLoopParams* lp, SpectralTimb
             wave = spectral_fast_sin_inline(rads);
             break;
         case TIMBRE_PARABOLA:
-            wave = 1.0f - rads * rads * SPECTRAL_INV_PI_SQ;
+            wave = spectral_osc_parabola(rads, width);
             break;
         default:
             return 0;

@@ -1,4 +1,4 @@
-/* spectral_mem.h - Device-agnostic memory-class placement (ULTRAPLAN Phase E).
+/* spectral_mem.h - Device-agnostic memory-class placement.
  *
  * Core expresses memory placement by INTENT, never by device:
  *   SPECTRAL_MEM_FAST       hot data in the fastest / zero-wait memory (e.g. DTCM)

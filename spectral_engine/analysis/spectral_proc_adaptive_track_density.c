@@ -24,8 +24,6 @@
 #define SPECTRAL_TRACK_LINK_BINS 1.0f
 #endif
 
-static const float ATD_TWO_PI = 6.28318530717958647692f;
-
 /* Frame index of a segment.  start == frame*hop and length == hop (constant),
  * so start/length recovers the integer frame.  Returns -1 if length invalid. */
 static long atd_frame_index(const Segment* s) {
@@ -67,10 +65,10 @@ static void atd_link_frames(Segment* segs,
 
         /* MQ maximally-smooth unwrap factor M* (eq. 38). */
         const float x = ((theta_k + w_k * T - theta_k1) + 0.5f * T * (w_k1 - w_k))
-                        / ATD_TWO_PI;
+                        / SPECTRAL_TWO_PI;
         const float M = roundf(x);
 
-        const float dtheta = theta_k1 + ATD_TWO_PI * M - theta_k - w_k * T;
+        const float dtheta = theta_k1 + SPECTRAL_TWO_PI * M - theta_k - w_k * T;
         const float dw = w_k1 - w_k;
         const float invT = 1.0f / T;
 
@@ -97,7 +95,7 @@ SpectralError spectral_proc_adaptive_track_density_apply(
     /* One MQ matching interval ~ bin spacing (2*pi / n_fft rad/sample). */
     float tol_omega = 0.0f;
     if (params && params->n_fft > 0) {
-        tol_omega = SPECTRAL_TRACK_LINK_BINS * (ATD_TWO_PI / (float)params->n_fft);
+        tol_omega = SPECTRAL_TRACK_LINK_BINS * (SPECTRAL_TWO_PI / (float)params->n_fft);
     }
 
     Segment* segs = sa->segs;
