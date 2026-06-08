@@ -17,6 +17,8 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: build desktop + tests
         run: cmake --build build --target desktop tests_all --parallel
+      - name: build embedded host targets
+        run: cmake --build build --target simulate simulate_daisy embedded_arm embedded_arm_float embedded_arm_restricted --parallel
       - name: ctest
         run: ctest --test-dir build --output-on-failure
 
@@ -30,6 +32,8 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: build desktop + tests
         run: cmake --build build --target desktop tests_all --parallel
+      - name: build embedded host targets
+        run: cmake --build build --target simulate simulate_daisy embedded_arm embedded_arm_float embedded_arm_restricted --parallel
       - name: ctest
         run: ctest --test-dir build --output-on-failure
 
