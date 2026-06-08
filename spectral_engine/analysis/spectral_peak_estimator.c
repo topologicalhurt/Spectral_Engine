@@ -49,10 +49,10 @@ static int spectral_peak_store_clamped_offset_d(float* out_offset, double offset
 {
     if (!out_offset || !isfinite(offset_d)) return 0;
 
-    if (offset_d > 0.5) {
-        *out_offset = 0.5f;
-    } else if (offset_d < -0.5) {
-        *out_offset = -0.5f;
+    if (offset_d > SPECTRAL_PEAK_BIN_OFFSET_MAX) {
+        *out_offset = SPECTRAL_PEAK_BIN_OFFSET_MAX;
+    } else if (offset_d < -SPECTRAL_PEAK_BIN_OFFSET_MAX) {
+        *out_offset = -SPECTRAL_PEAK_BIN_OFFSET_MAX;
     } else {
         *out_offset = (float)offset_d;
     }
@@ -62,8 +62,8 @@ static int spectral_peak_store_clamped_offset_d(float* out_offset, double offset
 
 static float spectral_peak_clamp_offset(float p) {
     /* Callers reject non-finite estimator output before clamping. */
-    if (p > 0.5f) return 0.5f;
-    if (p < -0.5f) return -0.5f;
+    if (p > SPECTRAL_PEAK_BIN_OFFSET_MAX) return SPECTRAL_PEAK_BIN_OFFSET_MAX;
+    if (p < -SPECTRAL_PEAK_BIN_OFFSET_MAX) return -SPECTRAL_PEAK_BIN_OFFSET_MAX;
     return p;
 }
 

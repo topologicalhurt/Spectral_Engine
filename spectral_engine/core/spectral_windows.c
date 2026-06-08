@@ -40,7 +40,7 @@ void spectral_window_hamming(float* window, size_t length) {
     /* Hamming: w[n] = 0.54 - 0.46 * cos(2*pi*n / (N-1)) */
     const float scale = (float)(2.0 * SPECTRAL_PI / (length - 1));
     for (size_t i = 0; i < length; i++) {
-        window[i] = 0.54f - 0.46f * cosf((float)i * scale);
+        window[i] = SPECTRAL_HAMMING_A0 - SPECTRAL_HAMMING_A1 * cosf((float)i * scale);
     }
 #endif
 }
@@ -56,7 +56,8 @@ void spectral_window_blackman(float* window, size_t length) {
     const float scale = (float)(2.0 * SPECTRAL_PI / (length - 1));
     for (size_t i = 0; i < length; i++) {
         float angle = (float)i * scale;
-        window[i] = 0.42f - 0.5f * cosf(angle) + 0.08f * cosf(2.0f * angle);
+        window[i] = SPECTRAL_BLACKMAN_B0 - SPECTRAL_BLACKMAN_B1 * cosf(angle)
+                  + SPECTRAL_BLACKMAN_B2 * cosf(2.0f * angle);
     }
 #endif
 }

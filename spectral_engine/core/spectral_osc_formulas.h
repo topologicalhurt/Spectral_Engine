@@ -68,10 +68,10 @@ OSC_FORMULA_FUNC float spectral_fast_sin_inline(float x) {
     float xr = x - q * SPECTRAL_PI;                  /* folded to [-pi/2, pi/2] */
     float x2 = xr * xr;
     float p = xr * (1.0f + x2 *
-        (-0.16666647791862488f + x2 *
-        ( 0.00833289884030819f + x2 *
-        (-0.0001980086526600644f + x2 *
-        ( 0.0000025904300855472684f)))));
+        (SPECTRAL_MINIMAX_SIN_C3 + x2 *
+        (SPECTRAL_MINIMAX_SIN_C5 + x2 *
+        (SPECTRAL_MINIMAX_SIN_C7 + x2 *
+        (SPECTRAL_MINIMAX_SIN_C9)))));
     float frac = q - 2.0f * floorf(q * 0.5f);        /* q mod 2 in {0,1}        */
     float sign = 1.0f - 2.0f * frac;                 /* (-1)^q                  */
     return p * sign;
