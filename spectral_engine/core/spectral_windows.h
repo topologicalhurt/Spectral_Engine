@@ -123,11 +123,6 @@ const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id);
 SpectralError spectral_window_generate(float* window, size_t length, SpectralWindowType type);
 
 /*
- * spectral_window_name: Get human-readable window name
- */
-const char* spectral_window_name(SpectralWindowType type);
-
-/*
  * Window calibration helpers.
  *
  * coherent_gain = sum(window) / length
@@ -149,12 +144,6 @@ const char* spectral_window_name(SpectralWindowType type);
 float spectral_window_sum(const float* window, size_t length);
 float spectral_window_energy(const float* window, size_t length);
 SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length);
-float spectral_window_coherent_gain(const float* window, size_t length);
-float spectral_window_rms_gain(const float* window, size_t length);
-float spectral_window_positive_bin_amp_scale(const float* window, size_t length);
-float spectral_window_positive_bin_magsq_scale(const float* window, size_t length);
-float spectral_window_endpoint_bin_amp_scale(const float* window, size_t length);
-float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t length);
 
 /*
  * Computes the sub-bin frequency offset for a detected peak based on the

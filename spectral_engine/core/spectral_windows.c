@@ -182,11 +182,6 @@ SpectralError spectral_window_generate(float* window, size_t length, SpectralWin
     return SPECTRAL_OK;
 }
 
-const char* spectral_window_name(SpectralWindowType type) {
-    const SpectralWindowDescriptor* desc = spectral_window_descriptor(type);
-    return desc ? desc->display_name : "Unknown";
-}
-
 float spectral_window_sum(const float* window, size_t length) {
     if (!window || length == 0 || !spectral_f32_span_finite(window, length)) return 0.0f;
 
@@ -286,30 +281,6 @@ SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length
     }
 
     return metrics;
-}
-
-float spectral_window_coherent_gain(const float* window, size_t length) {
-    return spectral_window_metrics(window, length).coherent_gain;
-}
-
-float spectral_window_rms_gain(const float* window, size_t length) {
-    return spectral_window_metrics(window, length).rms_gain;
-}
-
-float spectral_window_positive_bin_amp_scale(const float* window, size_t length) {
-    return spectral_window_metrics(window, length).positive_bin_amp_scale;
-}
-
-float spectral_window_positive_bin_magsq_scale(const float* window, size_t length) {
-    return spectral_window_metrics(window, length).positive_bin_magsq_scale;
-}
-
-float spectral_window_endpoint_bin_amp_scale(const float* window, size_t length) {
-    return spectral_window_metrics(window, length).endpoint_bin_amp_scale;
-}
-
-float spectral_window_endpoint_bin_magsq_scale(const float* window, size_t length) {
-    return spectral_window_metrics(window, length).endpoint_bin_magsq_scale;
 }
 
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq) {

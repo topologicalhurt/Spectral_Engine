@@ -67,7 +67,6 @@ typedef struct SpectralConfigParams {
 
 SpectralError spectral_config_validate(const SpectralConfigParams* cfg,
                                        char* error_msg, size_t error_msg_size);
-int spectral_config_is_valid(const SpectralConfigParams* cfg);
 
 #ifdef __cplusplus
 }

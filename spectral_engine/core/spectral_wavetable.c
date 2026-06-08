@@ -605,37 +605,3 @@ spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
     spectral_sample_t s1 = table->samples[idx + 1];
     return spectral_sample_lerp_q8(s0, s1, frac);
 }
-
-spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank* bank,
-                                                     uint8_t timbre_id,
-                                                     float phase_norm) {
-    if (!bank) return SPECTRAL_SAMPLE_ZERO;
-    uint8_t fallback = bank->default_timbre;
-    if (fallback >= SPECTRAL_MAX_WAVETABLES || !bank->tables[fallback].valid) {
-        fallback = (uint8_t)TIMBRE_SINE;
-    }
-    const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES &&
-                                      bank->tables[timbre_id].valid)
-        ? &bank->tables[timbre_id]
-        : ((fallback < SPECTRAL_MAX_WAVETABLES && bank->tables[fallback].valid)
-            ? &bank->tables[fallback]
-            : NULL);
-    return spectral_wavetable_lookup_f(table, phase_norm);
-}
-
-spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank* bank,
-                                                     uint8_t timbre_id,
-                                                     uint16_t phase_u16) {
-    if (!bank) return SPECTRAL_SAMPLE_ZERO;
-    uint8_t fallback = bank->default_timbre;
-    if (fallback >= SPECTRAL_MAX_WAVETABLES || !bank->tables[fallback].valid) {
-        fallback = (uint8_t)TIMBRE_SINE;
-    }
-    const SpectralWavetable* table = (timbre_id < SPECTRAL_MAX_WAVETABLES &&
-                                      bank->tables[timbre_id].valid)
-        ? &bank->tables[timbre_id]
-        : ((fallback < SPECTRAL_MAX_WAVETABLES && bank->tables[fallback].valid)
-            ? &bank->tables[fallback]
-            : NULL);
-    return spectral_wavetable_lookup_q(table, phase_u16);
-}

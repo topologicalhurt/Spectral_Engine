@@ -109,12 +109,6 @@ spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
                                               float phase_norm);
 spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
                                               uint16_t phase_u16);
-spectral_sample_t spectral_wavetable_lookup_timbre_f(const SpectralWavetableBank* bank,
-                                                     uint8_t timbre_id,
-                                                     float phase_norm);
-spectral_sample_t spectral_wavetable_lookup_timbre_q(const SpectralWavetableBank* bank,
-                                                     uint8_t timbre_id,
-                                                     uint16_t phase_u16);
 
 #ifdef __cplusplus
 }

@@ -51,13 +51,6 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_wavetable.c"
     "${SPECTRAL_CORE_DIR}/spectral_windows.c")
 
-# Desktop/analysis-only core modules (host threading, segment pooling).
-# Build-selected: excluded from embedded and embedded-simulation builds, which is
-# why these .c files carry no SPECTRAL_EMBEDDED guard (Phase E).
-set(SPECTRAL_SOURCES_CORE_DESKTOP
-    "${SPECTRAL_CORE_DIR}/spectral_segment_mt.c"
-    "${SPECTRAL_CORE_DIR}/spectral_segment_pool.c")
-
 # Per-profile SIMD oscillator implementation (Phase E port-layer split). The
 # device-agnostic dispatch state lives in core/oscillator_dispatch.c (in CORE);
 # the SIMD segment bodies are build-selected here behind oscillator_dispatch.h.
@@ -182,7 +175,6 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
     ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
     ${SPECTRAL_SOURCES_CORE_GPU_TILE_HOST}
-    ${SPECTRAL_SOURCES_CORE_DESKTOP}
     ${SPECTRAL_SOURCES_MONITORING})
 
 set(SPECTRAL_SOURCES_TARGET_SIMULATE

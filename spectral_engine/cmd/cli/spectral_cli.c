@@ -758,11 +758,6 @@ SpectralError spectral_config_validate(const SpectralConfigParams* cfg,
                                "n_threads %d out of range", cfg->n_threads);
     }
 #endif
-    
-    return SPECTRAL_OK;
-}
 
-int spectral_config_is_valid(const SpectralConfigParams* cfg)
-{
-    return spectral_config_validate(cfg, NULL, 0) == SPECTRAL_OK;
+    return SPECTRAL_OK;
 }

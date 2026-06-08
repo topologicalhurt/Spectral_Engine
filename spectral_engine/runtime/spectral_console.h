@@ -35,7 +35,6 @@ typedef struct {
 void table_print_header(const TableConfig* cfg);
 void table_print_separator(const TableConfig* cfg);
 void table_print_footer(const TableConfig* cfg);
-void table_print_row_str(const TableConfig* cfg, const char** values);
 void table_print_title(const TableConfig* cfg);
 void table_print_row(const TableConfig* cfg, ...);
 
@@ -57,11 +56,6 @@ void status_print(StatusLevel level, const char* fmt, ...);
 void print_padded_int(int value, int width, TableAlign align);
 void print_padded_float(double value, int width, int precision, TableAlign align);
 void print_padded_str(const char* str, int width, TableAlign align);
-
-/*
- * Progress display
- */
-void progress_bar_print(double fraction, int width, const char* label);
 
 /*
  * Box drawing character sets
