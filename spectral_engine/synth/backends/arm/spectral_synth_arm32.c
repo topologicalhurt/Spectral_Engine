@@ -1,26 +1,29 @@
-/* spectral_synth_arm32.c - Q15 Fixed-Point Synthesis for ARM Cortex-M
- * 
- * Optimized for ARM Cortex-M7 (Daisy Seed, STM32H7).
- * Uses DSP intrinsics when available for single-cycle saturating math.
- * 
- * Key Optimizations:
- *   - Dual MAC (SMLAD) processes 2 samples per instruction
- *   - Batch LUT lookups minimize cache misses
- *   - Phase accumulator is Q31 for precision, output is Q15
- *   - Active segment list avoids scanning inactive segments
- * 
- * Platform Detection:
- *   __ARM_ARCH_7EM__ - Cortex-M7 with DSP
- *   __ARM_FEATURE_DSP - DSP extension available
- *   ARM_MATH_CM7 - CMSIS-DSP library present
- * 
- * Memory Layout:
- *   Segment data in SDRAM (large, sequential access)
- *   Active state in SRAM (small, frequent access)
- *   LUT in DTCM or flash (read-only, cacheable)
- * 
- * Uses AoS layout for active segments. SoA is a future consideration
- * if profiling shows cache misses dominating at high voice counts.
+/* spectral_synth_arm32.c - Q15 Fixed-Point Synthesis for ARM Cortex-M7.
+ *
+ * Targets the Daisy Seed / STM32H7. Correct and host-verifiable (the real path
+ * runs on the host via spectral_q15.h portable fallbacks; tests/arm_core asserts
+ * its audio). On Cortex-M7, -mcpu=cortex-m7 defines __ARM_FEATURE_DSP, so the
+ * single-lane saturating DSP intrinsics (__smulbb, __qadd16, __qadd32) are used.
+ *
+ * What is actually true today:
+ *   - Phase accumulator is Q31, oscillator output Q15.
+ *   - An active-segment list avoids scanning inactive segments.
+ *   - The hot loop (synth_core_m7) is SCALAR Q15, unrolled by 4 (4 independent
+ *     single-lane MACs), segment-major.
+ *
+ * NOT yet realized (ULTRAPLAN Phase A2/A3 -- do not read the following as done):
+ *   - Dual 16-bit MAC: spectral_smlad() exists but is NOT called here. Exploiting
+ *     it needs a voice-parallel (sample-major) loop nest so two voices' (sine,amp)
+ *     pack into one SMLAD. The current segment-major nest makes SoA buy nothing.
+ *   - Memory placement: SPECTRAL_MEM_FAST/_FAST_CODE emit .dtcm_data/.itcm_text/
+ *     .sdram_data, but the Daisy BSP linker uses .dtcmram_bss/.sdram_bss (and has
+ *     no ITCM section), so placement is currently INERT -- hot data/code land in
+ *     default memory until the section names are bound to the BSP and verified.
+ *   - LUT residency: the sine LUT is gathered every sample, strided by freq_inc
+ *     (effectively random in-table -- it does NOT "minimize cache misses"); it is
+ *     not pinned to DTCM.
+ *   - The cycle/WCET perf model (spectral_perf_model.*) is an uncalibrated
+ *     heuristic; optimizations here are not yet measured on silicon/QEMU.
  */
 
 #include "spectral_synth_arm32.h"
