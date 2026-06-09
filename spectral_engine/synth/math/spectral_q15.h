@@ -170,6 +170,12 @@ static inline q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_
     uint32_t packed_b = ((uint32_t)(uint16_t)b1 << 16) | (uint16_t)b0;
     return __smlad(packed_a, packed_b, acc);
 }
+/* Dual 16-bit MAC into a q63 accumulator: acc + a0*b0 + a1*b1, exact (no overflow). */
+static inline q63_t spectral_smlald(q63_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1) {
+    uint32_t packed_a = ((uint32_t)(uint16_t)a1 << 16) | (uint16_t)a0;
+    uint32_t packed_b = ((uint32_t)(uint16_t)b1 << 16) | (uint16_t)b0;
+    return (q63_t)__smlald(packed_a, packed_b, (long long)acc);
+}
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return __smulbb(a, b);
 }
@@ -205,6 +211,10 @@ static inline q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_
      * avoid signed-overflow UB: two Q15 products can sum past INT32_MAX. */
     uint32_t prod = (uint32_t)((q31_t)a0 * b0) + (uint32_t)((q31_t)a1 * b1);
     return (q31_t)((uint32_t)acc + prod);
+}
+/* Dual 16-bit MAC into a q63 accumulator: acc + a0*b0 + a1*b1, exact (no overflow). */
+static inline q63_t spectral_smlald(q63_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1) {
+    return acc + (q63_t)((q31_t)a0 * b0) + (q63_t)((q31_t)a1 * b1);
 }
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return (q31_t)a * (q31_t)b;

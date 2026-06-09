@@ -72,6 +72,18 @@ static inline void spectral_perf_count_segment_samples(SpectralPerfCounters* c,
     c->accum_rw_words += (uint64_t)sample_count * 2u;
 }
 
+/* A voice folded into a partner's accumulator pass via the dual-MAC (SMLALD): it adds
+ * its own LUT/MAC/phase work but shares the partner's single accumulator read-modify-write,
+ * so it adds NO accumulator traffic. This is what makes the dual-MAC's halved accumulator
+ * traffic show up in accum_rw_words. */
+static inline void spectral_perf_count_paired_voice(SpectralPerfCounters* c,
+                                                    uint32_t sample_count) {
+    if (!c || sample_count == 0) return;
+    c->lut_lookups += sample_count;
+    c->mac_operations += sample_count;
+    c->phase_updates += sample_count;
+}
+
 static inline void spectral_perf_count_cache_pressure(SpectralPerfCounters* c,
                                                       uint32_t active_count,
                                                       uint32_t miss_threshold_active,

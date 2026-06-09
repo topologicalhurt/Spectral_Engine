@@ -297,6 +297,14 @@ static inline void spectral_perf_segment_samples(uint32_t segment_samples) {
 #endif
 }
 
+static inline void spectral_perf_paired_voice_samples(uint32_t segment_samples) {
+#if SPECTRAL_RESTRICTED_PROFILE
+    spectral_perf_count_paired_voice(&s_perf_op_counts, segment_samples);
+#else
+    (void)segment_samples;
+#endif
+}
+
 static inline uint32_t spectral_perf_amplitude_start(void) {
     return get_cycles();
 }
@@ -609,6 +617,35 @@ static inline void synth_core_m7(
     }
 }
 
+/* Two-voice sustain accumulation via the M7 dual 16-bit MAC (SMLALD): both voices'
+ * sine*amp products fold into the q63 accumulator in one instruction. Because the q63
+ * accumulate is exact (addition is associative with no overflow), this is bit-identical
+ * to two separate synth_core_m7 voices -- it just halves the MAC instructions and the
+ * accumulator read-modify-writes for the paired voices. */
+SPECTRAL_MEM_FAST_CODE
+static inline void synth_core_pair_m7(
+    q63_t* restrict accum,
+    const q15_t* restrict osc_lut,
+    uint32_t blk_start,
+    uint32_t blk_end,
+    uint32_t* restrict phaseA, q15_t* restrict ampA, uint32_t freq_incA, q15_t amp_deltaA,
+    uint32_t* restrict phaseB, q15_t* restrict ampB, uint32_t freq_incB, q15_t amp_deltaB
+) {
+    uint32_t pA = *phaseA, pB = *phaseB;
+    q15_t aA = *ampA, aB = *ampB;
+    for (uint32_t j = blk_start; j < blk_end; j++) {
+        SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
+        q15_t sA = spectral_lut_sin((uq16_t)(pA >> 16), osc_lut);
+        q15_t sB = spectral_lut_sin((uq16_t)(pB >> 16), osc_lut);
+        accum[j] = spectral_smlald(accum[j], sA, aA, sB, aB);
+        pA += freq_incA;  pB += freq_incB;
+        aA = spectral_qadd16(aA, amp_deltaA);
+        aB = spectral_qadd16(aB, amp_deltaB);
+    }
+    *phaseA = pA;  *ampA = aA;
+    *phaseB = pB;  *ampB = aB;
+}
+
 /* Fade region synthesis: applies linear Q15 fade ramp to each sample.
  * fade_val/fade_step are Q15 ramp state (0->Q15_MAX for fade-in, Q15_MAX->0 for fade-out).
  * Backend parity note: envelope shape matches GPU/desktop fade semantics but uses
@@ -724,6 +761,32 @@ static inline void synth_segment_m7(
 }
 
 #endif /* SPECTRAL_ARM_M7 */
+
+/* True if active voice k renders the WHOLE block [out_pos, out_end) entirely within its
+ * sustain region (no fade-in/out this block), so it can be dual-MAC paired with another
+ * such voice. fade_len is clamped to <= seg_length/2 at activation, so seg_length -
+ * fade_len does not underflow. */
+static inline int arm32_voice_full_sustain(const SpectralArm32Ctx* ctx, uint16_t k,
+                                           uint32_t out_pos, uint32_t out_end,
+                                           uint32_t num_samples) {
+#if SPECTRAL_SOA_ACTIVE
+    uint32_t seg_start = ctx->active_soa.seg_start[k];
+    uint32_t seg_end   = ctx->active_soa.seg_end[k];
+    uint32_t seg_len   = ctx->active_soa.seg_length[k];
+    uint32_t fade_len  = ctx->active_soa.fade_len[k];
+#else
+    const SpectralActiveSegment* a = &ctx->active[k];
+    uint32_t seg_start = a->seg_start;
+    uint32_t seg_end   = a->seg_end;
+    uint32_t seg_len   = a->seg_length;
+    uint32_t fade_len  = a->fade_len;
+#endif
+    if (seg_start > out_pos || seg_end < out_end) return 0;          /* not full-block  */
+    uint32_t seg_offset = out_pos - seg_start;                       /* blk_start == 0  */
+    if (seg_offset < fade_len) return 0;                             /* still fading in */
+    if (seg_offset + num_samples > seg_len - fade_len) return 0;     /* enters fade-out */
+    return 1;
+}
 
 /* Drop active segments that have ended at or before out_pos.
  *
@@ -951,6 +1014,42 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #endif
 
 #if SPECTRAL_ARM_M7
+        /* Dual-MAC fast path: when this voice and the next BOTH render the whole block
+         * entirely in sustain, fold them into the q63 accumulator via SMLALD (one
+         * dual-MAC, one accumulator slot for both). Bit-identical to two single-voice
+         * renders -- exact q63 add is associative -- so any voice at a fade boundary or
+         * a partial block falls through to the scalar path below with no loss. */
+        if (i + 1u < ctx->num_active &&
+            arm32_voice_full_sustain(ctx, i, out_pos, out_end, num_samples) &&
+            arm32_voice_full_sustain(ctx, (uint16_t)(i + 1u), out_pos, out_end, num_samples)) {
+#if SPECTRAL_SOA_ACTIVE
+            uint32_t phaseB    = ctx->active_soa.phase_acc[i + 1];
+            uint32_t freq_incB = (uint32_t)ctx->active_soa.freq_inc[i + 1];
+            q15_t    ampB      = ctx->active_soa.amp_current[i + 1];
+            q15_t    d_ampB    = ctx->active_soa.amp_delta[i + 1];
+#else
+            SpectralActiveSegment* actB = &ctx->active[i + 1];
+            uint32_t phaseB    = actB->phase_acc;
+            uint32_t freq_incB = (uint32_t)actB->freq_inc;
+            q15_t    ampB      = actB->amp_current;
+            q15_t    d_ampB    = actB->amp_delta;
+#endif
+            synth_core_pair_m7(accum, osc_lut, 0u, num_samples,
+                               &phase, &amp, freq_inc, d_amp,
+                               &phaseB, &ampB, freq_incB, d_ampB);
+            spectral_perf_paired_voice_samples(num_samples);  /* voice B (A counted above) */
+#if SPECTRAL_SOA_ACTIVE
+            ctx->active_soa.phase_acc[i]       = phase;
+            ctx->active_soa.amp_current[i]     = amp;
+            ctx->active_soa.phase_acc[i + 1]   = phaseB;
+            ctx->active_soa.amp_current[i + 1] = ampB;
+#else
+            act->phase_acc   = phase;   act->amp_current   = amp;
+            actB->phase_acc  = phaseB;  actB->amp_current  = ampB;
+#endif
+            i += 2;
+            continue;
+        }
         /* Use ARM M7 optimized inner loop */
         {
             uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg_start;
