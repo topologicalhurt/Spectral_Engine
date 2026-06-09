@@ -6,16 +6,11 @@
  *   SPECTRAL_MEM_BULK       large / bulk data, possibly external/slower (e.g. SDRAM)
  *   SPECTRAL_CACHE_LINE     cache-line size in bytes (for alignment)
  *
- * Binding resolution (asm-generic style): a board support package overrides by
- * defining SPECTRAL_BSP_MEM_HEADER; otherwise a built-in default for the Cortex-M
- * reference target applies on a real Cortex-M cross-compile; otherwise the
- * portable no-op default (host, simulation).
- *
- * Phase E note: the built-in Cortex-M section names below are a default for the
- * current Daisy/STM32H7 reference target. They should migrate into the api/ BSP
- * (supplied via SPECTRAL_BSP_MEM_HEADER) once the embedded toolchain build is
- * exercised — core must carry no device names. Until then the default is gated to
- * a real Cortex-M cross-compile so host/sim builds never emit device sections.
+ * Binding resolution: a board support package supplies the device binding by defining
+ * SPECTRAL_BSP_MEM_HEADER (the Daisy build points it at api/daisy_seed/daisy_seed_mem.h);
+ * with no BSP, placement is a portable no-op (host, simulation, or an unbound target).
+ * Core carries NO device section names -- a section name the active linker does not map
+ * would place hot data/code in default memory while looking optimized, so none is emitted.
  *
  * Included by spectral_config.h after SPECTRAL_ARM_M7 / SPECTRAL_EMBEDDED.
  */
@@ -28,16 +23,13 @@
 #include SPECTRAL_BSP_MEM_HEADER   /* board-provided bindings; device lives in the BSP */
 #endif
 
-/* Built-in default for the Cortex-M reference target — only if no BSP supplied a
- * binding and we are on a real Cortex-M cross-compile. */
-#if !defined(SPECTRAL_MEM_FAST) && SPECTRAL_ARM_M7 && SPECTRAL_EMBEDDED && \
-    (defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__))
-#define SPECTRAL_MEM_FAST       __attribute__((section(".dtcm_data")))
-#define SPECTRAL_MEM_FAST_CODE  __attribute__((section(".itcm_text")))
-#define SPECTRAL_MEM_BULK       __attribute__((section(".sdram_data")))
-#endif
+/* No built-in device sections: a real Cortex-M target MUST supply SPECTRAL_BSP_MEM_HEADER
+ * with bindings whose section names match its own linker script -- core carries no device
+ * names. Without a binding, placement is the deliberate no-op below, NOT fictitious section
+ * names the linker would silently drop into default (slow) memory. The Daisy/STM32H7 binding
+ * lives in api/daisy_seed/daisy_seed_mem.h (.dtcmram_bss / .sdram_bss, matching libDaisy). */
 
-/* Portable no-op defaults (host, simulation, or any target without a binding). */
+/* Portable no-op defaults (host, simulation, or any target without a BSP binding). */
 #ifndef SPECTRAL_MEM_FAST
 #define SPECTRAL_MEM_FAST
 #endif

@@ -90,6 +90,7 @@ function(spectral_daisy_collect_compile_definitions out_var)
         SPECTRAL_EMBEDDED=1
         SPECTRAL_NO_PERF=1
         SPECTRAL_COMPACT_SEG=1
+        SPECTRAL_BSP_MEM_HEADER=\"daisy_seed_mem.h\"
         HSE_VALUE=16000000
         DAISY_HAS_FATFS=1)
 
