@@ -212,6 +212,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-simd-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-throughput-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-pack8-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 
 # Build every compiled CTest executable at once. All test exes are
@@ -230,6 +231,7 @@ add_dependencies(tests_all
     q15_production_parity_test
     q15_simd_parity_test
     phase_nco_precision_test
+    osc_recursive_test
     full_fused_parity_test)
 
 message(STATUS "Configured Spectral Engine")
