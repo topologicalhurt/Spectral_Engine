@@ -49,8 +49,14 @@ extern int  dma_transfer_complete(void);
 #ifndef SPECTRAL_ARM32_DMA_BUFFER_DTCM
 #define SPECTRAL_ARM32_DMA_BUFFER_DTCM 0
 #endif
+/* D-cache maintenance after a DMA RX is REQUIRED whenever the buffer is cacheable, which
+ * (absent an MPU non-cacheable region) is exactly when it is NOT in tightly-coupled DTCM.
+ * DERIVE it from placement so the two can never be set to the silently-incoherent combination
+ * the old independent default produced: a cacheable buffer (DTCM=0) with invalidation off
+ * (CACHEABLE=0) -> the CPU reads stale cache after every DMA -> corrupt segment data. A target
+ * that maps the buffer's SRAM region non-cacheable via the MPU may override this to 0. */
 #ifndef SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE
-#define SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE 0
+#define SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE (!SPECTRAL_ARM32_DMA_BUFFER_DTCM)
 #endif
 
 #if SPECTRAL_ARM32_DMA_BUFFER_DTCM
