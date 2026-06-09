@@ -23,6 +23,11 @@ typedef struct SpectralPerfCounters {
     uint64_t seg_scan_checks;      /* total segment scan iterations */
     uint32_t peak_block_active;    /* worst-case active count in any block */
     uint64_t peak_block_cycles;    /* cycles for worst-case block */
+    /* Accumulator memory traffic (q31 read-modify-write). Segment-major touches a
+     * slot once PER VOICE (O(voices*samples)); a voice-parallel nest touches it once
+     * per sample (O(samples)). This counter makes that memory-bandwidth difference
+     * measurable rather than asserted (ULTRAPLAN A2). */
+    uint64_t accum_rw_words;       /* q31 accumulator loads + stores */
 } SpectralPerfCounters;
 
 static inline void spectral_perf_counters_reset(SpectralPerfCounters* c) {
@@ -36,6 +41,7 @@ static inline void spectral_perf_counters_reset(SpectralPerfCounters* c) {
     c->seg_scan_checks = 0;
     c->peak_block_active = 0;
     c->peak_block_cycles = 0;
+    c->accum_rw_words = 0;
 }
 
 static inline uint64_t spectral_perf_loop_iters_for_samples(uint32_t sample_count) {
@@ -60,6 +66,10 @@ static inline void spectral_perf_count_segment_samples(SpectralPerfCounters* c,
     c->mac_operations += sample_count;
     c->phase_updates += sample_count;
     c->loop_iterations += spectral_perf_loop_iters_for_samples(sample_count);
+    /* Segment-major today: each sample is a read-modify-write of one accumulator
+     * slot (1 load + 1 store). A voice-parallel nest would account this once per
+     * sample per block instead of per voice. */
+    c->accum_rw_words += (uint64_t)sample_count * 2u;
 }
 
 static inline void spectral_perf_count_cache_pressure(SpectralPerfCounters* c,
