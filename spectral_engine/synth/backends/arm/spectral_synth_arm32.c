@@ -617,6 +617,7 @@ static inline void synth_core_m7(
     }
 }
 
+#if SPECTRAL_HAS_DUAL_MAC
 /* Two-voice sustain accumulation via the M7 dual 16-bit MAC (SMLALD): both voices'
  * sine*amp products fold into the q63 accumulator in one instruction. Because the q63
  * accumulate is exact (addition is associative with no overflow), this is bit-identical
@@ -645,6 +646,8 @@ static inline void synth_core_pair_m7(
     *phaseA = pA;  *ampA = aA;
     *phaseB = pB;  *ampB = aB;
 }
+
+#endif /* SPECTRAL_HAS_DUAL_MAC */
 
 /* Fade region synthesis: applies linear Q15 fade ramp to each sample.
  * fade_val/fade_step are Q15 ramp state (0->Q15_MAX for fade-in, Q15_MAX->0 for fade-out).
@@ -762,6 +765,7 @@ static inline void synth_segment_m7(
 
 #endif /* SPECTRAL_ARM_M7 */
 
+#if SPECTRAL_HAS_DUAL_MAC
 /* True if active voice k renders the WHOLE block [out_pos, out_end) entirely within its
  * sustain region (no fade-in/out this block), so it can be dual-MAC paired with another
  * such voice. fade_len is clamped to <= seg_length/2 at activation, so seg_length -
@@ -787,6 +791,8 @@ static inline int arm32_voice_full_sustain(const SpectralArm32Ctx* ctx, uint16_t
     if (seg_offset + num_samples > seg_len - fade_len) return 0;     /* enters fade-out */
     return 1;
 }
+
+#endif /* SPECTRAL_HAS_DUAL_MAC */
 
 /* Drop active segments that have ended at or before out_pos.
  *
@@ -877,8 +883,9 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     static q63_t accum[256];
 #endif
     
-    /* q63 accumulator: no CMSIS q63 fill helper, use memset (exact additive mix). */
-    memset(accum, 0, (size_t)num_samples * sizeof(accum[0]));
+    /* Clear the q63 accumulator through the one retargetable zeroing primitive
+     * (spectral_mem.h) rather than assuming a raw memset here. */
+    spectral_mem_zero(accum, (size_t)num_samples * sizeof(accum[0]));
     
     /* Prefetch first few segments from SDRAM */
 #if SPECTRAL_HAS_DMA && SPECTRAL_ARM_M7
@@ -1014,6 +1021,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #endif
 
 #if SPECTRAL_ARM_M7
+#if SPECTRAL_HAS_DUAL_MAC
         /* Dual-MAC fast path: when this voice and the next BOTH render the whole block
          * entirely in sustain, fold them into the q63 accumulator via SMLALD (one
          * dual-MAC, one accumulator slot for both). Bit-identical to two single-voice
@@ -1050,6 +1058,8 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             i += 2;
             continue;
         }
+#endif /* SPECTRAL_HAS_DUAL_MAC */
+
         /* Use ARM M7 optimized inner loop */
         {
             uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg_start;

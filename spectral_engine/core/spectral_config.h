@@ -602,6 +602,32 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #endif
 #endif
 
+/* ---- Hardware capability flags --------------------------------------------------------
+ * Core kernels gate on CAPABILITIES, never on a specific CPU. The platform detection above
+ * is the ONLY place that maps a device/arch to capabilities; downstream code asks "do I have
+ * capability X?". This is the Linux-kernel model: optimize the bulk target first (here the
+ * low-level ARM A/M profile), then add a per-arch hierarchy of overrides. A new arch (another
+ * ARM profile, later RISC-V) is supported by extending THIS mapping, not by editing kernels.
+ * Define a capability =1 only where the operation has a MEASURED benefit on that arch.
+ *
+ * Capability candidates as the embedded surface grows (add when there is a real benefit, and
+ * route the kernels through them rather than through CPU macros): SPECTRAL_HAS_DUAL_MAC (done),
+ * a packed-SIMD capability (NEON / MVE / RVV) for the float and 8xQ15 kernels, a hardware-FPU
+ * capability, and a fast-tightly-coupled-memory capability (DTCM/ITCM presence). Until verified,
+ * those stay expressed by their existing CPU/feature macros; do not add speculative ones. */
+
+/* Dual 16-bit MAC: two Q15 products into one accumulate (ARM DSP-extension SMLAD/SMLALD).
+ * Verified benefit on Cortex-M7: halves the additive-synth MAC instructions (smlald codegen-
+ * confirmed). Derived from the ARM ACLE feature macro; another arch would set it from its own
+ * detection. Kernels gate the voice-pairing dual-MAC path on this, not on SPECTRAL_ARM_M7. */
+#ifndef SPECTRAL_HAS_DUAL_MAC
+#if defined(__ARM_FEATURE_DSP) && __ARM_FEATURE_DSP
+#define SPECTRAL_HAS_DUAL_MAC   1
+#else
+#define SPECTRAL_HAS_DUAL_MAC   0
+#endif
+#endif
+
 /* ARM32 embedded configuration */
 
 /* Memory-class placement (device-agnostic intent; the concrete device binding

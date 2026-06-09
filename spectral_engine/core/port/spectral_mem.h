@@ -54,4 +54,20 @@ _Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
                "cache line must be multiple of size_t");
 #endif
 
+/* Single zeroing primitive for the embedded path. Deliberately self-contained -- a word-store
+ * loop, NOT a libc memset -- because <string.h> is not a freestanding header and bare embedded
+ * toolchains may ship no hosted memset at all (do not assume memory routines exist). The
+ * compiler lowers the aligned word loop to the target's native stores. One place to retarget
+ * (e.g. to a DMA or CMSIS bulk fill) for a platform that wants accelerated clears. */
+static inline void spectral_mem_zero(void* dst, size_t bytes) {
+    if (!dst || !bytes) return;
+    unsigned char* b = (unsigned char*)dst;
+    while (bytes && ((size_t)b & (sizeof(size_t) - 1u))) { *b++ = 0u; bytes--; }  /* align */
+    size_t* w = (size_t*)(void*)b;
+    size_t words = bytes / sizeof(size_t);
+    for (size_t i = 0; i < words; i++) w[i] = (size_t)0;                          /* word stores */
+    b = (unsigned char*)(void*)(w + words);
+    for (size_t i = 0; i < bytes - words * sizeof(size_t); i++) b[i] = 0u;        /* tail */
+}
+
 #endif /* SPECTRAL_MEM_H */
