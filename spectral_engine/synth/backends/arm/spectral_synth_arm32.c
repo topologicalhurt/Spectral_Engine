@@ -345,17 +345,17 @@ static inline void spectral_amp_batch4(q15_t amp,
     *a3 = spectral_qadd16(*a2, amp_delta);
 }
 
-static inline void spectral_accum_batch4(q31_t* accum,
+static inline void spectral_accum_batch4(q63_t* accum,
                                          uint32_t j,
                                          const q15_t* samples,
                                          q15_t a0,
                                          q15_t a1,
                                          q15_t a2,
                                          q15_t a3) {
-    accum[j] = spectral_mac_q15(accum[j], samples[0], a0);
-    accum[j + 1] = spectral_mac_q15(accum[j + 1], samples[1], a1);
-    accum[j + 2] = spectral_mac_q15(accum[j + 2], samples[2], a2);
-    accum[j + 3] = spectral_mac_q15(accum[j + 3], samples[3], a3);
+    accum[j] = spectral_mac_q15_64(accum[j], samples[0], a0);
+    accum[j + 1] = spectral_mac_q15_64(accum[j + 1], samples[1], a1);
+    accum[j + 2] = spectral_mac_q15_64(accum[j + 2], samples[2], a2);
+    accum[j + 3] = spectral_mac_q15_64(accum[j + 3], samples[3], a3);
 }
 
 /* ARM M7 Prefetch & Cache */
@@ -562,7 +562,7 @@ void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
  * No fade applied — used for sustain region and as building block for fade regions. */
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_core_m7(
-    q31_t* restrict accum,
+    q63_t* restrict accum,
     const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
@@ -592,10 +592,10 @@ static inline void synth_core_m7(
         s2 = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
         s3 = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
 
-        accum[j]     = spectral_mac_q15(accum[j],     s0, a0);
-        accum[j + 1] = spectral_mac_q15(accum[j + 1], s1, a1);
-        accum[j + 2] = spectral_mac_q15(accum[j + 2], s2, a2);
-        accum[j + 3] = spectral_mac_q15(accum[j + 3], s3, a3);
+        accum[j]     = spectral_mac_q15_64(accum[j],     s0, a0);
+        accum[j + 1] = spectral_mac_q15_64(accum[j + 1], s1, a1);
+        accum[j + 2] = spectral_mac_q15_64(accum[j + 2], s2, a2);
+        accum[j + 3] = spectral_mac_q15_64(accum[j + 3], s3, a3);
 
         *phase = p3 + freq_inc;
         *amp = spectral_qadd16(a3, amp_delta);
@@ -603,7 +603,7 @@ static inline void synth_core_m7(
 
     for (; j < blk_end; j++) {
         q15_t sample = spectral_lut_sin((uq16_t)(*phase >> 16), osc_lut);
-        accum[j] = spectral_mac_q15(accum[j], sample, *amp);
+        accum[j] = spectral_mac_q15_64(accum[j], sample, *amp);
         *phase += freq_inc;
         *amp = spectral_qadd16(*amp, amp_delta);
     }
@@ -615,7 +615,7 @@ static inline void synth_core_m7(
  * fixed-point arithmetic to preserve embedded determinism. */
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_fade_m7(
-    q31_t* restrict accum,
+    q63_t* restrict accum,
     const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
@@ -629,7 +629,7 @@ static inline void synth_fade_m7(
     for (uint32_t j = blk_start; j < blk_end; j++) {
         q15_t sample = spectral_lut_sin((uq16_t)(*phase >> 16), osc_lut);
         q15_t faded = spectral_mul_q15(sample, fade_val);
-        accum[j] = spectral_mac_q15(accum[j], faded, *amp);
+        accum[j] = spectral_mac_q15_64(accum[j], faded, *amp);
         *phase += freq_inc;
         *amp = spectral_qadd16(*amp, amp_delta);
         fade_val = spectral_qadd16(fade_val, fade_step);
@@ -643,7 +643,7 @@ static inline void synth_fade_m7(
  * semantics used in desktop/GPU backends, but executes fully in Q15/Q31. */
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_segment_m7(
-    q31_t* restrict accum,
+    q63_t* restrict accum,
     const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
@@ -807,18 +807,15 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     /* Static accumulator in DTCM for zero wait-state access on Cortex-M7.
      * Safe for embedded: single-threaded audio callback, no reentrancy. */
 #if defined(__GNUC__) || defined(__clang__)
-    static q31_t accum[256] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
+    static q63_t accum[256] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-    static _Alignas(32) q31_t accum[256];
+    static _Alignas(32) q63_t accum[256];
 #else
-    static q31_t accum[256];
+    static q63_t accum[256];
 #endif
     
-#if SPECTRAL_USE_CMSIS
-    arm_fill_q31(0, accum, num_samples);
-#else
-    memset(accum, 0, num_samples * sizeof(q31_t));
-#endif
+    /* q63 accumulator: no CMSIS q63 fill helper, use memset (exact additive mix). */
+    memset(accum, 0, (size_t)num_samples * sizeof(accum[0]));
     
     /* Prefetch first few segments from SDRAM */
 #if SPECTRAL_HAS_DMA && SPECTRAL_ARM_M7
@@ -992,7 +989,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             for (uint32_t j = blk_start; j < fi_end; j++) {
                 q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                 sample = spectral_mul_q15(sample, fade_val);
-                accum[j] = spectral_mac_q15(accum[j], sample, amp);
+                accum[j] = spectral_mac_q15_64(accum[j], sample, amp);
                 phase += freq_inc;
                 amp = spectral_qadd16(amp, d_amp);
                 fade_val = spectral_qadd16(fade_val, fade_step);
@@ -1025,7 +1022,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             }
             for (; j < fo_start; j++) {
                 q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
-                accum[j] = spectral_mac_q15(accum[j], sample, amp);
+                accum[j] = spectral_mac_q15_64(accum[j], sample, amp);
                 phase += freq_inc;
                 amp = spectral_qadd16(amp, d_amp);
             }
@@ -1038,7 +1035,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                 for (; j < blk_end; j++) {
                     q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                     sample = spectral_mul_q15(sample, fade_val);
-                    accum[j] = spectral_mac_q15(accum[j], sample, amp);
+                    accum[j] = spectral_mac_q15_64(accum[j], sample, amp);
                     phase += freq_inc;
                     amp = spectral_qadd16(amp, d_amp);
                     fade_val = spectral_qadd16(fade_val, (q15_t)-fade_step);
@@ -1064,7 +1061,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     /* Convert the Q30 accumulator (sum of Q15*Q15 MAC products) to Q15 with the
      * master gain. Q30 -> Q15 is a >>15 shift (see spectral_q30_to_q15_scaled). */
     uint32_t amp_start = spectral_perf_amplitude_start();
-    spectral_q30_to_q15_scaled(accum, out_left, num_samples, master_amp);
+    spectral_q63_to_q15_scaled(accum, out_left, num_samples, master_amp);
     
     if (out_right && out_right != out_left) {
 #if SPECTRAL_USE_CMSIS

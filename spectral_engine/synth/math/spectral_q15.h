@@ -74,6 +74,7 @@ extern "C" {
  * follow-up (see QTYPE_REFACTOR_PLAN.md). */
 typedef int16_t  q15_t;
 typedef int32_t  q31_t;
+typedef int64_t  q63_t;   /* wide accumulator for exact multi-voice MAC (SMLALD) */
 typedef uint16_t uq16_t;
 typedef uint32_t uq32_t;
 
@@ -221,6 +222,12 @@ static inline q15_t spectral_mul_q15(q15_t a, q15_t b) {
 static inline q31_t spectral_mac_q15(q31_t acc, q15_t a, q15_t b) {
     return spectral_qadd32(acc, spectral_smulbb(a, b));
 }
+/* Wide MAC: accumulate exactly into a q63 (cannot overflow for realistic voice
+ * counts), so the additive mix needs no per-MAC saturation and the dual-MAC SMLALD
+ * applies. Saturate to Q15 once at the output (spectral_q63_to_q15_scaled). */
+static inline q63_t spectral_mac_q15_64(q63_t acc, q15_t a, q15_t b) {
+    return acc + (q63_t)spectral_smulbb(a, b);
+}
 static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
     return spectral_mul_q15(sample, amplitude);
 }
@@ -229,6 +236,9 @@ static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
 /* Q30 accumulator (sum of Q15*Q15 MAC products) -> Q15 output with master
  * scaling, via a >>15 shift. See spectral_q15.c / pass 145. */
 void spectral_q30_to_q15_scaled(const q31_t* accum, q15_t* dst, uint32_t count, q15_t scale);
+/* Wide (q63) accumulator variant: exact sum of Q15*Q15 products, saturated to Q15
+ * once at the end (>>15) before applying the master scale. */
+void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, q15_t scale);
 
 #define SPECTRAL_Q15_TYPES
 
