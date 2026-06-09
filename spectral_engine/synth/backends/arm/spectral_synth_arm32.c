@@ -479,7 +479,14 @@ void spectral_arm32_init(SpectralArm32Ctx* ctx,
      * 2^32). The per-sample increment is (omega/2pi)*2^32 = freq_q88 * 2^24/(2pi),
      * INDEPENDENT of sample_rate. The previous 2^24/sample_rate divisor treated
      * freq_q88 as Hz and rendered ~sample_rate/(2pi) too low (the desktop float
-     * backend and tests/arm_core both render the nominal frequency). */
+     * backend and tests/arm_core both render the nominal frequency).
+     *
+     * NOTE: the activation-time product `freq_q88 * freq_inc_scale_q24` (uint32) wraps
+     * mod 2^32 for omega > 2*pi (super-2x-Nyquist input). This is CORRECT, not a bug to
+     * "fix" with a wider int: freq_inc is a uint32 phase increment for a uint32 phase
+     * accumulator, so mod-2^32 IS the intended aliasing of an out-of-band partial. A 64-bit
+     * intermediate would be truncated back to the same value; widening freq_inc would change
+     * nothing the accumulator does. Valid partials (omega <= pi) never reach the wrap. */
     ctx->freq_inc_scale_q24 = (uint32_t)((double)(1u << 24) / SPECTRAL_TWO_PI + 0.5);
     ctx->amplitude_q15 = Q15_MAX;
     
