@@ -30,6 +30,7 @@
 #include "spectral_config.h"
 #include "spectral_io.h"
 #include "spectral_lut.h"
+#include "spectral_osc_recursive.h"
 #include "spectral_perf_accounting.h"
 #include "spectral_perf_model.h"
 #include "spectral_utils.h"
@@ -303,7 +304,7 @@ static inline void spectral_perf_segment_samples(uint32_t segment_samples) {
 #endif
 }
 
-static inline void spectral_perf_paired_voice_samples(uint32_t segment_samples) {
+SPECTRAL_MAYBE_UNUSED static inline void spectral_perf_paired_voice_samples(uint32_t segment_samples) {
 #if SPECTRAL_RESTRICTED_PROFILE
     spectral_perf_count_paired_voice(&s_perf_op_counts, segment_samples);
 #else
@@ -327,7 +328,9 @@ static inline void spectral_perf_amplitude_end(uint32_t start_cycles) {
  * Backend parity note: this intentionally diverges from float
  * spectral_segment_phase_at_f32() by operating on fixed-point phase
  * accumulators for deterministic embedded timing and throughput. */
-static inline void spectral_phase_batch4(uint32_t phase,
+/* LUT-path helpers: used by the generic (non-M7) fallback; the M7 path uses the
+ * gather-free coupled oscillator. MAYBE_UNUSED so the M7-only build stays warning-clean. */
+SPECTRAL_MAYBE_UNUSED static inline void spectral_phase_batch4(uint32_t phase,
                                          uint32_t freq_inc,
                                          uint32_t* p0,
                                          uint32_t* p1,
@@ -359,7 +362,7 @@ static inline void spectral_amp_batch4(q15_t amp,
     *a3 = spectral_qadd16(*a2, amp_delta);
 }
 
-static inline void spectral_accum_batch4(q63_t* accum,
+SPECTRAL_MAYBE_UNUSED static inline void spectral_accum_batch4(q63_t* accum,
                                          uint32_t j,
                                          const q15_t* samples,
                                          q15_t a0,
@@ -581,53 +584,58 @@ void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
 
 /* Core unrolled synthesis: accumulates samples from blk_start to blk_end.
  * No fade applied — used for sustain region and as building block for fade regions. */
+/* uint32 phase-accumulator units -> radians: phase/2^32 * 2*pi. DOUBLE precision (a float
+ * 2*pi would mis-set the recurrence frequency and re-introduce the init drift the module
+ * characterization caught). Used to seed the coupled oscillator from the canonical phase. */
+#define SPECTRAL_PHASE_U32_TO_RAD (6.283185307179586232 / 4294967296.0)
+
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_core_m7(
     q63_t* restrict accum,
-    const q15_t* restrict osc_lut,
+    SpectralCoupledOsc* restrict osc,
+    q31_t cos_w,
+    q31_t sin_w,
     uint32_t blk_start,
     uint32_t blk_end,
-    uint32_t* restrict phase,
     q15_t* restrict amp,
-    uint32_t freq_inc,
     q15_t amp_delta
 ) {
+    SpectralCoupledOsc o = *osc;   /* recurrence runs in registers */
+    q15_t am = *amp;
     uint32_t j = blk_start;
     uint32_t len = blk_end - blk_start;
-    uint32_t len4 = len & ~3U;
-    uint32_t end4 = blk_start + len4;
+    uint32_t end4 = blk_start + (len & ~3U);
 
     SPECTRAL_UNROLL_4
     for (; j < end4; j += 4) {
         SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
 
-        uint32_t p0, p1, p2, p3;
-        spectral_phase_batch4(*phase, freq_inc, &p0, &p1, &p2, &p3);
-
         q15_t a0, a1, a2, a3;
-        spectral_amp_batch4(*amp, amp_delta, &a0, &a1, &a2, &a3);
+        spectral_amp_batch4(am, amp_delta, &a0, &a1, &a2, &a3);
 
-        q15_t s0, s1, s2, s3;
-        s0 = spectral_lut_sin((uq16_t)(p0 >> 16), osc_lut);
-        s1 = spectral_lut_sin((uq16_t)(p1 >> 16), osc_lut);
-        s2 = spectral_lut_sin((uq16_t)(p2 >> 16), osc_lut);
-        s3 = spectral_lut_sin((uq16_t)(p3 >> 16), osc_lut);
+        /* output-then-step == the LUT's lookup-then-increment: o.s is sin(phase) for this
+         * sample, then the recurrence rotates to the next (serial; no cross-sample ILP). */
+        q15_t s0 = (q15_t)(o.s >> 16); spectral_coupled_step(&o, cos_w, sin_w);
+        q15_t s1 = (q15_t)(o.s >> 16); spectral_coupled_step(&o, cos_w, sin_w);
+        q15_t s2 = (q15_t)(o.s >> 16); spectral_coupled_step(&o, cos_w, sin_w);
+        q15_t s3 = (q15_t)(o.s >> 16); spectral_coupled_step(&o, cos_w, sin_w);
 
         accum[j]     = spectral_mac_q15_64(accum[j],     s0, a0);
         accum[j + 1] = spectral_mac_q15_64(accum[j + 1], s1, a1);
         accum[j + 2] = spectral_mac_q15_64(accum[j + 2], s2, a2);
         accum[j + 3] = spectral_mac_q15_64(accum[j + 3], s3, a3);
 
-        *phase = p3 + freq_inc;
-        *amp = spectral_qadd16(a3, amp_delta);
+        am = spectral_qadd16(a3, amp_delta);
     }
 
     for (; j < blk_end; j++) {
-        q15_t sample = spectral_lut_sin((uq16_t)(*phase >> 16), osc_lut);
-        accum[j] = spectral_mac_q15_64(accum[j], sample, *amp);
-        *phase += freq_inc;
-        *amp = spectral_qadd16(*amp, amp_delta);
+        q15_t sample = (q15_t)(o.s >> 16);
+        spectral_coupled_step(&o, cos_w, sin_w);
+        accum[j] = spectral_mac_q15_64(accum[j], sample, am);
+        am = spectral_qadd16(am, amp_delta);
     }
+    *osc = o;
+    *amp = am;
 }
 
 #if SPECTRAL_HAS_DUAL_MAC
@@ -639,25 +647,29 @@ static inline void synth_core_m7(
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_core_pair_m7(
     q63_t* restrict accum,
-    const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
     uint32_t* restrict phaseA, q15_t* restrict ampA, uint32_t freq_incA, q15_t amp_deltaA,
     uint32_t* restrict phaseB, q15_t* restrict ampB, uint32_t freq_incB, q15_t amp_deltaB
 ) {
-    uint32_t pA = *phaseA, pB = *phaseB;
+    SpectralCoupledOsc oA, oB;
+    q31_t cwA, swA, cwB, swB;
+    spectral_coupled_init(&oA, (double)freq_incA * SPECTRAL_PHASE_U32_TO_RAD,
+                          (double)(*phaseA) * SPECTRAL_PHASE_U32_TO_RAD, &cwA, &swA);
+    spectral_coupled_init(&oB, (double)freq_incB * SPECTRAL_PHASE_U32_TO_RAD,
+                          (double)(*phaseB) * SPECTRAL_PHASE_U32_TO_RAD, &cwB, &swB);
     q15_t aA = *ampA, aB = *ampB;
     for (uint32_t j = blk_start; j < blk_end; j++) {
         SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
-        q15_t sA = spectral_lut_sin((uq16_t)(pA >> 16), osc_lut);
-        q15_t sB = spectral_lut_sin((uq16_t)(pB >> 16), osc_lut);
+        q15_t sA = (q15_t)(oA.s >> 16); spectral_coupled_step(&oA, cwA, swA);
+        q15_t sB = (q15_t)(oB.s >> 16); spectral_coupled_step(&oB, cwB, swB);
         accum[j] = spectral_smlald(accum[j], sA, aA, sB, aB);
-        pA += freq_incA;  pB += freq_incB;
         aA = spectral_qadd16(aA, amp_deltaA);
         aB = spectral_qadd16(aB, amp_deltaB);
     }
-    *phaseA = pA;  *ampA = aA;
-    *phaseB = pB;  *ampB = aB;
+    uint32_t blk_len = blk_end - blk_start;
+    *phaseA += freq_incA * blk_len;  *ampA = aA;
+    *phaseB += freq_incB * blk_len;  *ampB = aB;
 }
 
 #endif /* SPECTRAL_HAS_DUAL_MAC */
@@ -669,24 +681,28 @@ static inline void synth_core_pair_m7(
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_fade_m7(
     q63_t* restrict accum,
-    const q15_t* restrict osc_lut,
+    SpectralCoupledOsc* restrict osc,
+    q31_t cos_w,
+    q31_t sin_w,
     uint32_t blk_start,
     uint32_t blk_end,
-    uint32_t* restrict phase,
     q15_t* restrict amp,
-    uint32_t freq_inc,
     q15_t amp_delta,
     q15_t fade_val,
     q15_t fade_step
 ) {
+    SpectralCoupledOsc o = *osc;
+    q15_t am = *amp;
     for (uint32_t j = blk_start; j < blk_end; j++) {
-        q15_t sample = spectral_lut_sin((uq16_t)(*phase >> 16), osc_lut);
+        q15_t sample = (q15_t)(o.s >> 16);
+        spectral_coupled_step(&o, cos_w, sin_w);
         q15_t faded = spectral_mul_q15(sample, fade_val);
-        accum[j] = spectral_mac_q15_64(accum[j], faded, *amp);
-        *phase += freq_inc;
-        *amp = spectral_qadd16(*amp, amp_delta);
+        accum[j] = spectral_mac_q15_64(accum[j], faded, am);
+        am = spectral_qadd16(am, amp_delta);
         fade_val = spectral_qadd16(fade_val, fade_step);
     }
+    *osc = o;
+    *amp = am;
 }
 
 /* Full segment synthesis with linear fade envelope.
@@ -697,7 +713,6 @@ static inline void synth_fade_m7(
 SPECTRAL_MEM_FAST_CODE
 static inline void synth_segment_m7(
     q63_t* restrict accum,
-    const q15_t* restrict osc_lut,
     uint32_t blk_start,
     uint32_t blk_end,
     uint32_t phase_start,
@@ -710,8 +725,14 @@ static inline void synth_segment_m7(
     uint32_t seg_length,
     uint32_t fade_len
 ) {
-    uint32_t phase = phase_start;
     q15_t amp = amp_start;
+
+    /* Seed the coupled oscillator from the canonical phase/freq for this block. Re-seeding
+     * each block from the exact uint32 phase IS the drift resync -- no separate renorm. */
+    SpectralCoupledOsc osc;
+    q31_t cos_w, sin_w;
+    spectral_coupled_init(&osc, (double)freq_inc * SPECTRAL_PHASE_U32_TO_RAD,
+                          (double)phase_start * SPECTRAL_PHASE_U32_TO_RAD, &cos_w, &sin_w);
 
     uint32_t seg_fade_out_start = seg_length - fade_len;
     uint32_t blk_len = blk_end - blk_start;
@@ -751,15 +772,13 @@ static inline void synth_segment_m7(
     /* Fade-in region */
     if (fi_end > orig_blk_start) {
         q15_t fade_val = (q15_t)((int32_t)seg_offset * fade_step);
-        synth_fade_m7(accum, osc_lut, orig_blk_start, fi_end,
-                      &phase, &amp, freq_inc, amp_delta,
-                      fade_val, fade_step);
+        synth_fade_m7(accum, &osc, cos_w, sin_w, orig_blk_start, fi_end,
+                      &amp, amp_delta, fade_val, fade_step);
     }
 
     /* Sustain region: no fade, full unrolled path */
     if (fi_end < fo_start) {
-        synth_core_m7(accum, osc_lut, fi_end, fo_start,
-                      &phase, &amp, freq_inc, amp_delta);
+        synth_core_m7(accum, &osc, cos_w, sin_w, fi_end, fo_start, &amp, amp_delta);
     }
 
     /* Fade-out region */
@@ -767,12 +786,13 @@ static inline void synth_segment_m7(
         uint32_t fo_seg_pos = seg_offset + (fo_start - orig_blk_start);
         uint32_t samples_into_fade = fo_seg_pos - seg_fade_out_start;
         q15_t fade_val = Q15_MAX - (q15_t)((int32_t)samples_into_fade * fade_step);
-        synth_fade_m7(accum, osc_lut, fo_start, blk_end,
-                      &phase, &amp, freq_inc, amp_delta,
-                      fade_val, (q15_t)-fade_step);
+        synth_fade_m7(accum, &osc, cos_w, sin_w, fo_start, blk_end,
+                      &amp, amp_delta, fade_val, (q15_t)-fade_step);
     }
 
-    *phase_out = phase;
+    /* Advance the canonical phase by the whole block (mod 2^32, exactly as the per-sample
+     * increment would), so the next block re-seeds the oscillator from the exact phase. */
+    *phase_out = phase_start + freq_inc * blk_len;
     *amp_out = amp;
 }
 
@@ -883,7 +903,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
     out_pos = ctx->output_position;
     out_end = out_pos + num_samples;
-    const q15_t* restrict osc_lut = ctx->osc_lut;
+    SPECTRAL_MAYBE_UNUSED const q15_t* restrict osc_lut = ctx->osc_lut;  /* generic (non-M7) LUT path */
     const q15_t master_amp = ctx->amplitude_q15;
 
     /* Static accumulator in DTCM for zero wait-state access on Cortex-M7.
@@ -1055,7 +1075,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             q15_t    ampB      = actB->amp_current;
             q15_t    d_ampB    = actB->amp_delta;
 #endif
-            synth_core_pair_m7(accum, osc_lut, 0u, num_samples,
+            synth_core_pair_m7(accum, 0u, num_samples,
                                &phase, &amp, freq_inc, d_amp,
                                &phaseB, &ampB, freq_incB, d_ampB);
             spectral_perf_paired_voice_samples(num_samples);  /* voice B (A counted above) */
@@ -1076,7 +1096,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         /* Use ARM M7 optimized inner loop */
         {
             uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg_start;
-            synth_segment_m7(accum, osc_lut, blk_start, blk_end,
+            synth_segment_m7(accum, blk_start, blk_end,
                              phase, freq_inc, amp, d_amp,
                              &phase, &amp, seg_offset, seg_length, fade_len);
         }
