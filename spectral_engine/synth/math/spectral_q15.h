@@ -176,8 +176,11 @@ static inline q63_t spectral_smlald(q63_t acc, q15_t a0, q15_t b0, q15_t a1, q15
     uint32_t packed_b = ((uint32_t)(uint16_t)b1 << 16) | (uint16_t)b0;
     return (q63_t)__smlald(packed_a, packed_b, (long long)acc);
 }
+/* ACLE has no __smulbb (GCC arm_acle.h: __smlabb yes, __smulbb no — the DSP
+ * branch failed to compile under arm-none-eabi-gcc). A widened 16x16 multiply
+ * is exact and GCC selects SMULBB for it (codegen-verified). */
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
-    return __smulbb(a, b);
+    return (q31_t)a * (q31_t)b;
 }
 
 #else
