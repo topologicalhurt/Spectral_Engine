@@ -77,6 +77,13 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATO
 - Change record = git log + `docs/core_audit/CHANGELOG.md` (one terse line per change). No
   per-change markdown files. No AI/prompt/planning-referential text in code, commits, or docs.
 
+## Third-party dependencies
+- `third_party/libs.yaml` is the SSOT (kind: submodule|subtree per entry; strict schema).
+  Manage via `python -m spectral_tools.vendor` (`list`, `submodule status|verify|sync|add|remove`,
+  `subtree ...`). Submodules bypass bulk sync with `sync: false`; subtrees with `track: none`.
+  Never edit `.gitmodules` by hand — `vendor submodule verify` is the consistency gate.
+  Rationale: spectral_tools ADR-0003.
+
 ## Public API (SemVer, 0.x = unstable)
 - Desktop: `spectral_engine/synth/api/spectral_synth.h`
 - Daisy Seed: `api/daisy_seed/daisy_seed_spectral.h`

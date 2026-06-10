@@ -1,0 +1,17 @@
+# Third-party dependency manifest — managed by `python -m spectral_tools.vendor`
+# Schema + rules: tools/spectral_tools/vendor/manifest.py (ADR-0003)
+version: 1
+dependencies:
+  simde:
+    kind: submodule
+    url: https://github.com/simd-everywhere/simde
+    path: third_party/simde
+    ref: master
+    notes: header-only SIMD portability; host SIMD paths compile SSE2 intrinsics through
+      it
+  xxHash:
+    kind: submodule
+    url: https://github.com/Cyan4973/xxHash
+    path: third_party/xxHash
+    ref: dev
+    notes: resource hash system (xx32/xx3)

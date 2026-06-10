@@ -75,7 +75,7 @@ class SubtreeManager(SubtreeOpsBase):
     ) -> int:
         lines = self.read_libs_file()
         if not lines:
-            print("No entries in libs.txt")
+            print("No subtree entries in the manifest (third_party/libs.yaml)")
             return 0
 
         entries = self.validate_entries(lines)
@@ -253,7 +253,7 @@ class SubtreeManager(SubtreeOpsBase):
     ) -> int:
         lines = self.read_libs_file()
         if not lines:
-            print("No entries in libs.txt")
+            print("No subtree entries in the manifest (third_party/libs.yaml)")
             return 0
 
         entries = self.validate_entries(lines)
@@ -516,7 +516,7 @@ class SubtreeManager(SubtreeOpsBase):
             print(f"  move   {self.console.bold(source_norm)} -> {self.console.bold(destination_norm)} ... ", end="", flush=True)
             commit_result = self.run_mutating(["commit", "-m", f"Move subtree {source_norm} -> {destination_norm}"])
             if commit_result.returncode == 0:
-                mode = "moved directory + updated libs.txt" if moved_on_disk else "updated libs.txt (directory absent)"
+                mode = "moved directory + updated manifest" if moved_on_disk else "updated manifest (directory absent)"
                 print(f"{self.console.green('ok')} ({mode})")
                 summary.record_ok(f"{source_norm} -> {destination_norm}")
             else:
@@ -530,12 +530,12 @@ class SubtreeManager(SubtreeOpsBase):
 
     def do_list(self) -> int:
         if not self.libs_file.exists():
-            print(f"No libs.txt at {self.libs_file}")
+            print(f"No manifest at {self.libs_file}")
             return 0
 
         lines = self.read_libs_file()
         if not lines:
-            print("No entries in libs.txt")
+            print("No subtree entries in the manifest (third_party/libs.yaml)")
             return 0
 
         entries = self.validate_entries(lines)
@@ -557,7 +557,7 @@ class SubtreeManager(SubtreeOpsBase):
     ) -> int:
         lines = self.read_libs_file()
         if not lines:
-            print("No entries in libs.txt")
+            print("No subtree entries in the manifest (third_party/libs.yaml)")
             return 0
 
         entries = self.validate_entries(lines)
@@ -634,16 +634,16 @@ class SubtreeManager(SubtreeOpsBase):
         print("Usage:")
         print(f"  {CLI_PROG} pull [--dry-run|-n] [-P] [--no-progress-bar] [-f|--flush|--no-cache] [-s|--skip <path> ...] [<path>...]   Pull (or add) subtrees")
         print(f"  {CLI_PROG} push [--dry-run|-n] [-P] [--no-progress-bar] [-s|--skip <path> ...] [<path>...]   Push subtrees upstream")
-        print(f"  {CLI_PROG} add <repo,path[,branch[,track_mask]]>...   Register entries in libs.txt only")
+        print(f"  {CLI_PROG} add <repo,path[,branch[,track_mask]]>...   Register subtree entries in the manifest only")
         print(f"  {CLI_PROG} track --mask {{pull|push|both}} <path>...   Re-enable updates for selected entries")
         print(f"  {CLI_PROG} untrack --mask {{pull|push|both}} <path>... Disable updates for selected entries")
-        print(f"  {CLI_PROG} move|mv <source_path> <destination_path>    Move subtree path + update libs.txt")
+        print(f"  {CLI_PROG} move|mv <source_path> <destination_path>    Move subtree path + update manifest")
         print(f"  {CLI_PROG} remove <path>...                  Remove and commit")
         print(f"  {CLI_PROG} status [-P] [--no-progress-bar] [<path>...]           Show fast-forward target and commit delta")
         print(f"  {CLI_PROG} list|ls                           Show configured subtrees")
         print(f"  {CLI_PROG} help                              Show this help")
         print("")
-        print("libs.txt format:  repo_url, local_path, branch[, track_mask]")
+        print("add-entry format:  repo_url, local_path, branch[, track_mask]  (stored in third_party/libs.yaml)")
         print("Branch defaults to main if omitted. track_mask defaults to both.")
         return 0
 

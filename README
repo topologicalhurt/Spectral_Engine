@@ -36,7 +36,7 @@ The following toolchains are strongly reccomended for contributors:
 - ARM-eabi-GCC toolchain ≥ 15.x (prefer latest)
 - GCC ≥ 16.x (prefer latest)
 
-You can refer to libs.txt under the `third_party` directory for everything that is built in-source. 
+You can refer to libs.yaml under the `third_party` directory for everything that is built in-source (managed by `python -m spectral_tools.vendor`). 
 Under the dedicated spectral_tools toolchain 
 
 BUILD
