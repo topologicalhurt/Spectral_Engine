@@ -92,3 +92,12 @@ the segment-load/DMA path.
   Pairing barely wins under perfect memory — its true win is halved accumulator
   read-modify-write traffic, which only the P4 memory layer prices. Do not draw
   pairing-coverage conclusions (P6) before P4.
+- P2 closed: `tools/perf_model/run_qemu_counts.sh` runs the real kernel on
+  qemu-system-arm mps2-an500 with the `spectral_counts` TCG plugin; counts verified
+  bit-identical across runs. First Layer-1 numbers `[measured: qemu-tcg]` for the
+  9-voice/16384-sample fixture: `spectral_arm32_process` = 3,763,544 insns,
+  4,566,738 B loaded / 1,652,298 B stored ⇒ ~51.0 insns and ~62 ld + ~22 st bytes per
+  voice-sample. The q63 accumulator read-modify-write dominates traffic — the measured
+  input the A2 loop-nest/data-layout question was missing. Known rig divergences from
+  the Daisy target (deliberate, attributed separately): byte-loop memcpy/memset,
+  runner-local sinf via the kernel's f64 init sine.

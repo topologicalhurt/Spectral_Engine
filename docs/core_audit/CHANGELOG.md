@@ -245,4 +245,5 @@ per-commit messages, not per-pass note files (see AI_CANON Rule 18).
 - Pass 237 — fix on-target DSP build break: __smulbb is not an ACLE intrinsic; widened multiply, SMULBB codegen-verified
 - Pass 238 — M7 perf-model measurement stack decided + planned (M7_PERF_MODEL_PLAN.md); codegen rig proven on the real M7 TU
 - Pass 239 — perf-model P1: committed codegen census + innermost-loop llvm-mca rig (tools/perf_model); first per-loop M7 numbers
+- Pass 240 — perf-model P2: QEMU mps2-an500 counts rig (freestanding runner + TCG plugin); real-kernel dynamic insn/byte counts, bit-reproducible
 
