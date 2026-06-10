@@ -32,10 +32,14 @@ RANGE_SYMBOLS = (
 
 NM_LINE_RE = re.compile(r"^([0-9a-f]+)\s+([0-9a-f]+)\s+[Tt]\s+(\S+)$", re.MULTILINE)
 COUNTS_ROW_RE = re.compile(
-    r"^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$", re.MULTILINE
+    r"^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$", re.MULTILINE
 )
 REGION_LINE_RE = re.compile(
     r"^# data bytes by region: code=(\d+) ssram23=(\d+) bulk60=(\d+) other=(\d+)",
+    re.MULTILINE,
+)
+REGION_LINES32_RE = re.compile(
+    r"^# unique 32B lines by region: code=(\d+) ssram23=(\d+) bulk60=(\d+) other=(\d+)",
     re.MULTILINE,
 )
 RESULT_RE = re.compile(r"^RESULT: (PASS|FAIL.*)$", re.MULTILINE)
@@ -55,6 +59,7 @@ class RangeCounts:
     stores: int
     load_bytes: int
     store_bytes: int
+    lines32: int                     # unique 32B data lines touched (footprint)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +69,7 @@ class RangeCounts:
             "stores": self.stores,
             "load_bytes": self.load_bytes,
             "store_bytes": self.store_bytes,
+            "lines32": self.lines32,
         }
 
 
@@ -76,6 +82,7 @@ class CountsReport:
     rendered_samples: int
     ranges: tuple[RangeCounts, ...]
     region_bytes: dict[str, int]
+    region_lines32: dict[str, int]
     reproducible: bool
 
     def range(self, name: str) -> RangeCounts | None:
@@ -124,7 +131,7 @@ def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) ->
 
     elf = out_dir / "qemu_counts.elf"
     result = run(
-        [tc.arm_gcc, "-mcpu=cortex-m7", "-mthumb", "-mfpu=fpv5-d16", "-mfloat-abi=hard",
+        [tc.arm_gcc, *tc.target_flags,
          "-nostdlib", "-T", str(qemu_dir / "mps2_an500.ld"), "-Wl,--gc-sections",
          *map(str, objects), "-lgcc", "-o", str(elf)],
         cwd=tc.repo_root,

@@ -1,16 +1,16 @@
-"""Toolchain discovery and compile-flag SSOT for the M7 measurement stack.
+"""Toolchain discovery for the M7 measurement stack.
 
-The target flags mirror the Daisy production build (SPECTRAL_DAISY_CPU/FPU/
-FLOAT_ABI in spectral_engine/cmake/options.cmake, -O3 per
-SPECTRAL_DAISY_OPTIMIZE). They are duplicated here because the Python stack
-must compile the real TUs without a CMake configure; if the cmake defaults
-change, change them here too — test_embedded_fixture asserts the pairing
-against options.cmake so drift fails a test instead of silently measuring
-the wrong build.
+The target flags are NOT defined here: they are parsed at runtime from
+spectral_engine/cmake/options.cmake (SPECTRAL_DAISY_CPU/FPU/FLOAT_ABI/
+OPTIMIZE) — the CMake defaults the Daisy production build uses are the
+single source of truth, and a missing/renamed variable raises instead of
+silently measuring a different build (C-truth rule: Python derives facts
+from the C/CMake artifacts, it does not restate them).
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -25,19 +25,39 @@ ARM_NM = "arm-none-eabi-nm"
 QEMU_SYSTEM_ARM = "qemu-system-arm"
 LLVM_MCA_CANDIDATES = ("/opt/homebrew/opt/llvm/bin/llvm-mca", "llvm-mca")
 
-# Daisy production target flags (see module docstring for the SSOT contract).
-M7_TARGET_FLAGS = (
-    "-mcpu=cortex-m7",
-    "-mthumb",
-    "-mfpu=fpv5-d16",
-    "-mfloat-abi=hard",
-)
-M7_OPT_FLAGS = ("-O3",)
+OPTIONS_CMAKE_RELPATH = "spectral_engine/cmake/options.cmake"
+_DAISY_FLAG_VARS = ("SPECTRAL_DAISY_CPU", "SPECTRAL_DAISY_FPU", "SPECTRAL_DAISY_FLOAT_ABI")
+
 M7_DEFINES = (
     "-DSPECTRAL_EMBEDDED=1",
     "-DSPECTRAL_ARM_M7=1",
     "-DSPECTRAL_HAS_DUAL_MAC=1",
 )
+
+
+def daisy_target_flags(repo_root: Path) -> tuple[str, ...]:
+    """Target + optimization flags read from the Daisy CMake defaults.
+
+    ``-mthumb`` is appended here: M-profile is Thumb-only and the Daisy build
+    inherits it from libDaisy's make rules rather than options.cmake.
+    """
+    options_path = repo_root / OPTIONS_CMAKE_RELPATH
+    text = options_path.read_text(encoding="utf-8")
+    flags: list[str] = []
+    for var in _DAISY_FLAG_VARS:
+        match = re.search(rf'set\({var} "([^"]+)"', text)
+        if match is None:
+            raise ToolchainError(
+                f"{var} not found in {OPTIONS_CMAKE_RELPATH} — the Daisy flag "
+                "contract moved; fix the parse, do not hardcode flags"
+            )
+        flags.append(match.group(1))
+    flags.append("-mthumb")
+    opt = re.search(r'set\(SPECTRAL_DAISY_OPTIMIZE "([^"]+)"', text)
+    if opt is None:
+        raise ToolchainError(f"SPECTRAL_DAISY_OPTIMIZE not found in {OPTIONS_CMAKE_RELPATH}")
+    flags.append(f"-O{opt.group(1)}")
+    return tuple(flags)
 
 ENGINE_INCLUDE_SUBDIRS = (
     "spectral_engine",
@@ -64,6 +84,7 @@ class ToolchainError(RuntimeError):
 class Toolchain:
     repo_root: Path
     arm_gcc: str
+    target_flags: tuple[str, ...]
     arm_nm: str | None = None
     llvm_mca: str | None = None
     qemu_system_arm: str | None = None
@@ -73,7 +94,7 @@ class Toolchain:
 
     def cflags(self, *, extra_includes: tuple[Path, ...] = ()) -> list[str]:
         """Full compile flags for the real M7 TUs (freestanding, stub libc)."""
-        flags: list[str] = [*M7_TARGET_FLAGS, *M7_OPT_FLAGS, "-ffreestanding"]
+        flags: list[str] = [*self.target_flags, "-ffreestanding"]
         flags += ["-isystem", str(NATIVE_DIR / "fs_include")]
         flags += list(M7_DEFINES)
         for sub in ENGINE_INCLUDE_SUBDIRS:
@@ -156,6 +177,7 @@ def discover(repo_root: Path | None = None, *, need: frozenset[str] = frozenset(
     return Toolchain(
         repo_root=root,
         arm_gcc=arm_gcc,
+        target_flags=daisy_target_flags(root),
         arm_nm=_which_or_none(ARM_NM),
         llvm_mca=mca,
         qemu_system_arm=qemu,
