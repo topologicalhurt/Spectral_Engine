@@ -3,5 +3,6 @@
 __all__ = [
     "benchmark_types",
     "embedded",
+    "matrix",
     "perf_profile",
 ]

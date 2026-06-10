@@ -8,7 +8,6 @@ skip cleanly when the cross toolchain / qemu are absent.
 from __future__ import annotations
 
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -63,19 +62,30 @@ def test_fixture_digest_tracks_content():
     assert changed.digest() != base.digest()
 
 
-# --- target-flag SSOT pairing against options.cmake -------------------------
+# --- target flags come FROM cmake at runtime (C-truth rule) ------------------
 
-def test_m7_flags_match_daisy_cmake_options():
-    """toolchain.M7_TARGET_FLAGS duplicates the Daisy production flags; this
-    pairing test makes silent drift impossible (AI_CANON SSOT rule)."""
-    options = (ROOT / "spectral_engine/cmake/options.cmake").read_text(encoding="utf-8")
-    for var in ("SPECTRAL_DAISY_CPU", "SPECTRAL_DAISY_FPU", "SPECTRAL_DAISY_FLOAT_ABI"):
-        match = re.search(rf'set\({var} "([^"]+)"', options)
-        assert match, f"{var} missing from options.cmake"
-        assert match.group(1) in toolchain.M7_TARGET_FLAGS, (
-            f"{var}={match.group(1)} not in M7_TARGET_FLAGS — embedded measurements "
-            "would run with different flags than the Daisy production build"
-        )
+def test_daisy_flags_are_parsed_from_options_cmake():
+    """Flags are read from the Daisy CMake defaults at runtime — Python holds
+    no copy. Assert the parse works against the real file and yields a
+    plausible cross-compile flag set (values themselves belong to CMake)."""
+    flags = toolchain.daisy_target_flags(ROOT)
+    assert any(f.startswith("-mcpu=") for f in flags)
+    assert any(f.startswith("-mfpu=") for f in flags)
+    assert any(f.startswith("-mfloat-abi=") for f in flags)
+    assert "-mthumb" in flags
+    assert any(re.fullmatch(r"-O.+", f) for f in flags)
+
+
+def test_daisy_flag_parse_fails_loudly_on_contract_move(tmp_path):
+    fake_root = tmp_path
+    cmake_dir = fake_root / "spectral_engine/cmake"
+    cmake_dir.mkdir(parents=True)
+    (cmake_dir / "options.cmake").write_text(
+        'set(SPECTRAL_DAISY_CPU "-mcpu=cortex-m7" CACHE STRING "x")\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(toolchain.ToolchainError, match="SPECTRAL_DAISY_FPU"):
+        toolchain.daisy_target_flags(fake_root)
 
 
 # --- loop extraction --------------------------------------------------------
@@ -160,21 +170,24 @@ def test_parse_mca_report():
 
 CANNED_COUNTS = """\
 # [measured: qemu-tcg dynamic counts] — not cycles
-range                                 insns        loads       stores     load_bytes    store_bytes
-<other>                              498145        74155        24258         460452          94394
-spectral_arm32_process              3763544      1097748       353301        4566738        1652298
+range                                 insns        loads       stores     load_bytes    store_bytes     lines32B
+<other>                              498145        74155        24258         460452          94394         1201
+spectral_arm32_process              3763544      1097748       353301        4566738        1652298         4587
 # data bytes by region: code=508272 ssram23=6324410 bulk60=0 other=8
+# unique 32B lines by region: code=310 ssram23=4496 bulk60=0 other=1
 """
 
 
 def test_parse_counts_table():
-    ranges, regions = counts._parse_counts(CANNED_COUNTS)
+    ranges, regions, region_lines = counts._parse_counts(CANNED_COUNTS)
     names = {r.name for r in ranges}
     assert names == {"<other>", "spectral_arm32_process"}
     process = next(r for r in ranges if r.name == "spectral_arm32_process")
     assert process.insns == 3763544
     assert process.load_bytes == 4566738
+    assert process.lines32 == 4587
     assert regions == {"code": 508272, "ssram23": 6324410, "bulk60": 0, "other": 8}
+    assert region_lines == {"code": 310, "ssram23": 4496, "bulk60": 0, "other": 1}
 
 
 def test_parse_counts_rejects_garbage():
@@ -182,14 +195,56 @@ def test_parse_counts_rejects_garbage():
         counts._parse_counts("nothing useful here\n")
 
 
+# --- measurement matrix ------------------------------------------------------
+
+def test_matrix_targets_and_probes():
+    from spectral_tools.performance import matrix
+
+    names = {profile.name for profile in matrix.TARGETS}
+    assert {"desktop", "simulate", "m7", "daisy"} <= names
+    with pytest.raises(KeyError, match="unknown measurement target"):
+        matrix.target("nonsense")
+
+    probed = matrix.probe_matrix()
+    for target_name, entry in probed.items():
+        assert entry["instruments"], f"{target_name} has no instruments"
+        for row in entry["instruments"]:
+            assert row["availability"] in {"available", "unavailable", "planned"}
+            assert row["provenance"] in {"measured", "modeled"}
+            assert row["kind"] in {"timing", "counters", "memory", "counts", "model"}
+
+
+def test_matrix_m7_instruments_probe_real_toolchain():
+    """On this machine the m7 instruments should probe available (toolchain
+    + qemu + mca installed); elsewhere they must degrade to unavailable with
+    an actionable hint, never raise."""
+    from spectral_tools.performance import matrix
+
+    entry = matrix.probe_matrix()["m7"]
+    by_name = {row["instrument"]: row for row in entry["instruments"]}
+    assert by_name["qemu-counts"]["availability"] in {"available", "unavailable"}
+    assert by_name["mca-census"]["availability"] in {"available", "unavailable"}
+    for row in entry["instruments"]:
+        if row["availability"] == "unavailable":
+            assert row["detail"], "unavailable instrument must say how to get it"
+
+
 # --- integration (skipped when toolchain absent) -----------------------------
 
-HAVE_ARM_GCC = shutil.which("arm-none-eabi-gcc") is not None
-HAVE_MCA = toolchain._find_llvm_mca() is not None
-HAVE_QEMU = shutil.which("qemu-system-arm") is not None
+def _have_toolchain(*need: str) -> bool:
+    try:
+        toolchain.discover(ROOT, need=frozenset(need))
+    except toolchain.ToolchainError:
+        return False
+    return True
 
 
-@pytest.mark.skipif(not (HAVE_ARM_GCC and HAVE_MCA), reason="needs arm-none-eabi-gcc + llvm-mca")
+HAVE_ARM_GCC = _have_toolchain()        # requires a newlib-capable toolchain
+HAVE_MCA = _have_toolchain("mca")
+HAVE_QEMU = _have_toolchain("qemu")
+
+
+@pytest.mark.skipif(not HAVE_MCA, reason="needs newlib arm-none-eabi-gcc + llvm-mca (m7-bootstrap)")
 def test_census_and_loop_analysis_end_to_end(tmp_path):
     tc = toolchain.discover(ROOT, need=frozenset({"mca"}))
     report = codegen.codegen_report(tc, out_dir=tmp_path)
@@ -205,7 +260,7 @@ def test_census_and_loop_analysis_end_to_end(tmp_path):
         assert 0 < loop.ipc <= 2.0  # M7 is dual-issue; IPC cannot exceed 2
 
 
-@pytest.mark.skipif(not (HAVE_ARM_GCC and HAVE_QEMU), reason="needs arm-none-eabi-gcc + qemu")
+@pytest.mark.skipif(not HAVE_QEMU, reason="needs newlib arm-none-eabi-gcc + qemu (m7-bootstrap)")
 def test_qemu_counts_end_to_end_reproducible(tmp_path):
     tc = toolchain.discover(ROOT, need=frozenset({"qemu"}))
     report = counts.measure(tc, out_dir=tmp_path, verify_reproducible=True)

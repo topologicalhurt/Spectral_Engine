@@ -1,38 +1,13 @@
 /* Freestanding Cortex-M7 startup for the QEMU mps2-an500 counts rig
- * (M7_PERF_MODEL_PLAN P2). No newlib: vector table, .data/.bss init, FPU
- * enable, byte-loop mem functions. Compile this TU with -fno-builtin
- * -fno-tree-loop-distribute-patterns so GCC cannot rewrite the loops below
- * into calls to themselves.
- *
- * Known divergence from the Daisy target, by design: memcpy/memset here are
- * byte loops, not newlib's optimized versions — their counts are attributed
- * to their own symbol ranges by the plugin and reported separately, never
- * folded into kernel numbers. */
+ * (M7_PERF_MODEL_PLAN P2): vector table, .data/.bss init, FPU enable,
+ * explicit FPSCR state. memcpy/memset come from the toolchain's newlib-nano
+ * (-lc_nano at link) — the same C library family the Daisy firmware links —
+ * so libc traffic in the counts matches production, attributed to its own
+ * symbol ranges by the plugin. */
 #include <stdint.h>
 
 extern uint32_t _sidata[], _sdata[], _edata[], _sbss[], _ebss[], _estack[];
 int main(void);
-
-void* memcpy(void* dst, const void* src, unsigned long n) {
-    uint8_t* d = (uint8_t*)dst;
-    const uint8_t* s = (const uint8_t*)src;
-    while (n--) *d++ = *s++;
-    return dst;
-}
-
-void* memset(void* dst, int c, unsigned long n) {
-    uint8_t* d = (uint8_t*)dst;
-    while (n--) *d++ = (uint8_t)c;
-    return dst;
-}
-
-void* memmove(void* dst, const void* src, unsigned long n) {
-    uint8_t* d = (uint8_t*)dst;
-    const uint8_t* s = (const uint8_t*)src;
-    if (d < s) { while (n--) *d++ = *s++; }
-    else { d += n; s += n; while (n--) *--d = *--s; }
-    return dst;
-}
 
 __attribute__((noreturn)) static void semihost_exit(uint32_t reason) {
     register uint32_t r0 __asm("r0") = 0x18;    /* SYS_EXIT */
@@ -46,6 +21,12 @@ __attribute__((noreturn)) static void semihost_exit(uint32_t reason) {
 __attribute__((noreturn)) void Reset_Handler(void) {
     *(volatile uint32_t*)0xE000ED88 |= (0xFu << 20);   /* CPACR: CP10/CP11 full */
     __asm volatile("dsb\n\tisb" ::: "memory");
+    /* Pin FPSCR to the documented contract state: FZ=0, DN=0, RN — IEEE-754,
+     * matching the Daisy default (SPECTRAL_DAISY_SAFE_MATH=ON, no -ffast-math
+     * so no crtfastmath FZ=1). If safe-math is ever disabled on hardware,
+     * double-precision parity claims must restate FPSCR (fidelity contract,
+     * M7_PERF_MODEL_PLAN). */
+    __asm volatile("vmsr fpscr, %0" :: "r"(0u));
 
     const uint32_t* src = _sidata;
     uint32_t* dst = _sdata;

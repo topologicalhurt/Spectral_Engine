@@ -48,6 +48,40 @@ replaced by (or re-derived from) this stack, or the sim/perf-model pair is depre
   voices, cold cache, SDRAM worst path). Every reported number is tagged `[measured]` or
   `[modeled:<source>]`. A heuristic presented as a measurement is a bug.
 
+## QEMU fidelity contract (what the counts oracle is — and is not)
+
+QEMU 11 `mps2-an500`/cortex-m7 is an **ISA-level oracle for architecturally-executed
+instruction and memory-access counts and IEEE-754 FP bit-exactness. It models zero
+microarchitecture** (no caches, no cycles, no DWT). Verified, not assumed:
+
+- The CPU model implements ARMv7E-M + DSP + FPv5-D16 double; MVFR0/1/2 ID values are
+  bit-identical to the Cortex-M7 TRM (DDI 0489F) reset values `[sourced: qemu
+  target/arm/tcg/cpu-v7m.c vs TRM Table 8-2]`.
+- Plugin exec callbacks fire exactly once per **architecturally executed** instruction,
+  including predicated-false IT-block members (measured: two byte-identical IT loops,
+  always-true vs always-false predicate, both count 60007); mem callbacks fire only for
+  **architecturally performed** accesses (predicated-false LDR produced zero) `[measured]`.
+  This matches the ARM definition — hardware also "executes" cond-fail instructions.
+- FP: FPSCR resets to 0 (FZ=0, DN=0, RN) exactly as hardware FPDSCR; softfloat honors
+  FZ/DN/rounding per spec (measured on subnormal cases); IEEE + identical FPSCR ⇒
+  identical bits `[measured + inferred]`.
+- Caches absent by design: SCB cache ops are NOPs, CLIDR/CCSIDR read 0 — counts contain
+  zero cache effects, which is why cycles/caches are separate layers (P3/P4).
+
+The contract holds under four conditions (all enforced or documented in the rig):
+1. **FPSCR is pinned** — the runner writes FPSCR=0 at reset, matching the Daisy default
+   (`SPECTRAL_DAISY_SAFE_MATH=ON` ⇒ no `-ffast-math` ⇒ no crtfastmath FZ=1). If safe-math
+   is ever disabled on hardware, double-precision parity claims must restate FPSCR.
+2. Kernels stay RAM-only, fault-free, interrupt-free (M-profile exception stacking is
+   plugin-invisible; MMIO-touching code risks exec-cb double-fire on TB restarts).
+3. Semihosting, cache-init (CCSIDR-driven loops degenerate on QEMU), and DWT/CYCCNT reads
+   stay outside counted ranges (DWT is RAZ/WI on QEMU and would change control flow).
+4. Counts are never read as cycles or cache behavior.
+
+Known platform deltas, all counts-irrelevant under the conditions above: mps2-an500
+memory map (placement is ldscript-controlled), no FMC/SDRAM controller, bitband present
+on QEMU but absent on real M7 (QEMU strictly more permissive), MPU 8 regions vs 16.
+
 ## Hot kernels under the model
 
 `synth_core_m7` (4×-unrolled coupled-step + MAC), `synth_core_pair_m7` (SMLALD dual-voice),
@@ -103,12 +137,24 @@ the segment-load/DMA path.
 - **Harness home (consolidation pass, 2026-06-10):** the whole stack lives in
   `tools/spectral_tools/performance/embedded/` (toolchain/fixture/codegen/counts +
   `native/` C sources); the original shell scripts are deleted. One CLI:
-  `python -m spectral_tools.testing.benchmark_workflow m7-census | m7-counts`
-  (CMake: `m7_census` / `m7_counts`, same family as `bench`). The workload fixture is
-  a Python SSOT that generates the C header the runner compiles; reports carry the
-  fixture digest and a measured/modeled provenance tag on every number. Harness
-  behavior is itself under test: `pytest tests/tools` (extraction/parsers/fixture
-  units + skip-aware end-to-end census and reproducible-counts integration; the
-  Daisy↔toolchain flag pairing is asserted against options.cmake). Migration
+  `python -m spectral_tools.testing.benchmark_workflow m7-census | m7-counts |
+  measure --target m7` (CMake: `m7_census` / `m7_counts`, same family as `bench`).
+  The workload fixture is a Python SSOT that generates the C header the runner
+  compiles; reports carry the fixture digest and a measured/modeled provenance tag
+  on every number. Target flags are parsed from options.cmake at runtime (no copy in
+  Python). Harness behavior is itself under test: `pytest tests/tools`. Migration
   verified: kernel-range counts and mca per-loop cycles bit/numerically identical
   to the pre-migration rig.
+- **Real newlib + working sets (hardening pass, 2026-06-10):** the freestanding stub
+  headers are deleted; the rigs require a newlib toolchain (sha-pinned xPack via
+  `m7-bootstrap` into `tools/toolchains/`, gitignored; brew's bare gcc is rejected by
+  a libc probe). Measured before adopting: DSP census identical stub-vs-newlib; with
+  `-ffreestanding` kept the full mnemonic census is byte-identical. The runner links
+  `-lc_nano` (newlib-nano memcpy/memset — the family Daisy firmware links) and pins
+  FPSCR=0 at reset per the fidelity contract. The counts plugin now also measures
+  unique 32B-line working sets per range and per region (footprints for P4) and has
+  an optional full address-trace mode (`trace=` arg) for offline cache simulation.
+  New baseline on xPack 15.2.1: `spectral_arm32_process` = 3,762,455 insns (was
+  3,763,544 on brew 15.2.0 — compiler scheduling delta), output checksum 77a267f6
+  unchanged, counts bit-reproducible; per-block kernel data working set ≈ 260 lines
+  (~8.3 KB) — comfortably DTCM-resident, a measured input for P4/P6.

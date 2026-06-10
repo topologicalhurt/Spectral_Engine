@@ -100,6 +100,7 @@ class CountsReport:
             "reproducible": self.reproducible,
             "ranges": [item.as_dict() for item in self.ranges],
             "region_bytes": dict(self.region_bytes),
+            "region_lines32": dict(self.region_lines32),
         }
 
 
@@ -111,9 +112,9 @@ def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) ->
     gc_flags = ("-ffunction-sections", "-fdata-sections")
     objects: list[Path] = []
     compile_plan: list[tuple[Path, tuple[str, ...]]] = [
-        # startup: -fno-builtin + no loop-distribute so GCC cannot rewrite the
-        # mem loops into calls to themselves.
-        (qemu_dir / "startup.c", ("-fno-builtin", "-fno-tree-loop-distribute-patterns")),
+        (qemu_dir / "startup.c", ()),
+        # -fno-builtin: qemu_main defines sinf itself (routed through the
+        # kernel's f64 init sine); keep GCC from folding it as a builtin.
         (qemu_dir / "qemu_main.c", ("-fno-builtin",)),
         *((tu, ()) for tu in tc.kernel_tus()),
     ]
@@ -130,10 +131,12 @@ def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) ->
         objects.append(obj)
 
     elf = out_dir / "qemu_counts.elf"
+    # -lc_nano: newlib-nano memcpy/memset — the libc family the Daisy firmware
+    # links (nano.specs), so libc traffic in counts matches production.
     result = run(
         [tc.arm_gcc, *tc.target_flags,
          "-nostdlib", "-T", str(qemu_dir / "mps2_an500.ld"), "-Wl,--gc-sections",
-         *map(str, objects), "-lgcc", "-o", str(elf)],
+         *map(str, objects), "-lc_nano", "-lgcc", "-o", str(elf)],
         cwd=tc.repo_root,
         check=False,
     )
@@ -181,10 +184,13 @@ def _build_plugin(tc: Toolchain, out_dir: Path) -> Path:
 def _run_once(
     tc: Toolchain, elf: Path, plugin: Path,
     ranges: list[tuple[str, int, int]], counts_path: Path,
+    *, trace_path: Path | None = None,
 ) -> tuple[str, str, int]:
     range_args = "".join(
         f",range={name}:0x{start:x}:0x{end:x}" for name, start, end in ranges
     )
+    if trace_path is not None:
+        range_args += f",trace={trace_path}"
     result = run(
         [str(tc.qemu_system_arm), "-M", "mps2-an500", "-semihosting",
          "-display", "none", "-serial", "none", "-monitor", "none",
@@ -210,26 +216,36 @@ def _run_once(
     return counts_path.read_text(encoding="utf-8"), checksum.group(1), int(rendered.group(1), 16)
 
 
-def _parse_counts(table: str) -> tuple[tuple[RangeCounts, ...], dict[str, int]]:
+def _parse_counts(
+    table: str,
+) -> tuple[tuple[RangeCounts, ...], dict[str, int], dict[str, int]]:
     ranges = tuple(
         RangeCounts(
             name=m.group(1), insns=int(m.group(2)), loads=int(m.group(3)),
-            stores=int(m.group(4)), load_bytes=int(m.group(5)), store_bytes=int(m.group(6)),
+            stores=int(m.group(4)), load_bytes=int(m.group(5)),
+            store_bytes=int(m.group(6)), lines32=int(m.group(7)),
         )
         for m in COUNTS_ROW_RE.finditer(table)
     )
     if not ranges:
         raise CountsError(f"no count rows parsed from plugin output:\n{table}")
-    region = REGION_LINE_RE.search(table)
-    if region is None:
-        raise CountsError("region-bytes line missing from plugin output")
-    region_bytes = {
-        "code": int(region.group(1)),
-        "ssram23": int(region.group(2)),
-        "bulk60": int(region.group(3)),
-        "other": int(region.group(4)),
-    }
-    return ranges, region_bytes
+
+    def region_dict(regex: re.Pattern[str], what: str) -> dict[str, int]:
+        match = regex.search(table)
+        if match is None:
+            raise CountsError(f"{what} line missing from plugin output")
+        return {
+            "code": int(match.group(1)),
+            "ssram23": int(match.group(2)),
+            "bulk60": int(match.group(3)),
+            "other": int(match.group(4)),
+        }
+
+    return (
+        ranges,
+        region_dict(REGION_LINE_RE, "region-bytes"),
+        region_dict(REGION_LINES32_RE, "region-lines"),
+    )
 
 
 def measure(
@@ -238,8 +254,12 @@ def measure(
     out_dir: Path,
     fixture: WorkloadFixture | None = None,
     verify_reproducible: bool = True,
+    trace_path: Path | None = None,
 ) -> CountsReport:
-    """Build + run the counts rig; returns measured counts for the fixture."""
+    """Build + run the counts rig; returns measured counts for the fixture.
+
+    ``trace_path`` enables the plugin's full data-access address trace (large;
+    input for offline cache simulation in the P4 layer)."""
     if tc.qemu_system_arm is None:
         raise CountsError("qemu-system-arm unavailable; run toolchain.discover(need={'qemu'})")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -250,10 +270,14 @@ def measure(
     ranges = _symbol_ranges(tc, elf)
     plugin = _build_plugin(tc, out_dir)
 
-    table_1, checksum, rendered = _run_once(tc, elf, plugin, ranges, out_dir / "qemu_counts.txt")
+    table_1, checksum, rendered = _run_once(
+        tc, elf, plugin, ranges, out_dir / "qemu_counts.txt", trace_path=trace_path
+    )
     reproducible = True
     if verify_reproducible:
-        table_2, checksum_2, _ = _run_once(tc, elf, plugin, ranges, out_dir / "qemu_counts_verify.txt")
+        table_2, checksum_2, _ = _run_once(
+            tc, elf, plugin, ranges, out_dir / "qemu_counts_verify.txt"
+        )
         reproducible = (table_1 == table_2) and (checksum == checksum_2)
         if not reproducible:
             raise CountsError(
@@ -261,7 +285,7 @@ def measure(
                 "(nondeterminism in the runner, plugin, or machine model)"
             )
 
-    parsed_ranges, region_bytes = _parse_counts(table_1)
+    parsed_ranges, region_bytes, region_lines32 = _parse_counts(table_1)
     if rendered != spec.total_samples:
         raise CountsError(
             f"workload rendered {rendered} samples, fixture expects {spec.total_samples}"
@@ -274,5 +298,6 @@ def measure(
         rendered_samples=rendered,
         ranges=parsed_ranges,
         region_bytes=region_bytes,
+        region_lines32=region_lines32,
         reproducible=reproducible,
     )

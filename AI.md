@@ -21,11 +21,27 @@ the full correctness rules; this file is the orientation.
   test exes are `EXCLUDE_FROM_ALL`, so build `tests_all` first). Behavioral numeric tests:
   `pytest tests/core_math` (compile+run real C against a Python reference). Perf-harness
   tests: `pytest tests/tools`.
-- Performance measurement has ONE entry point: `python -m
-  spectral_tools.testing.benchmark_workflow` (`bench`/`suite` desktop; `m7-census`/
-  `m7-counts` embedded model — see docs/core_audit/M7_PERF_MODEL_PLAN.md). CMake targets
-  `bench`, `bench_cache`, `m7_census`, `m7_counts` wrap the same module. Don't add
-  parallel perf scripts.
+## Performance measurement (the rules; full rationale in spectral_tools ADR-0002)
+- ONE entry point: `python -m spectral_tools.testing.benchmark_workflow`
+  (`bench`/`suite` desktop; `m7-census`/`m7-counts` embedded; `measure --list` shows
+  the target×instrument matrix; `m7-bootstrap` fetches the pinned newlib toolchain).
+  CMake targets `bench`, `bench_cache`, `m7_census`, `m7_counts` wrap the same module.
+  Don't add parallel perf scripts — extend `performance/matrix.py`.
+- Pipeline shape: reproducible build → run under an instrument → parse → interpret.
+  The matrix (`performance/matrix.py`) is the SSOT for which instrument measures
+  which build target, with runtime availability probes.
+- Timing = in-process stage markers (CLOCK_MONOTONIC ns, spectral_log.h). Debuggers
+  are never a timing instrument (measured: ~3.4 ms per lldb breakpoint stop vs
+  ~600 ns per marker); they are for state inspection and (future) QEMU-gdbstub
+  stage segmentation, where guest time freezes while stopped.
+- Embedded numbers carry provenance: QEMU counts are `[measured]` and never cycles;
+  llvm-mca numbers are `[modeled]`; the two are never blended. Fidelity contract:
+  docs/core_audit/M7_PERF_MODEL_PLAN.md.
+- C-truth rule: Python derives facts from C/CMake artifacts (parse options.cmake for
+  flags, nm for symbols, binaries for counts) — never restates constants or logic.
+  Python-originated data the C side needs is GENERATED into C with a content digest
+  (fixture header). The only sanctioned duplication is a labeled, parity-tested
+  independent-verification implementation.
 - A change is not verified until it builds on desktop **and** the embedded host targets
   (`embedded_arm`, `embedded_arm_float`) and ctest is green — a symbol unused in desktop may
   be live under another build flag.

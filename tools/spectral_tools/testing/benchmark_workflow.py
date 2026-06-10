@@ -578,6 +578,85 @@ def run_m7_counts(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_m7_bootstrap(args: argparse.Namespace, perf: Performance) -> int:
+    """Download + sha-verify + extract the pinned newlib toolchain."""
+    from ..performance.embedded import toolchain
+
+    console = Console(use_color=not bool(args.no_color))
+    try:
+        path = toolchain.bootstrap(perf.repo_root, force=bool(args.force))
+    except toolchain.ToolchainError as exc:
+        console.print_error(str(exc))
+        return 1
+    print(f"toolchain ready: {path}")
+    return 0
+
+
+def run_measure(args: argparse.Namespace, perf: Performance) -> int:
+    """Matrix-driven orchestration: probe or run the instruments for a target.
+
+    `measure --list` shows the full target×instrument matrix with live
+    availability probes. `measure --target <name>` runs every available
+    instrument for that target (building first where the profile names a
+    cmake target and --build is given) and emits one combined report.
+    """
+    from ..performance import matrix
+
+    if args.list or args.target is None:
+        probed = matrix.probe_matrix()
+        report = {
+            "suite": "measurement-matrix",
+            "context": perf.collect_context(),
+            "tests": [
+                {
+                    "name": name,
+                    "status": TestStatus.OK.value,
+                    "summary": entry["description"],
+                    "details": {
+                        "build_target": entry["build_target"],
+                        "instruments": entry["instruments"],
+                    },
+                }
+                for name, entry in probed.items()
+            ],
+        }
+        emit_report(args, report)
+        return 0
+
+    try:
+        profile = matrix.target(args.target)
+    except KeyError as exc:
+        Console(use_color=not bool(args.no_color)).print_error(str(exc))
+        return 2
+
+    if args.build and profile.build_target is not None:
+        build_dir = perf.repo_root / "build"
+        perf.configure_build(build_dir, ["-DCMAKE_BUILD_TYPE=Release"])
+        perf.build_target(build_dir, profile.build_target)
+
+    if profile.name == "m7":
+        rc_census = run_m7_census(args, perf)
+        rc_counts = run_m7_counts(args, perf)
+        return rc_census or rc_counts
+
+    if profile.name in {"desktop", "simulate"}:
+        if not args.input:
+            Console(use_color=not bool(args.no_color)).print_error(
+                f"measure --target {profile.name} needs --input <wav> (and a built binary)"
+            )
+            return 2
+        build_dir = perf.repo_root / "build"
+        binary = perf.resolve_desktop_binary(build_dir)
+        args.binary = str(binary)
+        args.binary_cli_args = []
+        return run_single_bench(args, perf)
+
+    Console(use_color=not bool(args.no_color)).print_error(
+        f"target '{profile.name}' has no runnable instruments yet (all planned)"
+    )
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Spectral benchmark workflows.")
     add_dry_run_flag(parser, short="-d")
@@ -673,6 +752,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_output_options(m7_counts)
 
+    measure = sub.add_parser(
+        "measure",
+        help="Matrix-driven measurement: --list shows target×instrument availability; "
+             "--target runs every available instrument for one build target",
+    )
+    measure.add_argument("--list", action="store_true", help="Probe and show the measurement matrix")
+    measure.add_argument("--target", default=None, help="Measurement target (see --list)")
+    measure.add_argument("--build", action="store_true", help="Configure+build the target's cmake target first")
+    measure.add_argument("-i", "--input", default=None, help="WAV input (desktop/simulate targets)")
+    measure.add_argument("-n", "--runs", type=int, default=DEFAULT_BENCH_RUNS, help="Benchmark run count")
+    measure.add_argument("-m", "--mode", default=DEFAULT_BENCH_MODE,
+                         choices=[mode.value for mode in BenchMode], help="Benchmark mode")
+    measure.add_argument("-a", "--bench-args", default=DEFAULT_BENCH_ARGS,
+                         help="Binary args as a shell-quoted string")
+    measure.add_argument("-c", "--cache-dir", default=DEFAULT_CACHE_DIR, help="Cache directory for cache mode")
+    measure.add_argument("--reset-cache", action="store_true", help="Reset cache files before cache benchmark")
+    measure.add_argument("-P", "--perf", action="store_true", help="Collect Linux perf statistics (desktop)")
+    measure.add_argument("--perf-strategy", default=PerfStrategy.MARKERS.value,
+                         choices=[strategy.value for strategy in PerfStrategy], help="Perf profiling strategy")
+    measure.add_argument("--perf-events", default=DEFAULT_PERF_EVENTS, help="Comma-separated perf events list")
+    measure.add_argument("--perf-include-full", action="store_true",
+                         help="Include an extra full-pipeline perf run in matrix mode")
+    measure.add_argument("--perf-timeout-sec", type=int, default=DEFAULT_PERF_TIMEOUT_SEC,
+                         help="Timeout for each perf-instrumented run (0 disables timeout)")
+    measure.add_argument("--out-dir", default=None, help="Artifact dir for m7 instruments")
+    measure.add_argument("--no-verify", action="store_true",
+                         help="m7: skip the duplicate run that asserts bit-identical counts")
+    add_output_options(measure)
+
+    m7_bootstrap = sub.add_parser(
+        "m7-bootstrap",
+        help="Download + sha-verify the pinned newlib arm-none-eabi toolchain into tools/toolchains/",
+    )
+    m7_bootstrap.add_argument("--force", action="store_true", help="Re-download even if present")
+    add_output_options(m7_bootstrap)
+
     return parser
 
 
@@ -691,6 +806,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_m7_census(args, perf)
     if args.command == "m7-counts":
         return run_m7_counts(args, perf)
+    if args.command == "measure":
+        return run_measure(args, perf)
+    if args.command == "m7-bootstrap":
+        return run_m7_bootstrap(args, perf)
 
     parser.error(f"unsupported command: {args.command}")
     return 2

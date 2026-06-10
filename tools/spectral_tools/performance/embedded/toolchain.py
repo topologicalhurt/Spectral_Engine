@@ -93,9 +93,13 @@ class Toolchain:
     qemu_include_dir: Path | None = None
 
     def cflags(self, *, extra_includes: tuple[Path, ...] = ()) -> list[str]:
-        """Full compile flags for the real M7 TUs (freestanding, stub libc)."""
+        """Full compile flags for the real M7 TUs.
+
+        Headers come from the toolchain's real newlib (discovery requires it);
+        -ffreestanding is kept deliberately — measured byte-identical census
+        vs hosted on the production TU, and the QEMU runner genuinely is
+        freestanding (own startup, no libc init)."""
         flags: list[str] = [*self.target_flags, "-ffreestanding"]
-        flags += ["-isystem", str(NATIVE_DIR / "fs_include")]
         flags += list(M7_DEFINES)
         for sub in ENGINE_INCLUDE_SUBDIRS:
             flags += ["-I", str(self.repo_root / sub)]
@@ -109,6 +113,55 @@ class Toolchain:
 
 def _which_or_none(name: str) -> str | None:
     return shutil.which(name)
+
+
+def _has_newlib(gcc: str) -> bool:
+    """True if the gcc resolves a real libc for the M7 multilib. A bare
+    toolchain echoes the literal name back; newlib returns an absolute path."""
+    try:
+        proc = subprocess.run(
+            [gcc, "-mcpu=cortex-m7", "-mthumb", "-print-file-name=libc_nano.a"],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+    except OSError:
+        return False
+    candidate = proc.stdout.strip()
+    return proc.returncode == 0 and "/" in candidate and Path(candidate).is_file()
+
+
+def _local_toolchain_gccs(repo_root: Path) -> list[str]:
+    """Bootstrap-installed toolchains under tools/toolchains/, newest first."""
+    toolchains_dir = repo_root / "tools" / "toolchains"
+    if not toolchains_dir.is_dir():
+        return []
+    hits = sorted(toolchains_dir.glob("*/bin/arm-none-eabi-gcc"), reverse=True)
+    return [str(p) for p in hits if p.is_file()]
+
+
+def find_arm_gcc(repo_root: Path) -> str:
+    """Pick the arm-none-eabi-gcc to measure with: must have newlib.
+
+    Preference: bootstrap-installed toolchain (tools/toolchains/) over PATH —
+    the brew formula ships no libc and is rejected by the newlib probe. The
+    stub-header workaround is gone on purpose: measurements must compile
+    against the same C library family the Daisy firmware links (newlib)."""
+    candidates = [*_local_toolchain_gccs(repo_root)]
+    path_gcc = _which_or_none(ARM_GCC)
+    if path_gcc:
+        candidates.append(path_gcc)
+    for gcc in candidates:
+        if _has_newlib(gcc):
+            return gcc
+    if candidates:
+        raise ToolchainError(
+            f"arm-none-eabi-gcc found ({candidates[0]}) but it has no newlib "
+            "(brew's is bare). Run: python3 -m spectral_tools.testing.benchmark_workflow "
+            "m7-bootstrap   (downloads the sha-pinned xPack toolchain into tools/toolchains/)"
+        )
+    raise ToolchainError(
+        "no arm-none-eabi-gcc found. Run: python3 -m spectral_tools.testing."
+        "benchmark_workflow m7-bootstrap   (or install a newlib-capable toolchain)"
+    )
 
 
 def _find_llvm_mca() -> str | None:
@@ -147,12 +200,7 @@ def discover(repo_root: Path | None = None, *, need: frozenset[str] = frozenset(
     ``need`` are returned as None and callers degrade explicitly."""
     root = repo_root or find_repo_root(Path(__file__))
 
-    arm_gcc = _which_or_none(ARM_GCC)
-    if arm_gcc is None:
-        raise ToolchainError(
-            "arm-none-eabi-gcc not found (brew install arm-none-eabi-gcc); "
-            "required for every embedded measurement"
-        )
+    arm_gcc = find_arm_gcc(root)
 
     mca = _find_llvm_mca()
     if "mca" in need and mca is None:
@@ -174,14 +222,88 @@ def discover(repo_root: Path | None = None, *, need: frozenset[str] = frozenset(
         if not glib_cflags:
             raise ToolchainError("pkg-config glib-2.0 failed; glib headers required to build the counts plugin")
 
+    arm_nm = str(Path(arm_gcc).parent / ARM_NM)
+    if not Path(arm_nm).is_file():
+        arm_nm = _which_or_none(ARM_NM)
+
     return Toolchain(
         repo_root=root,
         arm_gcc=arm_gcc,
         target_flags=daisy_target_flags(root),
-        arm_nm=_which_or_none(ARM_NM),
+        arm_nm=arm_nm,
         llvm_mca=mca,
         qemu_system_arm=qemu,
         glib_cflags=glib_cflags,
         glib_libs=glib_libs,
         qemu_include_dir=qemu_inc,
     )
+
+
+# --- bootstrap: reproducible no-sudo toolchain acquisition --------------------
+
+# xPack GNU Arm Embedded GCC (newlib 4.5.0 included). Version-pinned; the
+# darwin-arm64 sha256 was verified against the per-file .sha asset published
+# with the release. Other platforms verify against the fetched .sha asset
+# (same release tag, HTTPS).
+XPACK_VERSION = "15.2.1-1.1"
+XPACK_BASE_URL = (
+    "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/"
+    f"v{XPACK_VERSION}/xpack-arm-none-eabi-gcc-{XPACK_VERSION}-"
+)
+XPACK_SHA256 = {
+    "darwin-arm64": "574082d35e49a2bcbdc355836b2a3ae5e5bb3b9456c9f5e37177db2ab4aad870",
+}
+
+
+def _xpack_platform() -> str:
+    import platform as _platform
+
+    system = {"Darwin": "darwin", "Linux": "linux"}.get(_platform.system())
+    machine = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64"}.get(_platform.machine())
+    if system is None or machine is None:
+        raise ToolchainError(
+            f"no xPack toolchain for {_platform.system()}/{_platform.machine()}; "
+            "install a newlib-capable arm-none-eabi toolchain manually"
+        )
+    return f"{system}-{machine}"
+
+
+def bootstrap(repo_root: Path | None = None, *, force: bool = False) -> Path:
+    """Download + sha-verify + extract the pinned xPack toolchain into
+    tools/toolchains/ (gitignored). Returns the extracted toolchain root."""
+    import hashlib
+    import tarfile
+    import urllib.request
+
+    root = repo_root or find_repo_root(Path(__file__))
+    dest_dir = root / "tools" / "toolchains"
+    extracted = dest_dir / f"xpack-arm-none-eabi-gcc-{XPACK_VERSION}"
+    if extracted.is_dir() and not force:
+        if _has_newlib(str(extracted / "bin" / ARM_GCC)):
+            return extracted
+        raise ToolchainError(f"{extracted} exists but looks broken; rerun with force")
+
+    plat = _xpack_platform()
+    url = f"{XPACK_BASE_URL}{plat}.tar.gz"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tarball = dest_dir / f"xpack-{XPACK_VERSION}-{plat}.tar.gz"
+
+    urllib.request.urlretrieve(url, tarball)  # noqa: S310 — pinned https release URL
+
+    expected = XPACK_SHA256.get(plat)
+    if expected is None:
+        with urllib.request.urlopen(f"{url}.sha") as fh:  # noqa: S310
+            expected = fh.read().decode("utf-8").split()[0]
+    digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+    if digest != expected:
+        tarball.unlink()
+        raise ToolchainError(
+            f"toolchain tarball sha256 mismatch (got {digest}, want {expected}) — refusing"
+        )
+
+    with tarfile.open(tarball) as tar:
+        tar.extractall(dest_dir, filter="data")
+    tarball.unlink()
+    if not _has_newlib(str(extracted / "bin" / ARM_GCC)):
+        raise ToolchainError(f"extracted toolchain at {extracted} failed the newlib probe")
+    return extracted
