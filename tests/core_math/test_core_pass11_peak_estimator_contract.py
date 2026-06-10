@@ -465,7 +465,7 @@ def test_peak_estimator_benchmark_harness_reports_all_methods() -> None:
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
-                str(ROOT / "tools/core_audit/peak_estimator_bench.c"),
+                str(ROOT / "tests/core_math/harnesses/peak_estimator_bench.c"),
                 "-lm",
                 *link_flags,
                 "-o",

@@ -5,7 +5,7 @@
  *      spectral_engine/analysis/spectral_peak_estimator.c \
  *      spectral_engine/core/spectral_fast_math.c \
  *      spectral_engine/core/spectral_windows.c \
- *      tools/core_audit/peak_estimator_bench.c -lm -o /tmp/peak_estimator_bench
+ *      tests/core_math/harnesses/peak_estimator_bench.c -lm -o /tmp/peak_estimator_bench
  *
  * On macOS, add: -framework Accelerate
  *

@@ -67,7 +67,7 @@ def test_peak_estimator_sweep_harness_compiles_and_reports_ground_truth_error() 
                 str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
                 str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
                 str(ROOT / "spectral_engine/core/spectral_windows.c"),
-                str(ROOT / "tools/core_audit/peak_estimator_sweep.c"),
+                str(ROOT / "tests/core_math/harnesses/peak_estimator_sweep.c"),
                 "-lm",
                 *link_flags,
                 "-o",
