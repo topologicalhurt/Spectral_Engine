@@ -23,6 +23,16 @@ PRE-REQS
 macOS: ```brew install libomp libsndfile```
 Linux: install `libomp-dev` (or `libgomp`) and `libsndfile1-dev`
 
+PRE-REQS (Contributors)
+
+The following toolchains are strongly reccomended for contributors:
+
+- Qemu ≥ 11.x (prefer latest)
+- ARM-eabi-GCC toolchain ≥ 15.x (prefer latest)
+- GCC ≥ 16.x (prefer latest)
+
+You can refer to libs.txt under the `third_party` directory for all that is built in-source. 
+
 BUILD
 
 Run all build commands from the repository root.
@@ -44,15 +54,6 @@ Embedded-target builds
 make configure CMAKE_CONFIGURE_ARGS='-DSPECTRAL_DAISY_LIBDAISY_DIR=/path/to/libDaisy -DSPECTRAL_DAISY_DAISYSP_DIR=/path/to/DaisySP'
 make embedded_arm_restricted   # host build with embedded constraints
 make daisy                     # Cortex-M firmware build (Daisy Seed)
-```
-
-We also support a very primitive simulator which is designed to give a *very* rough estimate of the ARM-M7 chip's performance on the native target.
-
-Simulation build (for modeling cross-compiled code on desktop)
-```
-make configure
-make simulate          # generic profile
-make simulate_daisy    # Daisy profile
 ```
 
 The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices' flash. E.g,

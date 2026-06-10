@@ -63,3 +63,6 @@ __pycache__/
 !resources/testing/motormouth_test1_uncompressed_spear.txt
 !resources/testing/sin_440hz.wav
 /.spectral_core_audit_backups_*/
+
+# Local cross-toolchains (bootstrap-downloaded, ~1GB; never commit)
+/tools/toolchains/
