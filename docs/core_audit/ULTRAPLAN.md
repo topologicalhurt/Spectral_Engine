@@ -6,6 +6,15 @@ explicitly-deferred items were "ARM/embedded redesign as a separate project" and
 "compiled full/fused parity harness". This campaign delivers those plus the
 contract/guarantee, adversarial-correctness, and tooling-feedback workstreams.
 
+> **Campaign 3 / handoff.** The forward mandate — ARM instruction-level performance + a
+> no-hardware perf model, an adversarial bug fleet, file-level refactor, benchmark redesign,
+> a maturity audit, and the synthesis-method fork — is in
+> [`REVIEWER_HANDOFF.md`](REVIEWER_HANDOFF.md). **This plan is partly stale:** Phase A2/A3
+> (q63 accumulator, dual-MAC SMLALD pairing, DMA cache-coherency fix, Daisy section binding)
+> and D4 (CI repointed at ctest, 122 grep-tests retired) LANDED in the ARM/embedded campaign,
+> plus a coupled-form oscillator that removed the M7 LUT gather — see the handoff §2 for the
+> reconciled status. Completed Campaign-1/2 plans are in [`archive/`](archive/).
+
 ## Governance (applies to every pass)
 
 ```text

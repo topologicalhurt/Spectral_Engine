@@ -4,6 +4,7 @@ Real-time spectral analysis + resynthesis engine in C. Analyze audio into
 sinusoidal segments; resynthesize with stretch/pitch/timbre on desktop (float,
 Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed). `AI_CANON.md` holds
 the full correctness rules; this file is the orientation.
+**Forward mandate (what to work on next):** `docs/core_audit/REVIEWER_HANDOFF.md`.
 
 ## Layout
 - `spectral_engine/core/` — config, constants, oscillators, windows, segments, hashing, ports
