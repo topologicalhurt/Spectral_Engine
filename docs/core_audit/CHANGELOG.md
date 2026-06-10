@@ -240,3 +240,8 @@ per-commit messages, not per-pass note files (see AI_CANON Rule 18).
 - Pass 235 — coupled-form Q31 recursive oscillator + SNR contract (C1 foundation; magic-circle form rejected on measurement)
 - Pass 236 — replace the per-sample LUT gather with the coupled oscillator on the M7 path (C1; deterministic-latency synthesis)
 
+## Campaign 3 — reviewer mandate (S1–S5, REVIEWER_HANDOFF.md)
+
+- Pass 237 — fix on-target DSP build break: __smulbb is not an ACLE intrinsic; widened multiply, SMULBB codegen-verified
+- Pass 238 — M7 perf-model measurement stack decided + planned (M7_PERF_MODEL_PLAN.md); codegen rig proven on the real M7 TU
+
