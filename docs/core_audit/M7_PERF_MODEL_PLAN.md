@@ -80,8 +80,15 @@ the segment-load/DMA path.
 
 ## Status
 
-- P0 closed. P1 rig proven end-to-end (census below from first run, commit pending):
-  `smlald`×1, `smulbb`×2, `qadd16`×39, `ssat`×2, `smull`×105, `smlal`×37 in the M7 TU.
+- P0 closed. P1 closed: `tools/perf_model/codegen_census.sh` regenerates the census and
+  per-loop mca numbers in one command (census: `smlald`×1, `smulbb`×2, `qadd16`×39,
+  `ssat`×2, `smull`×105, `smlal`×37 in the M7 TU).
 - Defect found by the rig, fixed: `spectral_smulbb` DSP branch called nonexistent ACLE
   intrinsic `__smulbb`; replaced with widened multiply, SMULBB emission codegen-verified,
   ctest green.
+- First Layer-2 numbers `[modeled: llvm-mca/CortexM7Model, perfect memory]`: main
+  sustain loop 340 cyc / 16 samples ≈ 21.3 cyc/sample (GCC re-unrolled the 4× body to
+  16 samples/iter); SMLALD pair loop 40 cyc / 2 voice-samples = 20.0; scalar tail 18.
+  Pairing barely wins under perfect memory — its true win is halved accumulator
+  read-modify-write traffic, which only the P4 memory layer prices. Do not draw
+  pairing-coverage conclusions (P6) before P4.
