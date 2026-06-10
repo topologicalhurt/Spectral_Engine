@@ -254,8 +254,17 @@ XPACK_BASE_URL = (
     "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/"
     f"v{XPACK_VERSION}/xpack-arm-none-eabi-gcc-{XPACK_VERSION}-"
 )
+# sha256 pinned per platform, fetched once from the published .sha assets and
+# recorded here. The bootstrap NEVER fetches the expected hash at runtime: a
+# server-supplied digest for a server-supplied tarball is self-certifying and
+# provides zero protection against a compromised release asset (the exact
+# supply-chain threat the hash check exists to defend). Unpinned platform =
+# fail closed. To add one: fetch <url>.sha out of band and paste it here.
 XPACK_SHA256 = {
     "darwin-arm64": "574082d35e49a2bcbdc355836b2a3ae5e5bb3b9456c9f5e37177db2ab4aad870",
+    "darwin-x64": "5be906a5194c3173e145a58048e5607ffff947773237802b93e55e23c415f1b6",
+    "linux-arm64": "67980c7990eba7bb7ffdf39699102effd70889f5ac427be19a8c8a6c5fab2972",
+    "linux-x64": "da6a49ad4003944b823c6c93702a8787c922ab34bd7e918ec0eaf6933a9b1ff6",
 }
 
 
@@ -288,16 +297,27 @@ def bootstrap(repo_root: Path | None = None, *, force: bool = False) -> Path:
         raise ToolchainError(f"{extracted} exists but looks broken; rerun with force")
 
     plat = _xpack_platform()
+    expected = XPACK_SHA256.get(plat)
+    if expected is None:
+        # Fail closed: never trust a runtime-fetched digest for this platform.
+        raise ToolchainError(
+            f"no pinned sha256 for platform {plat!r}; refusing to bootstrap. "
+            f"Fetch {XPACK_BASE_URL}{plat}.tar.gz.sha out of band, verify it, and add "
+            "it to XPACK_SHA256 in toolchain.py."
+        )
+
     url = f"{XPACK_BASE_URL}{plat}.tar.gz"
     dest_dir.mkdir(parents=True, exist_ok=True)
     tarball = dest_dir / f"xpack-{XPACK_VERSION}-{plat}.tar.gz"
 
-    urllib.request.urlretrieve(url, tarball)  # noqa: S310 — pinned https release URL
+    if not url.startswith("https://"):  # belt-and-suspenders: pinned constant is https
+        raise ToolchainError(f"refusing non-https toolchain URL: {url}")
+    try:
+        urllib.request.urlretrieve(url, tarball)  # noqa: S310 — pinned https release URL
+    except OSError as exc:
+        tarball.unlink(missing_ok=True)   # no partial file a later run could trust
+        raise ToolchainError(f"toolchain download failed: {exc}") from exc
 
-    expected = XPACK_SHA256.get(plat)
-    if expected is None:
-        with urllib.request.urlopen(f"{url}.sha") as fh:  # noqa: S310
-            expected = fh.read().decode("utf-8").split()[0]
     digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
     if digest != expected:
         tarball.unlink()

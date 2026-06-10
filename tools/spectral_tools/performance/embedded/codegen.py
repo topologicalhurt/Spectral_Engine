@@ -142,9 +142,19 @@ def _innermost_loops(body: list[str]) -> list[tuple[int, int, str]]:
         branch = BRANCH_RE.match(line)
         if branch and branch.group(2) in label_at:
             spans.append((label_at[branch.group(2)], i, branch.group(2)))
+    # Collapse multiple back-edges to the same loop-top into one span reaching
+    # the FARTHEST back-edge. A `continue`/early-iterate adds an earlier
+    # back-edge to the same label; keeping the smaller span would slice a
+    # truncated loop body and silently under-report modeled cycles/iter.
+    by_start: dict[int, tuple[int, int, str]] = {}
+    for span in spans:
+        current = by_start.get(span[0])
+        if current is None or span[1] > current[1]:
+            by_start[span[0]] = span
+    collapsed = list(by_start.values())
     return [
-        s for s in spans
-        if not any(o is not s and s[0] <= o[0] and o[1] <= s[1] for o in spans)
+        s for s in collapsed
+        if not any(o is not s and s[0] <= o[0] and o[1] <= s[1] for o in collapsed)
     ]
 
 

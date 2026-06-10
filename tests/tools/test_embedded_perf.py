@@ -140,6 +140,28 @@ def test_extract_ignores_labels_directives_and_calls():
     assert loops[0].instructions == ("\tbl helper", "\tsubs r0, r0, #1", "\tbne .L5")
 
 
+def test_extract_keeps_full_body_with_continue_style_double_backedge():
+    # A `continue` produces two back-edges to the same loop-top label. The
+    # extractor must keep the span reaching the FARTHEST back-edge, not the
+    # truncated early one (else mca models a partial loop body).
+    asm = """\
+# LLVM-MCA-BEGIN k
+.L6:
+\tldr r0, [r1], #4
+\tcmp r0, #0
+\tbne .L6
+\tadd r2, r2, r0
+\tcmp r1, r3
+\tbne .L6
+# LLVM-MCA-END
+"""
+    loops = codegen.extract_loop_bodies(asm)
+    assert len(loops) == 1
+    # Must include the instructions AFTER the early back-edge, up to the last.
+    assert "\tadd r2, r2, r0" in loops[0].instructions
+    assert loops[0].instructions[-1] == "\tbne .L6"
+
+
 # --- mca report parsing -----------------------------------------------------
 
 CANNED_MCA = """\

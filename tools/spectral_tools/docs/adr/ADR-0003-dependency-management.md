@@ -60,10 +60,40 @@ rigor pass was applied at its boundaries (manifest I/O, kind separation,
 message accuracy). Deeper internal hardening of the 800-line manager is
 tracked work, not silently claimed.
 
+### 5. Security: manifest values are untrusted git argv
+
+A manifest `url` flows verbatim into git argv (clone/fetch/ls-remote/submodule
+add). git parses a positional beginning with `-` as an option, and
+`--upload-pack=<cmd>` is arbitrary command execution — so manifest values are
+treated as untrusted input even though the manifest is in-repo:
+
+- `url` must match a transport allowlist (`https`/`http`/`ssh`/`git`/`file`
+  scheme, or the `user@host:path` scp form). git's `ext::`/`fd::` transports
+  are rejected. The old `"://" in url or "@" in url` substring check was
+  insufficient (`--upload-pack=x@y` passed it) and is gone.
+- `url`, `ref`, `path` components, and `sparse` cones must not begin with `-`.
+- Git argv additionally carries a `--` end-of-options separator before
+  manifest-derived positionals (ls-remote, fetch, submodule add) as
+  version-independent defense in depth.
+
+These come from the 2026-06-10 adversarial audit, which confirmed (and
+reproduced) a `git ls-remote`/`fetch` RCE via a crafted subtree `url`.
+
+### 6. Manifest integrity
+
+`save()` rejects duplicate names and paths before serializing — a by-name
+dict would otherwise silently drop a colliding entry, and a subtree write
+whose derived name collided with a submodule could erase that submodule
+(defeating §2). Subtree entry names derive from the full path
+(`a/b` → `a_b`), not the basename, so a subtree cannot collide with a
+submodule by sharing a leaf directory name.
+
 ## Consequences
 
 - Adding a dependency is one manifest entry + `vendor submodule sync` (or a
   subtree `add`); CI/tests can `verify` consistency cheaply.
 - The two vendoring strategies cannot corrupt each other's declarations by
   construction, and mixing kinds at one path is detected.
+- A malicious/typo'd manifest value cannot turn a `vendor` command into
+  arbitrary command execution.
 - `pyyaml` joins the pinned build-venv requirements.

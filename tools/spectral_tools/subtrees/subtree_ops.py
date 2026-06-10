@@ -107,23 +107,22 @@ class SubtreeOpsBase(GitSubtreeOps):
         never clobber submodule declarations (ADR-0003 kind separation)."""
         from ..vendor import manifest as manifest_mod
 
-        names: set[str] = set()
-        specs: list[manifest_mod.DependencySpec] = []
-        for entry in entries:
-            name = Path(entry.local_path).name
-            if name in names:
-                name = entry.local_path.replace("/", "_")
-            names.add(name)
-            specs.append(
-                manifest_mod.DependencySpec(
-                    name=name,
-                    kind=manifest_mod.KIND_SUBTREE,
-                    url=entry.repo,
-                    path=entry.local_path,
-                    ref=entry.branch,
-                    track=entry.track_mask,
-                )
+        # Derive the manifest name from the FULL path, not the basename: a
+        # basename ('foo' from 'lib/foo') could collide with a submodule named
+        # 'foo' and, via replace_entries -> save, silently erase it. The
+        # full-path slug is unique because paths are unique+validated, and
+        # save() raises on any residual collision (ADR-0003 kind separation).
+        specs = [
+            manifest_mod.DependencySpec(
+                name=entry.local_path.replace("/", "_"),
+                kind=manifest_mod.KIND_SUBTREE,
+                url=entry.repo,
+                path=entry.local_path,
+                ref=entry.branch,
+                track=entry.track_mask,
             )
+            for entry in entries
+        ]
         manifest_mod.replace_entries(self.repo_root, kind=manifest_mod.KIND_SUBTREE, new_entries=specs)
 
     def parse_lib_entry(self, line: str) -> LibEntry:
@@ -654,12 +653,15 @@ class SubtreeOpsBase(GitSubtreeOps):
             if key in self._count_fetch_cache:
                 return self._count_fetch_cache[key]
 
+            # '--' before the repo/branch positionals: manifest-validated
+            # upstream, separator is version-independent defense in depth.
             filtered_args = [
                 "fetch",
                 "--quiet",
                 "--no-tags",
                 f"--depth={COUNT_FETCH_DEPTH}",
                 f"--filter={COUNT_FETCH_FILTER}",
+                "--",
                 repo,
                 branch,
             ]
@@ -667,7 +669,7 @@ class SubtreeOpsBase(GitSubtreeOps):
             result = self.run(filtered_args, mutates_repo=False)
             note = ""
             if result.returncode != 0:
-                fallback_args = ["fetch", "--quiet", "--no-tags", f"--depth={COUNT_FETCH_DEPTH}", repo, branch]
+                fallback_args = ["fetch", "--quiet", "--no-tags", f"--depth={COUNT_FETCH_DEPTH}", "--", repo, branch]
                 fallback_result = self.run(fallback_args, mutates_repo=False)
                 if fallback_result.returncode != 0:
                     value = self._new_lookup_result(

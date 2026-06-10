@@ -97,7 +97,10 @@ class GitOps:
     def ls_remote_head(self, repo: str, branch: str) -> RefLookupResult:
         """Resolve exact remote head for ``refs/heads/<branch>`` without history fetch."""
         exact_ref = self.canonical_head_ref(branch)
-        result = self.run(["ls-remote", "--heads", "--exit-code", repo, exact_ref])
+        # '--' before the repo positional: the manifest url is option-validated
+        # upstream, but the separator is version-independent defense in depth
+        # against an option-like value reaching git as --upload-pack=<cmd>.
+        result = self.run(["ls-remote", "--heads", "--exit-code", "--", repo, exact_ref])
         if result.returncode != 0:
             note = f"remote head lookup failed: {result.stderr.strip() or 'unknown error'}"
             return self._new_lookup_result(ref=None, note=note)

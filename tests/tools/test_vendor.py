@@ -57,7 +57,12 @@ def test_manifest_rejects_unknown_and_kind_mismatched_keys(tmp_path):
         ({**base, "kind": "nonsense"}, "kind must be"),
         ({"kind": "submodule", "url": "https://x.com/r"}, "missing required"),
         ({**base, "path": "../escape"}, "repo-relative"),
-        ({**base, "url": "not a url"}, "git URL"),
+        ({**base, "path": "-rf"}, "begin with '-'"),                  # option-injection via path
+        ({**base, "url": "not a url"}, "https/http/ssh"),
+        ({**base, "url": "--upload-pack=x://y"}, "begin with '-'"),   # option-injection via url
+        ({**base, "url": "ext::sh -c id"}, "https/http/ssh"),         # ext:: transport not allowlisted
+        ({**base, "ref": "-rf"}, "begin with '-'"),                   # option-injection via ref
+        ({**base, "kind": "submodule", "sparse": ["-x"]}, "begin with '-'"),  # via sparse cone
     ]
     import yaml as yaml_mod
 
@@ -100,6 +105,32 @@ def test_replace_entries_preserves_other_kind(tmp_path):
     assert {e.name for e in loaded.subtrees()} == {"newtree"}
     with pytest.raises(manifest.ManifestError, match="kind=submodule"):
         manifest.replace_entries(tmp_path, kind="subtree", new_entries=[_spec("x")])
+
+
+def test_save_rejects_duplicate_names(tmp_path):
+    # Two specs with the same name (distinct paths) must raise, not silently
+    # collapse via the by-name dict — otherwise a cross-kind name collision
+    # erases a declaration.
+    dup = [_spec("foo"), _spec("foo", kind="subtree", path="third_party/other")]
+    with pytest.raises(manifest.ManifestError, match="duplicate dependency name"):
+        manifest.save(tmp_path, dup)
+
+
+def test_subtree_write_cannot_clobber_submodule_via_name_collision(tmp_path):
+    # A subtree whose path basename equals an existing submodule name must NOT
+    # erase the submodule (ADR-0003 kind separation). The subtree name is now
+    # derived from the full path, so 'lib/foo' -> 'lib_foo', not 'foo'.
+    from spectral_tools.subtrees.subtree_manager import SubtreeManager
+
+    repo = _git_repo(tmp_path)
+    manifest.save(repo, [_spec("foo")])  # submodule named 'foo'
+    mgr = SubtreeManager(repo_root=repo, libs_file=repo / manifest.MANIFEST_RELPATH, ignored_paths=[])
+    from spectral_tools.subtrees.subtree_models import LibEntry
+    mgr._write_entries([LibEntry(raw="", repo="https://x.com/f.git", local_path="lib/foo", branch="main")])
+    loaded = manifest.load(repo)
+    assert {e.name for e in loaded.submodules()} == {"foo"}, "submodule must survive"
+    assert [e.path for e in loaded.subtrees()] == ["lib/foo"]
+    assert loaded.subtrees()[0].name == "lib_foo"
 
 
 # --- submodule engine (tmp repos) ---------------------------------------------

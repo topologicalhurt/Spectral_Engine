@@ -23,6 +23,7 @@ keys, stable field order) so manifest diffs stay reviewable.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,37 @@ VALID_KINDS = (KIND_SUBMODULE, KIND_SUBTREE)
 
 TRACK_VALUES = ("both", "pull", "push", "none")
 DEFAULT_REF = "main"
+
+# A manifest URL flows verbatim into git argv (clone/fetch/ls-remote/submodule
+# add). git treats a positional beginning with '-' as an option, and
+# --upload-pack=<cmd> is arbitrary command execution — so the URL must match an
+# explicit transport allowlist, never a loose substring heuristic. Permitted:
+# https/http/ssh/git/file scheme URLs, and the scp-like user@host:path form.
+# git's own ext::/fd:: transports are deliberately NOT allowed.
+_URL_SCHEME_RE = re.compile(r"^(?:https?|ssh|git|file)://[^\s]+$")
+_URL_SCP_RE = re.compile(r"^[A-Za-z0-9_.+-]+@[A-Za-z0-9_.\-]+:[^\s]+$")
+
+
+def _validate_url(name: str, url: Any) -> str:
+    if not isinstance(url, str) or not url:
+        raise ManifestError(f"{name}: url must be a non-empty string")
+    if url.startswith("-"):
+        raise ManifestError(f"{name}: url must not begin with '-' (git option-injection): {url!r}")
+    if not (_URL_SCHEME_RE.match(url) or _URL_SCP_RE.match(url)):
+        raise ManifestError(
+            f"{name}: url must be an https/http/ssh/git/file URL or user@host:path form, "
+            f"got {url!r}"
+        )
+    return url
+
+
+def _reject_leading_dash(name: str, field_name: str, value: str) -> None:
+    """A value reaching git as a positional/refspec must not look like an option."""
+    if value.startswith("-"):
+        raise ManifestError(
+            f"{name}: {field_name} must not begin with '-' (git option-injection): {value!r}"
+        )
+
 
 _COMMON_KEYS = {"kind", "url", "path", "ref", "sync", "notes"}
 _KIND_KEYS = {
@@ -117,6 +149,10 @@ def _validate_path(name: str, path: str) -> str:
     parts = Path(normalized).parts
     if Path(normalized).is_absolute() or ".." in parts:
         raise ManifestError(f"{name}: path must be repo-relative without '..' (got {path!r})")
+    # The path becomes a git positional (submodule add/rm, -C <path>); a leading
+    # '-' in any component would be parsed as an option.
+    if any(part.startswith("-") for part in parts):
+        raise ManifestError(f"{name}: path components must not begin with '-' (got {path!r})")
     return normalized
 
 
@@ -138,9 +174,7 @@ def _parse_entry(name: str, raw: Any) -> DependencySpec:
     if missing:
         raise ManifestError(f"{name}: missing required key(s) {sorted(missing)}")
 
-    url = raw["url"]
-    if not isinstance(url, str) or ("://" not in url and "@" not in url):
-        raise ManifestError(f"{name}: url does not look like a git URL: {url!r}")
+    url = _validate_url(name, raw["url"])
 
     sync = raw.get("sync", True)
     if not isinstance(sync, bool):
@@ -154,10 +188,13 @@ def _parse_entry(name: str, raw: Any) -> DependencySpec:
     ref = raw.get("ref", DEFAULT_REF)
     if not isinstance(ref, str) or not ref.strip():
         raise ManifestError(f"{name}: ref must be a non-empty string")
+    _reject_leading_dash(name, "ref", ref.strip())
 
     sparse_raw = raw.get("sparse", [])
     if not isinstance(sparse_raw, list) or not all(isinstance(s, str) for s in sparse_raw):
         raise ManifestError(f"{name}: sparse must be a list of path strings")
+    for cone in sparse_raw:
+        _reject_leading_dash(name, "sparse cone", cone)
 
     track = raw.get("track", "both")
     if track not in TRACK_VALUES:
@@ -220,7 +257,27 @@ def load(repo_root: Path, *, allow_missing: bool = False) -> Manifest:
 
 
 def save(repo_root: Path, entries: tuple[DependencySpec, ...] | list[DependencySpec]) -> Path:
-    """Deterministic serialization: names sorted, stable field order."""
+    """Deterministic serialization: names sorted, stable field order.
+
+    Guards duplicate names and paths before building the by-name dict —
+    otherwise a name collision would silently drop an entry (last write wins),
+    which across kinds could erase a submodule declaration via a colliding
+    subtree write (the ADR-0003 'never clobber' guarantee depends on this)."""
+    seen_names: dict[str, str] = {}
+    seen_paths: dict[str, str] = {}
+    for entry in entries:
+        if entry.name in seen_names:
+            raise ManifestError(
+                f"duplicate dependency name {entry.name!r} (paths {seen_names[entry.name]!r} "
+                f"and {entry.path!r}) — names must be unique across both kinds"
+            )
+        if entry.path in seen_paths:
+            raise ManifestError(
+                f"duplicate path {entry.path!r} (names {seen_paths[entry.path]!r} and {entry.name!r})"
+            )
+        seen_names[entry.name] = entry.path
+        seen_paths[entry.path] = entry.name
+
     manifest_path = repo_root / MANIFEST_RELPATH
     doc = {
         "version": MANIFEST_VERSION,

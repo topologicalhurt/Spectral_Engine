@@ -206,7 +206,9 @@ def sync(
 
         state = states.get(entry.path)
         if state is None:
-            cmd = ["submodule", "add", "-b", entry.ref, entry.url, entry.path]
+            # '--' before url/path positionals (manifest-validated upstream;
+            # separator is defense in depth against option-like values).
+            cmd = ["submodule", "add", "-b", entry.ref, "--", entry.url, entry.path]
             if dry_run:
                 actions.append(f"[dry-run] git {' '.join(cmd)}")
             else:
