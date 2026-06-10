@@ -4,14 +4,19 @@
 #                                                                        #
 ##########################################################################
 
-Real-time spectral analysis and resynthesis engine for macOS/Linux & ARM Cortex-M/A targets, with acceleration support available for Metal & CUDA platforms.
+Real-time spectral analysis and resynthesis engine currently supporting macOS/Linux for x86 & ARM based architectures. 
+Intentionally targets ARM Cortex-M/A targets with acceleration support available for:
 
-With planned support for the following:
+[✓] Metal & CUDA platforms
+[✓] ARM, X86
+[✓] Linux, MacOS
 
-[] OpenGL / Vulkan
-[] RISC-V
-[] FreeRTOS
-[] openBSD
+With support eventually planned for the following:
+
+[X] OpenGL / Vulkan (GPU acceleration framework)
+[X] RISC-V          (Full support)
+[X] FreeRTOS        (For embedded platforms)
+[X] OpenBSD         (Full support)
 
 If you are interested in a more detailed project description see spectral_engine/README.md
 
@@ -31,7 +36,8 @@ The following toolchains are strongly reccomended for contributors:
 - ARM-eabi-GCC toolchain ≥ 15.x (prefer latest)
 - GCC ≥ 16.x (prefer latest)
 
-You can refer to libs.txt under the `third_party` directory for all that is built in-source. 
+You can refer to libs.txt under the `third_party` directory for everything that is built in-source. 
+Under the dedicated spectral_tools toolchain 
 
 BUILD
 
