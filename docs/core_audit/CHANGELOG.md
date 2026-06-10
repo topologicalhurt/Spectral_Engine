@@ -228,3 +228,15 @@ per-commit messages, not per-pass note files (see AI_CANON Rule 18).
 - Pass 225 — vDSP / Accelerate math-acceleration audit (Oscillator-Backend-Contract Phase 4)
 - Pass 226 — GPU Q15 / fp16 double-pack audit (Oscillator-Backend-Contract Phase 5)
 
+## ARM/embedded performance campaign (ULTRAPLAN A2/A3 + memory-efficiency)
+- Pass 227 — honest ARM synth header + assumption-free accumulator-traffic counter (measure-first)
+- Pass 228 — exact q63 synthesis accumulator (saturate-once mix; M7 dual-MAC foundation)
+- Pass 229 — M7 dual-MAC (SMLALD) voice-pairing for full-sustain pairs (codegen-confirmed)
+- Pass 230 — bind memory placement to the real Daisy BSP linker sections (.dtcmram_bss/.sdram_bss)
+- Pass 231 — SPECTRAL_HAS_DUAL_MAC capability over CPU macros + libc-free spectral_mem_zero
+- Pass 232 — document freq_inc uint32 wrap as intended modular phase aliasing (audit false-positive)
+- Pass 233 — DMA-buffer cache-invalidate derived from placement (latent coherency bug)
+- Pass 234 — two intensive multi-perspective audits (perf; cache/bandwidth/OpenMP) — design confirmed sound at instruction level
+- Pass 235 — coupled-form Q31 recursive oscillator + SNR contract (C1 foundation; magic-circle form rejected on measurement)
+- Pass 236 — replace the per-sample LUT gather with the coupled oscillator on the M7 path (C1; deterministic-latency synthesis)
+
