@@ -92,9 +92,10 @@ the segment-load/DMA path.
 ## Phases
 
 - **P0 — survey + decision.** DONE (this doc is the record).
-- **P1 — codegen rig committed.** `tools/perf_model/`: stub headers + one script that
-  compiles the real TUs, extracts the hot-loop bodies, emits the instruction census.
-  Done-when: one command regenerates the census for the four hot kernels.
+- **P1 — codegen rig committed.** Compiles the real TUs, extracts the hot-loop bodies,
+  emits the instruction census (now `performance/embedded/codegen.py`; the original
+  shell rig is superseded). Done-when: one command regenerates the census for the four
+  hot kernels.
 - **P2 — QEMU counts rig.** Freestanding runner + TCG plugin + driver script; deterministic
   fixtures shared with `arm_core_test` so correctness and counts come from the same inputs.
   Done-when: real `spectral_arm32_process` runs under qemu-system-arm and per-kernel

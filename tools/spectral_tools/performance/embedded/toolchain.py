@@ -42,7 +42,10 @@ def daisy_target_flags(repo_root: Path) -> tuple[str, ...]:
     inherits it from libDaisy's make rules rather than options.cmake.
     """
     options_path = repo_root / OPTIONS_CMAKE_RELPATH
-    text = options_path.read_text(encoding="utf-8")
+    try:
+        text = options_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ToolchainError(f"cannot read {OPTIONS_CMAKE_RELPATH}: {exc}") from exc
     flags: list[str] = []
     for var in _DAISY_FLAG_VARS:
         match = re.search(rf'set\({var} "([^"]+)"', text)
@@ -51,7 +54,8 @@ def daisy_target_flags(repo_root: Path) -> tuple[str, ...]:
                 f"{var} not found in {OPTIONS_CMAKE_RELPATH} — the Daisy flag "
                 "contract moved; fix the parse, do not hardcode flags"
             )
-        flags.append(match.group(1))
+        # A cmake value may hold several flags; split so argv stays well-formed.
+        flags.extend(match.group(1).split())
     flags.append("-mthumb")
     opt = re.search(r'set\(SPECTRAL_DAISY_OPTIMIZE "([^"]+)"', text)
     if opt is None:

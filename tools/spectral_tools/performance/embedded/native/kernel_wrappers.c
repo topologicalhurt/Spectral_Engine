@@ -7,10 +7,8 @@
  * markers sit outside the loops; they pin the region but do not constrain
  * scheduling inside it.
  *
- * Compile (codegen_census.sh drives this):
- *   arm-none-eabi-gcc -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard
- *     -O3 -ffreestanding -isystem fs_include -DSPECTRAL_EMBEDDED=1
- *     -DSPECTRAL_ARM_M7=1 -DSPECTRAL_HAS_DUAL_MAC=1 -S kernel_wrappers.c
+ * Compiled by spectral_tools.performance.embedded.codegen.loop_analysis()
+ * with the Daisy production flags (parsed from options.cmake at runtime).
  */
 
 #include "spectral_synth_arm32.c"
