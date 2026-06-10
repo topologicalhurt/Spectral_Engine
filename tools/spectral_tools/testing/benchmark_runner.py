@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import tempfile
@@ -21,7 +22,8 @@ from ..core.utils import fmt_float, is_executable, tail_lines
 
 PROC_STATUS_ROOT = Path("/proc")
 PROCFS_SAMPLE_ENV = "SPECTRAL_BENCH_PROCFS_SAMPLE_SEC"
-GNU_TIME_CANDIDATES = (Path("/usr/bin/time"), Path("/bin/time"))
+TIME_CANDIDATES = (Path("/usr/bin/time"), Path("/bin/time"))
+BSD_TIME_RSS_RE = re.compile(r"^\s*(\d+)\s+maximum resident set size", re.MULTILINE)
 CACHE_FLAG = "--cache"
 CACHE_FILES = ("seg_cache_index.bin", "seg_cache_data.bin")
 METRIC_SECTION_KEYS = ("summary", "stage_medians", "bandwidth_medians", "memory", "track_series")
@@ -44,25 +46,57 @@ class _RunAccumulator:
     first_total: float | None = None
 
 
+def _detect_time_flavor() -> tuple[str | None, str | None]:
+    """Return (path, flavor) for the system time binary.
+
+    flavor is "gnu" (supports ``-f %M``, RSS in KB) or "bsd" (macOS, supports
+    ``-l``, RSS in bytes). Executability alone does not imply GNU: macOS ships
+    a BSD time at /usr/bin/time that rejects ``-f`` — probe, don't assume.
+    """
+    for candidate in TIME_CANDIDATES:
+        if not is_executable(candidate):
+            continue
+        try:
+            probe = subprocess.run(
+                [str(candidate), "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except OSError:
+            continue
+        if "GNU" in (probe.stdout + probe.stderr):
+            return str(candidate), "gnu"
+        try:
+            probe = subprocess.run(
+                [str(candidate), "-l", "true"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except OSError:
+            continue
+        if probe.returncode == 0 and "maximum resident set size" in probe.stderr:
+            return str(candidate), "bsd"
+    return None, None
+
+
 @dataclass(slots=True)
 class BenchmarkRunner:
     repo_root: Path
     dry_run: bool = False
     parser: BenchmarkOutputParser = field(init=False)
     time_bin: str | None = field(init=False, default=None)
+    time_flavor: str | None = field(init=False, default=None)
     have_procfs: bool = field(init=False, default=False)
     procfs_sample_sec: float = field(init=False, default=DEFAULT_PROCFS_SAMPLE_SEC)
 
     def __post_init__(self) -> None:
         self.repo_root = self.repo_root.resolve()
         self.parser = BenchmarkOutputParser()
-
-        self.time_bin = None
-        for time_bin in GNU_TIME_CANDIDATES:
-            if is_executable(time_bin):
-                self.time_bin = str(time_bin)
-                break
-
+        self.time_bin, self.time_flavor = _detect_time_flavor()
         self.have_procfs = PROC_STATUS_ROOT.is_dir()
         try:
             self.procfs_sample_sec = float(environ.get(PROCFS_SAMPLE_ENV, str(DEFAULT_PROCFS_SAMPLE_SEC)))
@@ -107,7 +141,7 @@ class BenchmarkRunner:
         return hwm if hwm is not None else rss
 
     def _run_with_metrics(self, cmd: list[str], *, cwd: Path, log_file: Path, mem_file: Path) -> tuple[int, float | None]:
-        if self.time_bin is not None:
+        if self.time_bin is not None and self.time_flavor == "gnu":
             with log_file.open("w", encoding=DEFAULT_UTF8_ENCODING) as handle:
                 proc = subprocess.run(
                     [self.time_bin, "-f", "%M", "-o", str(mem_file), *cmd],
@@ -130,6 +164,29 @@ class BenchmarkRunner:
                         mem_kb = float(line)
                     except ValueError:
                         continue
+            except OSError:
+                mem_kb = None
+
+            return proc.returncode, mem_kb
+
+        if self.time_bin is not None and self.time_flavor == "bsd":
+            with log_file.open("w", encoding=DEFAULT_UTF8_ENCODING) as handle:
+                proc = subprocess.run(
+                    [self.time_bin, "-l", "-o", str(mem_file), *cmd],
+                    cwd=str(cwd),
+                    env={**environ, "LC_ALL": "C"},
+                    text=True,
+                    encoding=DEFAULT_UTF8_ENCODING,
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+
+            mem_kb = None
+            try:
+                match = BSD_TIME_RSS_RE.search(mem_file.read_text(encoding=DEFAULT_UTF8_ENCODING))
+                if match:
+                    mem_kb = float(match.group(1)) / 1024.0   # BSD reports bytes
             except OSError:
                 mem_kb = None
 

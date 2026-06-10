@@ -278,9 +278,12 @@ def _run_perf_stat(
     }
 
 
-# Positional argument names matching DEFAULT_PERF_CLI_ARGS layout.
-PERF_ARG_NAMES = ("verbose", "format", "threads", "fft_size", "hop_size", "db_thresh", "min_dur_ms", "backend_id")
-_BACKEND_IDX = PERF_ARG_NAMES.index("backend_id")
+# Positional argument names matching DEFAULT_PERF_CLI_ARGS layout. This is the
+# REAL CLI contract (spectral_cli_print_usage): timbre stretch pitch n_fft hop
+# db_thresh threads backend — the previous names (verbose/format/min_dur_ms)
+# documented a contract that does not exist.
+PERF_ARG_NAMES = ("timbre", "stretch", "pitch", "n_fft", "hop", "db_thresh", "threads", "backend")
+_BACKEND_IDX = PERF_ARG_NAMES.index("backend")
 
 
 def _with_backend(cli_args: list[str], backend_id: int) -> list[str]:
