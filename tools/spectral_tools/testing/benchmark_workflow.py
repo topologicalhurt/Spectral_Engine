@@ -509,6 +509,75 @@ def run_suite(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if any(t.get("status") == TestStatus.FAILED.value for t in tests) else 0
 
 
+def run_m7_census(args: argparse.Namespace, perf: Performance) -> int:
+    """Embedded Layer 0/2: codegen census [measured] + mca loop cycles [modeled]."""
+    from ..performance.embedded import codegen, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca"}))
+        result = codegen.codegen_report(tc, out_dir=out_dir)
+        status = TestStatus.OK.value if not result.failed_regions else TestStatus.BLOCKED.value
+        loops_summary = ", ".join(
+            f"{loop.kernel}/{loop.label}={loop.cycles_per_iter:.1f}cyc" for loop in result.loops
+        )
+        test = {
+            "name": "m7-census",
+            "status": status,
+            "summary": loops_summary or "census only",
+            "details": result.as_dict(),
+        }
+    except (toolchain.ToolchainError, codegen.CodegenError) as exc:
+        test = {
+            "name": "m7-census",
+            "status": TestStatus.FAILED.value,
+            "summary": "census failed",
+            "details": {"error": str(exc)},
+        }
+
+    report = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_m7_counts(args: argparse.Namespace, perf: Performance) -> int:
+    """Embedded Layer 1: dynamic instruction/byte counts under QEMU [measured]."""
+    from ..performance.embedded import counts, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"qemu"}))
+        result = counts.measure(
+            tc, out_dir=out_dir, verify_reproducible=not args.no_verify
+        )
+        process_counts = result.range("spectral_arm32_process")
+        summary = (
+            f"process: {process_counts.insns} insns, "
+            f"{process_counts.load_bytes}B ld / {process_counts.store_bytes}B st"
+            if process_counts
+            else "counts collected"
+        )
+        test = {
+            "name": "m7-counts",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": result.as_dict(),
+        }
+    except (toolchain.ToolchainError, counts.CountsError) as exc:
+        test = {
+            "name": "m7-counts",
+            "status": TestStatus.FAILED.value,
+            "summary": "counts failed",
+            "details": {"error": str(exc)},
+        }
+
+    report = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Spectral benchmark workflows.")
     add_dry_run_flag(parser, short="-d")
@@ -585,6 +654,25 @@ def build_parser() -> argparse.ArgumentParser:
     suite.add_argument("--skip-prefetch-sweep", action="store_true", help="Skip prefetch profile sweep")
     add_output_options(suite)
 
+    m7_census = sub.add_parser(
+        "m7-census",
+        help="Embedded M7: codegen instruction census [measured] + llvm-mca loop cycles [modeled]",
+    )
+    m7_census.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_census)
+
+    m7_counts = sub.add_parser(
+        "m7-counts",
+        help="Embedded M7: dynamic instruction/byte counts under QEMU mps2-an500 [measured]",
+    )
+    m7_counts.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    m7_counts.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the duplicate run that asserts bit-identical counts",
+    )
+    add_output_options(m7_counts)
+
     return parser
 
 
@@ -599,6 +687,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_single_bench(args, perf)
     if args.command == "suite":
         return run_suite(args, perf)
+    if args.command == "m7-census":
+        return run_m7_census(args, perf)
+    if args.command == "m7-counts":
+        return run_m7_counts(args, perf)
 
     parser.error(f"unsupported command: {args.command}")
     return 2

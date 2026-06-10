@@ -1,18 +1,17 @@
 /* Deterministic workload for the QEMU counts rig (M7_PERF_MODEL_PLAN P2).
  *
  * Drives the REAL spectral_arm32_init/load/process — the same code the
- * arm32_process_correctness oracle verifies — with a fixed multi-voice
- * fixture, so the plugin's dynamic instruction/memory counts are exactly
- * reproducible run-to-run. Workload shape: 9 staggered voices (odd count
- * keeps one voice unpaired past the dual-MAC pairing), 8192-sample segments,
- * 16384 output samples in 64 blocks of 256. Fades exercise synth_fade_m7 at
- * every segment boundary; overlap holds up to 8 concurrent sustain voices.
+ * arm32_process_correctness oracle verifies — with the fixture emitted by
+ * spectral_tools.performance.embedded.fixture (the workload SSOT), so the
+ * plugin's dynamic instruction/memory counts are exactly reproducible
+ * run-to-run and every counts report is traceable to its workload digest.
  *
  * Output is a checksum printed over semihosting; the value is asserted
  * non-zero only (correctness lives in the oracle, not here — this binary
  * exists to be counted, and the checksum forces the synthesis to be live). */
 #include <stdint.h>
 
+#include "spectral_fixture_generated.h"
 #include "spectral_synth_arm32.h"
 #include "spectral_lut.h"
 #include "spectral_osc_recursive.h"
@@ -23,11 +22,23 @@
  * table matches a libm-built one at q15 precision). Cold path, not counted. */
 float sinf(float x) { return (float)spectral_osc_sin_init_f64((double)x); }
 
-#define N_SEG   9u
-#define BLOCK   256u
-#define TOTAL   16384u
-#define SR      48000u
+#define N_SEG   FIXTURE_N_SEG
+#define BLOCK   FIXTURE_BLOCK
+#define TOTAL   FIXTURE_TOTAL
+#define SR      FIXTURE_SR
 #define TWO_PI_F 6.28318530717958647692f
+
+typedef struct {
+    uint32_t start;
+    uint16_t length;
+    float    freq_hz;
+    float    amp;
+    int16_t  phase_q15;
+} FixtureVoice;
+
+#define X(s, l, f, a, p) { (s), (l), (f), (a), (p) },
+static const FixtureVoice fixture_spec[N_SEG] = { FIXTURE_VOICES(X) };
+#undef X
 
 static void semihost_write0(const char* s) {
     register uint32_t r0 __asm("r0") = 0x04;   /* SYS_WRITE0 */
@@ -55,12 +66,12 @@ int main(void) {
     spectral_lut_init_sine(lut);
 
     for (uint32_t i = 0; i < N_SEG; i++) {
-        float f_hz = 220.0f * (float)(i + 1u);
-        fixture[i].start     = i * 1024u;            /* monotonic, validator-required */
-        fixture[i].length    = 8192u;
-        fixture[i].freq_q88  = OMEGA_TO_Q88(TWO_PI_F * f_hz / (float)SR);
-        fixture[i].phase_q15 = 0;
-        fixture[i].amp_q15   = FLOAT_TO_Q15(0.05f);  /* 9 voices, no accumulator clip */
+        const FixtureVoice* v = &fixture_spec[i];
+        fixture[i].start     = v->start;             /* monotonic, validator-required */
+        fixture[i].length    = v->length;
+        fixture[i].freq_q88  = OMEGA_TO_Q88(TWO_PI_F * v->freq_hz / (float)SR);
+        fixture[i].phase_q15 = v->phase_q15;
+        fixture[i].amp_q15   = FLOAT_TO_Q15(v->amp);
         fixture[i].da_q15    = 0;
         fixture[i].df_q15    = 0;
     }

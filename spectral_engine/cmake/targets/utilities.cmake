@@ -147,6 +147,27 @@ add_custom_target(bench_cache
 add_custom_target(bench_all DEPENDS bench bench_cache)
 add_custom_target(pgo_collect DEPENDS bench bench_cache)
 
+# Embedded M7 measurement stack (M7_PERF_MODEL_PLAN): same harness module,
+# embedded subcommands. Census = codegen [measured] + llvm-mca [modeled];
+# counts = dynamic insn/byte counts under qemu mps2-an500 [measured].
+add_custom_target(m7_census
+    COMMAND ${CMAKE_COMMAND} -E env
+            LC_ALL=C
+            "PYTHONPATH=${SPECTRAL_TOOLS_PYTHONPATH}"
+            "${SPECTRAL_PYTHON}" -m "${SPECTRAL_BENCH_MODULE}"
+            m7-census
+    DEPENDS prepare_python_tools
+    WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
+
+add_custom_target(m7_counts
+    COMMAND ${CMAKE_COMMAND} -E env
+            LC_ALL=C
+            "PYTHONPATH=${SPECTRAL_TOOLS_PYTHONPATH}"
+            "${SPECTRAL_PYTHON}" -m "${SPECTRAL_BENCH_MODULE}"
+            m7-counts
+    DEPENDS prepare_python_tools
+    WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
+
 if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     find_program(SPECTRAL_LLVM_PROFDATA_EXECUTABLE llvm-profdata)
     if(SPECTRAL_LLVM_PROFDATA_EXECUTABLE)

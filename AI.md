@@ -19,7 +19,13 @@ the full correctness rules; this file is the orientation.
   `embedded_arm_float`, `embedded_arm_restricted`, `cuda`, `daisy` (`make help` for the matrix).
 - Tests: `cmake --build build --target tests_all && ctest --test-dir build` (the C suite;
   test exes are `EXCLUDE_FROM_ALL`, so build `tests_all` first). Behavioral numeric tests:
-  `pytest tests/core_math` (compile+run real C against a Python reference).
+  `pytest tests/core_math` (compile+run real C against a Python reference). Perf-harness
+  tests: `pytest tests/tools`.
+- Performance measurement has ONE entry point: `python -m
+  spectral_tools.testing.benchmark_workflow` (`bench`/`suite` desktop; `m7-census`/
+  `m7-counts` embedded model — see docs/core_audit/M7_PERF_MODEL_PLAN.md). CMake targets
+  `bench`, `bench_cache`, `m7_census`, `m7_counts` wrap the same module. Don't add
+  parallel perf scripts.
 - A change is not verified until it builds on desktop **and** the embedded host targets
   (`embedded_arm`, `embedded_arm_float`) and ctest is green — a symbol unused in desktop may
   be live under another build flag.

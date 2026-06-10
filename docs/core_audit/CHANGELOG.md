@@ -246,4 +246,6 @@ per-commit messages, not per-pass note files (see AI_CANON Rule 18).
 - Pass 238 — M7 perf-model measurement stack decided + planned (M7_PERF_MODEL_PLAN.md); codegen rig proven on the real M7 TU
 - Pass 239 — perf-model P1: committed codegen census + innermost-loop llvm-mca rig (tools/perf_model); first per-loop M7 numbers
 - Pass 240 — perf-model P2: QEMU mps2-an500 counts rig (freestanding runner + TCG plugin); real-kernel dynamic insn/byte counts, bit-reproducible
+- Pass 241 — tools audit: bench runner was broken on macOS (BSD time treated as GNU) — probe flavor, BSD -l fallback; fictitious perf positional names → real CLI contract
+- Pass 242 — embedded perf stack consolidated into spectral_tools.performance.embedded: one CLI (benchmark_workflow m7-census/m7-counts + CMake m7_census/m7_counts), fixture SSOT generates the runner header, harness under pytest tests/tools; shell rigs deleted; migration verified count/cycle-identical
 

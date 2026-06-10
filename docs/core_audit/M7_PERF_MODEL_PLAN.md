@@ -80,9 +80,8 @@ the segment-load/DMA path.
 
 ## Status
 
-- P0 closed. P1 closed: `tools/perf_model/codegen_census.sh` regenerates the census and
-  per-loop mca numbers in one command (census: `smlald`×1, `smulbb`×2, `qadd16`×39,
-  `ssat`×2, `smull`×105, `smlal`×37 in the M7 TU).
+- P0 closed. P1 closed (census: `smlald`×1, `smulbb`×2, `qadd16`×39, `ssat`×2,
+  `smull`×105, `smlal`×37 in the M7 TU).
 - Defect found by the rig, fixed: `spectral_smulbb` DSP branch called nonexistent ACLE
   intrinsic `__smulbb`; replaced with widened multiply, SMULBB emission codegen-verified,
   ctest green.
@@ -92,12 +91,24 @@ the segment-load/DMA path.
   Pairing barely wins under perfect memory — its true win is halved accumulator
   read-modify-write traffic, which only the P4 memory layer prices. Do not draw
   pairing-coverage conclusions (P6) before P4.
-- P2 closed: `tools/perf_model/run_qemu_counts.sh` runs the real kernel on
-  qemu-system-arm mps2-an500 with the `spectral_counts` TCG plugin; counts verified
-  bit-identical across runs. First Layer-1 numbers `[measured: qemu-tcg]` for the
-  9-voice/16384-sample fixture: `spectral_arm32_process` = 3,763,544 insns,
+- P2 closed: the real kernel runs on qemu-system-arm mps2-an500 with the
+  `spectral_counts` TCG plugin; counts verified bit-identical across runs (the
+  duplicate-run check is on by default). First Layer-1 numbers `[measured: qemu-tcg]`
+  for the 9-voice/16384-sample fixture: `spectral_arm32_process` = 3,763,544 insns,
   4,566,738 B loaded / 1,652,298 B stored ⇒ ~51.0 insns and ~62 ld + ~22 st bytes per
   voice-sample. The q63 accumulator read-modify-write dominates traffic — the measured
   input the A2 loop-nest/data-layout question was missing. Known rig divergences from
   the Daisy target (deliberate, attributed separately): byte-loop memcpy/memset,
   runner-local sinf via the kernel's f64 init sine.
+- **Harness home (consolidation pass, 2026-06-10):** the whole stack lives in
+  `tools/spectral_tools/performance/embedded/` (toolchain/fixture/codegen/counts +
+  `native/` C sources); the original shell scripts are deleted. One CLI:
+  `python -m spectral_tools.testing.benchmark_workflow m7-census | m7-counts`
+  (CMake: `m7_census` / `m7_counts`, same family as `bench`). The workload fixture is
+  a Python SSOT that generates the C header the runner compiles; reports carry the
+  fixture digest and a measured/modeled provenance tag on every number. Harness
+  behavior is itself under test: `pytest tests/tools` (extraction/parsers/fixture
+  units + skip-aware end-to-end census and reproducible-counts integration; the
+  Daisy↔toolchain flag pairing is asserted against options.cmake). Migration
+  verified: kernel-range counts and mca per-loop cycles bit/numerically identical
+  to the pre-migration rig.
