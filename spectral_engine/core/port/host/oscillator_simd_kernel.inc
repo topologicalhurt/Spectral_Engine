@@ -252,10 +252,16 @@ static inline OSC_VF OSC_FN(wave_quantized_v)(OSC_VF rads, const void* ctx) {
      * when `scaled` is non-finite or falls outside [INT_MIN, INT_MAX]. Without
      * this, the truncate saturates such lanes to INT_MIN and emits an
      * out-of-[-1,1] value, diverging from the scalar contract and this segment's
-     * own fade-region scalar lane. The >=/<= comparisons reject NaN/Inf too. */
+     * own fade-region scalar lane. The comparisons reject NaN/Inf too.
+     *
+     * Upper bound is STRICT (<): (float)INT_MAX rounds up to 2^31, which is not
+     * a representable int32, so cvttps saturates it to INT_MIN and emits -rads.
+     * The scalar guard rejects with `scaled >= (float)INT_MAX`, so this must use
+     * OSC_VCMPLT to mirror it. Lower bound stays >= since (float)INT_MIN == -2^31
+     * is exactly representable and a valid int32. */
     OSC_VF in_range = OSC_VAND(
         OSC_VCMPGE(scaled, OSC_VSET1((float)INT_MIN)),
-        OSC_VCMPLE(scaled, OSC_VSET1((float)INT_MAX)));
+        OSC_VCMPLT(scaled, OSC_VSET1((float)INT_MAX)));
     OSC_VF truncated = OSC_VTRUNC2F(scaled);
     return OSC_VAND(in_range, OSC_VMUL(truncated, v_inv_w));
 }

@@ -159,9 +159,53 @@ static void test_parity(void) {
           "RMS-vs-signal drift %.1f dB > budget %.1f dB", rms_rel_db, (double)BUDGET_RMS_REL_DB);
 }
 
+/* Boundary regression: the quantized oscillator's domain guard must reject
+ * scaled == (float)INT_MAX (2^31) identically on scalar and SIMD. (float)INT_MAX
+ * rounds up to 2^31, which is not a representable int32, so a vectorized
+ * truncate saturates to INT_MIN and emits -rads (out of [-1,1]) unless the
+ * upper bound is STRICT (<). With a power-of-two width and a DC phase fixed at
+ * rads=2.0, every sustain sample lands exactly on scaled=2^31: scalar returns
+ * 0, a buggy SIMD returns -2.0. The normal parity sweep uses width=8 and never
+ * reaches this boundary. */
+static void test_quantized_int_max_boundary(void) {
+    SegmentLoopParams lp;
+    memset(&lp, 0, sizeof(lp));
+    lp.length = 128;            /* > vector width so the sustain region vectorizes */
+    lp.alpha  = 0.0f;           /* DC: phase stays at lp.phase every sample        */
+    lp.phase  = 2.0f;           /* normalize_phase(2.0) == 2.0, in [-pi, pi)       */
+    lp.amp    = 1.0f;
+    lp.width  = 1073741824.0f;  /* 2^30: rads(2.0) * width == 2^31 == (float)INT_MAX */
+    lp.valid  = 1;
+
+    float buf_scalar[MAX_LEN];
+    float buf_simd[MAX_LEN];
+    memset(buf_scalar, 0, sizeof(buf_scalar));
+    memset(buf_simd,   0, sizeof(buf_simd));
+
+    osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
+    timbre_synth_segment(buf_scalar, &lp, TIMBRE_QUANTIZED);
+    osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
+    timbre_synth_segment(buf_simd, &lp, TIMBRE_QUANTIZED);
+
+    double max_diff = 0.0;
+    double max_simd_abs = 0.0;
+    for (size_t j = 0; j < lp.length; j++) {
+        double d = fabs((double)buf_simd[j] - (double)buf_scalar[j]);
+        if (d > max_diff) max_diff = d;
+        if (fabs((double)buf_simd[j]) > max_simd_abs) max_simd_abs = fabs((double)buf_simd[j]);
+    }
+    printf("  quantized@INT_MAX  max|simd-scalar|=%.3e  max|simd|=%.3e\n", max_diff, max_simd_abs);
+    CHECK(max_diff <= BUDGET_ABS,
+          "quantized SIMD/scalar diverge at scaled==2^31: %.3e > budget %.1e", max_diff, BUDGET_ABS);
+    /* The waveform contract: amp=1 so |output| must stay <= 1 (a buggy lane emits 2.0). */
+    CHECK(max_simd_abs <= 1.0 + 1e-6,
+          "quantized SIMD emits out-of-[-1,1] value %.3e at the INT_MAX boundary", max_simd_abs);
+}
+
 int main(void) {
     printf("== SIMD-vs-scalar oscillator parity (drift + RMS-dBFS) ==\n");
     test_parity();
+    test_quantized_int_max_boundary();
     printf("RESULT: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }
