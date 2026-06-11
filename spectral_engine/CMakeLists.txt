@@ -214,6 +214,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-pack8-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 
 # Build every compiled CTest executable at once. All test exes are
 # EXCLUDE_FROM_ALL, so a plain build skips them; CI uses this before ctest.
@@ -232,7 +233,8 @@ add_dependencies(tests_all
     q15_simd_parity_test
     phase_nco_precision_test
     osc_recursive_test
-    full_fused_parity_test)
+    full_fused_parity_test
+    osc_formulas_domain_test)
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")

@@ -130,8 +130,12 @@ OSC_FORMULA_FUNC float spectral_osc_quantized(float rads, float width) {
 
     scaled = rads * width;
     inv_w = 1.0f / width;
+    /* (float)INT_MAX rounds UP to 2^31, which is NOT a representable int, so
+     * the upper bound must be exclusive-by->= : at scaled==2^31 a '>' test
+     * passes and (int)2^31 is signed-overflow UB. (float)INT_MIN == -2^31 is
+     * exactly representable, so the lower bound stays a strict '<'. */
     if (!isfinite(scaled) || !isfinite(inv_w) ||
-        scaled < (float)INT_MIN || scaled > (float)INT_MAX) {
+        scaled < (float)INT_MIN || scaled >= (float)INT_MAX) {
         return 0.0f;
     }
 
