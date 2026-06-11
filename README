@@ -9,7 +9,9 @@ Intentionally targets ARM Cortex-M/A targets with acceleration support available
 
 [✓] Metal & CUDA platforms
 [✓] ARM, X86
-[✓] Linux, MacOS
+[✓] Linux (fftw3), MacOS (vDSP)
+[✓] SIMD support via. SIMDE
+[✓] OpenMP
 
 With support eventually planned for the following:
 
@@ -20,24 +22,34 @@ With support eventually planned for the following:
 
 If you are interested in a more detailed project description see spectral_engine/README.md
 
+--------
 PRE-REQS
+--------
 
-- CMake ≥ 3.x and a C/C++ toolchain (Clang or GCC)
+- CMake ≥ 3.x
+- C/C++ toolchain (Clang or GCC)
 - `libomp` and `libsndfile`
+
+Linux:
+
+- `fftw3`
+- `nvcc` if you have a NVIDIA gpu
 
 macOS: ```brew install libomp libsndfile```
 Linux: install `libomp-dev` (or `libgomp`) and `libsndfile1-dev`
 
-PRE-REQS (Contributors)
+Contributors:
 
 The following toolchains are strongly reccomended for contributors:
 
 - Qemu ≥ 11.x (prefer latest)
 - ARM-eabi-GCC toolchain ≥ 15.x (prefer latest)
 - GCC ≥ 16.x (prefer latest)
+- Python ≥ 3.12.x (prefer latest)
 
-You can refer to libs.yaml under the `third_party` directory for everything that is built in-source (managed by `python -m spectral_tools.vendor`). 
-Under the dedicated spectral_tools toolchain 
+You can refer to libs.yaml under the `third_party` directory for everything that is built in-source (managed by `python -m spectral_tools.vendor`).
+
+Patchsets applied to 3rd party libs need to be maintained in-source as subtrees.
 
 BUILD
 
@@ -62,7 +74,7 @@ make embedded_arm_restricted   # host build with embedded constraints
 make daisy                     # Cortex-M firmware build (Daisy Seed)
 ```
 
-The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices' flash. E.g,
+The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the device's flash. E.g,
 ```
 make configure
 make desktop daisy
@@ -70,7 +82,7 @@ make desktop daisy
 make daisy-flash       # Flash the target device with the segment binary
 ```
 
-Other useful commands
+An overview of the build system:
 ```
 make CMAKE_CONFIGURE_ARGS='-DCMAKE_BUILD_TYPE=Debug -DSPECTRAL_DEBUG_LOGGING=ON'  # Turn on debug logging
 
@@ -108,14 +120,15 @@ USAGE
 
 STRUCTURE
 
-  spectral_engine/    Core analysis and synthesis
-  api/                Platform-specific wrappers
+  spectral_engine/    Device agnostic core analysis, synthesis and runtime utilities
+  tests/              Self-explanitory
+  api/                Platform-specific wrappers or ports
   examples/           Example applications & Demo's
-  tools/              Useful scripts or toolings
+  tools/              Useful scripts, toolings, workflows & devops
   resources/          Location for auxiliary files
   build/bin/          Compiled binaries
 
 AUTHOR
 
   Connor Sinclair
-  csin0659@uni.sydney.edu.au
+  lospolloscarlos@gmail.com
