@@ -73,13 +73,18 @@
 #ifndef SPECTRAL_METAL_FAST_MATH
 #define SPECTRAL_METAL_FAST_MATH 0
 #endif
-/* Precise (cubic) MQ phase reconstruction gate.
+/* Precise (cubic) MQ phase reconstruction gate. EXPERIMENTAL — NOT a
+ * supported path (maintainer decision 2026-06-11, REVIEWER_HANDOFF_2 sec 4.3).
  * When 0 (default) the synthesis phase model is the canonical per-interval
  * quadratic phase (McAulay-Quatieri 1986 per-frame interpolation); the cubic
  * coefficients reduce to (c2=beta, c3=0) so the synth path is bit-identical.
  * When 1, the adaptive_track_density stage may annotate segments with
  * cross-frame cubic phase coefficients (smooth C1 phase across hops) which the
- * synth path consumes. Opt-in and tested against a signed-off golden. */
+ * synth path consumes. No build target sets this flag: the cubic path is
+ * unbuilt and untested end-to-end (only its Segment serialization is covered,
+ * by segment_endian_roundtrip). Do not enable in production. Its fate is
+ * decided when the F synthesis-method stream is engaged (OPTIMISATION_PLAN
+ * F3 per-track cubic-phase interpolation): wire+golden-sign-off, or delete. */
 #ifndef SPECTRAL_PRECISE_PHASE
 #define SPECTRAL_PRECISE_PHASE 0
 #endif
