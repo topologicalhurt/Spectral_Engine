@@ -216,6 +216,21 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 
+# Test/bench targets that compile core/oscillator.c also #include the generated
+# spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
+# so its own foreach (over the main build targets) cannot reach them — without
+# this, a parallel `tests_all` can compile oscillator.c while the codegen custom
+# command is mid-regeneration of the header into the source tree (a known flake).
+# Gate each on generate_metal_osc so the header is present before they compile.
+foreach(_spectral_osc_test_target
+        osc_parity_test osc_width_parity_test
+        q15_production_parity_test q15_simd_parity_test
+        bench_q15_pack8 bench_q15_throughput)
+    if(TARGET ${_spectral_osc_test_target})
+        add_dependencies(${_spectral_osc_test_target} generate_metal_osc)
+    endif()
+endforeach()
+
 # Build every compiled CTest executable at once. All test exes are
 # EXCLUDE_FROM_ALL, so a plain build skips them; CI uses this before ctest.
 # The cmake -P source-scan tests (q_domain_contract, osc_backend_contract) need
