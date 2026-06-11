@@ -15,7 +15,8 @@ add_executable(osc_parity_test EXCLUDE_FROM_ALL
     "${SPECTRAL_CORE_DIR}/spectral_osc_bandlimited.c"
     "${SPECTRAL_CORE_DIR}/spectral_envelope.c"
     "${SPECTRAL_CORE_DIR}/spectral_fast_math.c"
-    "${SPECTRAL_ENGINE_ROOT}/runtime/spectral_utils.c")
+    "${SPECTRAL_ENGINE_ROOT}/runtime/spectral_utils.c"
+    "${SPECTRAL_CORE_DIR}/spectral_log.c")
 
 spectral_apply_common_target(osc_parity_test)
 target_link_libraries(osc_parity_test PRIVATE m)
