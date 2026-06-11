@@ -29,17 +29,6 @@ def dft_bin_magsq(size: int, tone_bin: float, bin_index: int) -> float:
     return re * re + im * im
 
 
-def log_power_parabolic_three_log(left: float, center: float, right: float) -> float:
-    log_l = math.log(max(left, 1.0e-30))
-    log_c = math.log(max(center, 1.0e-30))
-    log_r = math.log(max(right, 1.0e-30))
-    denom = log_l - 2.0 * log_c + log_r
-    if abs(denom) < 1.0e-20:
-        return 0.0
-    p = 0.5 * (log_l - log_r) / denom
-    return max(-0.5, min(0.5, p))
-
-
 def log_power_parabolic_two_log(left: float, center: float, right: float) -> float:
     left = max(left, 1.0e-30)
     center = max(center, 1.0e-30)
@@ -57,14 +46,13 @@ def log_power_parabolic(left: float, center: float, right: float) -> float:
     return log_power_parabolic_two_log(left, center, right)
 
 
-def test_two_log_ratio_matches_three_log_formula() -> None:
-    values = [1.0e-9, 1.0e-4, 0.1, 0.75, 1.0, 2.0, 16.0, 1.0e5]
-    for left in values:
-        for center in values:
-            for right in values:
-                three = log_power_parabolic_three_log(left, center, right)
-                two = log_power_parabolic_two_log(left, center, right)
-                assert abs(two - three) <= 1.0e-12
+# NOTE: the former test_two_log_ratio_matches_three_log_formula was removed — it
+# compared two test-local Python helpers that are algebraically identical by
+# construction (a tautology that no engine change could fail) while implying it
+# covered the C two-log/three-log equivalence. The real C function
+# spectral_window_interp_magsq_parabolic (both its fast and overflow-fallback
+# branches) is now exercised by the compiled ctest `peak_interp_parabolic`
+# (tests/core_contracts/test_peak_interp_parabolic.c).
 
 
 def test_hann_log_power_parabolic_bias_contract() -> None:

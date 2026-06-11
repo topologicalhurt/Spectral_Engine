@@ -216,6 +216,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/peak-interp-parabolic-test.cmake")
 
 # Test/bench targets that compile core/oscillator.c also #include the generated
 # spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
@@ -226,6 +227,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cm
 foreach(_spectral_osc_test_target
         osc_parity_test osc_width_parity_test
         q15_production_parity_test q15_simd_parity_test
+        full_fused_parity_test
         bench_q15_pack8 bench_q15_throughput)
     if(TARGET ${_spectral_osc_test_target})
         add_dependencies(${_spectral_osc_test_target} generate_metal_osc)
@@ -251,7 +253,8 @@ add_dependencies(tests_all
     osc_recursive_test
     full_fused_parity_test
     osc_formulas_domain_test
-    window_backend_parity_test)
+    window_backend_parity_test
+    peak_interp_parabolic_test)
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")

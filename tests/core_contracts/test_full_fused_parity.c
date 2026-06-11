@@ -140,7 +140,7 @@ static SegmentArray run_path(const float* audio, size_t n, SpectralAnalysisPathM
                                         PAR_DB_THRESH, mode, &t_fft, &t_track);
 }
 
-static int compare_fixture(const char* name, fixture_fn gen)
+static int compare_fixture(const char* name, fixture_fn gen, int expect_empty)
 {
     float* buf = (float*)malloc(PAR_N_SAMPLES * sizeof(float));
     if (!buf) { fprintf(stderr, "  %-16s OOM\n", name); return 1; }
@@ -151,6 +151,16 @@ static int compare_fixture(const char* name, fixture_fn gen)
     free(buf);
 
     int fail = 0;
+    int printed = 0;  /* distinct from the boolean verdict so the print cap works */
+
+    /* For fixtures that must yield NO segments (silence), assert the absolute
+     * count is 0 on BOTH paths — equality alone would pass if both paths
+     * spuriously emitted the same nonzero count. */
+    if (expect_empty && (full.count != 0u || fused.count != 0u)) {
+        fprintf(stderr, "  %-16s FAIL expected 0 segments: full=%u fused=%u\n",
+                name, full.count, fused.count);
+        fail = 1;
+    }
 
     if (full.count != fused.count) {
         fprintf(stderr, "  %-16s FAIL count: full=%u fused=%u\n",
@@ -175,7 +185,7 @@ static int compare_fixture(const char* name, fixture_fn gen)
             !within(a->amp,    b->amp,    TOL_AMP_REL,   TOL_AMP_ABS)       ||
             !within(a->df,     b->df,     TOL_DFDA_REL,  TOL_DFDA_ABS)      ||
             !within(a->da,     b->da,     TOL_DFDA_REL,  TOL_DFDA_ABS)) {
-            if (fail < 32) {
+            if (printed++ < 32) {
                 fprintf(stderr,
                         "  %-16s FAIL seg[%u]: "
                         "start %.6f/%.6f omega %.9f/%.9f amp %.9f/%.9f "
@@ -199,13 +209,13 @@ static int compare_fixture(const char* name, fixture_fn gen)
 
 int main(void)
 {
-    struct { const char* name; fixture_fn fn; } fixtures[] = {
-        { "silence",     fx_silence            },
-        { "sine_bin",    fx_sine_bin_centered  },
-        { "sine_offbin", fx_sine_off_bin       },
-        { "two_tone",    fx_two_tone           },
-        { "chirp",       fx_chirp              },
-        { "amp_ramp",    fx_amp_ramp           },
+    struct { const char* name; fixture_fn fn; int expect_empty; } fixtures[] = {
+        { "silence",     fx_silence,           1 },
+        { "sine_bin",    fx_sine_bin_centered, 0 },
+        { "sine_offbin", fx_sine_off_bin,      0 },
+        { "two_tone",    fx_two_tone,          0 },
+        { "chirp",       fx_chirp,             0 },
+        { "amp_ramp",    fx_amp_ramp,          0 },
     };
     const size_t nfix = sizeof(fixtures) / sizeof(fixtures[0]);
 
@@ -214,7 +224,7 @@ int main(void)
 
     int fail = 0;
     for (size_t i = 0; i < nfix; i++)
-        fail |= compare_fixture(fixtures[i].name, fixtures[i].fn);
+        fail |= compare_fixture(fixtures[i].name, fixtures[i].fn, fixtures[i].expect_empty);
 
     if (fail) {
         fprintf(stderr, "full_fused_parity: FAILED\n");
