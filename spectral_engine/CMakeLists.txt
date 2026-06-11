@@ -215,6 +215,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmak
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
 
 # Test/bench targets that compile core/oscillator.c also #include the generated
 # spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
@@ -249,7 +250,8 @@ add_dependencies(tests_all
     phase_nco_precision_test
     osc_recursive_test
     full_fused_parity_test
-    osc_formulas_domain_test)
+    osc_formulas_domain_test
+    window_backend_parity_test)
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")

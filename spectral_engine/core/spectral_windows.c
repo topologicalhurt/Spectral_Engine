@@ -1,7 +1,18 @@
 /* spectral_windows.c - Window Functions Implementation
- * 
+ *
  * Implements common window functions for FFT-based spectral analysis.
- * Uses vDSP on macOS for hardware-accelerated window generation when available.
+ *
+ * Window shape is backend-INVARIANT: the symmetric (N-1 denominator) raised-
+ * cosine forms below are the single source of truth (spectral_windows.h,
+ * CORE_CONTRACTS.md), used identically on every target. The vDSP window
+ * generators were removed: vDSP_hann_window/hamm/blkman use Apple's PERIODIC
+ * (2*pi*n/N) convention, which silently diverged from this documented
+ * symmetric form on desktop and fed different magsq/leakage into the live STFT
+ * path — a backend-vs-backend divergence with no parity test. Window
+ * generation is O(N) once per analysis config, so dropping the vDSP path costs
+ * nothing measurable. (Adopting the DFT-even/periodic convention as the SSOT
+ * is a separate deliberate change — it shifts every backend's analysis output
+ * and needs golden re-sign-off; do not fold it in here.)
  */
 #include "spectral_windows.h"
 #include "spectral_config.h"
@@ -11,55 +22,39 @@
 #include <string.h>
 #include <float.h>
 
-#if SPECTRAL_USE_VDSP
-#include <Accelerate/Accelerate.h>
-#endif
-
 void spectral_window_hann(float* window, size_t length) {
     if (!window || length == 0) return;
     if (length == 1) { window[0] = 1.0f; return; }
-    
-#if SPECTRAL_USE_VDSP
-    vDSP_hann_window(window, (vDSP_Length)length, vDSP_HANN_DENORM);
-#else
-    /* Portable implementation: w[n] = 0.5 * (1 - cos(2*pi*n / (N-1))) */
+
+    /* w[n] = 0.5 * (1 - cos(2*pi*n / (N-1)))  (symmetric SSOT) */
     const float scale = (float)(2.0 * SPECTRAL_PI / (length - 1));
     for (size_t i = 0; i < length; i++) {
         window[i] = 0.5f * (1.0f - cosf((float)i * scale));
     }
-#endif
 }
 
 void spectral_window_hamming(float* window, size_t length) {
     if (!window || length == 0) return;
     if (length == 1) { window[0] = 1.0f; return; }
-    
-#if SPECTRAL_USE_VDSP
-    vDSP_hamm_window(window, (vDSP_Length)length, 0);
-#else
-    /* Hamming: w[n] = 0.54 - 0.46 * cos(2*pi*n / (N-1)) */
+
+    /* w[n] = 0.54 - 0.46 * cos(2*pi*n / (N-1)) */
     const float scale = (float)(2.0 * SPECTRAL_PI / (length - 1));
     for (size_t i = 0; i < length; i++) {
         window[i] = SPECTRAL_HAMMING_A0 - SPECTRAL_HAMMING_A1 * cosf((float)i * scale);
     }
-#endif
 }
 
 void spectral_window_blackman(float* window, size_t length) {
     if (!window || length == 0) return;
     if (length == 1) { window[0] = 1.0f; return; }
-    
-#if SPECTRAL_USE_VDSP
-    vDSP_blkman_window(window, (vDSP_Length)length, 0);
-#else
-    /* Blackman: w[n] = 0.42 - 0.5*cos(2*pi*n/(N-1)) + 0.08*cos(4*pi*n/(N-1)) */
+
+    /* w[n] = 0.42 - 0.5*cos(2*pi*n/(N-1)) + 0.08*cos(4*pi*n/(N-1)) */
     const float scale = (float)(2.0 * SPECTRAL_PI / (length - 1));
     for (size_t i = 0; i < length; i++) {
         float angle = (float)i * scale;
         window[i] = SPECTRAL_BLACKMAN_B0 - SPECTRAL_BLACKMAN_B1 * cosf(angle)
                   + SPECTRAL_BLACKMAN_B2 * cosf(2.0f * angle);
     }
-#endif
 }
 
 void spectral_window_rectangular(float* window, size_t length) {
