@@ -120,12 +120,16 @@ class ParsedEmbeddedRow:
     size_bytes: int
 
 
-def file_id_from_path(canonical_path: bytes) -> int:
+def file_id_from_path(raw_path: bytes) -> int:
     """Compute FNV-1a (32-bit) file ID via the native C bridge.
 
-    Callers must pass the result of :func:`compress_path`, not a raw path.
+    Pass the RAW relative path (the same string the embedded runtime looks up
+    with): the C function canonicalizes exactly once. Do NOT pass the output of
+    :func:`compress_path` — canonicalization is not idempotent (phase 1 strips
+    the \\x01 RLE sentinel phase 5 emits), so a second pass would diverge from
+    the runtime id for any path containing a repeated-byte run.
     """
-    return _bridge.file_id_from_path(canonical_path)
+    return _bridge.file_id_from_path(raw_path)
 
 
 def decode_fnv1a32_offset_basis(canonical_path: bytes, digest: int) -> int:
@@ -201,7 +205,13 @@ def collect_entries(
         entries.append(ResourceHashEntry(
             relative_path=rel,
             canonical_path=canonical,
-            file_id=file_id_from_path(canonical),
+            # file_id is computed from the RAW relative path, exactly as the
+            # embedded runtime calls spectral_resource_file_id_from_path(user_path)
+            # — the C function canonicalizes once. Passing the already-compressed
+            # `canonical` double-canonicalizes (canon is NOT idempotent: phase 1
+            # strips the \x01 RLE sentinel phase 5 emits), so the stored id would
+            # diverge from the runtime id for any path with a repeated-byte run.
+            file_id=file_id_from_path(rel.encode("utf-8")),
             host_digest=host_hash,
             embedded_digest=embedded_hash,
             size_bytes=file_size,

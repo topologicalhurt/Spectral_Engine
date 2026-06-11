@@ -70,15 +70,16 @@ _lib = _load_library()
 # Public API
 # ---------------------------------------------------------------------------
 
-def file_id_from_path(canonical_path: bytes) -> int:
+def file_id_from_path(raw_path: bytes) -> int:
     """Compute FNV-1a 32-bit file ID for a resource path.
 
-    The C function ``spectral_resource_file_id_from_path`` internally
-    canonicalizes its input before hashing.  Callers should pass the
-    result of :func:`compress_path` — re-canonicalization is idempotent
-    on valid canonical output, so the hash is stable.
+    The C function ``spectral_resource_file_id_from_path`` canonicalizes its
+    input before hashing, so pass the RAW relative path — exactly what the
+    embedded runtime passes. Canonicalization is NOT idempotent (phase 1 strips
+    the \\x01 RLE sentinel phase 5 emits), so passing an already-canonical path
+    double-canonicalizes and diverges from the runtime id on repeated-byte runs.
     """
-    return _lib.spectral_resource_file_id_from_path(canonical_path)
+    return _lib.spectral_resource_file_id_from_path(raw_path)
 
 
 def compress_path(relative_posix_path: str) -> bytes:
