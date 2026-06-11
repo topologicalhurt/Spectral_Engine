@@ -104,11 +104,18 @@ engine spectral_window_hann (SYMMETRIC), hop N/2
 hop does not divide N / hop==N (Hann) / NULL analysis -> rejected
 ```
 
-The test forces `SPECTRAL_USE_VDSP=0` so it asserts the source-visible window
-formulas in `spectral_windows.c`, not Accelerate's window.
+The test forces `SPECTRAL_USE_VDSP=0`, a now-redundant belt-and-suspenders: as
+of the window unification (pass 248) `spectral_windows.c` has **no** vDSP window
+path — `vDSP_hann_window`/`hamm`/`blkman` used Apple's *periodic* (`2pi n/N`)
+convention and silently diverged from the symmetric form on desktop. All
+backends now generate the single documented symmetric formula regardless of
+`SPECTRAL_USE_VDSP`. The cross-backend guarantee is enforced by
+`tests/core_contracts/test_window_backend_parity.c` (CTest `window_backend_parity`),
+compiled with `SPECTRAL_USE_VDSP=1` so any reintroduced periodic window fails.
 
 **Finding the registry now records.** The shipping windows are *symmetric* (`N-1`
-denominator — `spectral_windows.h`: "conventional, unnormalized window shapes").
+denominator — `spectral_windows.h`: "conventional, unnormalized window shapes")
+on **every** backend (desktop included, since pass 248).
 They are analysis windows and do NOT strictly satisfy COLA; only periodic (`N`
 denominator) windows at `hop = N/2, N/4, ...` and the rectangular window do. The
 symmetric Hann's overlap deviation is O(1/N) (~1.5e-3 at N=1024). This is
