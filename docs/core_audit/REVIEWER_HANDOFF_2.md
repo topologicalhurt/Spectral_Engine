@@ -1,4 +1,4 @@
-# Reviewer Handoff 2 — status reconciliation (as of pass 249)
+# Reviewer Handoff 2 — status reconciliation (as of pass 249; §4/§5 annotated pass 250)
 
 > This continues `REVIEWER_HANDOFF.md`, which remains the **standing Campaign-3
 > mandate** (S1–S5 work-streams + the F synthesis fork). Nothing here supersedes
@@ -12,9 +12,12 @@
 
 ## 0. One-screen status
 
-- **Build/test baseline:** `ctest` is **18 tests, all green**; desktop, `embedded_arm`,
-  `embedded_arm_float`, and the host oracle build clean. `pytest tests/core_math`
-  (15) and `pytest tests/tools` (31) green.
+- **Build/test baseline:** `ctest` is **19 tests, all green** (pass 250 added
+  `segment_payload_bounds`); desktop, `embedded_arm`, `embedded_arm_float`, and
+  the host oracle build clean. `pytest tests/core_math` (16) and `pytest
+  tests/tools` (34) green. (If `tests/tools` ever reports ~10 fewer tests, check
+  for a silently module-skipped `test_vendor.py` — a Python upgrade can drop
+  PyYAML; this happened between passes 247 and 250.)
 - **Two adversarial kernel sweeps** ran (passes 248, 249), each a multi-lens
   finder fleet with **3-skeptic majority-refute** verification. Combined: **8
   confirmed defects fixed**, **13 refuted** (the verification is load-bearing —
@@ -136,6 +139,9 @@ These are not in the original mandate and will not surface from the code alone.
    SIMD pass-249) stem from an unconstrained `width` reaching `rads*width`. The
    guards are now correct, but an **upper clamp on `width` at validation** would
    be defense-in-depth and remove a whole class of boundary risk. Recommended.
+   **DONE (pass 250):** `|width| ≤ SPECTRAL_SEGMENT_WIDTH_MAX` (2^24) enforced in
+   `spectral_segment_payload_valid`; ctest `segment_payload_bounds`, fail-on-bug
+   verified.
 
 3. **`SPECTRAL_PRECISE_PHASE` is dormant.** The cubic-MQ phase path
    (`spectral_segment_set_cubic`, the `_pad_w` annotation, the precise-phase
@@ -144,6 +150,9 @@ These are not in the original mandate and will not surface from the code alone.
    pass-249 endian fix hardened its serialization, but the feature itself is
    experimental-only. Decide: wire+test it, or document it as explicitly
    experimental and stop carrying latent risk in it.
+   **DECIDED (maintainer, 2026-06-11): documented as EXPERIMENTAL** at the flag's
+   definition (`spectral_config.h`); its real fate (wire+golden-sign-off vs
+   delete) is decided when the F stream is engaged (F3 cubic-phase interpolation).
 
 4. **Window convention is a deferred deliberate decision.** Pass 248 unified all
    backends on the *documented symmetric (N-1)* window (lowest blast radius). But
@@ -152,6 +161,20 @@ These are not in the original mandate and will not surface from the code alone.
    Adopting periodic as the SSOT would shift **every** backend's analysis output
    and needs golden re-sign-off (mandate D2). This is left open on purpose — it
    is the maintainer's call, with data.
+   **DATA GATHERED (pass 250)** — harness `tests/core_math/harnesses/
+   window_convention_sweep.c` (+ pytest `test_window_convention_sweep.py`)
+   measured, symmetric vs periodic: (a) periodic Hann/Hamming satisfy COLA to
+   float noise (~1e-7 ripple) at every dividing hop, symmetric misses by O(1/N)
+   (1.5e-3 @ N=1024 hop N/2, 3.8e-4 @ N=4096); (b) Blackman fails COLA at hop
+   N/2 in BOTH conventions (its k=2 term needs ≥4 phases) — OLA there is
+   hop ≤ N/4 regardless; (c) the log-parabolic estimator is convention-
+   INSENSITIVE (RMS bin-offset error differs <0.6%, periodic marginally worse);
+   (d) adopting periodic shifts coherent gain by ~+1/N (+0.1% amplitudes @1024)
+   and raw peak-triplet magsq by up to ~0.9%. Reading: periodic buys exact COLA
+   only — which matters iff the F stream adopts IFFT/OLA synthesis; it does
+   NOT improve current analysis. Cheapest correct path: keep symmetric now and
+   fold the convention switch (if any) into the F-stream golden re-sign-off so
+   one sign-off covers both. Final call remains the maintainer's.
 
 5. **GPU backends remain under-tested.** The pass-249 GPU/SIMD lens refuted its
    GPU divergence findings, but there is **no CUDA/Metal hardware parity test in
@@ -176,3 +199,17 @@ price synthesis)** → **F (measure osc-bank vs IFFT crossover, decide)** →
 STFT paths)** → **S4 (desktop perf-counter benchmarks; the build-reliability
 items in §4.1)** → **S5 maturity audit**. The §4 concerns (2, 3, 4) are small,
 self-contained hardening items that can be done opportunistically at any point.
+
+**Pass-250 progress + maintainer direction (2026-06-12):** §4.2 done, §4.3
+decided (experimental), §4.4 data gathered (decision pending); **S1 P3 closed**
+(M7_PERF_MODEL_PLAN status — CortexM7Model body-throughput validated ≤1% on a
+9-case sourced microbench set; per-kernel cyc/iter now carry stated deltas).
+Next is **P4** (AN4891-calibrated memory layer; the full TRM PDF is now
+available locally for it). The maintainer also sharpened the S1/P6 goal: treat
+the M7 as an embedded platform whose execution units (FPU, both ALUs, MAC,
+dual-issue slots, cache/TCM) should be *meaningfully saturated*; **CMSIS /
+CMSIS-DSP and the embedded-SIMD strategy are under-integrated with the codebase
+and explicitly in scope**; the end state is an architecture (mirrored from the
+best desktop design, ported to ARM) settled well enough that compiler-flag
+tinkering and hand assembly become a meaningful, final-stage consideration —
+see the expanded P6 entry in M7_PERF_MODEL_PLAN.md.

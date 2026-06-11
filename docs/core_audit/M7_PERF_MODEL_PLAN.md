@@ -102,7 +102,7 @@ the segment-load/DMA path.
   instruction/memory counts are reproducible exactly.
 - **P3 — pipeline layer.** Automated mca over extracted loop bodies + the validation
   microbench set with TRM cross-check. Done-when: cycles/iteration per kernel with stated
-  validation delta.
+  validation delta. **CLOSED (pass 250)** — see Status.
 - **P4 — memory layer.** Line-footprint analyzer over L1 traces; AN4891-calibrated latency
   table; SDRAM segment-stream/DMA model. Done-when: per-block stall estimate with per-constant
   calibration provenance.
@@ -111,7 +111,18 @@ the segment-load/DMA path.
   benchmark redesign.
 - **P6 — application.** Re-evaluate S1 optimization candidates against the model: loop-nest /
   data-layout inversion, SMLALD coverage beyond full-sustain pairs, ITCM code placement,
-  and the F2 oscillator-vs-IFFT embedded crossover.
+  and the F2 oscillator-vs-IFFT embedded crossover. Maintainer emphasis (2026-06-12):
+  the bar is *meaningful saturation* of the execution units the silicon has — FPU, both
+  ALUs, the MAC pipe, the dual-issue slots, the cache/TCM hierarchy — treated as an
+  embedded platform first, not a ported desktop loop. **CMSIS / CMSIS-DSP and the
+  embedded SIMD treatment are explicitly in scope here** (the codebase has not
+  thought them through together yet; SIMDe is host-only by design, the embedded
+  dispatch has no CMSIS-DSP wiring — see OSCILLATOR_BACKEND_CONTRACT_PLAN's open
+  CMSIS item). End state: the architecture/algorithm choice is settled (mirroring
+  the desktop path's best design, ported to ARM), so that compiler-directive
+  tinkering and hand-written assembly become a *meaningful* final consideration
+  rather than premature effort — P3's validated per-loop model + P4's memory layer
+  are what make that judgment defensible without hardware.
 
 ## Status
 
@@ -146,6 +157,35 @@ the segment-load/DMA path.
   Python). Harness behavior is itself under test: `pytest tests/tools`. Migration
   verified: kernel-range counts and mca per-loop cycles bit/numerically identical
   to the pre-migration rig.
+- **P3 closed (pass 250, 2026-06-12).** The Layer-2 validation protocol ran: a
+  9-case microbench set of hand-analyzable loops (`performance/embedded/
+  mca_validation.py`, CLI `m7-mca-validate`, pytest-covered) whose expected
+  cycles/iteration are derived ONLY from sourced facts — the Cortex-M7 TRM
+  DDI 0489F structure statements (2-skeptic-verified + the full TRM now local)
+  and the two community DWT measurement sets (quinapalus, STM32H730@480MHz;
+  jnk0le, STM32H743 — both re-verified first-party at source during pass 250;
+  ARM publishes no per-instruction M7 cycle table, which is itself sourced).
+  Covered shapes: ALU dual-issue + dependent-chain serialization, banked
+  load/load pairing, load-use forwarding, single-MAC-pipe throughput,
+  SMLAL/SMLALD accumulator chaining (the `spectral_coupled_step` /
+  `synth_core_pair_m7` shapes), single-store-channel, load+store pairing.
+  **Result: CortexM7Model body-throughput delta ≤1% on 9/9 cases** (llvm-mca
+  21.1.8). One known systematic: the model has no branch folding, charging
+  ~1–2 cyc/iter for a predicted-taken back-edge that real M7 folds to ~0–1
+  [jnk0le] — an *upper* bias on loop numbers, bounded per kernel below.
+  Validation deltas are model-vs-derivation distances, not hardware truth
+  (no board; fidelity contract unchanged).
+- **Per-kernel cycles/iteration with stated validation delta (P3 done-when),**
+  current census (xPack 15.2.1, llvm-mca 21.1.8) `[modeled: mca/CortexM7Model,
+  perfect memory; body-throughput validated ≤1%; back-edge bias ≤+2 cyc/iter]`:
+  | kernel loop | cyc/iter | per voice-sample | back-edge bias bound |
+  |---|---|---|---|
+  | `synth_core_m7` sustain (16-sample) | 340 | 21.3 | ≤0.6% |
+  | `synth_core_pair_m7` SMLALD pair | 40 | 20.0 | ≤5% |
+  | `synth_core_m7` scalar tail | 18 | 18 | ≤11% |
+  | `synth_fade_m7` fade ramp | 22 | 22 | ≤9% |
+  Memory effects are NOT in these numbers — that is P4's layer; do not compare
+  them against wall-clock or QEMU counts without it.
 - **Real newlib + working sets (hardening pass, 2026-06-10):** the freestanding stub
   headers are deleted; the rigs require a newlib toolchain (sha-pinned xPack via
   `m7-bootstrap` into `tools/toolchains/`, gitignored; brew's bare gcc is rejected by

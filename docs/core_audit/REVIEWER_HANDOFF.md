@@ -24,7 +24,7 @@ is trustworthy:
    fictitious linker sections, uncalibrated cost models = bugs. (This campaign removed exactly
    these from the ARM path.)
 3. **Verification anchors** (keep them green; extend them):
-   - `ctest` (17 tests as of pass 248; was 14 when this mandate was written) — the regression
+   - `ctest` (19 tests as of pass 250; was 14 when this mandate was written) — the regression
      contract. Build `tests_all` then `ctest`. See `REVIEWER_HANDOFF_2.md` for what has landed
      since this mandate and the current open frontier.
    - `arm32_process_correctness` — the host-runnable **real M7 codepath** oracle (property-based:
