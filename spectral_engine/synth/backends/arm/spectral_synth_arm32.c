@@ -70,7 +70,19 @@ extern int  dma_transfer_complete(void);
 #include "arm_math.h"
 #endif
 
-static SpectralSegmentQ15 dma_seg_buf[SPECTRAL_DMA_BATCH] SPECTRAL_ARM32_DMA_BUFFER_ATTR;
+/* DMA RX target: MUST be cache-line aligned and a whole number of lines long.
+ * spectral_arm32_dma_rx_sync() rounds the invalidate range out to cache-line
+ * boundaries; if this buffer shared a line with another (dirty) static, the
+ * rounded-out SCB_InvalidateDCache_by_Addr would discard that neighbor's
+ * un-written-back data. The static asserts below are the permanent guard:
+ * they fail the build (arm_core_test on host + every embedded build) if the
+ * alignment attribute is dropped or the size stops being a line multiple. */
+static SpectralSegmentQ15 dma_seg_buf[SPECTRAL_DMA_BATCH]
+    __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_ARM32_DMA_BUFFER_ATTR;
+_Static_assert(__alignof__(dma_seg_buf) >= SPECTRAL_CACHE_LINE,
+               "dma_seg_buf must be cache-line aligned (DMA invalidate-by-addr coherency)");
+_Static_assert(sizeof(dma_seg_buf) % SPECTRAL_CACHE_LINE == 0,
+               "dma_seg_buf must span a whole number of cache lines");
 static uint32_t dma_prefetch_start = 0;
 static uint32_t dma_prefetch_count = 0;
 static int dma_prefetch_coherent = 0;
