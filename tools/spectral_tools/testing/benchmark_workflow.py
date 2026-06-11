@@ -541,6 +541,39 @@ def run_m7_census(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_m7_mca_validate(args: argparse.Namespace, perf: Performance) -> int:
+    """Layer 2 validation: mca CortexM7Model vs hand-derived expectations."""
+    from ..performance.embedded import codegen, mca_validation, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca"}))
+        report = mca_validation.validate(tc, out_dir=out_dir)
+        summary = (
+            f"max body delta {report.max_abs_body_delta * 100:.1f}% over "
+            f"{len(report.results)} cases; back-edge divergence "
+            f"+{report.mean_backedge_divergence:.1f} cyc/iter"
+        )
+        test = {
+            "name": "m7-mca-validate",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": report.as_dict(),
+        }
+    except (toolchain.ToolchainError, codegen.CodegenError) as exc:
+        test = {
+            "name": "m7-mca-validate",
+            "status": TestStatus.FAILED.value,
+            "summary": "validation failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_m7_counts(args: argparse.Namespace, perf: Performance) -> int:
     """Embedded Layer 1: dynamic instruction/byte counts under QEMU [measured]."""
     from ..performance.embedded import counts, toolchain
@@ -740,6 +773,14 @@ def build_parser() -> argparse.ArgumentParser:
     m7_census.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
     add_output_options(m7_census)
 
+    m7_validate = sub.add_parser(
+        "m7-mca-validate",
+        help="Embedded M7: validate the llvm-mca CortexM7Model against hand-derived "
+             "TRM + community-measured timings (P3 microbench set)",
+    )
+    m7_validate.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_validate)
+
     m7_counts = sub.add_parser(
         "m7-counts",
         help="Embedded M7: dynamic instruction/byte counts under QEMU mps2-an500 [measured]",
@@ -804,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_suite(args, perf)
     if args.command == "m7-census":
         return run_m7_census(args, perf)
+    if args.command == "m7-mca-validate":
+        return run_m7_mca_validate(args, perf)
     if args.command == "m7-counts":
         return run_m7_counts(args, perf)
     if args.command == "measure":

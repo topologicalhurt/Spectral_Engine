@@ -16,7 +16,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from spectral_tools.performance.embedded import codegen, counts, fixture, toolchain  # noqa: E402
+from spectral_tools.performance.embedded import (  # noqa: E402
+    codegen,
+    counts,
+    fixture,
+    mca_validation,
+    toolchain,
+)
 
 
 # --- fixture SSOT -----------------------------------------------------------
@@ -188,6 +194,40 @@ def test_parse_mca_report():
     assert loop.ipc == pytest.approx(43000 / 34002)
 
 
+# --- mca validation set (P3) ------------------------------------------------
+
+def test_validation_cases_cite_real_facts_with_sane_expectations():
+    """Every expectation must rest on a recorded, sourced fact — an uncited
+    number is exactly the 'heuristic presented as measurement' bug class."""
+    assert len(mca_validation.CASES) >= 8
+    for case in mca_validation.CASES:
+        assert case.body, case.name
+        assert case.expected_body_cycles > 0, case.name
+        assert case.facts, f"{case.name} cites no facts"
+        for fid in case.facts:
+            assert fid in mca_validation.FACTS, f"{case.name} cites unknown fact {fid}"
+            assert f"[{fid}" in case.derivation or fid in case.derivation, (
+                f"{case.name}: derivation does not reference fact {fid}"
+            )
+    for fid, fact in mca_validation.FACTS.items():
+        assert fact["source"], fid
+        assert fact["verified"] in {"skeptics", "direct"}, fid
+
+
+def test_validation_report_math():
+    case = mca_validation.CASES[0]
+    result = mca_validation.CaseResult(case=case, mca_body_cycles=4.4, mca_loop_cycles=6.4)
+    assert result.body_delta_rel == pytest.approx((4.4 - case.expected_body_cycles) / case.expected_body_cycles)
+    assert result.mca_loop_overhead == pytest.approx(2.0)
+    report = mca_validation.ValidationReport(results=(result,), iterations=100)
+    assert report.max_abs_body_delta == pytest.approx(abs(result.body_delta_rel))
+    # overhead 2.0 is exactly the hand upper bound -> zero excess divergence
+    assert report.mean_backedge_divergence == pytest.approx(0.0)
+    doc = report.as_dict()
+    assert doc["summary"]["max_abs_body_delta_rel"] == round(report.max_abs_body_delta, 4)
+    assert doc["cases"][0]["facts"] == list(case.facts)
+
+
 # --- counts table parsing ---------------------------------------------------
 
 CANNED_COUNTS = """\
@@ -280,6 +320,25 @@ def test_census_and_loop_analysis_end_to_end(tmp_path):
     for loop in report.loops:
         assert loop.cycles_per_iter > 0
         assert 0 < loop.ipc <= 2.0  # M7 is dual-issue; IPC cannot exceed 2
+
+
+@pytest.mark.skipif(not HAVE_MCA, reason="needs newlib arm-none-eabi-gcc + llvm-mca (m7-bootstrap)")
+def test_mca_validation_against_hand_derived_timings(tmp_path):
+    """The P3 contract: CortexM7Model body throughput must stay within 10% of
+    the hand-derived TRM/community expectations on every microbench, and the
+    back-edge divergence must not exceed the hand range by more than 1.5
+    cycles. At landing (llvm 21.1.8) the body deltas were <= 1% and the
+    divergence 0.0; a failure here means the shipped mca model drifted and the
+    kernel cycles/iter error bound needs re-derivation."""
+    tc = toolchain.discover(ROOT, need=frozenset({"mca"}))
+    report = mca_validation.validate(tc, out_dir=tmp_path)
+    assert len(report.results) == len(mca_validation.CASES)
+    for result in report.results:
+        assert abs(result.body_delta_rel) <= 0.10, (
+            f"{result.case.name}: mca {result.mca_body_cycles} vs hand "
+            f"{result.case.expected_body_cycles}"
+        )
+    assert report.mean_backedge_divergence <= 1.5
 
 
 @pytest.mark.skipif(not HAVE_QEMU, reason="needs newlib arm-none-eabi-gcc + qemu (m7-bootstrap)")

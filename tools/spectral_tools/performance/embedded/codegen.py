@@ -276,25 +276,54 @@ def loop_analysis(
     failures: list[dict[str, str]] = []
     for loop in loops:
         name = f"{loop.kernel}/{loop.label}"
-        region_src = "\n".join(
-            ["\t.syntax unified", "\t.thumb", f"# LLVM-MCA-BEGIN {name}",
-             *loop.instructions, "# LLVM-MCA-END", ""]
-        )
-        region_path = out_dir / f"loop_{loop.kernel}_{loop.label.strip('.')}.s"
-        region_path.write_text(region_src, encoding="utf-8")
-
-        mca = run(
-            [tc.llvm_mca, "-mtriple=thumbv7em-none-eabi", "-mcpu=cortex-m7",
-             f"-iterations={iterations}", str(region_path)],
-            cwd=tc.repo_root,
-            check=False,
-        )
-        if mca.returncode != 0:
-            failures.append({"region": name, "error": mca.stderr.strip().splitlines()[-1] if mca.stderr else "mca failed"})
-            continue
-        analyses.extend(_parse_mca_report(mca.stdout, [name]))
+        try:
+            analyses.extend(
+                mca_region(
+                    tc, name=name, instructions=loop.instructions,
+                    out_dir=out_dir, file_stem=f"loop_{loop.kernel}_{loop.label.strip('.')}",
+                    iterations=iterations,
+                )
+            )
+        except CodegenError as exc:
+            failures.append({"region": name, "error": str(exc)})
 
     return tuple(analyses), tuple(failures)
+
+
+def mca_region(
+    tc: Toolchain,
+    *,
+    name: str,
+    instructions: tuple[str, ...],
+    out_dir: Path,
+    file_stem: str,
+    iterations: int = 100,
+) -> list[LoopAnalysis]:
+    """Run one marker-bracketed region through llvm-mca/CortexM7Model.
+
+    The single mca invocation path shared by the kernel loop analysis and the
+    validation microbench set, so both measure under identical flags."""
+    if tc.llvm_mca is None:
+        raise CodegenError("llvm-mca unavailable; run toolchain.discover(need={'mca'})")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    region_src = "\n".join(
+        ["\t.syntax unified", "\t.thumb", f"# LLVM-MCA-BEGIN {name}",
+         *instructions, "# LLVM-MCA-END", ""]
+    )
+    region_path = out_dir / f"{file_stem}.s"
+    region_path.write_text(region_src, encoding="utf-8")
+
+    mca = run(
+        [tc.llvm_mca, "-mtriple=thumbv7em-none-eabi", "-mcpu=cortex-m7",
+         f"-iterations={iterations}", str(region_path)],
+        cwd=tc.repo_root,
+        check=False,
+    )
+    if mca.returncode != 0:
+        raise CodegenError(
+            mca.stderr.strip().splitlines()[-1] if mca.stderr else "mca failed"
+        )
+    return _parse_mca_report(mca.stdout, [name])
 
 
 def codegen_report(tc: Toolchain, *, out_dir: Path) -> CodegenReport:
