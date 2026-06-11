@@ -395,6 +395,17 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_DEFAULT_WIDTH
 #define SPECTRAL_TRACK_DEFAULT_WIDTH    0.5f
 #endif
+/* Segment width domain bound, enforced by spectral_segment_payload_valid.
+ * width is a waveform shape parameter (quantized step density, pwm duty); the
+ * synth boundary computes rads*width with |rads| <= pi+ulp, which becomes
+ * int-conversion UB once width reaches ~2^31/pi (the scalar pass-248 and SIMD
+ * pass-249 INT_MAX defects). 2^24 is the largest float with exactly
+ * representable unit steps -- a step count above it cannot be represented
+ * distinctly anyway -- and keeps pi*width ~40x under the UB envelope. The bound
+ * is on |width| so no future consumer inherits the boundary class. */
+#ifndef SPECTRAL_SEGMENT_WIDTH_MAX
+#define SPECTRAL_SEGMENT_WIDTH_MAX      16777216.0f
+#endif
 #ifndef SPECTRAL_TRACK_INTERP_LOG_DOMAIN
 #define SPECTRAL_TRACK_INTERP_LOG_DOMAIN 1
 #endif

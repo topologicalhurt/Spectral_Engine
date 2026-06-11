@@ -39,7 +39,7 @@ static inline int spectral_segment_payload_valid(const Segment* s)
     if (!isfinite(s->df)) return 0;
     if (!isfinite(s->amp)) return 0;
     if (!isfinite(s->da)) return 0;
-    if (!isfinite(s->width)) return 0;
+    if (!isfinite(s->width) || fabsf(s->width) > SPECTRAL_SEGMENT_WIDTH_MAX) return 0;
     return 1;
 }
 
