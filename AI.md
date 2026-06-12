@@ -22,18 +22,16 @@ the full correctness rules; this file is the orientation.
   `pytest tests/core_math` (compile+run real C against a Python reference). Perf-harness
   tests: `pytest tests/tools`.
 ## Performance measurement (the rules; full rationale in spectral_tools ADR-0002)
-- ONE entry point: `python -m spectral_tools.testing.benchmark_workflow`
-  (`bench`/`suite` desktop; `m7-census`/`m7-counts` embedded; `measure --list` shows
-  the target×instrument matrix; `m7-bootstrap` fetches the pinned newlib toolchain).
-  CMake targets `bench`, `bench_cache`, `m7_census`, `m7_counts` wrap the same module.
-  Don't add parallel perf scripts — extend `performance/matrix.py`.
+- ONE entry point: `python -m spectral_tools.testing.benchmark_workflow` (run with
+  `--help` for the verbs; `measure --list` shows the live target×instrument matrix;
+  the matching CMake targets wrap the same module). Don't add parallel perf
+  scripts — extend `performance/matrix.py`.
 - Pipeline shape: reproducible build → run under an instrument → parse → interpret.
   The matrix (`performance/matrix.py`) is the SSOT for which instrument measures
   which build target, with runtime availability probes.
 - Timing = in-process stage markers (CLOCK_MONOTONIC ns, spectral_log.h). Debuggers
-  are never a timing instrument (measured: ~3.4 ms per lldb breakpoint stop vs
-  ~600 ns per marker); they are for state inspection and (future) QEMU-gdbstub
-  stage segmentation, where guest time freezes while stopped.
+  are never a timing instrument (orders of magnitude of overhead per stop — measured
+  in ADR-0002); they are for state inspection only.
 - Embedded numbers carry provenance: QEMU counts are `[measured]` and never cycles;
   llvm-mca numbers are `[modeled]`; the two are never blended. Fidelity contract:
   docs/core_audit/M7_PERF_MODEL_PLAN.md.
@@ -96,8 +94,9 @@ ten commits or before executing any structural plan. It is adversarial by
 design: the goal is to find what is wrong, lazy, duplicated, or dishonest, not
 to confirm what is fine. Every finding becomes either a fix in the same
 review, a tracked item in a plan doc, or an explicit, written decision to
-accept it. Style north star: K&R — economy of expression, structure that
-tells its own story, comments that carry intuition.
+accept it. Style north star: K&R ("The C Programming Language", 2nd ed., in
+`docs/core_audit/`) — economy of expression, structure that tells its own
+story, comments that carry intuition.
 
 1. **Duplication.** Hunt near-identical blocks (hoist into one function next
    to its domain — never a grab-bag utils file), switch/if ladders that should
@@ -163,19 +162,25 @@ tells its own story, comments that carry intuition.
     (keep-alive hacks, inline import tricks, "good enough" tolerances): each
     is either fixed now or written into the plan with its risk. Meticulous
     beats fast; this is a kernel.
-11. **Tests are code too.** Every regression test is fail-on-bug verified
+11. **K&R adherence, without mercy.** "The C Programming Language" (2nd
+    ed., in `docs/core_audit/`) is the golden guide for C principles: economy
+    of expression, idiomatic use of the language, structure over cleverness,
+    well-chosen names, the standard library used as intended. Every violation
+    of its principles is a finding — no seniority of the surrounding code
+    excuses it.
+12. **Tests are code too.** Every regression test is fail-on-bug verified
     (revert the fix, watch it fail). No tautologies, no bands so wide they
     gate nothing, no silently-skipped suites (a skip must be visible and
     justified). Fixtures are deterministic and digest-stamped; committed
     fixtures contain no machine-specific paths.
-12. **Naming tells the truth.** Names state format and units (`*_q15`,
+13. **Naming tells the truth.** Names state format and units (`*_q15`,
     `*_rad`, `*_bytes`); a counter named for something the code no longer
     does is a lie and gets renamed with its semantics.
-13. **Lifecycle & boundaries.** Every create has a destroy on every path;
+14. **Lifecycle & boundaries.** Every create has a destroy on every path;
     allocation failures are handled; inputs crossing a trust boundary
     (files, CLI, vendored data) are validated at the boundary, once, with
     contracts — not re-checked ad hoc downstream.
-14. **Docs in the same patchset.** A change that falsifies a doc updates the
+15. **Docs in the same patchset.** A change that falsifies a doc updates the
     doc in the same unit of work; a stale claim is a bug with the same
     severity as the code defect it describes.
 

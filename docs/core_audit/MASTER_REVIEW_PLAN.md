@@ -115,8 +115,8 @@ comparison loops over parallel lists lacked a set-equality precondition
 (class rule: assert set equality before element-compare — now in the gate;
 sweep other zips: `grep -n "zip(" tools/`).
 
-### R6 Comments — the conversational-reference scrub (cardinal sin, rule
-already in AI.md:78, violated extensively by recent work)
+### R6 Comments — the conversational-reference scrub (cardinal sin; the standing rule is AI.md's "No AI/prompt/planning-referential
+text in code", violated extensively by recent work)
 - `grep -rn "pass[ -]2[0-9][0-9]" spectral_engine tools tests api` — every
   hit in CODE is rewritten: history belongs to git/CHANGELOG; code comments
   reference the governing DOC or the MEASUREMENT ("floors measured by the F1
@@ -157,6 +157,16 @@ migration story) · researcher (reproducibility, provenance, citations).
 Target set: the F2 IFFT files, wcet/expectations/memory_model, the SDRAM
 header, spectral_synth_arm32.c, the q15 header.
 
+### R11 K&R adherence (golden guide; merciless)
+The in-repo "C Programming Language" 2nd ed. governs C style. Sweep for:
+cleverness over structure, non-idiomatic control flow, pointer arithmetic
+where indexing reads better (and vice versa where K&R idiom prefers
+pointers), gratuitous casts, misuse or avoidance of the standard library on
+hosted paths, names that fight the book's economy. Runs inside the W6 panel
+as an eighth lens with veto power, plus a dedicated sweep of the hot kernels
+(spectral_synth_arm32.c, oscillator paths, q15 primitives) where idiom and
+economy matter most.
+
 ### R10 Honesty ledger (declared up front, by the author of the recent code)
 - `test_ifft_synth_parity.c` keep-alive hack (`if (ref[0] == 42.0f) ...`) —
   exactly the lazy-code class this review exists to kill → volatile sink.
@@ -182,7 +192,7 @@ header, spectral_synth_arm32.c, the q15 header.
 - **W4 — duplication hoists (R1)**: rig/test support headers; conversion
   policy unification; ELF-builder share; timbre-cap constant.
 - **W5 — honesty items (R10) + bug-class tests (R5)**.
-- **W6 — seven-lens panel (R9) + architecture sweep (R4)**: fleet workflow
+- **W6 — seven-lens panel (R9) + K&R lens (R11) + architecture sweep (R4)**: fleet workflow
   (budget permitting) or inline lens-by-lens; findings feed W-fix commits.
 - **W7 — re-verify**: full suites + gate + a final adversarial diff review
   of everything this review itself changed (the reviewer reviews the
