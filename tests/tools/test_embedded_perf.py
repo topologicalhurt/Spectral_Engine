@@ -231,26 +231,43 @@ def test_validation_report_math():
 
 # --- memory model (P4) ------------------------------------------------------
 
-def test_memory_constants_carry_provenance():
-    """Every latency constant must say where it came from — an unsourced
-    constant is the 'uncalibrated cost model' bug class the plan retires."""
-    for name, c in memory_model.LATENCY.items():
-        assert c.provenance and len(c.provenance) > 10, name
-    # Assumptions must be labeled as such.
-    assert "ASSUMPTION" in memory_model.LATENCY["bridge_cpu_cycles"].provenance
-    # Derived per-line costs: a row miss must cost more than a row hit, and
-    # the serial bound must exceed the pure-transfer bandwidth bound.
-    hit, miss = memory_model.line_fill_cycles(True), memory_model.line_fill_cycles(False)
+def test_memory_constants_parse_from_the_c_ssot():
+    """C-truth rule: the model parses daisy_seed_sdram.h + the rig ldscript at
+    runtime and fails loudly when the contract moves — no Python copies."""
+    c = memory_model.load_constants(ROOT)
+    for key in memory_model._REQUIRED_DEFINES:
+        assert key in c.defines, key
+    # The chosen-performance timing set: TRP/TRCD are the datasheet-derived
+    # values, NOT libDaisy's debug-era 16/10.
+    assert c.defines["SPECTRAL_DAISY_SDRAM_TRP"] < memory_model.STOCK_LIBDAISY_TICKS["TRP"]
+    assert c.defines["SPECTRAL_DAISY_SDRAM_TRCD"] < memory_model.STOCK_LIBDAISY_TICKS["TRCD"]
+    # Marker address comes from the ldscript MARKER region.
+    assert c.marker_addr == 0x60F00000
+    # Derived per-line costs: row miss > row hit > pure bandwidth; the chosen
+    # set must beat the stock set on the row-miss path (the point of choosing).
+    hit, miss = c.line_fill_cycles(True), c.line_fill_cycles(False)
     assert 0 < hit < miss
-    beats = memory_model.LATENCY["linefill_beats"].value
-    sd = memory_model.LATENCY["sdclk_per_cpu_cycle"].value
-    assert hit > beats * sd  # latency adds to bandwidth, never undercuts it
+    assert hit > c.linefill_beats * c.sdclk_per_cpu_cycle
+    assert miss < c.line_fill_cycles_stock(False)
+    # The model assumption stays labeled.
+    assert "ASSUMPTION" in memory_model.BRIDGE_PROVENANCE
+
+
+def test_memory_constants_fail_loudly_on_contract_move(tmp_path):
+    fake_root = tmp_path
+    hdr = fake_root / "api/daisy_seed"
+    hdr.mkdir(parents=True)
+    (hdr / "daisy_seed_sdram.h").write_text(
+        "#define SPECTRAL_DAISY_CPU_HZ 400000000u\n", encoding="utf-8")
+    with pytest.raises(memory_model.MemoryModelError, match="SPECTRAL_DAISY_SDCLK_HZ"):
+        memory_model.load_constants(fake_root)
 
 
 def test_dcache_sim_compulsory_capacity_and_write_allocate():
-    sim = memory_model.DCacheSim()
-    line = memory_model.LINE_BYTES
-    cache_bytes = int(memory_model.LATENCY["dcache_bytes"].value)
+    c = memory_model.load_constants(ROOT)
+    sim = memory_model.DCacheSim(c)
+    line = c.line_bytes
+    cache_bytes = c.defines["SPECTRAL_DAISY_DCACHE_BYTES"]
     base = 0x60000000
 
     # Sequential cold reads: every line a compulsory miss, re-read: all hits.
@@ -263,7 +280,7 @@ def test_dcache_sim_compulsory_capacity_and_write_allocate():
     assert sim.read_hits == n_resident
 
     # Streaming twice through 4x the cache: capacity misses on the second pass.
-    sim2 = memory_model.DCacheSim()
+    sim2 = memory_model.DCacheSim(c)
     n_stream = (cache_bytes // line) * 4
     for _ in range(2):
         for i in range(n_stream):
@@ -272,18 +289,19 @@ def test_dcache_sim_compulsory_capacity_and_write_allocate():
 
     # Write-allocate: a partial-line store miss fills; a full-line aligned
     # store stream switches to no-fill (dynamic read allocate class).
-    sim3 = memory_model.DCacheSim()
+    sim3 = memory_model.DCacheSim(c)
     sim3.access(memory_model._Access(True, base, 4))
     assert sim3.write_miss_fills == 1
-    sim4 = memory_model.DCacheSim()
+    sim4 = memory_model.DCacheSim(c)
     for i in range(4):
         sim4.access(memory_model._Access(True, base + i * line, line))
     assert sim4.write_miss_no_fill == 4 and sim4.write_miss_fills == 0
 
 
 def test_row_tracker_sequential_cadence():
-    rows = memory_model.RowTracker()
-    row_bytes = int(memory_model.LATENCY["row_bytes"].value)
+    c = memory_model.load_constants(ROOT)
+    rows = memory_model.RowTracker(c)
+    row_bytes = c.defines["SPECTRAL_DAISY_SDRAM_ROW_BYTES"]
     misses = sum(0 if rows.access(addr) else 1
                  for addr in range(0x60000000, 0x60000000 + 8 * row_bytes, 64))
     # Sequential stream: exactly one row-open per row_bytes span.
@@ -291,19 +309,20 @@ def test_row_tracker_sequential_cadence():
 
 
 def test_analyze_trace_splits_epochs_and_bounds(tmp_path):
-    line = memory_model.LINE_BYTES
+    c = memory_model.load_constants(ROOT)
+    line = c.line_bytes
     trace = tmp_path / "trace.txt"
     rows = [
         f"S {0x60000000:x} 4",            # sdram store miss -> fill
         f"L {0x20000000:x} 4",            # dtcm: counted, never priced
-        f"S {memory_model.MARKER_ADDR:x} 4",   # epoch boundary
+        f"S {c.marker_addr:x} 4",         # epoch boundary
         f"L {0x60000000 + line:x} 4",     # sdram read miss -> fill
         f"L {0x60000000 + line:x} 4",     # hit
         f"L {0x08000000:x} 4",            # flash-class
-        f"S {memory_model.MARKER_ADDR:x} 4",
+        f"S {c.marker_addr:x} 4",
     ]
     trace.write_text("\n".join(rows) + "\n", encoding="utf-8")
-    rep = memory_model.analyze_trace(trace)
+    rep = memory_model.analyze_trace(trace, c)
     assert len(rep.blocks) == 2
     b0, b1 = rep.blocks
     assert b0.sdram_accesses == 1 and b0.dtcm_accesses == 1
@@ -315,6 +334,9 @@ def test_analyze_trace_splits_epochs_and_bounds(tmp_path):
     doc = rep.as_dict()
     assert doc["n_blocks"] == 2
     assert "ASSUMPTION" in doc["constants"]["bridge_cpu_cycles"]["provenance"]
+    # The report must show the chosen-vs-stock comparison so the win is visible.
+    derived = doc["derived_per_line_cycles"]
+    assert derived["linefill_row_miss"] < derived["stock_libdaisy_comparison"]["linefill_row_miss"]
 
 
 # --- counts table parsing ---------------------------------------------------

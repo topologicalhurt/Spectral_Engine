@@ -2,16 +2,24 @@
 
 Replays the QEMU plugin's data-access trace (program order, exact addresses)
 through the Daisy placement and a Cortex-M7 D-cache model, pricing misses with
-a latency table whose every constant carries its calibration provenance —
-the shipped libDaisy FMC/clock configuration, the M7 TRM structure facts, and
-the AN4891 measured anchors. Nothing here is a measurement of hardware: the
-trace is measured, the stalls are MODELED, and the report says which is which
-(M7_PERF_MODEL_PLAN fidelity contract).
+the CHOSEN hardware configuration. Nothing here is a measurement of hardware:
+the trace is measured, the stalls are MODELED, and the report says which is
+which (M7_PERF_MODEL_PLAN fidelity contract).
+
+Constants are CENTRALIZED and parsed at runtime (C-truth rule, ADR-0002):
+  - api/daisy_seed/daisy_seed_sdram.h — the ONE place for clock tree, FMC
+    SDRAM timing (the maintainer-chosen best-performance set the firmware
+    actually programs), SDRAM geometry, and cache geometry; per-value
+    provenance lives next to each value in that header. Python holds no copy.
+  - native/qemu/mps2_an500.ld — the block-marker address (MARKER region).
+The only Python-side constants are model-side: the uncalibrated AXIM->FMC
+bridge assumption, and libDaisy's STOCK timing set kept for the comparison row
+(it is libDaisy's fact, not this repo's configuration).
 
 Placement mirror (the counts rig's ldscript ⇄ Daisy):
   DATA  0x20000000  -> DTCM-class   (Daisy .dtcmram_bss: ctx, q63 accum, blk)
   BULK  0x60000000  -> SDRAM-class  (Daisy .sdram_bss: the segment store),
-                       reached through the 16 KB 4-way WBWA D-cache
+                       reached through the 4-way WBWA D-cache
   CODE  <0x20000000 -> flash-class  (rodata via D-cache; code via I-cache)
 
 Stall accounting is reported as a RANGE, not a point: the M7 is non-blocking
@@ -22,69 +30,151 @@ serial bound (every miss latency exposed). A point estimate would be theater.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-LINE_BYTES = 32          # [TRM DDI 0489F 5.9: "Both caches use a line-length of 32-bytes"]
-MARKER_ADDR = 0x60F00000  # block boundary marker (rig ldscript .bulk_marker)
+from ...core.utils import find_repo_root
+
+SDRAM_HEADER_RELPATH = "api/daisy_seed/daisy_seed_sdram.h"
+LDSCRIPT_RELPATH = (
+    "tools/spectral_tools/performance/embedded/native/qemu/mps2_an500.ld"
+)
+
+# The header keys the model requires; a missing one means the SSOT contract
+# moved and the model must fail loudly, not fall back to a stale copy.
+_REQUIRED_DEFINES = (
+    "SPECTRAL_DAISY_CPU_HZ", "SPECTRAL_DAISY_AXI_HZ", "SPECTRAL_DAISY_SDCLK_HZ",
+    "SPECTRAL_DAISY_SDRAM_BUS_BITS", "SPECTRAL_DAISY_SDRAM_BANKS",
+    "SPECTRAL_DAISY_SDRAM_ROW_BYTES",
+    "SPECTRAL_DAISY_SDRAM_TMRD", "SPECTRAL_DAISY_SDRAM_TXSR",
+    "SPECTRAL_DAISY_SDRAM_TRAS", "SPECTRAL_DAISY_SDRAM_TRC",
+    "SPECTRAL_DAISY_SDRAM_TWR", "SPECTRAL_DAISY_SDRAM_TRP",
+    "SPECTRAL_DAISY_SDRAM_TRCD", "SPECTRAL_DAISY_SDRAM_CAS",
+    "SPECTRAL_DAISY_DCACHE_BYTES", "SPECTRAL_DAISY_DCACHE_WAYS",
+    "SPECTRAL_DAISY_CACHE_LINE",
+)
+
+_DEFINE_RE = re.compile(r"^#define\s+(SPECTRAL_DAISY_\w+)\s+(\d+)u?\b", re.MULTILINE)
+_MARKER_RE = re.compile(r"MARKER\s*\(\w+\)\s*:\s*ORIGIN\s*=\s*(0x[0-9A-Fa-f]+)")
+
+# Model-side assumption (NOT hardware configuration — stays here on purpose).
+BRIDGE_CPU_CYCLES = 12.0
+BRIDGE_PROVENANCE = (
+    "ASSUMPTION (uncalibrated): AXIM->FMC bridge + RPIPE0 capture, ~6 AXI "
+    "cycles @200 MHz; bounded by the AN4891 Table-6 cross-check; refine on "
+    "hardware"
+)
+
+# libDaisy's shipped timing set, kept ONLY for the comparison row in the
+# report. This is libDaisy's fact (sdram.cpp as shipped), not this repo's
+# configuration — the repo's chosen set lives in daisy_seed_sdram.h and is
+# what daisy_spectral_sdram_apply_timings() programs.
+STOCK_LIBDAISY_TICKS = {
+    "TRP": 16, "TRCD": 10, "TRAS": 4, "TRC": 8, "TWR": 3, "CAS": 3,
+}
+STOCK_PROVENANCE = (
+    "libDaisy sdram.cpp as shipped (RPDelay=16, RCDDelay=10, "
+    "SelfRefreshTime=4 — debug-era values; TRAS=4 ticks is 40 ns, below the "
+    "48 ns minimum its own comment quotes)"
+)
+
+# Empirical anchor for sanity, not a model input: with code in ITCM and
+# D-cache ON, AN4891 measured FFT R/W data in SDRAM at 1.19x the DTCM-resident
+# time (Table 6, STM32H743I-EVAL @400 MHz).
+AN4891_TABLE6_SDRAM_OVER_DTCM = 1.19
+
+
+class MemoryModelError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
-class Constant:
-    value: float
-    provenance: str
+class ModelConstants:
+    """Hardware configuration parsed from the SSOTs + the model assumption."""
+    defines: dict[str, int]          # SPECTRAL_DAISY_* from the header
+    marker_addr: int                 # from the rig ldscript MARKER region
+    header_relpath: str = SDRAM_HEADER_RELPATH
+
+    @property
+    def line_bytes(self) -> int:
+        return self.defines["SPECTRAL_DAISY_CACHE_LINE"]
+
+    @property
+    def sdclk_per_cpu_cycle(self) -> float:
+        return self.defines["SPECTRAL_DAISY_CPU_HZ"] / self.defines["SPECTRAL_DAISY_SDCLK_HZ"]
+
+    @property
+    def linefill_beats(self) -> float:
+        return self.line_bytes * 8 / self.defines["SPECTRAL_DAISY_SDRAM_BUS_BITS"]
+
+    def _fill_cycles(self, cas: int, row_extra_ticks: int, row_hit: bool) -> float:
+        ticks = cas + self.linefill_beats + (0 if row_hit else row_extra_ticks)
+        return BRIDGE_CPU_CYCLES + ticks * self.sdclk_per_cpu_cycle
+
+    def line_fill_cycles(self, row_hit: bool) -> float:
+        """CPU cycles per 32B linefill under the CHOSEN timing set."""
+        d = self.defines
+        return self._fill_cycles(
+            d["SPECTRAL_DAISY_SDRAM_CAS"],
+            d["SPECTRAL_DAISY_SDRAM_TRP"] + d["SPECTRAL_DAISY_SDRAM_TRCD"],
+            row_hit,
+        )
+
+    def line_fill_cycles_stock(self, row_hit: bool) -> float:
+        """Same, under libDaisy's shipped timings (comparison row only)."""
+        s = STOCK_LIBDAISY_TICKS
+        return self._fill_cycles(s["CAS"], s["TRP"] + s["TRCD"], row_hit)
+
+    def writeback_cycles(self) -> float:
+        return (self.defines["SPECTRAL_DAISY_SDRAM_TWR"] + self.linefill_beats) \
+            * self.sdclk_per_cpu_cycle
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "source": f"parsed: {self.header_relpath} (per-value provenance "
+                      "lives next to each value in that header)",
+            "defines": dict(self.defines),
+            "marker_addr": hex(self.marker_addr),
+            "bridge_cpu_cycles": {"value": BRIDGE_CPU_CYCLES,
+                                  "provenance": BRIDGE_PROVENANCE},
+            "stock_libdaisy_ticks": {"values": dict(STOCK_LIBDAISY_TICKS),
+                                     "provenance": STOCK_PROVENANCE},
+        }
 
 
-# Every model constant with its calibration provenance. CPU cycles @ 400 MHz
-# (the libDaisy default clock) unless stated otherwise.
-LATENCY = {
-    "cpu_hz": Constant(400e6, "libDaisy system.cpp FREQ_400MHZ default (PLLN=200, HSE)"),
-    "dtcm_stall_cycles": Constant(0.0,
-        "TRM DDI 0489F: internal TCM zero-wait; AN4891 Rev1 p17: DTCM 'accessible at the "
-        "maximum CPU clock speed (400 MHz) without latency'"),
-    "sdclk_per_cpu_cycle": Constant(4.0,
-        "derived: FMC kernel = PLL2R 200 MHz (libDaisy system.cpp), SDClockPeriod=2 "
-        "(libDaisy sdram.cpp) -> SDCLK 100 MHz vs CPU 400 MHz"),
-    "linefill_beats": Constant(8.0,
-        "derived: 32B line [TRM 5.9] / 32-bit SDRAM data bus "
-        "(libDaisy FMC_SDRAM_MEM_BUS_WIDTH_32); RBURST enabled, RPIPE 0"),
-    "cas_sdclk": Constant(3.0, "libDaisy sdram.cpp FMC_SDRAM_CAS_LATENCY_3"),
-    "row_open_extra_sdclk": Constant(26.0,
-        "libDaisy sdram.cpp AS SHIPPED: RPDelay=16 + RCDDelay=10 (comments say "
-        "'started at 2'; AS4C16M32MSA-6 datasheet minimum is ~3+3 at 100 MHz — the "
-        "shipped config is ~4x conservative; the model prices the device as configured)"),
-    "writeback_extra_sdclk": Constant(3.0, "libDaisy sdram.cpp WriteRecoveryTime=3"),
-    "bridge_cpu_cycles": Constant(12.0,
-        "ASSUMPTION (uncalibrated): AXIM->FMC bridge + RPIPE0 capture, ~6 AXI cycles "
-        "@200 MHz; bounded by the AN4891 Table-6 cross-check below; refine on hardware"),
-    "row_bytes": Constant(2048.0,
-        "AS4C16M32MSA organization: 512 columns x 32-bit = 2 KB per row per bank"),
-    "banks": Constant(4.0, "libDaisy sdram.cpp FMC_SDRAM_INTERN_BANKS_NUM_4"),
-    "dcache_bytes": Constant(16384.0,
-        "AN4891 Rev1 p5 Table: STM32H7x3 data cache 16 Kbytes"),
-    "dcache_ways": Constant(4.0, "TRM DDI 0489F 5.9: data cache four-way set-associative"),
-}
+def load_constants(repo_root: Path | None = None) -> ModelConstants:
+    """Parse the SSOTs. Raises MemoryModelError when the contract moved —
+    never silently substitutes a default."""
+    root = repo_root or find_repo_root(Path(__file__))
 
-# Empirical anchor for sanity, not a model input: with code in ITCM and D-cache
-# ON, AN4891 measured FFT R/W data in SDRAM at 1.19x the DTCM-resident time
-# (Table 6, STM32H743I-EVAL @400 MHz). A modeled SDRAM stall share wildly
-# inconsistent with that order of magnitude means a constant is wrong.
-AN4891_TABLE6_SDRAM_OVER_DTCM = 1.19
+    header = root / SDRAM_HEADER_RELPATH
+    try:
+        text = header.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MemoryModelError(f"cannot read {SDRAM_HEADER_RELPATH}: {exc}") from exc
+    defines = {m.group(1): int(m.group(2)) for m in _DEFINE_RE.finditer(text)}
+    missing = [k for k in _REQUIRED_DEFINES if k not in defines]
+    if missing:
+        raise MemoryModelError(
+            f"{SDRAM_HEADER_RELPATH} is missing {missing} — the constants "
+            "contract moved; fix the parse or the header, do not hardcode"
+        )
 
-# Derived per-line costs (CPU cycles).
-def line_fill_cycles(row_hit: bool) -> float:
-    sd = LATENCY["sdclk_per_cpu_cycle"].value
-    cyc = LATENCY["bridge_cpu_cycles"].value + (
-        LATENCY["cas_sdclk"].value + LATENCY["linefill_beats"].value) * sd
-    if not row_hit:
-        cyc += LATENCY["row_open_extra_sdclk"].value * sd
-    return cyc
+    ldscript = root / LDSCRIPT_RELPATH
+    try:
+        ld_text = ldscript.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MemoryModelError(f"cannot read {LDSCRIPT_RELPATH}: {exc}") from exc
+    marker = _MARKER_RE.search(ld_text)
+    if marker is None:
+        raise MemoryModelError(
+            f"MARKER region not found in {LDSCRIPT_RELPATH} — the trace "
+            "block-marker contract moved"
+        )
 
-
-def writeback_cycles() -> float:
-    sd = LATENCY["sdclk_per_cpu_cycle"].value
-    return (LATENCY["writeback_extra_sdclk"].value + LATENCY["linefill_beats"].value) * sd
+    return ModelConstants(defines=defines, marker_addr=int(marker.group(1), 16))
 
 
 @dataclass(slots=True)
@@ -102,20 +192,21 @@ def parse_trace(path: Path) -> Iterable[_Access]:
 
 
 class DCacheSim:
-    """16 KB, 4-way, 32B-line, write-back write-allocate D-cache.
+    """4-way, write-back write-allocate D-cache (geometry from the SSOT).
 
     LRU replacement: the TRM does not document the data-cache policy; for the
     segment stream (sequential, compulsory-miss dominated) the policy choice
     is immaterial, which is why the assumption is acceptable — revisit if a
-    reuse-heavy SDRAM working set ever approaches 16 KB.
+    reuse-heavy SDRAM working set ever approaches the cache size.
     Dynamic read allocate mode [TRM 5.9.1] is approximated: a store that
     writes a full line which is not resident allocates WITHOUT a linefill
     read when it follows full-line-write streaks (memset-class traffic).
     """
 
-    def __init__(self) -> None:
-        n_lines = int(LATENCY["dcache_bytes"].value) // LINE_BYTES
-        self.ways = int(LATENCY["dcache_ways"].value)
+    def __init__(self, constants: ModelConstants) -> None:
+        self.line_bytes = constants.line_bytes
+        self.ways = constants.defines["SPECTRAL_DAISY_DCACHE_WAYS"]
+        n_lines = constants.defines["SPECTRAL_DAISY_DCACHE_BYTES"] // self.line_bytes
         self.n_sets = n_lines // self.ways
         self.sets: list[list[tuple[int, bool]]] = [[] for _ in range(self.n_sets)]  # (tag, dirty), MRU first
         self.full_line_write_streak = 0
@@ -144,14 +235,14 @@ class DCacheSim:
         s.insert(0, (tag, dirty))
 
     def access(self, a: _Access) -> None:
-        first = a.addr // LINE_BYTES
-        last = (a.addr + a.size - 1) // LINE_BYTES
+        first = a.addr // self.line_bytes
+        last = (a.addr + a.size - 1) // self.line_bytes
         for line_addr in range(first, last + 1):
             set_idx, tag = self._lookup(line_addr)
             s = self.sets[set_idx]
             hit = next((i for i, (t, _) in enumerate(s) if t == tag), None)
             if a.is_store:
-                full_line = a.size >= LINE_BYTES and a.addr % LINE_BYTES == 0
+                full_line = a.size >= self.line_bytes and a.addr % self.line_bytes == 0
                 if hit is not None:
                     self.write_hits += 1
                     self._touch(s, hit, dirty=True)
@@ -177,9 +268,9 @@ class RowTracker:
     for the sequential segment stream the mapping detail only sets the
     row-miss cadence to one per row_bytes, which dominates either way)."""
 
-    def __init__(self) -> None:
-        self.banks = int(LATENCY["banks"].value)
-        self.row_bytes = int(LATENCY["row_bytes"].value)
+    def __init__(self, constants: ModelConstants) -> None:
+        self.banks = constants.defines["SPECTRAL_DAISY_SDRAM_BANKS"]
+        self.row_bytes = constants.defines["SPECTRAL_DAISY_SDRAM_ROW_BYTES"]
         self.open_rows: dict[int, int] = {}
         self.row_hits = 0
         self.row_misses = 0
@@ -196,8 +287,8 @@ class RowTracker:
         return False
 
 
-def _region(addr: int) -> str:
-    if addr == MARKER_ADDR:
+def _region(addr: int, marker_addr: int) -> str:
+    if addr == marker_addr:
         return "marker"
     if 0x20000000 <= addr < 0x30000000:
         return "dtcm"
@@ -210,6 +301,7 @@ def _region(addr: int) -> str:
 
 @dataclass(slots=True)
 class BlockStalls:
+    constants: ModelConstants
     sdram_accesses: int = 0
     dtcm_accesses: int = 0
     flash_accesses: int = 0
@@ -221,18 +313,19 @@ class BlockStalls:
     @property
     def stall_serial(self) -> float:
         """Upper bound: every miss latency fully exposed."""
-        return (self.fills_row_hit * line_fill_cycles(True)
-                + self.fills_row_miss * line_fill_cycles(False)
-                + (self.dirty_evictions + self.write_no_fill) * writeback_cycles())
+        c = self.constants
+        return (self.fills_row_hit * c.line_fill_cycles(True)
+                + self.fills_row_miss * c.line_fill_cycles(False)
+                + (self.dirty_evictions + self.write_no_fill) * c.writeback_cycles())
 
     @property
     def stall_bandwidth(self) -> float:
         """Lower bound: transfers limited only by SDRAM beat bandwidth
         (two linefill buffers + store buffer hide latency [TRM])."""
-        sd = LATENCY["sdclk_per_cpu_cycle"].value
+        c = self.constants
         lines = (self.fills_row_hit + self.fills_row_miss
                  + self.dirty_evictions + self.write_no_fill)
-        return lines * LATENCY["linefill_beats"].value * sd
+        return lines * c.linefill_beats * c.sdclk_per_cpu_cycle
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -247,23 +340,29 @@ class BlockStalls:
 
 @dataclass(frozen=True, slots=True)
 class MemoryReport:
+    constants: ModelConstants
     blocks: tuple[BlockStalls, ...]
     cache: dict[str, int]
     total: BlockStalls
 
     def as_dict(self) -> dict[str, Any]:
+        c = self.constants
         per_block = [b.as_dict() for b in self.blocks]
         worst = max(self.blocks, key=lambda b: b.stall_serial) if self.blocks else None
         return {
             "provenance": "modeled: analytical memory layer over [measured: qemu-tcg] "
-                          "trace; constants from libDaisy-as-shipped + TRM + AN4891 "
-                          "(see constants); stalls are bounds, not points",
-            "constants": {k: {"value": c.value, "provenance": c.provenance}
-                          for k, c in LATENCY.items()},
+                          "trace; hardware constants parsed from the C SSOT "
+                          "(daisy_seed_sdram.h); stalls are bounds, not points",
+            "constants": c.as_dict(),
             "derived_per_line_cycles": {
-                "linefill_row_hit": line_fill_cycles(True),
-                "linefill_row_miss": line_fill_cycles(False),
-                "writeback": writeback_cycles(),
+                "timing_set": "chosen (daisy_seed_sdram.h — what the firmware programs)",
+                "linefill_row_hit": c.line_fill_cycles(True),
+                "linefill_row_miss": c.line_fill_cycles(False),
+                "writeback": c.writeback_cycles(),
+                "stock_libdaisy_comparison": {
+                    "linefill_row_hit": c.line_fill_cycles_stock(True),
+                    "linefill_row_miss": c.line_fill_cycles_stock(False),
+                },
             },
             "an4891_anchor": {
                 "table6_sdram_over_dtcm": AN4891_TABLE6_SDRAM_OVER_DTCM,
@@ -283,14 +382,17 @@ class MemoryReport:
         }
 
 
-def analyze_trace(trace_path: Path) -> MemoryReport:
+def analyze_trace(
+    trace_path: Path, constants: ModelConstants | None = None
+) -> MemoryReport:
     """Replay the trace; split into blocks on the marker store; price SDRAM-class
     misses. DTCM-class accesses are counted but never stall [TRM/AN4891]."""
-    cache = DCacheSim()
-    rows = RowTracker()
+    c = constants or load_constants()
+    cache = DCacheSim(c)
+    rows = RowTracker(c)
     blocks: list[BlockStalls] = []
-    cur = BlockStalls()
-    total = BlockStalls()
+    cur = BlockStalls(constants=c)
+    total = BlockStalls(constants=c)
 
     def fills_snapshot() -> tuple[int, int, int]:
         return (cache.read_misses + cache.write_miss_fills,
@@ -299,10 +401,10 @@ def analyze_trace(trace_path: Path) -> MemoryReport:
     prev_fills, prev_nofill, prev_evict = fills_snapshot()
 
     for a in parse_trace(trace_path):
-        region = _region(a.addr)
+        region = _region(a.addr, c.marker_addr)
         if region == "marker":
             blocks.append(cur)
-            cur = BlockStalls()
+            cur = BlockStalls(constants=c)
             continue
         if region == "dtcm":
             cur.dtcm_accesses += 1
@@ -341,6 +443,6 @@ def analyze_trace(trace_path: Path) -> MemoryReport:
         "write_hits": cache.write_hits, "write_miss_fills": cache.write_miss_fills,
         "write_miss_no_fill": cache.write_miss_no_fill,
         "dirty_evictions": cache.dirty_evictions,
-        "sets": cache.n_sets, "ways": cache.ways, "line_bytes": LINE_BYTES,
+        "sets": cache.n_sets, "ways": cache.ways, "line_bytes": cache.line_bytes,
     }
-    return MemoryReport(blocks=tuple(blocks), cache=cache_stats, total=total)
+    return MemoryReport(constants=c, blocks=tuple(blocks), cache=cache_stats, total=total)

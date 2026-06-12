@@ -181,6 +181,18 @@ def _build_plugin(tc: Toolchain, out_dir: Path) -> Path:
     return plugin
 
 
+def _line_shift(repo_root: Path) -> int:
+    """log2(cache line) from the C SSOT (daisy_seed_sdram.h) — the plugin
+    requires it as an arg so no copy of the line size lives in C plugin code."""
+    from .memory_model import load_constants
+
+    line = load_constants(repo_root).line_bytes
+    shift = line.bit_length() - 1
+    if (1 << shift) != line:
+        raise CountsError(f"cache line {line} from the SSOT is not a power of two")
+    return shift
+
+
 def _run_once(
     tc: Toolchain, elf: Path, plugin: Path,
     ranges: list[tuple[str, int, int]], counts_path: Path,
@@ -189,6 +201,7 @@ def _run_once(
     range_args = "".join(
         f",range={name}:0x{start:x}:0x{end:x}" for name, start, end in ranges
     )
+    range_args += f",lineshift={_line_shift(tc.repo_root)}"
     if trace_path is not None:
         range_args += f",trace={trace_path}"
     result = run(

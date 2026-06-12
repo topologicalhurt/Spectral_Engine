@@ -9,6 +9,9 @@
  *
  * Args:  range=name:0xstart:0xend   (repeatable; from arm-none-eabi-nm)
  *        out=path                   (report file; default stderr)
+ *        lineshift=N                (REQUIRED: log2(cache line bytes); the
+ *                                    driver derives it from the C SSOT
+ *                                    daisy_seed_sdram.h — no copy lives here)
  *        trace=path                 (optional: full data-access address trace,
  *                                    one "L|S vaddr size" line per access —
  *                                    large; for offline cache simulation)
@@ -25,8 +28,11 @@
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
 #define MAX_RANGES 64
-#define LINE_SHIFT 5            /* Cortex-M7 cache line = 32B */
 #define N_REGIONS 4
+
+/* log2(cache line bytes); set by the REQUIRED lineshift= plugin arg from the
+ * C SSOT (daisy_seed_sdram.h) — install fails without it (no silent copy). */
+static unsigned line_shift = 0;
 
 typedef struct {
     char name[64];
@@ -78,8 +84,8 @@ static void mem_cb(unsigned int vcpu_index, qemu_plugin_meminfo_t info,
         r->load_bytes += bytes;
     }
     /* An access can straddle a line boundary; record every line it touches. */
-    uint64_t first_line = vaddr >> LINE_SHIFT;
-    uint64_t last_line = (vaddr + bytes - 1) >> LINE_SHIFT;
+    uint64_t first_line = vaddr >> line_shift;
+    uint64_t last_line = (vaddr + bytes - 1) >> line_shift;
     int region = region_of(vaddr);
     region_bytes[region] += bytes;
     for (uint64_t line = first_line; line <= last_line; line++) {
@@ -161,6 +167,8 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
             g_strfreev(parts);
         } else if (g_str_has_prefix(argv[i], "out=")) {
             snprintf(out_path, sizeof out_path, "%s", argv[i] + 4);
+        } else if (g_str_has_prefix(argv[i], "lineshift=")) {
+            line_shift = (unsigned)g_ascii_strtoull(argv[i] + 10, NULL, 10);
         } else if (g_str_has_prefix(argv[i], "trace=")) {
             trace_file = fopen(argv[i] + 6, "w");
             if (!trace_file) {
@@ -168,6 +176,11 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
                 return -1;
             }
         }
+    }
+    if (line_shift == 0u || line_shift > 12u) {
+        fprintf(stderr, "spectral_counts: lineshift=N (1..12) is required — "
+                        "derive it from daisy_seed_sdram.h, do not hardcode\n");
+        return -1;
     }
     qemu_plugin_register_vcpu_tb_trans_cb(id, tb_trans_cb);
     qemu_plugin_register_atexit_cb(id, atexit_cb, NULL);

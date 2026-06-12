@@ -1,5 +1,6 @@
 /* daisy_seed_spectral.c - Daisy Seed spectral synthesis wrapper */
 #include "daisy_seed_spectral.h"
+#include "daisy_seed_sdram.h"
 #include "spectral_lut.h"
 #include <string.h>
 #include <math.h>
@@ -31,7 +32,12 @@ DaisyResult daisy_spectral_init(DaisySpectralCtx* ctx, uint32_t sample_rate) {
     if (!ctx) return DAISY_ERR_PARAM;
     if (s_active_ctx && s_active_ctx != ctx) return DAISY_ERR_MEMORY;
     memset(ctx, 0, sizeof(DaisySpectralCtx));
-    
+
+    /* Replace libDaisy's debug-era FMC SDRAM timings with the chosen
+     * datasheet-derived set (daisy_seed_sdram.h). No-op off-target or under
+     * SPECTRAL_SDRAM_STOCK_TIMINGS; runs after the app's hw.Init(). */
+    daisy_spectral_sdram_apply_timings();
+
     /* Validate sample rate */
     if (sample_rate != DAISY_SAMPLE_RATE && sample_rate != DAISY_SAMPLE_RATE_96K) {
         sample_rate = DAISY_SAMPLE_RATE;
