@@ -246,10 +246,11 @@ int osc_simd_available(SpectralTimbre timbre) {
  * branch, and the dev environment has no arm_math.h / libDaisy, so this body is
  * neither built nor run locally -- it is type-checked against an arm_math.h shim and
  * mirrors the already-shipping float CMSIS path above. NOTE: it also has no LIVE
- * caller yet -- oscillator.c's Q15 dispatch is #if !SPECTRAL_EMBEDDED (PASS216), so
+ * caller yet -- oscillator.c's Q15 dispatch is deliberately #if !SPECTRAL_EMBEDDED, so
  * embedded Q15 oscillator synthesis is owned by spectral_synth_arm32.c today. Wiring
  * this into the live embedded dispatch reverses that deliberate guard and changes
- * shipped embedded behavior, so it is surfaced as a maintainer decision (plan Phase 2). */
+ * shipped embedded behavior, so it needs explicit sign-off (QTYPE_DOMAIN_PLAN.md
+ * Phase 2). */
 #define SPECTRAL_OSC_Q15_VERSION_CMSIS_PIN 1
 _Static_assert(SPECTRAL_OSC_Q15_VERSION == SPECTRAL_OSC_Q15_VERSION_CMSIS_PIN,
                "spectral_osc_q15.h contract changed; re-validate CMSIS-Q15 oscillator");

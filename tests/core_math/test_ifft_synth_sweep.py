@@ -2,9 +2,10 @@
 """F1 gate for the IFFT-synthesis frame-builder math (IFFT_SYNTHESIS_PLAN).
 
 Compiles and runs harnesses/ifft_synth_sweep.c and pins the MEASURED error
-floors (pass 257, double precision, N=512/hop 256, periodic Hann):
+floors (this harness is the measurement; double precision, N=512/hop 256,
+periodic Hann):
   COLA exact; frame truncation floor K=8 ~ -55 dBFS, K=12 ~ -63 dBFS
-  (decay ~1/d^3 -- the -80 dB plan guess was wrong, measurement replaced it);
+  (decay ~1/d^3 -- measurement replaced the plan's -80 dB guess);
   interpolation negligible at O>=16; stream RMS -83..-92 dBFS.
 Bounds below carry ~3 dB headroom; a breach means the frame-builder math
 or the motif changed, and F2+ must re-derive its error budget.
@@ -52,7 +53,7 @@ def test_ifft_frame_builder_error_floors():
     # COLA: periodic Hann at 50% must be exact to double precision.
     assert cola is not None and abs(cola[0] - 1.0) < 1e-9 and abs(cola[1] - 1.0) < 1e-9
 
-    # Frame truncation floors (measured pass 257, +3 dB headroom).
+    # Frame truncation floors (measured values above, +3 dB headroom).
     assert frames[(4, 64)] < -40.0
     assert frames[(8, 64)] < -52.0
     assert frames[(12, 64)] < -59.0

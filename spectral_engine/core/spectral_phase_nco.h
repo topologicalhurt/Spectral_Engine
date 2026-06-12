@@ -4,8 +4,8 @@
  * it accumulates theta(t) = phase0 + alpha*t + c2*t^2 + c3*t^3 in a FIXED-POINT phase
  * via cubic forward-differencing -- 3 integer adds per sample, zero float on the hot
  * path -- so an opt-in Q15 oscillator can derive its phase index WITHOUT the per-sample
- * float->Q15 conversion that PASS210 measured cannot be paid if Q15 lane-packing is ever
- * to beat float-SIMD. This is the desktop lift of the embedded integer NCO
+ * float->Q15 conversion, measured (bench_q15_pack8) as too costly to pay if Q15
+ * lane-packing is ever to beat float-SIMD. This is the desktop lift of the embedded integer NCO
  * (SpectralActiveSegQ15 / spectral_phase_batch4 in spectral_synth_arm32.c), widened from
  * its linear+quadratic (freq_inc/freq_delta) form to the full cubic (third difference).
  *

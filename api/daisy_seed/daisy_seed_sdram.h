@@ -7,8 +7,8 @@
  * no copy. Every value carries its calibration provenance next to it. Rename a
  * macro and the model fails loudly, not silently.
  *
- * TIMING POLICY (maintainer decision, 2026-06-12): the CHOSEN configuration is
- * the best-performance datasheet-derived set, not libDaisy's shipped one.
+ * TIMING POLICY: the CHOSEN configuration is the best-performance
+ * datasheet-derived set, not libDaisy's shipped one.
  * libDaisy's sdram.cpp ships debug-era timings (RPDelay=16, RCDDelay=10,
  * comments admit "started at 2") that are ~4x slower than the part needs, and
  * a SelfRefreshTime (tRAS) of 4 ticks = 40 ns, BELOW the 48 ns minimum its own
@@ -52,7 +52,7 @@
  * libDaisy's quoted -6 part minima [tRAS 48ns, tRC 60ns]), each rounded UP.
  * The part-specific AS4C16M32MSA sheet is distribution-gated; the family
  * table + the in-tree quotes are the best obtainable provenance. Verify on
- * hardware before calling these final (no board as of pass 252).            */
+ * hardware before calling these final (derived without a board).            */
 #define SPECTRAL_DAISY_SDRAM_TMRD        2u   /* mode-register set, JEDEC 2 CLK   */
 #define SPECTRAL_DAISY_SDRAM_TXSR        7u   /* self-refresh exit (libDaisy 7)   */
 #define SPECTRAL_DAISY_SDRAM_TRAS        5u   /* 48 ns -> 5 (libDaisy ships 4!)   */

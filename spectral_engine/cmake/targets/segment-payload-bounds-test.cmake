@@ -2,7 +2,7 @@
 #
 # Asserts spectral_segment_payload_valid upper-bounds |width| at
 # SPECTRAL_SEGMENT_WIDTH_MAX (defense-in-depth for the rads*width
-# int-conversion boundary behind the pass-248/249 INT_MAX defects), with an
+# int-conversion boundary behind the INT_MAX defect class), with an
 # inclusive boundary and no over-tightening of the normal width domain.
 #
 # Run: cmake --build build --target segment_payload_bounds_test

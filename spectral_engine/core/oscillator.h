@@ -68,7 +68,8 @@ OscDispatchWord osc_get_dispatch(void);
 /* Per-timbre opt-in Q15 *compute* domain (Q3b, QTYPE_DOMAIN_PLAN.md §5).
  * Bit (1u << timbre) set => that timbre's point-sampled sustain renders via the
  * Q15 evaluators (spectral_osc_q15.h) instead of float.  Float is the DEFAULT
- * (mask 0); Q15 is lossy (~-85..-92 dBFS vs float, PASS208) and engaged only
+ * (mask 0); Q15 is lossy (~-85..-92 dBFS vs float; floors pinned by
+ * test_q15_compute_precision) and engaged only
  * when explicitly enabled.  Only sine/saw/square/triangle/parabola have a Q15
  * path (osc_q15_available); the bit is ignored for any other timbre. */
 #define OSC_Q15_BIT(timbre) ((uint16_t)(1u << (timbre)))

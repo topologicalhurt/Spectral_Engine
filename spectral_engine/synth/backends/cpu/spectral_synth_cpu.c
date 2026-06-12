@@ -84,11 +84,7 @@ static ThreadBuffers thread_buffers_alloc(int n_threads, size_t out_len, size_t 
 
     /* Checked align-up: stride = align_up(out_bytes, SPECTRAL_CACHE_ALIGN).
      * The power-of-two validation above makes the mask form valid; the
-     * spectral_size_add() guard proves the padding addition cannot wrap.
-     *
-     * Calculate buffer size and aligned stride without raw addition.
-     * Pass 22 proved out_len * element_size; this pass proves the cache-line
-     * padding arithmetic before allocating the per-thread arena. */
+     * spectral_size_add() guard proves the padding addition cannot wrap. */
     tb.buf_size = out_bytes;
     if (!spectral_size_add(tb.buf_size, align_mask, &stride_with_padding)) {
         *out_error = SPECTRAL_ERR_OVERFLOW;

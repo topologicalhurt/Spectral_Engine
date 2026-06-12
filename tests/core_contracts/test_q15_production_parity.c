@@ -11,8 +11,9 @@
  * — and asserts the per-timbre RMS error stays at the characterized Q15 floor.
  * This is the CI lock on the QTYPE_DOMAIN_PLAN.md §7 per-path sign-off: float
  * stays default, and a regression that breaks a Q15 path (or silently widens its
- * error) fails the build. The five timbres are the signed-off set
- * (sine/saw/square/triangle/parabola); asin/quantized/pwm have no Q15 path.
+ * error) fails the build. The five timbres are the full Q15-capable set
+ * (sine/saw/square/triangle/parabola, osc_q15_available); asin/quantized/pwm
+ * have no Q15 path.
  *
  * Both paths carry the real fade-in/out envelope and amp ramp, so the rendered
  * error is the production-observable delta of enabling Q15, not a synthetic

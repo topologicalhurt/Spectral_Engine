@@ -74,7 +74,7 @@
 #define SPECTRAL_METAL_FAST_MATH 0
 #endif
 /* Precise (cubic) MQ phase reconstruction gate. EXPERIMENTAL — NOT a
- * supported path (maintainer decision 2026-06-11, REVIEWER_HANDOFF_2 sec 4.3).
+ * supported path (policy: REVIEWER_HANDOFF_2 sec 4.3).
  * When 0 (default) the synthesis phase model is the canonical per-interval
  * quadratic phase (McAulay-Quatieri 1986 per-frame interpolation); the cubic
  * coefficients reduce to (c2=beta, c3=0) so the synth path is bit-identical.
@@ -394,8 +394,8 @@ static inline const char* spectral_exec_mode_name(void) {
 /* Segment width domain bound, enforced by spectral_segment_payload_valid.
  * width is a waveform shape parameter (quantized step density, pwm duty); the
  * synth boundary computes rads*width with |rads| <= pi+ulp, which becomes
- * int-conversion UB once width reaches ~2^31/pi (the scalar pass-248 and SIMD
- * pass-249 INT_MAX defects). 2^24 is the largest float with exactly
+ * int-conversion UB once width reaches ~2^31/pi (the INT_MAX defect class
+ * reproduced by test_segment_payload_bounds). 2^24 is the largest float with exactly
  * representable unit steps -- a step count above it cannot be represented
  * distinctly anyway -- and keeps pi*width ~40x under the UB envelope. The bound
  * is on |width| so no future consumer inherits the boundary class. */

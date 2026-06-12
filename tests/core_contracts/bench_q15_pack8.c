@@ -1,10 +1,10 @@
 /* bench_q15_pack8.c - Q5c measure-first probe: can packed 8xQ15 beat 4-wide float-SIMD?
  *
  * NOT a ctest (timing is machine-dependent): a standalone EXCLUDE_FROM_ALL probe
- * that settles the Q5c GO/NO-GO on data, exactly as bench_q15_throughput settled
- * Q3b. PASS210 declined a Q15 SIMD kernel over FLOAT phase because the per-lane
- * float->Q15 conversion cancelled the lane-density win. Q5a/Q5b removed that
- * precondition: phase is now an integer NCO. This probe drives the kernel as hard
+ * that settles the Q5c GO/NO-GO on data (QTYPE_DOMAIN_PLAN.md), exactly as
+ * bench_q15_throughput settled Q3b. A Q15 SIMD kernel over FLOAT phase was
+ * declined on data: the per-lane float->Q15 conversion cancelled the
+ * lane-density win. Q5a/Q5b removed that precondition: phase is now an integer NCO. This probe drives the kernel as hard
  * as it can be driven on desktop and isolates where the time goes, so the GO/NO-GO
  * is made on a *tuned* kernel, not a strawman.
  *

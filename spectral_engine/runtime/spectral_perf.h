@@ -15,8 +15,8 @@
  * Cycle PROJECTIONS are deliberately absent: they come from the validated M7
  * measurement stack (m7-census / m7-stalls / m7-wcet — M7_PERF_MODEL_PLAN),
  * never from in-C cost constants. The old profile-driven estimator
- * (spectral_perf_model.*) was retired in pass 253: uncalibrated constants
- * pricing a kernel shape that no longer exists.
+ * (spectral_perf_model.*) was retired: uncalibrated constants pricing a
+ * kernel shape that no longer exists.
  */
 #ifndef SPECTRAL_PERF_H
 #define SPECTRAL_PERF_H

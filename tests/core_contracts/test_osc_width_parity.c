@@ -10,8 +10,8 @@
  *     8-wide  ==  4-wide  ==  scalar      (within the FMA-contraction budget)
  *
  * That pins the plan's Q2 contract: widening the register does not change the
- * synthesized signal beyond the same <=1 ULP class already accepted for SIMD-vs-
- * scalar at PASS200. The 8-wide path is NOT bit-identical to the 4-wide path -
+ * synthesized signal beyond the same <=1 ULP class already accepted for SIMD-
+ * vs-scalar (test_osc_parity). The 8-wide path is NOT bit-identical to the 4-wide path -
  * the SIMD/scalar-tail boundary moves from a multiple of 4 to a multiple of 8,
  * so a few boundary samples per segment shift between the vector and scalar
  * lanes - but the divergence stays within budget, which is the guarantee.

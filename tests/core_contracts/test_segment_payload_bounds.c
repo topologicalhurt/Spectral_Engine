@@ -2,7 +2,7 @@
  * |width|, not just require finiteness.
  *
  * Defense-in-depth for the rads*width int-conversion boundary: both confirmed
- * INT_MAX defects (scalar pass-248, SIMD pass-249) reached the oscillator with
+ * INT_MAX defects (one scalar, one SIMD) reached the oscillator with
  * a finite-but-astronomical width that spectral_segment_payload_valid happily
  * accepted (it only checked isfinite). The formula-level guards are correct
  * now, but a validated Segment must never carry a width that even approaches
@@ -64,7 +64,7 @@ static void test_width_beyond_bound_rejects(void) {
     CHECK(!spectral_segment_payload_valid(&s), "width just above WIDTH_MAX must reject");
 
     /* The actual defect class: finite width large enough that rads*width can
-     * cross (float)INT_MAX. Both pass-248/249 reproducers live here. */
+     * cross (float)INT_MAX. The scalar and SIMD reproducers live here. */
     s.width = 1e9f;
     CHECK(!spectral_segment_payload_valid(&s), "width=1e9 (UB envelope class) must reject");
     s.width = 1073741824.0f; /* 2^30, the osc_formulas_domain reproducer width */

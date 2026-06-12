@@ -32,22 +32,23 @@ from .codegen import CodegenError, mca_region
 from .toolchain import Toolchain
 
 # The fact base behind every expected value. Verification status is explicit:
-# "skeptics" = 2-skeptic majority-refute (pass-250 research workflow);
-# "direct" = source fetched and quotes confirmed first-party during pass 250.
+# "direct" = the cited source was fetched and the quote confirmed first-party;
+# "corroborated" = cross-checked against independent secondary write-ups, the
+# primary quote itself not re-confirmed.
 FACTS: dict[str, dict[str, str]] = {
     "trm-dual-issue": {
         "claim": "In-order super-scalar pipeline; many instructions can be "
                  "dual-issued, including load/load and load/store pairs "
                  "(multiple memory interfaces).",
         "source": "Arm Cortex-M7 TRM, DDI 0489F sec 1.1",
-        "verified": "skeptics",
+        "verified": "corroborated",
     },
     "trm-two-alus": {
         "claim": "DPU has two ALUs (one SIMD-capable) and a 6-read/4-write "
                  "register file sized for dual-issue, with extensive "
                  "forwarding to minimise interlocks.",
         "source": "Arm Cortex-M7 TRM, DDI 0489F sec 1.2.1",
-        "verified": "skeptics",
+        "verified": "corroborated",
     },
     "no-official-cycle-table": {
         "claim": "Unlike M0/M3/M4, ARM does not publish per-instruction cycle "

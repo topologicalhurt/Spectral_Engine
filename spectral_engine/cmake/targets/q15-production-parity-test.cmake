@@ -3,7 +3,7 @@
 # Renders representative segments through the REAL production dispatch
 # (timbre_synth_segment) with the opt-in Q15 compute domain off (float, the
 # shipping default) and on, and asserts the per-timbre RMS error stays at the
-# characterized Q15 floor (q15_compute_precision / PASS208). This is the CI lock
+# characterized Q15 floor (q15_compute_precision). This is the CI lock
 # on the QTYPE_DOMAIN_PLAN.md §7 per-path sign-off: float stays default, a Q15
 # regression fails the build. Same engine link set as osc_parity.
 #

@@ -213,7 +213,7 @@ def test_validation_cases_cite_real_facts_with_sane_expectations():
             )
     for fid, fact in mca_validation.FACTS.items():
         assert fact["source"], fid
-        assert fact["verified"] in {"skeptics", "direct"}, fid
+        assert fact["verified"] in {"corroborated", "direct"}, fid
 
 
 def test_validation_report_math():

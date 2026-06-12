@@ -3,7 +3,7 @@
  * Q3 of QTYPE_DOMAIN_PLAN.md adds an OPT-IN Q15 *compute* domain for throughput-
  * bound L1 oscillator paths. The plan's open question (§6) is which timbres clear
  * the 15-bit precision bar — computing audio in Q15 spends ~60 dB of the headroom
- * the float oscillator earns (-155 dBFS, PASS201), so each candidate path needs a
+ * the float oscillator earns (measured -155 dBFS vs double truth), so each candidate path needs a
  * measured dBFS justification BEFORE it is wired into production. This harness is
  * that measurement. It changes NO production output: it renders the L1 waveforms
  * two ways and reports the per-timbre error, nothing more.

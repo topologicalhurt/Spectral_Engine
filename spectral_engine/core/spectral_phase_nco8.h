@@ -5,8 +5,9 @@
  * signed Q15 phase index the spectral_osc_q15_* evaluators read and the low 16 bits are
  * fractional headroom), each lane offset by one sample and advancing by 8 (stride-8
  * differences) so ONE step emits 8 CONSECUTIVE sample indices in a simde__m128i. This
- * removes the serial scalar phase that PASS213 measured as ~31-35% of the packed-Q15
- * kernel -- the gap between the shipped 1.2-1.4x and the ~2x eval+accumulate floor.
+ * removes the serial scalar phase, measured at ~31-35% of the packed-Q15 kernel
+ * (QTYPE_DOMAIN_PLAN.md Q5c) -- the gap between the shipped 1.2-1.4x and the ~2x
+ * eval+accumulate floor.
  *
  * PRECISION: uint32 keeps only 16 fractional bits where the uint64 scalar NCO keeps 48,
  * so the stride-8 third difference (and its cubic accumulation over a segment) has less

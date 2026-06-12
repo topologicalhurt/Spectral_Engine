@@ -6,9 +6,10 @@ every counts table is traceable to its exact workload. Generation is
 deterministic — same spec, byte-identical header (generators discipline,
 ADR-0001 rules 3/5).
 
-The default fixture is the Campaign-3 P2 workload: 9 staggered 8192-sample
-voices (odd count keeps one voice unpaired past dual-MAC pairing), 16384
-output samples in 256-sample blocks, fades exercised at every boundary.
+The default fixture is the standard counts workload (M7_PERF_MODEL_PLAN.md):
+9 staggered 8192-sample voices (odd count keeps one voice unpaired past
+dual-MAC pairing), 16384 output samples in 256-sample blocks, fades
+exercised at every boundary.
 """
 
 from __future__ import annotations

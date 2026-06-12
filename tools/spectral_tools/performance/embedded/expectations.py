@@ -1,6 +1,6 @@
 """Centralized performance expectations: ONE generated baseline, ONE gate.
 
-The maintainer's rule (pass 255): testing constants must not float around the
+The rule: testing constants must not float around the
 codebase — they are generated from the live measurement stack into a single
 frozen fixture, and every tolerance lives HERE with a name and a
 justification. This mirrors the resource-hash generate/verify pattern:
@@ -50,9 +50,9 @@ TOLERANCES: dict[str, dict[str, Any]] = {
     "measured_insns_rel": {
         "value": 0.05,
         "justification": "arm-none-eabi-gcc codegen drift across releases was "
-                         "measured at 0.03% (15.2.0 -> 15.2.1, pass 244); 5% "
-                         "absorbs a major-version bump while still catching a "
-                         "real kernel regression",
+                         "measured at 0.03% (15.2.0 -> 15.2.1); 5% absorbs a "
+                         "major-version bump while still catching a real "
+                         "kernel regression",
     },
     "wcet_rel": {
         "value": 0.15,
@@ -71,14 +71,14 @@ TOLERANCES: dict[str, dict[str, Any]] = {
 # --- the set-in-stone ceilings (the deterministic capacity promises) --------
 # These are ABSOLUTE gates, independent of the frozen baseline: the engine
 # must always be able to keep the published capacity table
-# (M7_PERF_MODEL_PLAN, pass 254). Budgets derive from the C SSOTs at gate
-# time — nothing here hardcodes a clock or sample rate.
+# (docs/core_audit/M7_PERF_MODEL_PLAN.md). Budgets derive from the C SSOTs
+# at gate time — nothing here hardcodes a clock or sample rate.
 STONE_SCENARIOS: tuple[dict[str, Any], ...] = (
     # Daisy default callback: 32 voices, 128-segment scan, 48-sample block
-    # must fit the real-time budget (published guarantee: 88% @ pass 254).
+    # must fit the real-time budget (published guarantee: 88% of budget).
     {"active": 32, "scan_segments": 128, "block": 48, "max_budget_fraction": 1.0},
     # Batch path: the BSP active cap (128) at 256-sample blocks must fit
-    # (published guarantee: 89% @ pass 254).
+    # (published guarantee: 89% of budget).
     {"active": 128, "scan_segments": 1024, "block": 256, "max_budget_fraction": 1.0},
 )
 # The validated synthesis rate must not regress past this ceiling
@@ -232,7 +232,7 @@ def compare(base: dict[str, Any], live: dict[str, Any]) -> list[str]:
 
     # Scenario sets must MATCH before comparing: a drifted STONE_SCENARIOS
     # table (length or parameters) must fail the gate, not silently drop
-    # checks via zip truncation (inline-audit finding, pass 256).
+    # checks via zip truncation.
     base_params = [(s["active"], s["scan_segments"], s["block"])
                    for s in base["wcet_scenarios"]]
     live_params = [(s["active"], s["scan_segments"], s["block"])

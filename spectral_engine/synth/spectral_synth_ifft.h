@@ -8,7 +8,7 @@
  * stream RMS -83 dBFS; see the plan's error budget). This path is OPT-IN:
  * the oscillator bank remains the exact default until golden sign-off (F3).
  *
- * Layering (pass-256 file-organization ruling):
+ * Layering (one implementation TU per port contract, selected by the build):
  *   - This header is the ONLY surface; no third-party types leak through.
  *   - The inverse-FFT primitive is a port contract implemented by exactly
  *     one TU per build: core/port/host/spectral_ifft_vdsp.c (Apple) or

@@ -23,8 +23,8 @@
  *     (effectively random in-table -- it does NOT "minimize cache misses"); it is
  *     not pinned to DTCM.
  *   - Cycle/WCET numbers come from the validated M7 measurement stack
- *     (m7-census / m7-stalls / m7-wcet); the old in-C cost model was retired
- *     in pass 253 (uncalibrated, priced a pre-pass-236 kernel shape).
+ *     (m7-census / m7-stalls / m7-wcet); the old in-C cost model was
+ *     retired (uncalibrated, priced an obsolete kernel shape).
  */
 
 #include "spectral_synth_arm32.h"

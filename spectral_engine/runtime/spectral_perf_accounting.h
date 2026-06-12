@@ -5,9 +5,9 @@
  * cycle PROJECTIONS are not made here (or anywhere in C): they come from the
  * validated M7 measurement stack (tools/spectral_tools/performance/embedded/,
  * M7_PERF_MODEL_PLAN). The old per-op cost taxonomy (lut_lookups & friends)
- * was retired in pass 253: it priced a kernel shape that no longer exists
- * (the per-sample LUT gather was replaced by the coupled-form oscillator in
- * pass 236), and its constants were uncalibrated.
+ * was retired: it priced a kernel shape that no longer exists (the
+ * coupled-form oscillator replaced the per-sample LUT gather), and its
+ * constants were uncalibrated.
  */
 #ifndef SPECTRAL_PERF_ACCOUNTING_H
 #define SPECTRAL_PERF_ACCOUNTING_H

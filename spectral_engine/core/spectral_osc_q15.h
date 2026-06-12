@@ -12,7 +12,7 @@
  * float (the cubic NCO); QTYPE_DOMAIN_PLAN.md treats integer-NCO phase
  * resolution as an orthogonal, deferred axis.  So the precision these carry is
  * exactly the waveform-eval floor characterized by the q15_compute_precision
- * CTest (PASS208): sine -85.1, saw -91.5, square -90.0, triangle -92.6,
+ * CTest: sine -85.1, saw -91.5, square -90.0, triangle -92.6,
  * parabola -91.0 dBFS vs the float reference.
  *
  * Each evaluator mirrors the matching spectral_osc_<t>(rads) formula; the
@@ -37,8 +37,8 @@ extern "C" {
  * pack8) pin this with _Static_assert, so a silent contract edit fails their
  * build -- the Q15 twin of SPECTRAL_OSC_FORMULAS_VERSION (spectral_osc_formulas.h).
  *
- * v1 (2026-06-06): five evaluators (sine/saw/square/triangle/parabola), the
- *   rads->Q15 boundary helper, and the full-scale (Q15_MAX) sine-LUT builder. */
+ * v1: five evaluators (sine/saw/square/triangle/parabola), the rads->Q15
+ *   boundary helper, and the full-scale (Q15_MAX) sine-LUT builder. */
 #define SPECTRAL_OSC_Q15_VERSION 1
 
 /* float rads in [-pi, pi) -> signed Q15 phase (rads/pi -> [-1, 1)).

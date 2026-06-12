@@ -2,7 +2,8 @@
  *
  * QTYPE_DOMAIN_PLAN.md Q5 takes up the integer-NCO phase axis: the prerequisite for
  * double-lane Q15 packing (8xint16 in a 128-bit register) to ever beat float-SIMD.
- * PASS210 proved a Q15 SIMD kernel over a FLOAT phase accumulator cannot win -- the
+ * Measurement (bench_q15_pack8) proved a Q15 SIMD kernel over a FLOAT phase
+ * accumulator cannot win -- the
  * per-lane float->Q15 conversion cancels the 2x lane-density advantage before the eval
  * starts. The fix is to derive the Q15 phase index from an INTEGER accumulator with no
  * float on the hot path: spectral_phase_nco.h (a uint64 cubic forward-difference NCO,
@@ -28,10 +29,11 @@
  *   index (the CURRENTLY-SHIPPING opt-in Q15 path, oscillator.c synth_segment_q15) --
  *   and report the RMS difference in dBFS.  This is exactly Q5b's question: swapping the
  *   Q15 path's phase source must not degrade the already-characterized Q15-eval floor
- *   (PASS208: sine -85.1, saw -91.5, square -90.0, triangle -92.6, parabola -91.0 dBFS).
- *   The CHECK is a loose gross-bug tripwire; the printed table is the verdict the
- *   maintainer reads for the Q5b GO/NO-GO (per the measure-first / decline-on-data
- *   discipline -- if integer phase drifts, we learn it HERE, before any kernel).
+ *   (test_q15_compute_precision: sine -85.1, saw -91.5, square -90.0, triangle -92.6,
+ *   parabola -91.0 dBFS).
+ *   The CHECK is a loose gross-bug tripwire; the printed table is the Q5b GO/NO-GO
+ *   verdict (measure-first / decline-on-data discipline -- if integer phase
+ *   drifts, we learn it HERE, before any kernel).
  *
  * Run: cmake --build build --target phase_nco_precision_test \
  *      && ctest --test-dir build -R phase_nco_precision

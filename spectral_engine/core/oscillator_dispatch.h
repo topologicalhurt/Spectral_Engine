@@ -39,10 +39,10 @@
  * WHAT AN EMBEDDED BUILD CAN TAKE (oscillator paths on real Cortex-M):
  *   - Scalar  : float OR Q15 (spectral_osc_q15.h evaluators).  Universal.
  *   - CMSIS   : float (live); Q15 kernel present (Phase 2) but not yet dispatched --
- *               oscillator.c's Q15 path is #if !SPECTRAL_EMBEDDED (PASS216), so today
- *               embedded Q15 oscillator synthesis is owned by arm32 below.  Promoting
- *               CMSIS-Q15 into the live dispatch is a maintainer decision (changes
- *               shipped embedded behavior).  Cortex-M4/M7/ARMv8-M only.
+ *               oscillator.c's Q15 path is deliberately #if !SPECTRAL_EMBEDDED, so
+ *               today embedded Q15 oscillator synthesis is owned by arm32 below.
+ *               Promoting CMSIS-Q15 into the live dispatch changes shipped embedded
+ *               behavior and needs explicit sign-off.  Cortex-M4/M7/ARMv8-M only.
  *   - arm32   : Q15 fixed-point synth (synth/backends/arm/spectral_synth_arm32.c),
  *               sine-only via spectral_lut_sin over the production 32700-scale LUT.
  *   SIMDe is HOST-ONLY: it is the desktop default CPU path and also runs in the
@@ -147,9 +147,9 @@ void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
  * the waveform through the SAME canonical spectral_osc_q15.h evaluators (one
  * versioned contract, no drift), with float quadratic phase + CMSIS-DSP f32 widen/
  * amp/accumulate. Verification is hardware-gated (real Cortex-M); it has no LIVE
- * caller yet (oscillator.c's Q15 dispatch is host-only since PASS216) -- wiring it
- * into the embedded dispatch is a surfaced maintainer decision. See
- * port/embedded/oscillator_simd.c. */
+ * caller yet (oscillator.c's Q15 dispatch is host-only by design) -- wiring it
+ * into the embedded dispatch changes shipped behavior and needs explicit
+ * sign-off. See port/embedded/oscillator_simd.c. */
 int osc_simd_q15_available(SpectralTimbre timbre);
 void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
                           SpectralTimbre timbre, const int16_t* sine_lut);

@@ -1,7 +1,7 @@
 /* test_osc_parity.c - SIMD-vs-scalar oscillator parity + RMS-drift contract.
  *
- * Pins the two equivalence guarantees the PASS200 SIMD-default re-baseline was
- * signed off against, so they are checked by CI instead of by hand:
+ * Pins the two equivalence guarantees the SIMD-default oscillator baseline
+ * rests on, so they are checked by CI instead of by hand:
  *
  *   (1) DRIFT GUARD  - per-sample, the SIMD CPU oscillator stays within a tiny
  *       absolute budget of the scalar reference for every SIMD-capable timbre.

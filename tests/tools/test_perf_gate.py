@@ -1,4 +1,4 @@
-"""The embedded performance regression gate (maintainer mandate, pass 255).
+"""The embedded performance regression gate.
 
 Verifies the LIVE measurement stack against the frozen baseline
 (tests/fixtures/m7_baseline.json) within the named tolerance bands, plus the
@@ -97,8 +97,9 @@ def test_gate_compare_passes_on_identical_docs():
 
 
 def test_gate_compare_fails_on_scenario_drift_not_silently():
-    """Inline-audit finding (pass 256): zip() truncation silently dropped
-    checks when the scenario sets drifted. The gate must NAME the drift."""
+    """compare() must assert scenario-set equality before element-compare:
+    bare zip() would silently drop checks when the sets drift. The gate
+    must NAME the drift."""
     base, live = _fake_docs()
     live["wcet_scenarios"] = []   # drifted set (e.g. edited STONE_SCENARIOS)
     fails = expectations.compare(base, live)

@@ -88,7 +88,10 @@ the gate proves it).
   sweep for others, e.g. `PI`, `MIN/MAX`-style names).
 - Committed-fixture hygiene: `m7_baseline.json` stores the absolute
   toolchain path (machine-specific noise in a frozen fixture) → store
-  basename + version string only; regenerate.
+  basename + version string only; regenerate. Same wave renames the fixture id
+  `campaign3-p2-9voice` (planning-referential identifier compiled into the
+  generated workload header — W1 could not prove that codegen-neutral) to a
+  workload-descriptive name (`stagger9-8k`).
 
 ### R4 Architecture & honesty-of-foundations
 - Toy-presenting-as-real sweep: the remaining "method tokens"
@@ -200,4 +203,10 @@ economy matter most.
   begins on a clean foundation.
 
 ## Status
-- Plan authored + standing prompt added to AI.md. Waves not yet started.
+- Plan authored + standing prompt added to AI.md.
+- **W1 DONE** (comment scrub): 33 files rewritten to timeless doc/measurement
+  references; mca FACTS vocabulary de-jargonized ("corroborated"/"direct");
+  fixture id rename deferred to W3 (compiled into the generated header).
+  Verified ctest 20/20 + pytest 69 + m7-baseline gate PASS (codegen-neutral).
+- W2 next: simulate-glob bug + per-target resolution class test, dead sim
+  API/define, bench_metal_q15pack.m, CI smoke decision, Metal scope.

@@ -4,7 +4,7 @@
 # documented per-sample drift budget and aggregate RMS-dBFS budget of the scalar
 # reference, for every SIMD-capable timbre. Both paths run through the real
 # production dispatch (timbre_synth_segment under osc_set_dispatch), so this pins
-# the equivalence the PASS200 SIMD-default re-baseline was signed off against.
+# the equivalence the SIMD-default oscillator baseline rests on.
 #
 # Run: cmake --build build --target osc_parity_test && ctest --test-dir build -R osc_parity
 

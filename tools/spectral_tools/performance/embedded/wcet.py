@@ -39,7 +39,7 @@ from .toolchain import Toolchain
 
 # Voice-samples produced per loop iteration of each hot kernel.
 # [structure: codegen-verified — GCC re-unrolls the 4x source body to 16
-# samples/iter in the sustain loop (pass 239, re-checked on xPack 15.2.1);
+# samples/iter in the sustain loop (codegen census, xPack 15.2.1);
 # the SMLALD pair loop advances two voices one sample (2 voice-samples/iter);
 # tail and fade are 1 sample/iter. Re-verify on a toolchain change: a drift
 # makes cycles/iter jump far outside the guard band below.]
@@ -61,7 +61,7 @@ RESIDUAL_CPI_BOUND = 2.0
 
 # Per-segment scan-check instruction bound.
 # [bound: the activation scan body (start compare, bounds check, advance) is
-# ~10 instructions in the pass-239 codegen; 20 is a 2x margin.]
+# ~10 instructions in the codegen census; 20 is a 2x margin.]
 SCAN_INSNS_PER_CHECK_BOUND = 20.0
 
 # [measured-community: jnk0le STM32H743 — misprediction penalty 8 cycles

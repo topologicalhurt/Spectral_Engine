@@ -51,7 +51,7 @@ int osc_q15_available(SpectralTimbre timbre) {
     case TIMBRE_TRIANGLE: case TIMBRE_PARABOLA:
         return 1;
     default:
-        return 0;   /* asin/quantized/pwm: no Q15 path (PASS208 scope) */
+        return 0;   /* asin/quantized/pwm: no Q15 evaluator (spectral_osc_q15.h) */
     }
 }
 
@@ -140,14 +140,15 @@ static inline q15_t osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* l
     }
 }
 
-/* Scalar Q15-compute sustain path (Q3b oracle, Q5b integer-NCO phase). Op-for-op
+/* Scalar Q15-compute sustain path (QTYPE_DOMAIN_PLAN.md: Q3b oracle, Q5b
+ * integer-NCO phase). Op-for-op
  * the float synth_segment_scalar above, except (a) the Q15 phase index is produced
  * by the integer-NCO cubic forward-difference accumulator (spectral_phase_nco.h) —
  * 3 integer adds per sample, no float and no per-sample float->Q15 conversion on the
  * phase path — and (b) the WAVEFORM is evaluated in Q15, then converted back to float
- * for the (unchanged, float) amplitude + fade envelope and accumulation. Q5a
- * characterized this integer phase at/below the Q15-eval floor (PASS211: tighter than
- * float-cubic, square bit-identical), so it drops in for the old float-cubic phase +
+ * for the (unchanged, float) amplitude + fade envelope and accumulation. The integer
+ * phase sits at/below the Q15-eval floor (pinned by test_phase_nco_precision: tighter
+ * than float-cubic, square bit-identical), so it drops in for the old float-cubic phase +
  * spectral_osc_q15_phase_from_rads pipeline with no audible change.
  *
  * The NCO is stepped exactly ONCE per sample. The three fade regions below together

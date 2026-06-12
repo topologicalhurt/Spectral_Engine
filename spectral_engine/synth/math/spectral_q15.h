@@ -79,7 +79,7 @@ typedef uint16_t uq16_t;
 typedef uint32_t uq32_t;
 
 /* Q range macros. #ifndef-guarded for CMSIS-DSP coexistence: arm_math_types.h
- * defines the same four names with identical VALUES (verified pass 256) but
+ * (vendored CMSIS-DSP) defines the same four names with identical VALUES but
  * its definitions are unguarded -- in a TU that needs both headers (the IFFT
  * synthesis path), include CMSIS BEFORE this header and these guards keep the
  * build warning-free under -Werror. The boundary rule stands regardless:

@@ -2,9 +2,9 @@
  *
  * Reports MEASURED workload counters and real-time budget arithmetic for the
  * embedded target, plus an exact memory-footprint calculation. Cycle
- * projections were retired with spectral_perf_model.* (pass 253): they come
- * from the validated M7 measurement stack (m7-census / m7-stalls / m7-wcet),
- * not from in-C cost constants.
+ * projections were retired with spectral_perf_model.*: they come from the
+ * validated M7 measurement stack (m7-census / m7-stalls / m7-wcet), not
+ * from in-C cost constants.
  *
  * All declarations are in spectral_perf.h (no new header needed).
  */
