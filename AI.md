@@ -89,6 +89,99 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATO
 - Daisy Seed: `api/daisy_seed/daisy_seed_spectral.h`
 - `api/spectral_api.h` does not exist; these two are the contract.
 
+## The Major-Patchset Review (standing checklist)
+
+Run this review at every PR-sized unit of work — as a yardstick, roughly every
+ten commits or before executing any structural plan. It is adversarial by
+design: the goal is to find what is wrong, lazy, duplicated, or dishonest, not
+to confirm what is fine. Every finding becomes either a fix in the same
+review, a tracked item in a plan doc, or an explicit, written decision to
+accept it. Style north star: K&R — economy of expression, structure that
+tells its own story, comments that carry intuition.
+
+1. **Duplication.** Hunt near-identical blocks (hoist into one function next
+   to its domain — never a grab-bag utils file), switch/if ladders that should
+   be data tables, parameter clumps that should be structs, and the same fact
+   expressed in two languages (C/Python/MSL/docs) — cross-language duplicates
+   are either GENERATED from one source or pinned by a parity test; nothing
+   is kept in sync by hand and hope.
+2. **Wiring.** Every TU is in a build target or a test; every test runs in
+   CI; every `#if` branch is compiled by some configured build (a branch no
+   target compiles is dead — delete it or add the build). Nothing is
+   half-wired: unreferenced functions, unconsumed defines, unbuilt benches
+   are deleted or wired, never left in limbo. Every fallible call's result is
+   checked or explicitly voided with a reason. Prefer compute-once/
+   event-shaped flows over per-call recomputation and polling — and when a
+   loop must poll, the bound and the cost are written down.
+3. **Constants & macros.** No constant defined twice (guard + value-equality
+   note when a vendored library owns the name). Every empirical constant —
+   buffer sizes, thresholds, batch counts — either derives from a stated
+   budget/measurement (written at the definition) or is marked as a choice
+   with its rationale; a bare `512` with no story is a defect. Macros never
+   change the language: no control-flow hiding, no function renaming, no
+   multi-evaluation of arguments — if it can be a `static inline`, it is.
+   Generated constants come from generators with digests, not transcription.
+4. **Architecture.** The declared frameworks (capability-not-CPU, contract
+   headers, port-pattern TU selection, measured-vs-modeled provenance tags,
+   C-truth) are either followed or formally amended — silent deviation is a
+   defect even when the deviation is locally better. Hunt sand presenting as
+   concrete: toy models, asserted-not-proven bounds, stub features that
+   silently no-op. A stub must fail loudly or be marked unimplemented at its
+   surface. Tech debt is paid before building on top of it.
+5. **Bugs & escape analysis.** For every bug found, answer in writing: which
+   existing harness should have caught it, and why didn't it? Then add the
+   CLASS test (the input domain / structural property), never just the
+   instance regression. A bug with no escape analysis is half-fixed.
+6. **Comments.** Comments carry intuition, derivations, units, invariants,
+   and provenance of numbers — never change history, session/pass/patch
+   references, dates, author voice, or planning narrative (history lives in
+   git and the CHANGELOG; the governing doc may be referenced by name).
+   Highly technical code deserves generous explanation; obvious code
+   deserves none. If a comment explains WHAT the next line does, delete it;
+   if it explains WHY or the math, keep it.
+7. **File structure.** Split files on responsibility boundaries, not line
+   counts — a long, coherent hot pipeline may stay; a dispatch grab-bag may
+   not. Headers hold contracts and `static inline` leaf math; TUs hold the
+   rest. No file accumulates unrelated verbs.
+8. **Library use.** Before implementing, check (a) the vendored libraries
+   and (b) our own SSOT headers for an existing solution; after
+   implementing, justify in place any reimplementation (the keep/switch
+   rubric: measured edge, portability, fusion/directive control vs
+   wheel-reinvention and debt). Neglecting our own helpers is the same
+   defect as neglecting a library.
+9. **The seven lenses.** Read the highest-risk files as: senior engineer
+   (interfaces, ownership, error paths), DSP engineer (conditioning,
+   headroom, phase/window conventions, aliasing), mathematician (derivations
+   and bounds proven, invariants stated), software architect (dependency
+   direction, coupling, contract fidelity), embedded engineer (placement,
+   determinism, ISR-safety, hidden allocation, worst case), maintainer
+   (docs true, churn justified, migration story), researcher
+   (reproducibility, provenance, citations). Each lens has veto power.
+10. **Honesty.** The reviewer lists what they may have missed and which areas
+    deserve a second pass — unknown unknowns are surfaced by naming the
+    places nobody looked. Declare every shortcut taken under time pressure
+    (keep-alive hacks, inline import tricks, "good enough" tolerances): each
+    is either fixed now or written into the plan with its risk. Meticulous
+    beats fast; this is a kernel.
+11. **Tests are code too.** Every regression test is fail-on-bug verified
+    (revert the fix, watch it fail). No tautologies, no bands so wide they
+    gate nothing, no silently-skipped suites (a skip must be visible and
+    justified). Fixtures are deterministic and digest-stamped; committed
+    fixtures contain no machine-specific paths.
+12. **Naming tells the truth.** Names state format and units (`*_q15`,
+    `*_rad`, `*_bytes`); a counter named for something the code no longer
+    does is a lie and gets renamed with its semantics.
+13. **Lifecycle & boundaries.** Every create has a destroy on every path;
+    allocation failures are handled; inputs crossing a trust boundary
+    (files, CLI, vendored data) are validated at the boundary, once, with
+    contracts — not re-checked ad hoc downstream.
+14. **Docs in the same patchset.** A change that falsifies a doc updates the
+    doc in the same unit of work; a stale claim is a bug with the same
+    severity as the code defect it describes.
+
+The review's findings ledger and execution waves for the current instance
+live in `docs/core_audit/MASTER_REVIEW_PLAN.md`.
+
 ## Reference docs
 `docs/core_audit/`: `AI_CANON.md` (rules), `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md`
 (paper-backed methods), `CHANGELOG.md`, and the `*_PLAN.md` campaign plans.
