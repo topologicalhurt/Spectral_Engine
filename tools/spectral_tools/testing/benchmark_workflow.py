@@ -625,6 +625,46 @@ def run_m7_bootstrap(args: argparse.Namespace, perf: Performance) -> int:
     return 0
 
 
+def run_m7_stalls(args: argparse.Namespace, perf: Performance) -> int:
+    """Layer 3 (P4): memory-stall bounds modeled over the measured trace."""
+    from ..performance.embedded import counts, memory_model, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"qemu"}))
+        trace_path = out_dir / "qemu_trace.txt"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # The trace run is slower; counts determinism is m7-counts' contract.
+        counts.measure(tc, out_dir=out_dir, verify_reproducible=False,
+                       trace_path=trace_path)
+        report = memory_model.analyze_trace(trace_path)
+        doc = report.as_dict()
+        mean = doc["per_block_mean_stalls"]
+        summary = (
+            f"{doc['n_blocks']} epochs; mean stalls/block "
+            f"[{mean['bandwidth_bound']}, {mean['serial_bound']}] cyc; "
+            f"fills {report.total.fills_row_hit}+{report.total.fills_row_miss}rm"
+        )
+        test = {
+            "name": "m7-stalls",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": doc,
+        }
+    except (toolchain.ToolchainError, counts.CountsError, OSError) as exc:
+        test = {
+            "name": "m7-stalls",
+            "status": TestStatus.FAILED.value,
+            "summary": "memory model failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_measure(args: argparse.Namespace, perf: Performance) -> int:
     """Matrix-driven orchestration: probe or run the instruments for a target.
 
@@ -793,6 +833,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_output_options(m7_counts)
 
+    m7_stalls = sub.add_parser(
+        "m7-stalls",
+        help="Embedded M7: memory-stall bounds [modeled] from the QEMU address trace "
+             "(P4 layer; constants calibrated from libDaisy-as-shipped + TRM + AN4891)",
+    )
+    m7_stalls.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_stalls)
+
     measure = sub.add_parser(
         "measure",
         help="Matrix-driven measurement: --list shows target×instrument availability; "
@@ -849,6 +897,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_m7_mca_validate(args, perf)
     if args.command == "m7-counts":
         return run_m7_counts(args, perf)
+    if args.command == "m7-stalls":
+        return run_m7_stalls(args, perf)
     if args.command == "measure":
         return run_measure(args, perf)
     if args.command == "m7-bootstrap":

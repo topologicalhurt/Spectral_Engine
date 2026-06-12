@@ -57,12 +57,25 @@ static void write_hex_u32(const char* label, uint32_t v) {
 }
 
 static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
-static SpectralSegmentQ15 segbuf[N_SEG];
+/* The segment store mirrors the Daisy placement contract (SPECTRAL_MEM_BULK ->
+ * .sdram_bss): it lands in the 0x60000000 BULK region so the plugin separates
+ * the SDRAM-class scan stream from DTCM-class hot state (P4 memory layer).
+ * .bulk_bss is NOLOAD and NOT zeroed by startup — main() clears it. */
+static SpectralSegmentQ15 segbuf[N_SEG] __attribute__((section(".bulk_bss")));
 static SpectralSegmentQ15 fixture[N_SEG];
 static SpectralArm32Ctx ctx;
 static q15_t blk[BLOCK];
 
+/* Block-boundary marker for the P4 trace: one store to this fixed-address
+ * word (ldscript .bulk_marker @ 0x60F00000) splits the address trace into
+ * per-block epochs. The first marker closes the init/load epoch. */
+static volatile uint32_t block_marker __attribute__((section(".bulk_marker")));
+
 int main(void) {
+    {   /* zero the NOLOAD bulk store (libc-free; startup only clears .bss) */
+        volatile unsigned char* p = (volatile unsigned char*)segbuf;
+        for (uint32_t i = 0; i < sizeof segbuf; i++) p[i] = 0u;
+    }
     spectral_lut_init_sine(lut);
 
     for (uint32_t i = 0; i < N_SEG; i++) {
@@ -84,6 +97,7 @@ int main(void) {
 
     uint32_t checksum = 0u;
     uint32_t rendered = 0u;
+    block_marker = 0u;   /* close the init/load epoch (trace block 0) */
     while (rendered < TOTAL) {
         uint32_t want = TOTAL - rendered;
         if (want > BLOCK) want = BLOCK;
@@ -94,6 +108,7 @@ int main(void) {
             checksum ^= (uint16_t)blk[i];
         }
         rendered += got;
+        block_marker = rendered;   /* one epoch per processed block */
     }
 
     write_hex_u32("RENDERED=", rendered);

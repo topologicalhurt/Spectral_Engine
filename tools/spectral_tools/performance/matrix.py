@@ -127,6 +127,20 @@ M7_MCA_CENSUS = Instrument(
     probe=_probe_embedded("mca"),
     cli="m7-census",
 )
+M7_MCA_VALIDATION = Instrument(
+    name="mca-validation",
+    kind="model",
+    provenance="modeled",
+    probe=_probe_embedded("mca"),
+    cli="m7-mca-validate",
+)
+M7_MEMORY_STALLS = Instrument(
+    name="memory-stalls",
+    kind="memory",
+    provenance="modeled",
+    probe=_probe_embedded("qemu"),
+    cli="m7-stalls",
+)
 M7_GDBSTUB_STAGES = Instrument(
     name="qemu-gdbstub-stages",
     kind="counts",
@@ -164,7 +178,8 @@ TARGETS: tuple[TargetProfile, ...] = (
         name="m7",
         description="Cross Cortex-M7 model (no hardware): counts measured, cycles modeled",
         build_target=None,
-        instruments=(M7_QEMU_COUNTS, M7_MCA_CENSUS, M7_GDBSTUB_STAGES),
+        instruments=(M7_QEMU_COUNTS, M7_MCA_CENSUS, M7_MCA_VALIDATION,
+                     M7_MEMORY_STALLS, M7_GDBSTUB_STAGES),
     ),
     TargetProfile(
         name="daisy",

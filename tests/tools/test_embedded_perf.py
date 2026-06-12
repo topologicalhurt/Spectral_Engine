@@ -21,6 +21,7 @@ from spectral_tools.performance.embedded import (  # noqa: E402
     counts,
     fixture,
     mca_validation,
+    memory_model,
     toolchain,
 )
 
@@ -228,6 +229,94 @@ def test_validation_report_math():
     assert doc["cases"][0]["facts"] == list(case.facts)
 
 
+# --- memory model (P4) ------------------------------------------------------
+
+def test_memory_constants_carry_provenance():
+    """Every latency constant must say where it came from — an unsourced
+    constant is the 'uncalibrated cost model' bug class the plan retires."""
+    for name, c in memory_model.LATENCY.items():
+        assert c.provenance and len(c.provenance) > 10, name
+    # Assumptions must be labeled as such.
+    assert "ASSUMPTION" in memory_model.LATENCY["bridge_cpu_cycles"].provenance
+    # Derived per-line costs: a row miss must cost more than a row hit, and
+    # the serial bound must exceed the pure-transfer bandwidth bound.
+    hit, miss = memory_model.line_fill_cycles(True), memory_model.line_fill_cycles(False)
+    assert 0 < hit < miss
+    beats = memory_model.LATENCY["linefill_beats"].value
+    sd = memory_model.LATENCY["sdclk_per_cpu_cycle"].value
+    assert hit > beats * sd  # latency adds to bandwidth, never undercuts it
+
+
+def test_dcache_sim_compulsory_capacity_and_write_allocate():
+    sim = memory_model.DCacheSim()
+    line = memory_model.LINE_BYTES
+    cache_bytes = int(memory_model.LATENCY["dcache_bytes"].value)
+    base = 0x60000000
+
+    # Sequential cold reads: every line a compulsory miss, re-read: all hits.
+    n_resident = (cache_bytes // line) // 2   # half the cache, conflict-free
+    for i in range(n_resident):
+        sim.access(memory_model._Access(False, base + i * line, 4))
+    assert sim.read_misses == n_resident and sim.read_hits == 0
+    for i in range(n_resident):
+        sim.access(memory_model._Access(False, base + i * line, 4))
+    assert sim.read_hits == n_resident
+
+    # Streaming twice through 4x the cache: capacity misses on the second pass.
+    sim2 = memory_model.DCacheSim()
+    n_stream = (cache_bytes // line) * 4
+    for _ in range(2):
+        for i in range(n_stream):
+            sim2.access(memory_model._Access(False, base + i * line, 4))
+    assert sim2.read_misses == 2 * n_stream
+
+    # Write-allocate: a partial-line store miss fills; a full-line aligned
+    # store stream switches to no-fill (dynamic read allocate class).
+    sim3 = memory_model.DCacheSim()
+    sim3.access(memory_model._Access(True, base, 4))
+    assert sim3.write_miss_fills == 1
+    sim4 = memory_model.DCacheSim()
+    for i in range(4):
+        sim4.access(memory_model._Access(True, base + i * line, line))
+    assert sim4.write_miss_no_fill == 4 and sim4.write_miss_fills == 0
+
+
+def test_row_tracker_sequential_cadence():
+    rows = memory_model.RowTracker()
+    row_bytes = int(memory_model.LATENCY["row_bytes"].value)
+    misses = sum(0 if rows.access(addr) else 1
+                 for addr in range(0x60000000, 0x60000000 + 8 * row_bytes, 64))
+    # Sequential stream: exactly one row-open per row_bytes span.
+    assert misses == 8
+
+
+def test_analyze_trace_splits_epochs_and_bounds(tmp_path):
+    line = memory_model.LINE_BYTES
+    trace = tmp_path / "trace.txt"
+    rows = [
+        f"S {0x60000000:x} 4",            # sdram store miss -> fill
+        f"L {0x20000000:x} 4",            # dtcm: counted, never priced
+        f"S {memory_model.MARKER_ADDR:x} 4",   # epoch boundary
+        f"L {0x60000000 + line:x} 4",     # sdram read miss -> fill
+        f"L {0x60000000 + line:x} 4",     # hit
+        f"L {0x08000000:x} 4",            # flash-class
+        f"S {memory_model.MARKER_ADDR:x} 4",
+    ]
+    trace.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    rep = memory_model.analyze_trace(trace)
+    assert len(rep.blocks) == 2
+    b0, b1 = rep.blocks
+    assert b0.sdram_accesses == 1 and b0.dtcm_accesses == 1
+    assert b1.sdram_accesses == 2 and b1.flash_accesses == 1
+    total_fills = rep.total.fills_row_hit + rep.total.fills_row_miss
+    assert total_fills == 2
+    for b in rep.blocks:
+        assert b.stall_bandwidth <= b.stall_serial
+    doc = rep.as_dict()
+    assert doc["n_blocks"] == 2
+    assert "ASSUMPTION" in doc["constants"]["bridge_cpu_cycles"]["provenance"]
+
+
 # --- counts table parsing ---------------------------------------------------
 
 CANNED_COUNTS = """\
@@ -339,6 +428,33 @@ def test_mca_validation_against_hand_derived_timings(tmp_path):
             f"{result.case.expected_body_cycles}"
         )
     assert report.mean_backedge_divergence <= 1.5
+
+
+@pytest.mark.skipif(not HAVE_QEMU, reason="needs newlib arm-none-eabi-gcc + qemu (m7-bootstrap)")
+def test_memory_model_end_to_end_over_real_trace(tmp_path):
+    """P4 contract on the default fixture: the trace splits into init/load +
+    one epoch per block (+ epilogue); the tiny 9-segment store becomes
+    D-cache resident during load, so EVERY steady-state block models zero
+    SDRAM stalls — the fills all sit in epoch 0. A steady-state epoch with
+    nonzero stalls means the placement mirror or the cache model regressed."""
+    tc = toolchain.discover(ROOT, need=frozenset({"qemu"}))
+    trace_path = tmp_path / "trace.txt"
+    counts.measure(tc, out_dir=tmp_path, verify_reproducible=False,
+                   trace_path=trace_path)
+    rep = memory_model.analyze_trace(trace_path)
+
+    spec = fixture.default_fixture()
+    n_render_blocks = spec.total_samples // spec.block_samples
+    assert len(rep.blocks) == n_render_blocks + 2  # init/load + blocks + epilogue
+
+    fills = rep.total.fills_row_hit + rep.total.fills_row_miss
+    assert fills > 0, "the bulk-placed segment store must cause linefills"
+    b0 = rep.blocks[0]
+    assert b0.fills_row_hit + b0.fills_row_miss == fills, "all fills belong to init/load"
+    for b in rep.blocks[1:]:
+        assert b.stall_serial == 0.0
+    # The hot path is DTCM-class by placement: it must dominate the traffic.
+    assert rep.total.dtcm_accesses > 100 * rep.total.sdram_accesses
 
 
 @pytest.mark.skipif(not HAVE_QEMU, reason="needs newlib arm-none-eabi-gcc + qemu (m7-bootstrap)")
