@@ -197,8 +197,12 @@ def _rel(a: float, b: float) -> float:
 def verify(tc: Toolchain, *, out_dir: Path) -> list[str]:
     """Compare live stack vs the frozen baseline and the stone ceilings.
     Returns failure strings (empty = gate passes)."""
-    base = Baseline.load(tc.repo_root).doc
-    live = _live_numbers(tc, out_dir=out_dir)
+    return compare(Baseline.load(tc.repo_root).doc,
+                   _live_numbers(tc, out_dir=out_dir))
+
+
+def compare(base: dict[str, Any], live: dict[str, Any]) -> list[str]:
+    """Pure gate logic (unit-testable without the toolchain)."""
     fails: list[str] = []
 
     tol_cyc = TOLERANCES["modeled_cycles_rel"]["value"]
@@ -226,6 +230,16 @@ def verify(tc: Toolchain, *, out_dir: Path) -> list[str]:
             fails.append(f"{lines_key} {live['counts'][lines_key]} vs baseline "
                          f"{base['counts'][lines_key]} (> {tol_lines} lines)")
 
+    # Scenario sets must MATCH before comparing: a drifted STONE_SCENARIOS
+    # table (length or parameters) must fail the gate, not silently drop
+    # checks via zip truncation (inline-audit finding, pass 256).
+    base_params = [(s["active"], s["scan_segments"], s["block"])
+                   for s in base["wcet_scenarios"]]
+    live_params = [(s["active"], s["scan_segments"], s["block"])
+                   for s in live["wcet_scenarios"]]
+    if base_params != live_params:
+        fails.append(f"scenario set drifted: baseline {base_params} vs "
+                     f"live {live_params} — regenerate the baseline deliberately")
     for b_s, l_s in zip(base["wcet_scenarios"], live["wcet_scenarios"]):
         label = f"wcet({l_s['active']}a/{l_s['scan_segments']}s/{l_s['block']}b)"
         if _rel(l_s["wcet_cycles"], b_s["wcet_cycles"]) > tol_wcet:

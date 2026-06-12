@@ -73,3 +73,45 @@ def test_perf_gate_live_stack_within_contract(tmp_path):
     tc = toolchain.discover(ROOT, need=frozenset({"mca", "qemu"}))
     fails = expectations.verify(tc, out_dir=tmp_path)
     assert not fails, "performance contract violated:\n" + "\n".join(fails)
+
+
+def _fake_docs():
+    scenario = {"active": 32, "scan_segments": 128, "block": 48,
+                "wcet_cycles": 350000.0, "budget_cycles": 400000.0,
+                "budget_fraction": 0.875, "max_budget_fraction": 1.0}
+    doc = {
+        "kernels": {"synth_core_m7/.L452": {"cycles_per_iter": 340.0,
+                                            "insns_per_iter": 430,
+                                            "samples_per_iter": 16.0}},
+        "counts": {"process_insns": 3_762_455, "code_lines": 310, "data_lines": 4500},
+        "wcet_scenarios": [scenario],
+        "worst_cyc_per_voice_sample": 24.0,
+    }
+    import copy
+    return doc, copy.deepcopy(doc)
+
+
+def test_gate_compare_passes_on_identical_docs():
+    base, live = _fake_docs()
+    assert expectations.compare(base, live) == []
+
+
+def test_gate_compare_fails_on_scenario_drift_not_silently():
+    """Inline-audit finding (pass 256): zip() truncation silently dropped
+    checks when the scenario sets drifted. The gate must NAME the drift."""
+    base, live = _fake_docs()
+    live["wcet_scenarios"] = []   # drifted set (e.g. edited STONE_SCENARIOS)
+    fails = expectations.compare(base, live)
+    assert any("scenario set drifted" in f for f in fails)
+
+
+def test_gate_compare_catches_regressions_and_stone_breach():
+    base, live = _fake_docs()
+    live["kernels"]["synth_core_m7/.L452"]["cycles_per_iter"] = 340.0 * 1.2
+    live["counts"]["process_insns"] = int(3_762_455 * 1.10)
+    live["wcet_scenarios"][0]["budget_fraction"] = 1.05
+    live["worst_cyc_per_voice_sample"] = 26.0
+    fails = expectations.compare(base, live)
+    assert any("cycles/iter" in f for f in fails)
+    assert any("process insns" in f for f in fails)
+    assert sum("STONE" in f for f in fails) == 2
