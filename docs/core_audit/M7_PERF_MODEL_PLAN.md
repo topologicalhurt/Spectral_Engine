@@ -207,9 +207,22 @@ the segment-load/DMA path.
 - **Finding (upstreamable): libDaisy SDRAM timing is ~4× conservative.**
   `sdram.cpp` ships `RPDelay=16`, `RCDDelay=10` (comments admit "started at 2")
   vs the AS4C16M32MSA-6 datasheet minima (~3+3 SDCLK at 100 MHz). As shipped, a
-  row-miss linefill costs 160 CPU cyc; at datasheet timings ~70. The model
-  prices the device **as configured**; fixing the upstream config is a real,
-  free on-target win to propose when hardware exists.
+  row-miss linefill costs 160 CPU cyc; at datasheet timings ~70. Also: the
+  shipped `SelfRefreshTime` (tRAS) of 4 ticks = 40 ns is **below** the 48 ns
+  minimum libDaisy's own comment quotes — out of spec, not just slow.
+- **Pass 252 — constants centralized; best-performance timing CHOSEN
+  (maintainer directive).** `api/daisy_seed/daisy_seed_sdram.h` is now the ONE
+  SSOT for the Daisy memory-system numbers (clock tree, FMC timing, SDRAM and
+  cache geometry; per-value provenance in-header). The Python model parses it
+  at runtime (C-truth, fail-loud), the counts plugin takes `lineshift=` from
+  it, the trace marker address is parsed from the rig ldscript. The CHOSEN
+  FMC set is the datasheet-derived minima (TRP/TRCD 2/2, TWR 2, TRAS 5,
+  TRC 7; CAS kept at 3 — a chip mode-register reload is not worth an
+  untestable 4-cycle gain) and `daisy_spectral_init()` programs it into
+  FMC_SDTR1 (`SPECTRAL_SDRAM_STOCK_TIMINGS` opts out; **needs on-target
+  verification when a board exists**). Model under the chosen set: row-miss
+  linefill **72 cyc** (was 160 stock); the report keeps the stock comparison
+  row so the win stays visible.
 - **Fixture result + the scaling input P6/F needs.** For the 9-voice fixture
   the whole segment store is 5 cache lines: all linefills land in the init/load
   epoch, **steady-state per-block SDRAM stalls = 0**, and the dominant 1.5 M
