@@ -23,6 +23,7 @@ from spectral_tools.performance.embedded import (  # noqa: E402
     mca_validation,
     memory_model,
     toolchain,
+    wcet,
 )
 
 
@@ -339,6 +340,60 @@ def test_analyze_trace_splits_epochs_and_bounds(tmp_path):
     assert derived["linefill_row_miss"] < derived["stock_libdaisy_comparison"]["linefill_row_miss"]
 
 
+# --- WCET synthesis (P5) ----------------------------------------------------
+
+def _synthetic_wcet(active=64, scan=1024, block=256) -> wcet.WcetReport:
+    c = memory_model.load_constants(ROOT)
+    inputs = wcet.WcetInputs(
+        worst_cyc_per_voice_sample=24.0,
+        worst_kernel="synth_fade_m7/.L624",
+        sustain_insns_per_voice_sample=15.8,
+        measured_insns_per_block=58_800.0,
+        measured_voice_samples_per_block=2304.0,
+        fixture_peak_active=9,
+        code_lines=310,
+        data_lines=4500,
+    )
+    return wcet.WcetReport(inputs=inputs, constants=c,
+                           active=active, scan_segments=scan, block=block)
+
+
+def test_wcet_terms_are_bounds_with_provenance():
+    rep = _synthetic_wcet()
+    # T1 is exact arithmetic over the validated per-voice-sample rate.
+    assert rep.t1_synth_cycles == 64 * 256 * 24.0
+    # Residual subtracts at the cheapest loop rate and scales by active ratio:
+    # both choices over-estimate (documented), so the term must be positive.
+    assert rep.residual_insns > 0
+    assert rep.t2_residual_cycles > rep.residual_insns  # CPI bound >= 1
+    assert rep.t3_cold_memory_cycles > 0
+    doc = rep.as_dict()
+    assert doc["wcet_block_cycles"] == round(rep.wcet_cycles, 0)
+    for term in doc["terms"].values():
+        assert "provenance" in term and term["cycles"] >= 0
+    assert "BOUND" in doc["provenance"]
+    assert doc["constants_source"] == memory_model.SDRAM_HEADER_RELPATH
+
+
+def test_wcet_monotonic_in_parameters():
+    base = _synthetic_wcet(active=64, scan=1024)
+    more_active = _synthetic_wcet(active=128, scan=1024)
+    more_scan = _synthetic_wcet(active=64, scan=4096)
+    assert more_active.wcet_cycles > base.wcet_cycles
+    assert more_scan.wcet_cycles > base.wcet_cycles
+
+
+def test_wcet_unroll_map_names_real_kernels():
+    expected = {"synth_core_m7", "synth_core_pair_m7", "synth_fade_m7"}
+    assert {k.split("/")[0] for k in wcet.SAMPLES_PER_ITER} == expected
+    # Bound constants must be documented as bounds where they are not measured.
+    import inspect
+
+    src = inspect.getsource(wcet)
+    for name in ("RESIDUAL_CPI_BOUND", "SCAN_INSNS_PER_CHECK_BOUND"):
+        assert f"[bound:" in src and name in src
+
+
 # --- counts table parsing ---------------------------------------------------
 
 CANNED_COUNTS = """\
@@ -450,6 +505,22 @@ def test_mca_validation_against_hand_derived_timings(tmp_path):
             f"{result.case.expected_body_cycles}"
         )
     assert report.mean_backedge_divergence <= 1.5
+
+
+@pytest.mark.skipif(not (HAVE_MCA and HAVE_QEMU),
+                    reason="needs newlib arm-none-eabi-gcc + llvm-mca + qemu")
+def test_wcet_end_to_end_composes_live_stack(tmp_path):
+    """P5 contract: the WCET bound derives from LIVE stack outputs (no cached
+    numbers), every kernel passes the unroll-drift guard, and the default
+    64-active/1024-scan scenario stays a meaningful fraction of the block
+    budget (a bound near 0% or far past 1000% means a term broke)."""
+    tc = toolchain.discover(ROOT, need=frozenset({"mca", "qemu"}))
+    rep = wcet.wcet(tc, out_dir=tmp_path)
+    doc = rep.as_dict()
+    assert rep.inputs.worst_cyc_per_voice_sample > 0
+    assert 0.05 < doc["budget_fraction"] < 10.0
+    # The bound must exceed the pure synthesis term (T2/T3 are real charges).
+    assert rep.wcet_cycles > rep.t1_synth_cycles
 
 
 @pytest.mark.skipif(not HAVE_QEMU, reason="needs newlib arm-none-eabi-gcc + qemu (m7-bootstrap)")

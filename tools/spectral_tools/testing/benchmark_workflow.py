@@ -665,6 +665,44 @@ def run_m7_stalls(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_m7_wcet(args: argparse.Namespace, perf: Performance) -> int:
+    """P5: per-block WCET upper bound composed from the validated stack."""
+    from ..performance.embedded import codegen, counts, toolchain, wcet
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca", "qemu"}))
+        report = wcet.wcet(
+            tc, out_dir=out_dir, active=args.active,
+            scan_segments=args.scan_segments, block=args.block,
+        )
+        doc = report.as_dict()
+        summary = (
+            f"WCET {doc['wcet_block_cycles']:.0f} cyc/block "
+            f"({args.active} active, {args.scan_segments} scanned) = "
+            f"{doc['budget_fraction'] * 100:.1f}% of the 48k block budget"
+        )
+        test = {
+            "name": "m7-wcet",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": doc,
+        }
+    except (toolchain.ToolchainError, codegen.CodegenError,
+            counts.CountsError, wcet.WcetError) as exc:
+        test = {
+            "name": "m7-wcet",
+            "status": TestStatus.FAILED.value,
+            "summary": "wcet failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_measure(args: argparse.Namespace, perf: Performance) -> int:
     """Matrix-driven orchestration: probe or run the instruments for a target.
 
@@ -833,6 +871,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_output_options(m7_counts)
 
+    m7_wcet = sub.add_parser(
+        "m7-wcet",
+        help="Embedded M7: parametric per-block WCET upper bound [modeled+measured] "
+             "composed from the validated stack (P5)",
+    )
+    m7_wcet.add_argument("--active", type=int, default=64, help="Worst-case active voices")
+    m7_wcet.add_argument("--scan-segments", type=int, default=1024,
+                         help="Worst-case segments scanned per block")
+    m7_wcet.add_argument("--block", type=int, default=256, help="Block size in samples")
+    m7_wcet.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_wcet)
+
     m7_stalls = sub.add_parser(
         "m7-stalls",
         help="Embedded M7: memory-stall bounds [modeled] from the QEMU address trace "
@@ -899,6 +949,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_m7_counts(args, perf)
     if args.command == "m7-stalls":
         return run_m7_stalls(args, perf)
+    if args.command == "m7-wcet":
+        return run_m7_wcet(args, perf)
     if args.command == "measure":
         return run_measure(args, perf)
     if args.command == "m7-bootstrap":
