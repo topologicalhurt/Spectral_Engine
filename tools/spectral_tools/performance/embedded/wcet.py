@@ -26,6 +26,7 @@ data per the Daisy contract (zero-wait [TRM/AN4891]).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,29 @@ class WcetError(RuntimeError):
     pass
 
 
+DAISY_CONFIG_RELPATH = "api/daisy_seed/daisy_seed_config.h"
+
+
+def parse_daisy_app_config(repo_root: Path) -> dict[str, int]:
+    """C-truth: Daisy app-level constants (sample rate, callback block,
+    active cap). Fails loudly if the contract moves."""
+    path = repo_root / DAISY_CONFIG_RELPATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise WcetError(f"cannot read {DAISY_CONFIG_RELPATH}: {exc}") from exc
+    out: dict[str, int] = {}
+    for key in ("DAISY_SAMPLE_RATE", "DAISY_AUDIO_BLOCK_SIZE", "DAISY_MAX_ACTIVE"):
+        m = re.search(rf"#define\s+{key}\s+(\d+)", text)
+        if m is None:
+            raise WcetError(
+                f"{key} not found in {DAISY_CONFIG_RELPATH} — the app config "
+                "contract moved; fix the parse, do not hardcode"
+            )
+        out[key] = int(m.group(1))
+    return out
+
+
 @dataclass(frozen=True, slots=True)
 class WcetInputs:
     """Live stack outputs the bound is built from."""
@@ -99,6 +123,7 @@ class WcetReport:
     active: int
     scan_segments: int
     block: int
+    sample_rate: int = 48000  # overridden by wcet() from the C SSOT
 
     @property
     def t1_synth_cycles(self) -> float:
@@ -147,8 +172,7 @@ class WcetReport:
     def as_dict(self) -> dict[str, Any]:
         c = self.constants
         cpu_hz = c.defines["SPECTRAL_DAISY_CPU_HZ"]
-        budget = None
-        sr = 48000
+        sr = self.sample_rate
         budget = cpu_hz / sr * self.block
         return {
             "provenance": "upper BOUND composed from [modeled: mca validated <=1%] + "
@@ -180,7 +204,8 @@ class WcetReport:
                 },
             },
             "wcet_block_cycles": round(self.wcet_cycles, 0),
-            "block_budget_cycles_at_48k": round(budget, 0),
+            "block_budget_cycles": round(budget, 0),
+            "sample_rate": sr,
             "budget_fraction": round(self.wcet_cycles / budget, 3),
             "constants_source": c.header_relpath,
         }
@@ -257,4 +282,5 @@ def wcet(
         active=active,
         scan_segments=scan_segments,
         block=block,
+        sample_rate=parse_daisy_app_config(tc.repo_root)["DAISY_SAMPLE_RATE"],
     )

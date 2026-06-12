@@ -703,6 +703,45 @@ def run_m7_wcet(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_m7_baseline(args: argparse.Namespace, perf: Performance) -> int:
+    """Performance baseline: --generate freezes; default verifies (the gate)."""
+    from ..performance.embedded import codegen, counts, expectations, toolchain, wcet
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca", "qemu"}))
+        if args.generate:
+            path = expectations.generate(tc, out_dir=out_dir)
+            test = {
+                "name": "m7-baseline",
+                "status": TestStatus.OK.value,
+                "summary": f"baseline re-signed: {path.relative_to(perf.repo_root)}",
+                "details": {"path": str(path)},
+            }
+        else:
+            fails = expectations.verify(tc, out_dir=out_dir)
+            test = {
+                "name": "m7-baseline",
+                "status": TestStatus.OK.value if not fails else TestStatus.FAILED.value,
+                "summary": ("gate PASS: live stack within tolerances + stone ceilings"
+                            if not fails else f"gate FAIL: {len(fails)} quantities moved"),
+                "details": {"failures": fails},
+            }
+    except (toolchain.ToolchainError, codegen.CodegenError, counts.CountsError,
+            wcet.WcetError, expectations.ExpectationsError) as exc:
+        test = {
+            "name": "m7-baseline",
+            "status": TestStatus.FAILED.value,
+            "summary": "baseline failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_measure(args: argparse.Namespace, perf: Performance) -> int:
     """Matrix-driven orchestration: probe or run the instruments for a target.
 
@@ -871,6 +910,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_output_options(m7_counts)
 
+    m7_baseline = sub.add_parser(
+        "m7-baseline",
+        help="Embedded M7: verify the live stack against the frozen performance "
+             "baseline + set-in-stone capacity ceilings; --generate re-signs it",
+    )
+    m7_baseline.add_argument("--generate", action="store_true",
+                             help="Freeze current live numbers as the baseline (deliberate act)")
+    m7_baseline.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_baseline)
+
     m7_wcet = sub.add_parser(
         "m7-wcet",
         help="Embedded M7: parametric per-block WCET upper bound [modeled+measured] "
@@ -951,6 +1000,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_m7_stalls(args, perf)
     if args.command == "m7-wcet":
         return run_m7_wcet(args, perf)
+    if args.command == "m7-baseline":
+        return run_m7_baseline(args, perf)
     if args.command == "measure":
         return run_measure(args, perf)
     if args.command == "m7-bootstrap":
