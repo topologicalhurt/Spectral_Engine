@@ -108,7 +108,7 @@ the segment-load/DMA path.
   calibration provenance. **CLOSED (pass 251)** — see Status.
 - **P5 — integration.** Re-derive or retire `spectral_perf_model.c` profiles from the stack
   (decision point: the sim earns its keep here or is deprecated); WCET report; feeds S4
-  benchmark redesign.
+  benchmark redesign. **CLOSED (pass 253)** — see Status.
 - **P6 — application.** Re-evaluate S1 optimization candidates against the model: loop-nest /
   data-layout inversion, SMLALD coverage beyond full-sustain pairs, ITCM code placement,
   and the F2 oscillator-vs-IFFT embedded crossover. Maintainer emphasis (2026-06-12):
@@ -238,6 +238,29 @@ the segment-load/DMA path.
   variant is priced by the same bandwidth constants (no separate code path
   pretends otherwise); flash-class data reads are counted but not priced
   (cached + AN4891 ×1.01 anchor); I-side fetch is outside the data trace.
+- **P5 closed (pass 253, 2026-06-12).** Decision: **RETIRED, not re-derived.**
+  `runtime/spectral_perf_model.c/h` deleted on evidence — every constant was
+  uncalibrated (confidence/pessimism numerology) and the op-cost taxonomy
+  priced a kernel shape that no longer exists (per-sample LUT gather, replaced
+  by the coupled-form oscillator in pass 236; 4×-unroll loop term vs the real
+  16×). Re-deriving constants could not fix a wrong structure. The sim KEEPS
+  its real value: it runs the REAL `spectral_arm32_process` and reports only
+  MEASURED workload counters (`voice_samples` — renamed from the stale
+  lut/mac/phase trio — scan checks, activations, `accum_rw_words`, on-device
+  DWT peak-block) plus budget arithmetic; the host never fabricates cycles
+  and the report points at this stack for projections.
+  **WCET (the P5 done-when):** `performance/embedded/wcet.py` (CLI `m7-wcet`)
+  composes the live layers into a parametric per-block upper BOUND:
+  T1 synthesis = active × block × worst validated cyc/voice-sample (+ the P3
+  back-edge bias worst case); T2 non-loop residual = measured fixture insn
+  profile scaled conservatively × CPI bound [bound: ≤2, justified] + per-scan
+  worst-case mispredicts [measured-community: 8 cyc]; T3 cold memory =
+  working-set + scan lines × the P4 row-miss serial fill (SDRAM price
+  upper-bounds flash). An unroll-drift guard fails loudly if codegen moves.
+  Reference scenario: **64 active voices + 1024-segment scan + 256-sample
+  block ≈ 1.02 M cycles = 48% of the 48 kHz block budget @400 MHz** —
+  64 worst-case voices are schedulable with margin. WCET excludes init/load
+  and assumes the Daisy DTCM placement contract.
 - **Real newlib + working sets (hardening pass, 2026-06-10):** the freestanding stub
   headers are deleted; the rigs require a newlib toolchain (sha-pinned xPack via
   `m7-bootstrap` into `tools/toolchains/`, gitignored; brew's bare gcc is rejected by
