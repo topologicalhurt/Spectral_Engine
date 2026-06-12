@@ -105,7 +105,7 @@ the segment-load/DMA path.
   validation delta. **CLOSED (pass 250)** — see Status.
 - **P4 — memory layer.** Line-footprint analyzer over L1 traces; AN4891-calibrated latency
   table; SDRAM segment-stream/DMA model. Done-when: per-block stall estimate with per-constant
-  calibration provenance.
+  calibration provenance. **CLOSED (pass 251)** — see Status.
 - **P5 — integration.** Re-derive or retire `spectral_perf_model.c` profiles from the stack
   (decision point: the sim earns its keep here or is deprecated); WCET report; feeds S4
   benchmark redesign.
@@ -186,6 +186,45 @@ the segment-load/DMA path.
   | `synth_fade_m7` fade ramp | 22 | 22 | ≤9% |
   Memory effects are NOT in these numbers — that is P4's layer; do not compare
   them against wall-clock or QEMU counts without it.
+- **P4 closed (pass 251, 2026-06-12).** Layer 3 lives in
+  `performance/embedded/memory_model.py` (CLI `m7-stalls`; matrix instruments
+  `mca-validation`, `memory-stalls`): the QEMU plugin's program-order address
+  trace replays through the Daisy placement mirror (rig change: `segbuf` now in
+  `.bulk_bss` @0x60000000; per-block `.bulk_marker` stores split the trace into
+  init/load + per-block epochs) → a 16 KB 4-way 32B-line WBWA D-cache model
+  (incl. a dynamic-read-allocate approximation for full-line write streams) +
+  a per-bank open-row tracker → stall **bounds** per epoch. Bounds, not points:
+  the M7 is non-blocking (2 data linefill buffers + merging store buffer [TRM]),
+  so N misses cost between the bandwidth bound and the serial-latency bound.
+  **Every constant carries provenance**: libDaisy-as-shipped FMC config
+  (CAS=3, 32-bit bus, SDCLK=HCLK/2) + clock tree (CPU 400 / AXI 200 / SDCLK
+  100 MHz → 4 CPU cyc per SDCLK), TRM structure facts, AN4891 Rev 1 measured
+  anchors (DTCM zero-latency p17; D-cache 16 KB p5; flash+I-cache ≈ ITCM ×1.01
+  Table 7; cached-SDRAM FFT data ×1.19 Table 6 as the order-of-magnitude
+  cross-check). One labeled ASSUMPTION: the AXIM→FMC bridge overhead
+  (12 CPU cyc) — uncalibrated without a board. Derived per-line costs:
+  row-hit linefill **56 cyc**, row-miss **160 cyc**, writeback 44 cyc.
+- **Finding (upstreamable): libDaisy SDRAM timing is ~4× conservative.**
+  `sdram.cpp` ships `RPDelay=16`, `RCDDelay=10` (comments admit "started at 2")
+  vs the AS4C16M32MSA-6 datasheet minima (~3+3 SDCLK at 100 MHz). As shipped, a
+  row-miss linefill costs 160 CPU cyc; at datasheet timings ~70. The model
+  prices the device **as configured**; fixing the upstream config is a real,
+  free on-target win to propose when hardware exists.
+- **Fixture result + the scaling input P6/F needs.** For the 9-voice fixture
+  the whole segment store is 5 cache lines: all linefills land in the init/load
+  epoch, **steady-state per-block SDRAM stalls = 0**, and the dominant 1.5 M
+  DTCM-class accesses are zero-wait by placement — i.e. the mca (L2) numbers
+  ARE the block cost for DTCM-resident workloads, as designed. The model's
+  marginal prices for non-resident (streaming) segment stores, at 14–16 B per
+  `SpectralSegmentQ15` ≈ 2 segments/line: **per-block scan ≈ 14 N (bandwidth
+  bound) to 25 N (serial bound) cycles for N streamed segments** (row misses
+  amortize at 1 per 2 KB). At N=1000 that is ~14–25 K cyc/block on top of
+  ~49 K cyc compute (9 active voices × 256 samples × 21.3) — the magnitude that
+  prices the A2 loop-nest question, SDRAM-side DMA double-buffering, and the F2
+  osc-vs-IFFT crossover. Boundaries stated honestly: the DMA segment-stream
+  variant is priced by the same bandwidth constants (no separate code path
+  pretends otherwise); flash-class data reads are counted but not priced
+  (cached + AN4891 ×1.01 anchor); I-side fetch is outside the data trace.
 - **Real newlib + working sets (hardening pass, 2026-06-10):** the freestanding stub
   headers are deleted; the rigs require a newlib toolchain (sha-pinned xPack via
   `m7-bootstrap` into `tools/toolchains/`, gitignored; brew's bare gcc is rejected by
