@@ -4,6 +4,8 @@
 
 /* Math constants (float precision) */
 #define SPECTRAL_PI             3.14159265358979323846f
+/* Double-precision pi for init-time table construction (IFFT motif etc.). */
+#define SPECTRAL_PI_D           3.14159265358979323846
 #define SPECTRAL_TWO_PI         6.283185307179586f
 #define SPECTRAL_INV_PI         0.31830988618379067f
 #define SPECTRAL_INV_TWO_PI     0.159154943091895f

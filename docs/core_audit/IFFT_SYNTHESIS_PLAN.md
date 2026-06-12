@@ -81,5 +81,15 @@ generator, committed artifact — resource-hash pattern).
   headroom). The frame-builder construction (centered motif, (−1)^k
   twiddle, Hermitian placement) is validated and is the SSOT formulation
   for F2.
-- Next: F2 (desktop reference path behind the `spectral_synth_ifft.h`
-  contract + hybrid router + ctest parity).
+- F2 core CLOSED (pass 258): contract `synth/spectral_synth_ifft.h` +
+  frame renderer `synth/spectral_synth_ifft.c` (float port of the F1
+  formulation, K=8/O=16 measured operating point) + two host iFFT ports
+  (`core/port/host/spectral_ifft_vdsp.c`, `spectral_ifft_ref.c` — exactly
+  one live per build, selected on SPECTRAL_USE_VDSP). ctest
+  `ifft_synth_parity` (#20): port-vs-reference-iDFT 5.6e-9; stream parity
+  vs the exact oscillator sum **−72.8 dBFS max / −87.5 dBFS RMS** at 64
+  dense partials; deterministic; **MEASURED 7.5× over the naive oscillator
+  loop on desktop** (matches the embedded pricing's ~8× at 64 partials).
+- Next: F2b — the hybrid density router into the engine dispatch (segment
+  semantics: stationary sine interiors → IFFT, fades/chirps/non-sine →
+  oscillator bank; opt-in flag, no default change), then F3 golden.
