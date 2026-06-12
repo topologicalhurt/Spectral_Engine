@@ -131,8 +131,7 @@ set(SPECTRAL_SIMULATION_DEFINES
 
 set(SPECTRAL_SIMULATION_DAISY_DEFINES
     ${SPECTRAL_SIMULATION_DEFINES}
-    SPECTRAL_RESTRICTED_MODE=1
-    SPECTRAL_SIMULATION_TARGET_DAISY=1)
+    SPECTRAL_RESTRICTED_MODE=1)
 
 # Extra defines layered on top of SPECTRAL_SIMULATION_DEFINES for the embedded
 # host variants (see cmake/targets/embedded.cmake). Without these the variables
@@ -211,6 +210,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-production-parity-test.cm
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-simd-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-throughput-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-pack8-bench.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/metal-q15pack-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
@@ -220,6 +220,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/peak-interp-parabolic-test.cm
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-endian-roundtrip-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-payload-bounds-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/ifft-synth-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/simulate-smoke-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/gpu-backend-parity-test.cmake")
 
 # Test/bench targets that compile core/oscillator.c also #include the generated
 # spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
@@ -243,6 +245,7 @@ endforeach()
 # no build. Usage: cmake --build build --target tests_all && ctest --test-dir build
 add_custom_target(tests_all)
 add_dependencies(tests_all
+    simulate
     arm_core_test
     core_contracts_test
     core_guarantees_test

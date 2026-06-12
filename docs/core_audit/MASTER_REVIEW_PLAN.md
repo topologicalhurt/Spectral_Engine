@@ -208,5 +208,15 @@ economy matter most.
   references; mca FACTS vocabulary de-jargonized ("corroborated"/"direct");
   fixture id rename deferred to W3 (compiled into the generated header).
   Verified ctest 20/20 + pytest 69 + m7-baseline gate PASS (codegen-neutral).
-- W2 next: simulate-glob bug + per-target resolution class test, dead sim
-  API/define, bench_metal_q15pack.m, CI smoke decision, Metal scope.
+- **W2 DONE** (wiring + dead code): simulate-glob bug fixed via CMake-derived
+  per-target resolution + 5-test class lock (fail-on-bug verified); dead sim
+  API/define deleted; bench_metal_q15pack wired (Apple manual target);
+  simulate_smoke ctest (E2E, isolated workdir); gpu_backend_parity ctest
+  (first GPU coverage, measured bounds, exit-77 skip protocol); CI runs
+  tests/tools + pyyaml; Metal REQUIRED justified in place. ctest 22,
+  pytest 74, gate PASS. Remaining R2 sweeps (dead #if configurations,
+  adaptive-vs-static review) ride W6; main.c vtable bypass rides
+  KERNEL_LAYOUT L0 as planned.
+- W3 next: multi-eval macros → static inline; constants provenance;
+  baseline fixture absolute path + campaign3-p2-9voice id rename
+  (deliberate regeneration).

@@ -69,6 +69,10 @@ if(APPLE)
         set(SPECTRAL_SNDFILE_LIB sndfile)
     endif()
 
+    # REQUIRED at configure time is deliberate: the desktop target (which
+    # links all three) is unconditionally defined on Apple, and every macOS
+    # SDK ships these frameworks — a miss means a broken SDK, best surfaced
+    # at configure, not at link.
     find_library(SPECTRAL_ACCELERATE_FRAMEWORK Accelerate REQUIRED)
     find_library(SPECTRAL_METAL_FRAMEWORK Metal REQUIRED)
     find_library(SPECTRAL_FOUNDATION_FRAMEWORK Foundation REQUIRED)

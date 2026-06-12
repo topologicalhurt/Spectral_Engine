@@ -19,6 +19,7 @@ The pipeline shape every instrument follows (maintainer contract):
 from __future__ import annotations
 
 import platform
+import re
 import shutil
 from dataclasses import dataclass
 from enum import Enum
@@ -47,6 +48,43 @@ class TargetProfile:
     description: str
     build_target: str | None       # cmake target, None = built by the rig itself
     instruments: tuple[Instrument, ...]
+    # set(TARGET_* ...) variable in spectral_engine/CMakeLists.txt naming this
+    # profile's output binary; None = no host-run binary (rig-built or on-target).
+    binary_cmake_var: str | None = None
+
+
+# The binary naming scheme is a CMake fact (C-truth rule): Python derives the
+# glob by parsing the set(TARGET_* "...") block, never by restating the names.
+NAMES_CMAKE_RELPATH = "spectral_engine/CMakeLists.txt"
+_TARGET_NAME_RE = re.compile(r'set\((TARGET_[A-Z_]+)\s+"([^"]+)"\)')
+
+
+def cmake_target_names(repo_root: Path) -> dict[str, str]:
+    """Parse the output-binary naming SSOT; fails loudly if the block moves."""
+    path = repo_root / NAMES_CMAKE_RELPATH
+    names = dict(_TARGET_NAME_RE.findall(path.read_text(encoding="utf-8")))
+    if not names:
+        raise KeyError(
+            f"no set(TARGET_* ...) names found in {NAMES_CMAKE_RELPATH} — the "
+            "binary naming contract moved; fix the parse, do not hardcode names"
+        )
+    return names
+
+
+def binary_glob(profile: TargetProfile, repo_root: Path) -> str:
+    """Output-binary glob for a host-run profile, derived from CMake.
+
+    ${...} expansions (arch, GPU backend) vary per host and become wildcards.
+    """
+    if profile.binary_cmake_var is None:
+        raise KeyError(f"target '{profile.name}' has no host-run binary")
+    names = cmake_target_names(repo_root)
+    if profile.binary_cmake_var not in names:
+        raise KeyError(
+            f"{profile.binary_cmake_var} not found in {NAMES_CMAKE_RELPATH} — "
+            "the binary naming contract moved; fix the parse, do not hardcode names"
+        )
+    return re.sub(r"\$\{[^}]+\}", "*", names[profile.binary_cmake_var])
 
 
 def _probe_always(reason: str = "") -> Callable[[], tuple[Availability, str]]:
@@ -167,12 +205,14 @@ TARGETS: tuple[TargetProfile, ...] = (
         description="Host desktop build (Metal/vDSP on macOS, CUDA on Linux x86)",
         build_target="desktop",
         instruments=(STAGE_MARKERS, RSS_TIME, LINUX_PERF, XCTRACE),
+        binary_cmake_var="TARGET_DESKTOP",
     ),
     TargetProfile(
         name="simulate",
         description="Host-built embedded simulation (Q15, single-threaded)",
         build_target="simulate",
         instruments=(STAGE_MARKERS, RSS_TIME, LINUX_PERF),
+        binary_cmake_var="TARGET_SIMULATION",
     ),
     TargetProfile(
         name="m7",

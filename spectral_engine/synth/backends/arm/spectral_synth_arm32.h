@@ -149,10 +149,6 @@ void arm32_synth_get_op_counts(SpectralPerfCounters* out);
 
 #include "spectral_common.h"
 
-void embedded_sim_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
-                             uint32_t block_size, uint32_t max_mem_kb);
-void embedded_sim_set_verbose(int verbose);
-
 SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t out_len,
                                      float stretch, float pitch, SpectralTimbre timbre,
                                      int n_threads, double* t_synth);

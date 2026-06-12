@@ -37,19 +37,6 @@ static EmbeddedTargetConfig* get_simulation_config(void) {
     return &g_sim_config;
 }
 
-void embedded_sim_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
-                             uint32_t block_size, uint32_t max_mem_kb) {
-    EmbeddedTargetConfig* cfg = get_simulation_config();
-    if (cpu_mhz > 0) cfg->cpu_freq_mhz = cpu_mhz;
-    if (sample_rate > 0) cfg->sample_rate = sample_rate;
-    if (block_size > 0) cfg->block_size = block_size;
-    if (max_mem_kb > 0) cfg->max_memory_kb = max_mem_kb;
-}
-
-void embedded_sim_set_verbose(int verbose) {
-    get_simulation_config()->verbose = verbose;
-}
-
 /* Float Segment -> embedded SpectralSegmentQ15 conversion.
  *
  * This is the desktop-side equivalent of cmd/convert_segments.c, but it also

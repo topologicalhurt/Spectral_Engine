@@ -1,7 +1,7 @@
-/* Phase 5 GPU Q15 double-pack audit bench (host/Apple/Metal only; NOT wired into CMake).
+/* GPU Q15 double-pack audit bench (host/Apple/Metal only; manual benchmark).
  *
- * Reproduction harness for docs/core_audit/GPU_Q15_DOUBLEPACK_AUDIT.md. Answers the
- * maintainer's measure-first question: on this GPU, does packing two 16-bit lanes per
+ * Reproduction harness for docs/core_audit/archive/GPU_Q15_DOUBLEPACK_AUDIT.md.
+ * Answers the measure-first question: on this GPU, does packing two 16-bit lanes per
  * 32-bit register (Metal `half` / `half2`) make the synth oscillator faster than the
  * shipping fp32 kernel — by enough to justify half's precision loss?
  *
@@ -13,10 +13,8 @@
  *       only the oscillator sin narrowed to half — the real Q-island upper bound)
  * and reports GPU time, speedup, and precision (max|diff| + RMS dBFS) of f16x2 vs f32.
  *
- * Build + run by hand (no CMake target — links Metal/Foundation, Apple-exclusive):
- *   clang -O3 -fobjc-arc -framework Metal -framework Foundation \
- *     tests/core_contracts/bench_metal_q15pack.m -o /tmp/bench_metal_q15pack \
- *     && /tmp/bench_metal_q15pack
+ * Run: cmake --build build --target bench_metal_q15pack
+ *      && build/bin/bench_metal_q15pack
  *
  * NO production code is wired; this only measures, per measure-first / decline-on-data. */
 #import <Metal/Metal.h>

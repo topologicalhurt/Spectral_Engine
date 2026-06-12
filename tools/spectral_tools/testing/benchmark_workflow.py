@@ -24,7 +24,6 @@ from ..core.console import Console
 from .benchmark_runner import BenchmarkRunner
 from ..performance.benchmark_types import BenchMode, PerfStrategy, TestStatus
 from ..core.constants import (
-    DEFAULT_BENCHMARK_BINARY_GLOB,
     DEFAULT_BENCH_MODE,
     DEFAULT_BENCH_RUNS,
     DEFAULT_BUILD_TARGET,
@@ -136,13 +135,21 @@ class Performance:
         cmd = ["cmake", "--build", str(build_dir), "--target", target, "--parallel"]
         return self._must_run(cmd, cwd=self.repo_root)
 
-    def resolve_desktop_binary(self, build_dir: Path) -> Path:
+    def resolve_target_binary(self, build_dir: Path, target_name: str) -> Path:
+        """Resolve the output binary for a measurement-matrix target by the
+        glob derived from the CMake naming SSOT (per-target: the desktop and
+        simulate binaries coexist in bin/ and must never cross-match)."""
+        from ..performance import matrix
+
+        profile = matrix.target(target_name)
+        pattern = matrix.binary_glob(profile, self.repo_root)
         bin_dir = (build_dir / "bin").resolve()
-        candidates = sorted(bin_dir.glob(DEFAULT_BENCHMARK_BINARY_GLOB))
+        candidates = sorted(bin_dir.glob(pattern))
         for path in candidates:
             if is_executable(path):
                 return path
-        raise RuntimeError(f"unable to resolve desktop binary in {bin_dir}")
+        raise RuntimeError(
+            f"unable to resolve '{target_name}' binary ({pattern}) in {bin_dir}")
 
     def collect_context(self) -> dict[str, Any]:
         context: dict[str, Any] = {
@@ -194,11 +201,15 @@ class Performance:
         }
 
         if self.dry_run:
+            from ..performance import matrix
+
+            planned_glob = matrix.binary_glob(
+                matrix.target(DEFAULT_BUILD_TARGET), self.repo_root)
             details["planned"] = {
                 "configure_cmd": ["cmake", "-S", ".", "-B", str(build_dir), *cmake_args],
                 "build_cmd": ["cmake", "--build", str(build_dir), "--target", DEFAULT_BUILD_TARGET, "--parallel"],
                 "benchmark_cmd": [
-                    str(build_dir / "bin" / "spectral_*_desktop"),
+                    str(build_dir / "bin" / planned_glob),
                     str(benchmark_input),
                     *benchmark_cli_args,
                     *(["--cache"] if benchmark_mode == BenchMode.CACHE.value else []),
@@ -214,7 +225,7 @@ class Performance:
         try:
             self.configure_build(build_dir, cmake_args)
             self.build_target(build_dir)
-            binary = self.resolve_desktop_binary(build_dir)
+            binary = self.resolve_target_binary(build_dir, DEFAULT_BUILD_TARGET)
             details["binary"] = str(binary)
 
             bench = self.run_benchmark(
@@ -796,7 +807,7 @@ def run_measure(args: argparse.Namespace, perf: Performance) -> int:
             )
             return 2
         build_dir = perf.repo_root / "build"
-        binary = perf.resolve_desktop_binary(build_dir)
+        binary = perf.resolve_target_binary(build_dir, profile.name)
         args.binary = str(binary)
         args.binary_cli_args = []
         return run_single_bench(args, perf)
