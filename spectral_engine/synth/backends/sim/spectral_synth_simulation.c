@@ -11,7 +11,6 @@
 #include "spectral_wavetable.h"
 #include "spectral_perf.h"
 #include "spectral_perf_accounting.h"
-#include "spectral_perf_model.h"
 #include "spectral_utils.h"
 #include "spectral_contracts.h"
 #include "oscillator.h"
@@ -30,41 +29,9 @@
 static EmbeddedTargetConfig g_sim_config;
 static int g_sim_config_initialized = 0;
 
-static SpectralPerfProfileId parse_perf_profile_env(const char* value) {
-    if (spectral_is_empty_string(value)) return SPECTRAL_PERF_PROFILE_M7_GENERIC_WORST;
-    if (strcmp(value, "m7") == 0 || strcmp(value, "generic") == 0 ||
-        strcmp(value, "m7_generic_worst") == 0) {
-        return SPECTRAL_PERF_PROFILE_M7_GENERIC_WORST;
-    }
-    if (strcmp(value, "daisy") == 0 || strcmp(value, "h750") == 0 ||
-        strcmp(value, "daisy_h750_worst") == 0) {
-        return SPECTRAL_PERF_PROFILE_DAISY_H750_WORST;
-    }
-    return SPECTRAL_PERF_PROFILE_M7_GENERIC_WORST;
-}
-
-static void apply_perf_overrides_from_env(EmbeddedTargetConfig* cfg) {
-    const char* profile_env = spectral_getenv_nonempty(SPECTRAL_ENV_SIM_PERF_PROFILE);
-    double pessimism = 0.0;
-    int cold_start = 0;
-
-    if (!cfg) return;
-
-    if (profile_env) {
-        cfg->perf_profile = (uint32_t)parse_perf_profile_env(profile_env);
-    }
-    if (spectral_getenv_f64_positive(SPECTRAL_ENV_SIM_PESSIMISM, &pessimism)) {
-        cfg->pessimism_override = pessimism;
-    }
-    if (spectral_getenv_bool(SPECTRAL_ENV_SIM_PERF_COLD, &cold_start)) {
-        cfg->include_cold_start = cold_start;
-    }
-}
-
 static EmbeddedTargetConfig* get_simulation_config(void) {
     if (!g_sim_config_initialized) {
         g_sim_config = embedded_perf_default_config();
-        apply_perf_overrides_from_env(&g_sim_config);
         g_sim_config_initialized = 1;
     }
     return &g_sim_config;
@@ -81,22 +48,6 @@ void embedded_sim_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
 
 void embedded_sim_set_verbose(int verbose) {
     get_simulation_config()->verbose = verbose;
-}
-
-void embedded_sim_set_perf_profile(uint32_t profile_id) {
-    EmbeddedTargetConfig* cfg = get_simulation_config();
-    if (profile_id < (uint32_t)SPECTRAL_PERF_PROFILE_COUNT) {
-        cfg->perf_profile = profile_id;
-    }
-}
-
-void embedded_sim_set_pessimism(double factor) {
-    if (!spectral_is_finite_positive_f64(factor)) return;
-    get_simulation_config()->pessimism_override = factor;
-}
-
-void embedded_sim_set_cold_start_reporting(int enabled) {
-    get_simulation_config()->include_cold_start = enabled ? 1 : 0;
 }
 
 /* Float Segment -> embedded SpectralSegmentQ15 conversion.
@@ -249,12 +200,6 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
         }
     }
 
-    const SpectralPerfModelProfile* perf_profile =
-        spectral_perf_model_profile((SpectralPerfProfileId)cfg->perf_profile);
-    const uint32_t cache_miss_threshold =
-        perf_profile ? perf_profile->cache_miss_threshold_active : 24u;
-    if (!perf_profile) perf_profile = spectral_perf_model_default_profile();
-
 #if SPECTRAL_DEBUG && !defined(NDEBUG)
     if (cfg->verbose) {
         SPECTRAL_DBG("max_amp=%.3f amp_scale=%.6f loaded=%u/%zu",
@@ -294,9 +239,8 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
 
     /* Workload-accounting model (MEASURED side). Walk the same per-block segment
      * schedule that spectral_arm32_process() follows and tally the work — segment
-     * activations, scan length, peak active set, and the per-sample LUT / MAC /
-     * phase op counts that feed the cycle estimate. No samples are produced here;
-     * this populates EmbeddedOpCounts only. */
+     * activations, scan length, peak active set, and per-voice sample counts.
+     * No samples are produced here; this populates EmbeddedOpCounts only. */
     active_idx = (uint32_t*)spectral_malloc_array(SIMULATION_MAX_ACTIVE, sizeof(*active_idx));
     if (!active_idx) {
         result = SPECTRAL_ERR_MEMORY;
@@ -331,12 +275,6 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
         spectral_perf_count_segment_activations(&ops, block_activations);
         spectral_perf_count_segment_scan(&ops, (uint32_t)(next_seg_idx - scan_start_idx));
         if (num_active > peak_active) peak_active = num_active;
-        spectral_perf_count_cache_pressure(&ops, num_active, cache_miss_threshold, block_len);
-
-        uint64_t block_lut_lookups = 0;
-        uint64_t block_mac_operations = 0;
-        uint64_t block_phase_updates = 0;
-        uint64_t block_loop_iterations = 0;
 
         uint32_t i = 0;
         while (i < num_active) {
@@ -351,19 +289,13 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
             uint32_t len = blk_end - blk_start;
 
             spectral_perf_count_segment_samples(&ops, len);
-            block_lut_lookups += len;
-            block_mac_operations += len;
-            block_phase_updates += len;
-            block_loop_iterations += spectral_perf_loop_iters_for_samples(len);
             i++;
         }
 
-        uint64_t block_cycles = spectral_perf_model_estimate_block_cycles(
-            perf_profile, block_len, num_active, block_activations,
-            (uint32_t)(next_seg_idx - scan_start_idx),
-            block_lut_lookups, block_mac_operations,
-            block_phase_updates, block_loop_iterations);
-        spectral_perf_record_peak_block(&ops, block_cycles, num_active);
+        /* peak_block_cycles stays 0 on host: only the on-device DWT counter
+         * (SPECTRAL_RESTRICTED_PROFILE) measures block cycles; the host never
+         * fabricates them. Track the active peak only. */
+        if (num_active > ops.peak_block_active) ops.peak_block_active = num_active;
     }
 
 #if SPECTRAL_DEBUG && !defined(NDEBUG)

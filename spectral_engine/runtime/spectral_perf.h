@@ -5,13 +5,18 @@
  *   - CPU time (user, system, wall clock)
  *   - CPU utilization and thread efficiency
  * 
- * Embedded target estimation:
- *   - Cycle counting based on Q15 operation costs
- *   - Real-time feasibility assessment
- *   - Memory footprint calculation
- * 
- * The embedded estimation allows simulation on desktop before deployment,
- * predicting whether audio will render in real-time on Cortex-M7.
+ * Embedded target reporting:
+ *   - MEASURED workload counters (voice-samples, scan checks, activations,
+ *     accumulator traffic) from running the real kernel
+ *   - Real-time budget arithmetic (cycles available per block at the target
+ *     clock — arithmetic, not a model)
+ *   - Memory footprint calculation (exact, from the data structures)
+ *
+ * Cycle PROJECTIONS are deliberately absent: they come from the validated M7
+ * measurement stack (m7-census / m7-stalls / m7-wcet — M7_PERF_MODEL_PLAN),
+ * never from in-C cost constants. The old profile-driven estimator
+ * (spectral_perf_model.*) was retired in pass 253: uncalibrated constants
+ * pricing a kernel shape that no longer exists.
  */
 #ifndef SPECTRAL_PERF_H
 #define SPECTRAL_PERF_H
@@ -65,40 +70,32 @@ typedef struct {
     uint32_t sample_rate;
     uint32_t block_size;
     uint32_t max_memory_kb;
-    uint32_t perf_profile;        /* SpectralPerfProfileId */
-    double   pessimism_override;  /* 0 = profile default, >0 clamps to >= default */
-    int      include_cold_start;  /* include cold-start envelope estimate */
     int      verbose;
 } EmbeddedTargetConfig;
 
+/* Measured workload + budget arithmetic. No field here is a cycle projection:
+ * peak_block_cycles is a DWT measurement on restricted-profile device builds
+ * (0 = unavailable), everything else is a count or plain arithmetic. */
 typedef struct {
     double   desktop_time_ms;
-    uint64_t estimated_cycles;
-    uint64_t estimated_cycles_cold;
-    double   target_time_ms;
-    double   target_time_cold_ms;
-    double   cycles_per_sample;
-    double   cycles_available;
-    double   cpu_load_percent;
-    double   cpu_load_best;        /* optimistic: good cache + compiler opts */
-    double   cpu_load_worst;       /* pessimistic: peak block or +30% overhead */
-    double   cpu_load_cold;
-    double   realtime_ratio;
-    double   model_confidence;     /* confidence in absolute estimate [0,1] */
-    double   pessimism_factor;     /* explicit worst-case safety multiplier */
-    const char* profile_name;      /* stable perf profile name */
-    const char* profile_version;   /* model profile revision */
     size_t   segment_count;
     uint32_t peak_active;
     size_t   output_samples;
-    uint64_t peak_block_cycles;    /* cycles for worst-case block */
-    uint32_t peak_block_active;    /* active count in worst-case block */
-    uint64_t cycles_scan;
-    uint64_t cycles_oscillator;
-    uint64_t cycles_accumulation;
-    uint64_t cycles_output;
-    uint64_t cycles_overhead;
-    uint64_t cycles_memory;
+
+    /* Measured workload (real kernel structure). */
+    uint64_t voice_samples;
+    uint64_t seg_scan_checks;
+    uint64_t segment_activations;
+    uint64_t accum_rw_words;
+
+    /* Real-time budget arithmetic at the target clock. */
+    double   cycles_per_sample_budget;   /* cpu_hz / sample_rate */
+    double   cycles_per_block_budget;    /* budget * block_size */
+    double   budget_per_voice_sample;    /* block budget / (peak_active*block) */
+
+    /* Measured on-device only (DWT, SPECTRAL_RESTRICTED_PROFILE); else 0. */
+    uint64_t peak_block_cycles;
+    uint32_t peak_block_active;
 } EmbeddedPerfEstimate;
 
 /*
@@ -115,12 +112,6 @@ typedef struct {
  * of hot data (active segments, accum buffer) in fast SRAM vs cold
  * data (segment pool) in SDRAM is a deployment consideration.
  */
-/*
- * Cycle-cost assumptions live in runtime/spectral_perf_model.[ch] as
- * versioned profile data. This keeps model tuning isolated from users
- * of the estimator API.
- */
-
 typedef struct SpectralPerfCounters EmbeddedOpCounts;
 
 /* Embedded memory usage (exact calculation from data structures) */

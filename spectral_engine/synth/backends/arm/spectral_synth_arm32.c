@@ -22,8 +22,9 @@
  *   - LUT residency: the sine LUT is gathered every sample, strided by freq_inc
  *     (effectively random in-table -- it does NOT "minimize cache misses"); it is
  *     not pinned to DTCM.
- *   - The cycle/WCET perf model (spectral_perf_model.*) is an uncalibrated
- *     heuristic; optimizations here are not yet measured on silicon/QEMU.
+ *   - Cycle/WCET numbers come from the validated M7 measurement stack
+ *     (m7-census / m7-stalls / m7-wcet); the old in-C cost model was retired
+ *     in pass 253 (uncalibrated, priced a pre-pass-236 kernel shape).
  */
 
 #include "spectral_synth_arm32.h"
@@ -32,7 +33,6 @@
 #include "spectral_lut.h"
 #include "spectral_osc_recursive.h"
 #include "spectral_perf_accounting.h"
-#include "spectral_perf_model.h"
 #include "spectral_utils.h"
 
 #if SPECTRAL_EMBEDDED
@@ -213,10 +213,6 @@ static inline void profile_update(FunctionProfile* prof, uint32_t cycles) {
     if (cycles > prof->max_cycles) prof->max_cycles = cycles;
 }
 
-static inline uint32_t perf_cache_miss_threshold(void) {
-    const SpectralPerfModelProfile* p = spectral_perf_model_default_profile();
-    return p ? p->cache_miss_threshold_active : 24u;
-}
 
 #endif
 
@@ -284,17 +280,6 @@ static inline void spectral_perf_segment_scan_end(const SpectralArm32Ctx* ctx,
 #endif
 }
 
-static inline void spectral_perf_cache_pressure(uint32_t active_segments, uint32_t block_samples) {
-#if SPECTRAL_RESTRICTED_PROFILE
-    spectral_perf_count_cache_pressure(&s_perf_op_counts,
-                                       active_segments,
-                                       perf_cache_miss_threshold(),
-                                       block_samples);
-#else
-    (void)active_segments;
-    (void)block_samples;
-#endif
-}
 
 static inline uint32_t spectral_perf_oscillator_start(void) {
     return get_cycles();
@@ -1024,8 +1009,6 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     if (SPECTRAL_UNLIKELY(ctx->num_active > ctx->peak_active)) {
         ctx->peak_active = ctx->num_active;
     }
-    spectral_perf_cache_pressure(ctx->num_active, num_samples);
-    
     /* Process all active segments */
     uint32_t osc_start = spectral_perf_oscillator_start();
     uint16_t i = 0;

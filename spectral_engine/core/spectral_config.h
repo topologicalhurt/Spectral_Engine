@@ -314,15 +314,6 @@ typedef enum SpectralTimbre {
 #endif
 
 /* Canonical simulation environment keys */
-#ifndef SPECTRAL_ENV_SIM_PERF_PROFILE
-#define SPECTRAL_ENV_SIM_PERF_PROFILE "SPECTRAL_SIM_PERF_PROFILE"
-#endif
-#ifndef SPECTRAL_ENV_SIM_PESSIMISM
-#define SPECTRAL_ENV_SIM_PESSIMISM "SPECTRAL_SIM_PESSIMISM"
-#endif
-#ifndef SPECTRAL_ENV_SIM_PERF_COLD
-#define SPECTRAL_ENV_SIM_PERF_COLD "SPECTRAL_SIM_PERF_COLD"
-#endif
 /* Emit split analysis stage markers (fft/track) in addition to aggregate analysis markers. */
 #ifndef SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS
 #define SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS "SPECTRAL_STAGE_SPLIT_ANALYSIS"

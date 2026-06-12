@@ -152,9 +152,6 @@ void arm32_synth_get_op_counts(SpectralPerfCounters* out);
 void embedded_sim_set_config(uint32_t cpu_mhz, uint32_t sample_rate,
                              uint32_t block_size, uint32_t max_mem_kb);
 void embedded_sim_set_verbose(int verbose);
-void embedded_sim_set_perf_profile(uint32_t profile_id);
-void embedded_sim_set_pessimism(double factor);
-void embedded_sim_set_cold_start_reporting(int enabled);
 
 SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t out_len,
                                      float stretch, float pitch, SpectralTimbre timbre,

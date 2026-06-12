@@ -105,8 +105,7 @@ set(SPECTRAL_SOURCES_MONITORING
     "${SPECTRAL_RUNTIME_DIR}/spectral_perf.c")
 
 set(SPECTRAL_SOURCES_RUNTIME_PERF_MODEL
-    "${SPECTRAL_RUNTIME_DIR}/spectral_perf_embedded.c"
-    "${SPECTRAL_RUNTIME_DIR}/spectral_perf_model.c")
+    "${SPECTRAL_RUNTIME_DIR}/spectral_perf_embedded.c")
 
 set(SPECTRAL_SOURCES_ANALYSIS_PROC
     "${SPECTRAL_ANALYSIS_DIR}/spectral_processing_chain.c"
