@@ -261,6 +261,58 @@ the segment-load/DMA path.
   block ≈ 1.02 M cycles = 48% of the 48 kHz block budget @400 MHz** —
   64 worst-case voices are schedulable with margin. WCET excludes init/load
   and assumes the Daisy DTCM placement contract.
+- **P6 decided (pass 254, 2026-06-12) — the model applied to the open
+  optimization candidates.** Three decisions, each on the stack's numbers:
+  - **D1 loop-nest / data-layout inversion (A2): DECLINED on data.** The
+    motivating win was halved q63-accumulator memory traffic
+    (`accum_rw_words`, measured). The accumulator is DTCM-resident per the
+    placement contract and DTCM is zero-wait dual-ported [TRM / AN4891 p17]
+    — the traffic difference prices to **zero stall cycles** (P4). The
+    accumulator ld/st issue slots are already inside the validated
+    21.3 cyc/voice-sample. Inverting the nest would *add* per-sample reload
+    traffic of per-voice oscillator state. No win exists at any voice count
+    while the accumulator stays DTCM-resident.
+  - **D2 SMLALD pairing extension beyond full-sustain: DECLINED.** Validated
+    rates: pair loop 20.0 vs sustain 21.3 cyc/voice-sample = **6.1% on the
+    paired fraction only**; the traffic half of the win prices to zero (D1).
+    Extending pairing into fade-phase/partial-overlap voices buys ≤6% of a
+    fraction of synthesis time for real bookkeeping complexity at activation.
+    The existing full-sustain pairing stays (already landed, free).
+  - **D3 ITCM code placement: DEFERRED TO HARDWARE, quantified.** Hot-code
+    working set = 310 lines (9.9 KB) fits 64 KB ITCM outright. Steady-state
+    throughput win ≈ 0 (I-cache resident; AN4891 flash+cache = ×1.01). The
+    real win is **determinism**: it deletes the I-side cold/jitter WCET term
+    (≈ 310 × 72 ≈ 22 K cycles ≈ 5.6% of the 1 ms Daisy callback budget).
+    Needs a libDaisy linker section + startup copy (BSP territory) and a
+    board to verify — the top on-target item, not actionable here.
+  - **D4 F2 osc-vs-IFFT embedded pricing: IFFT justified for dense frames.**
+    Osc-bank cost per dense partial per 256-sample block = 256 × 21.3 ≈
+    5.45 K cycles [validated]. A Q31 inverse RFFT-512 is structurally
+    22–31 K instructions (radix-4: 4 stages × 64 butterflies × ~70–90 insns
+    + split + bitrev) → 15–60 K cycles across the IPC band [structural
+    bound, not a measurement] → **crossover at ~3–12 simultaneous dense
+    partials** even at the pessimistic end. Typical dense workloads exceed
+    this comfortably ⇒ the F stream is justified; its FIRST step is
+    vendoring CMSIS-DSP and measuring `arm_rfft_q31` under the counts rig
+    (rig ready; maintainer's CMSIS-DSP emphasis lands exactly here). Until
+    then the oscillator bank remains the only signed-off path.
+- **Deterministic capacity (Daisy Seed, STM32H750 @400 MHz, 48 kHz, chosen
+  SDRAM timing, DTCM placement contract).** Two number classes — never mix:
+  **WCET-bound (guaranteed)** from `m7-wcet` (every term an upper bound) and
+  **expected steady-state (modeled, validated ≤1% on loops)**:
+  | scenario | WCET-bound | expected steady-state |
+  |---|---|---|
+  | 48-sample callback (Daisy default, 1 ms, 400 K cyc) | **32 voices @ 88%** (24 @ 71%, ~36 @ 100%) | ~128 voices ≈ 43% load (28 cyc/vs whole-kernel) |
+  | 256-sample blocks (2.13 M cyc) | **128 voices @ 89%** (≈145 @ 100%) | ~290 voices compute ceiling; `DAISY_MAX_ACTIVE`=128 binds first |
+  Segments: storage-bound at **2,000,000** (`DAISY_MAX_SEGMENTS_SAFE`; 48 MB
+  SDRAM pool, 16 B each; raw pool fits 3.1 M); per-block scan ≈ 48 cyc/check
+  bound, streamed-scan 14–25 cyc/segment (P4). Headroom for non-audio work =
+  100% − the table's load (e.g. ≥11% guaranteed at the 128-voice/256-block
+  point, ~50%+ at 64 voices). 96 kHz halves every budget; 480 MHz boost adds
+  20%. The WCET bound at the 48-sample callback is dominated by deliberately
+  conservative terms (the 256-block-measured residual charged whole on a
+  48-sample block + cold memory per block); on-target measurement will pull
+  the guaranteed numbers toward the expected column, never past it.
 - **Real newlib + working sets (hardening pass, 2026-06-10):** the freestanding stub
   headers are deleted; the rigs require a newlib toolchain (sha-pinned xPack via
   `m7-bootstrap` into `tools/toolchains/`, gitignored; brew's bare gcc is rejected by
