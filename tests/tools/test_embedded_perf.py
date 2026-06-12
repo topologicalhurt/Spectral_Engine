@@ -507,6 +507,25 @@ def test_mca_validation_against_hand_derived_timings(tmp_path):
     assert report.mean_backedge_divergence <= 1.5
 
 
+@pytest.mark.skipif(not HAVE_QEMU, reason="needs newlib arm-none-eabi-gcc + qemu")
+def test_fft_probe_measures_cmsis_rfft(tmp_path):
+    """F-stream step 1: the vendored CMSIS-DSP inverse RFFT-512 measures at a
+    stable instruction count on the rig. Band: 30K-60K insns (measured 43,910
+    at v1.16.2 / xPack 15.2.1) — a move outside it means the vendored DSP lib
+    or the toolchain changed the F2 crossover input and the pricing in
+    M7_PERF_MODEL_PLAN must be re-derived."""
+    from spectral_tools.performance.embedded import fft_probe
+
+    tc = toolchain.discover(ROOT, need=frozenset({"qemu"}))
+    r = fft_probe.probe(tc, out_dir=tmp_path)
+    assert 30_000 < r.insns_per_fft < 60_000
+    assert "arm_rfft_q31" in r.compute_symbols
+    assert "arm_radix4_butterfly_inverse_q31" in r.compute_symbols
+    doc = r.as_dict()
+    assert doc["cycles_per_fft_band"][0] < doc["cycles_per_fft_band"][1]
+    assert "measured: qemu-tcg" in doc["provenance"]
+
+
 @pytest.mark.skipif(not (HAVE_MCA and HAVE_QEMU),
                     reason="needs newlib arm-none-eabi-gcc + llvm-mca + qemu")
 def test_wcet_end_to_end_composes_live_stack(tmp_path):

@@ -2,6 +2,26 @@
 # Schema + rules: tools/spectral_tools/vendor/manifest.py (ADR-0003)
 version: 1
 dependencies:
+  CMSIS-DSP:
+    kind: submodule
+    url: https://github.com/ARM-software/CMSIS-DSP
+    path: third_party/CMSIS-DSP
+    ref: main
+    sparse:
+    - Include
+    - Source/TransformFunctions
+    - Source/CommonTables
+    - Source/BasicMathFunctions
+    - PrivateInclude
+    notes: pinned at tag v1.16.2 via the gitlink; Q15/Q31 FFT for the F-stream IFFT
+      synthesis path (rfft measured on the QEMU rig, pass 255)
+  CMSIS_6:
+    kind: submodule
+    url: https://github.com/ARM-software/CMSIS_6
+    path: third_party/CMSIS_6
+    ref: main
+    sparse:
+    - CMSIS/Core/Include
   simde:
     kind: submodule
     url: https://github.com/simd-everywhere/simde

@@ -6,3 +6,11 @@
 	path = third_party/xxHash
 	url = https://github.com/Cyan4973/xxHash
 	branch = dev
+[submodule "third_party/CMSIS-DSP"]
+	path = third_party/CMSIS-DSP
+	url = https://github.com/ARM-software/CMSIS-DSP
+	branch = main
+[submodule "third_party/CMSIS_6"]
+	path = third_party/CMSIS_6
+	url = https://github.com/ARM-software/CMSIS_6
+	branch = main
