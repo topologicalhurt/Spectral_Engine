@@ -78,12 +78,26 @@ typedef int64_t  q63_t;   /* wide accumulator for exact multi-voice MAC (SMLALD)
 typedef uint16_t uq16_t;
 typedef uint32_t uq32_t;
 
+/* Q range macros. #ifndef-guarded for CMSIS-DSP coexistence: arm_math_types.h
+ * defines the same four names with identical VALUES (verified pass 256) but
+ * its definitions are unguarded -- in a TU that needs both headers (the IFFT
+ * synthesis path), include CMSIS BEFORE this header and these guards keep the
+ * build warning-free under -Werror. The boundary rule stands regardless:
+ * CMSIS-DSP is for leaf algorithm blocks (FFT); engine Q semantics live here. */
+#ifndef Q15_MAX
 #define Q15_MAX     ((q15_t)32767)
+#endif
+#ifndef Q15_MIN
 #define Q15_MIN     ((q15_t)-32768)
+#endif
 #define Q15_HALF    ((q15_t)16384)
 #define Q15_ZERO    ((q15_t)0)
+#ifndef Q31_MAX
 #define Q31_MAX     ((q31_t)2147483647L)
+#endif
+#ifndef Q31_MIN
 #define Q31_MIN     ((q31_t)-2147483648L)
+#endif
 
 static inline q15_t spectral_float_to_q15(float f) {
     if (!isfinite(f)) return Q15_ZERO;

@@ -12,6 +12,7 @@ dependencies:
     - Source/TransformFunctions
     - Source/CommonTables
     - Source/BasicMathFunctions
+    - Source/FastMathFunctions
     - PrivateInclude
     notes: pinned at tag v1.16.2 via the gitlink; Q15/Q31 FFT for the F-stream IFFT
       synthesis path (rfft measured on the QEMU rig, pass 255)
