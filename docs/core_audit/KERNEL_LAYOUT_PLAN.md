@@ -141,6 +141,17 @@ file moves must be codegen-identical, and the gate PROVES it at ±5% insns)
   + radix-2 iFFT; arch/arm ← backends/arm + CMSIS osc + sim adapter;
   drivers/vdsp ← vdsp iFFT (early, so core/port retires now);
   core/spectral_mem.h ← port/. All vars/paths/rigs rewired; gate-identical.
-- L3 next: synth/ dissolution — api header + cpu backend + IFFT
-  renderer/contract → core; fix the api→arch synth_cpu redirect inversion;
-  synth/ reduced to gpu/ (which L4 then lifts into drivers/).
+- **L3 DONE** (69602500f0): the synth_cpu rename macro replaced by
+  build-selected TU definition (the sim TU defines synth_cpu and includes
+  the contract it implements); the api→arch include inversion is gone.
+  core gains spectral_synth.h (public API), spectral_synth_cpu.c, and the
+  IFFT renderer/contract. synth/ = backends/gpu only. Bonus fix: the sim
+  report block's guard now matches the perf include (NO_PERF profiles
+  compiled it only via the old macro chain). Gate PASS.
+- L4 next: gpu → drivers/{metal,cuda} with the four anchor cuts — (a) MSL
+  payload out of core/oscillator.c, (b) GPU externs out of the public
+  header into per-driver headers, (c) MSL struct-mirror codegen, (d) plan/
+  cache layer stays in core (already correct). gpu_backend_parity (the
+  L4 parity requirement) already exists from the review's W2.
+- L5 next: include-graph layering test; ENGINE include dirs narrowed per
+  layer; docs trued.
