@@ -257,5 +257,13 @@ economy matter most.
   idiom read of arm32/oscillator kernel bodies (census-pinned; defer to next
   review instance), memory_model/cli_pipeline R7 cohesion read, MSL codegen
   (L4). ctest 24, pytest 75, gate PASS.
-- W7 next: full re-verify + adversarial diff review of the review's own
-  changes; close out the plan; then KERNEL_LAYOUT L0+L1.
+- **W7 DONE — REVIEW INSTANCE CLOSED.** Adversarial re-read of all six
+  wave commits clean (sample-op semantics re-verified identical; resolution
+  hunks re-read; embedded_arm_restricted built). Final ladder: ctest 24/24,
+  pytest 75, gate PASS. Instance totals: 3 bugs fixed + class-tested, 1
+  rotted dormant config repaired + pinned, 5 new test surfaces, 2 written
+  declines, zero conversational references in code. Items deferred WITH A
+  HOME: K&R idiom read of arm32/oscillator bodies + memory_model/cli_pipeline
+  cohesion read (next review instance), MSL mirror codegen + GPU externs +
+  synth_cpu rename macro (KERNEL_LAYOUT L3/L4), include-graph enforcement
+  test (L5). KERNEL_LAYOUT L0+L1 begins next.
