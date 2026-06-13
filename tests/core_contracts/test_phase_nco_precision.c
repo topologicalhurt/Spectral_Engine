@@ -26,7 +26,7 @@
  *
  *   Part 2 - PHASE-SOURCE SWAP COST (per timbre, dBFS).  Drive the SAME Q15 waveform
  *   evaluator two ways -- once from the integer-NCO index, once from the float-cubic
- *   index (the CURRENTLY-SHIPPING opt-in Q15 path, oscillator.c synth_segment_q15) --
+ *   index (the CURRENTLY-SHIPPING opt-in Q15 path, spectral_oscillator.c synth_segment_q15) --
  *   and report the RMS difference in dBFS.  This is exactly Q5b's question: swapping the
  *   Q15 path's phase source must not degrade the already-characterized Q15-eval floor
  *   (test_q15_compute_precision: sine -85.1, saw -91.5, square -90.0, triangle -92.6,

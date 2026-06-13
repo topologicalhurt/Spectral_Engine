@@ -22,7 +22,7 @@
  *                cusp/staircase timbres (asin, quantized) that have no closed-form
  *                BLEP or compact Fourier series.
  *
- * Phase/amplitude bookkeeping mirrors synth_segment_scalar() in oscillator.c so
+ * Phase/amplitude bookkeeping mirrors synth_segment_scalar() in spectral_oscillator.c so
  * these are drop-in quality swaps: same cubic phase helper, same per-sample
  * amplitude ramp, same Hann fade envelope. */
 #include "spectral_osc_bandlimited.h"
@@ -34,7 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Process-global quality state (mirrors osc_set_dispatch in oscillator.c) ---- */
+/* ---- Process-global quality state (mirrors osc_set_dispatch in spectral_oscillator.c) ---- */
 
 static SpectralOscQuality g_osc_quality = SPECTRAL_OSC_QUALITY_NAIVE;
 

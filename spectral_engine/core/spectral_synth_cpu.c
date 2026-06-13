@@ -7,7 +7,7 @@
 #include "spectral_contracts.h"
 #include "spectral_vector_ops.h"
 #include "spectral_wavetable.h"
-#include "oscillator.h"
+#include "spectral_oscillator.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>

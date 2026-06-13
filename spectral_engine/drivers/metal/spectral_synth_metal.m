@@ -1,6 +1,6 @@
 /* spectral_synth_metal.m - Metal GPU synthesis (macOS)
  * 
- * Uses oscillator functions from oscillator.h for GPU waveform generation.
+ * Uses oscillator functions from spectral_oscillator.h for GPU waveform generation.
  * The Metal shader source (oscillator_metal_source) is defined in the payload TU (spectral_osc_metal_payload.c).
  * 
  */
@@ -11,7 +11,7 @@
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
 #include "spectral_utils.h"
-#include "oscillator.h"
+#include "spectral_oscillator.h"
 #include "spectral_omp.h"
 
 /* The oscillator and segment-math MSL functions are CODEGEN'd from the canonical

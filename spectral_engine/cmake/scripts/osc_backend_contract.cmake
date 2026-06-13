@@ -21,7 +21,7 @@
 #         MUST contain a `_Static_assert(... SPECTRAL_OSC_Q15_VERSION == ...)` pin. The
 #         consumer set is DISCOVERED (glob), not hard-coded, so a brand-new backend that
 #         includes the contract is automatically held to the rule. Today's three:
-#         core/oscillator.c (scalar), arch/simd/oscillator_simd.c (SIMDe pack8),
+#         core/spectral_oscillator.c (scalar), arch/simd/oscillator_simd.c (SIMDe pack8),
 #         arch/arm/oscillator_simd.c (CMSIS).
 #
 # WHY ONLY Q15 GETS A PIN RULE (and float does not): the Q15 waveform is RE-IMPLEMENTED
@@ -33,7 +33,7 @@
 # than a version token), GPU-Metal by verify_metal_osc (the MSL is codegen'd from the C
 # formulas; the build fails on drift), CUDA likewise from the shared evaluator. This scan
 # only sanity-asserts BOTH contracts still declare a numeric version, so the matrix header
-# in oscillator_dispatch.h never silently loses its anchor.
+# in spectral_oscillator_dispatch.h never silently loses its anchor.
 #
 # Implementation note: presence is a whole-file REGEX MATCH (not a per-line walk) — we are
 # asserting a token EXISTS somewhere, not reporting a line, so the q_domain_contract-style
@@ -111,7 +111,7 @@ foreach(_file IN LISTS _sources)
         _pin "${_content}")
     if(_pin STREQUAL "")
         list(APPEND _violations
-            "  ${_file}: includes the canonical Q15 contract (${_q15_header}) but carries no _Static_assert(... SPECTRAL_OSC_Q15_VERSION == ...) pin -- a Q15 re-implementer must version-handshake the contract so a bump forces re-validation here. See SPECTRAL_OSC_Q15_VERSION in ${_q15_header} and the existing pins in oscillator.c / arch/simd/oscillator_simd.c / arch/arm/oscillator_simd.c.")
+            "  ${_file}: includes the canonical Q15 contract (${_q15_header}) but carries no _Static_assert(... SPECTRAL_OSC_Q15_VERSION == ...) pin -- a Q15 re-implementer must version-handshake the contract so a bump forces re-validation here. See SPECTRAL_OSC_Q15_VERSION in ${_q15_header} and the existing pins in spectral_oscillator.c / arch/simd/oscillator_simd.c / arch/arm/oscillator_simd.c.")
     endif()
 endforeach()
 
@@ -120,7 +120,7 @@ if(_nv GREATER 0)
     string(REPLACE ";" "\n" _report "${_violations}")
     message(FATAL_ERROR
         "Oscillator backend contract FAILED (${_nv} issue(s)):\n${_report}\n"
-        "See OSCILLATOR_BACKEND_CONTRACT_PLAN.md / oscillator_dispatch.h matrix.")
+        "See OSCILLATOR_BACKEND_CONTRACT_PLAN.md / spectral_oscillator_dispatch.h matrix.")
 endif()
 
 list(LENGTH _consumers _nc)

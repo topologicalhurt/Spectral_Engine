@@ -1,5 +1,5 @@
 # Metal MSL oscillator codegen — single source of truth is the C synthesis
-# contract (spectral_osc_formulas.h / spectral_segment_math.h / oscillator.h).
+# contract (spectral_osc_formulas.h / spectral_segment_math.h / spectral_oscillator.h).
 # tools/spectral_tools/generators/metal_osc.py emits the committed header
 # core/spectral_osc_metal_generated.h; the verify target fails the build if that
 # header drifts from the current C formulas (replaces the old _Static_assert
@@ -11,7 +11,7 @@ set(SPECTRAL_METAL_OSC_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_metal_osc.cmake")
 set(SPECTRAL_METAL_OSC_INPUTS
     "${SPECTRAL_CORE_DIR}/spectral_osc_formulas.h"
     "${SPECTRAL_CORE_DIR}/spectral_segment_math.h"
-    "${SPECTRAL_CORE_DIR}/oscillator.h"
+    "${SPECTRAL_CORE_DIR}/spectral_oscillator.h"
     "${SPECTRAL_CORE_DIR}/spectral_common.h"
     "${SPECTRAL_CORE_DIR}/spectral_synth_internal.h")
 configure_file(

@@ -101,17 +101,17 @@ Three forks resolved (maintainer answers, verbatim):
 an oscillator.**
 
 - **Scalar** — `core/spectral_osc_formulas.h` (canonical float L0, `SPECTRAL_OSC_FORMULAS_VERSION` +
-  `_Static_assert` guards) consumed by `core/oscillator.c`. Universal (host + embedded).
+  `_Static_assert` guards) consumed by `core/spectral_oscillator.c`. Universal (host + embedded).
 - **SIMDe** — `core/port/host/oscillator_simd.c` (+ `oscillator_simd_kernel.inc`,
   `oscillator_simd_scalar_waves.h`). The **desktop default CPU path**, and the embedded-*simulator* path
   (itself a host x86 build).
 - **CMSIS** — `core/port/embedded/oscillator_simd.c`: a **complete CMSIS-DSP float oscillator**
   (`arm_sin_f32`/`arm_mult_f32`/`arm_add_f32`/`arm_scale_f32` for sine/saw/triangle/parabola; scalar
   fallback for square/asin/quantized/pwm — `osc_simd_available()` advertises the first four). Gated
-  `#if defined(OSC_SIMD_CMSIS)`, which `oscillator_dispatch.h:8` defines **only** for
+  `#if defined(OSC_SIMD_CMSIS)`, which `spectral_oscillator_dispatch.h:8` defines **only** for
   `ARM_MATH_CM4/CM7/ARMV8MML`.
 - **GPU** — Metal MSL (codegen'd from the C contract) + CUDA `.cu`. Float.
-- **Dispatch contract already exists** — `oscillator_dispatch.h`: per-timbre 2-bit `OscDispatchWord`
+- **Dispatch contract already exists** — `spectral_oscillator_dispatch.h`: per-timbre 2-bit `OscDispatchWord`
   (lines 33–45), the `osc_simd_segment_*` interface every CPU-SIMD backend implements (73–79), and the
   Q15 pack8 entry `osc_simd_q15_segment` (84–92, `#if OSC_SIMD_GENERIC` — i.e. **SIMDe/host only**).
 
@@ -121,7 +121,7 @@ work on embedded" is inverted versus the tree:
 | Backend | Runs on | Embedded-hardware? |
 |---------|---------|--------------------|
 | **Scalar** | host **and** embedded | yes (universal fallback) |
-| **SIMDe** | host only (desktop default + embedded *sim*, which is a host build) | **no** — real Cortex-M swaps it for CMSIS at `oscillator_dispatch.h:8` |
+| **SIMDe** | host only (desktop default + embedded *sim*, which is a host build) | **no** — real Cortex-M swaps it for CMSIS at `spectral_oscillator_dispatch.h:8` |
 | **CMSIS** | embedded Cortex-M only | yes (the only embedded-exclusive path) |
 | **GPU (Metal/CUDA)** | host | no |
 | **vDSP** | host (Apple) — **analysis/FFT only today**, no oscillator | no |
@@ -134,12 +134,12 @@ lands on **CMSIS + arm32**, not SIMDe. (All 5 green targets are `SPECTRAL_EMBEDD
 **The Q15 landscape — three worlds, one already-canonical contract.**
 
 - **Canonical Q15 contract EXISTS**: `core/spectral_osc_q15.h` — "the single source of those evaluators,
-  shared by production (`oscillator.c`) and the precision/parity CTests (no drift between what we measure
+  shared by production (`spectral_oscillator.c`) and the precision/parity CTests (no drift between what we measure
   and what we ship)." It carries the lone float→Q boundary (`spectral_osc_q15_phase_from_rads:40`), the
   gain-matched LUT (`spectral_osc_q15_init_sine_lut:53`), and pure Q15 evaluators for
   sine/saw/square/triangle/parabola inside a `SPECTRAL_Q_DOMAIN` region (68–92). Phase is the integer-NCO
   (`core/spectral_phase_nco.h`, `core/spectral_phase_nco8.h`).
-- **Consumers of the canonical contract today**: `core/oscillator.c` (scalar Q15) and
+- **Consumers of the canonical contract today**: `core/spectral_oscillator.c` (scalar Q15) and
   `core/port/host/oscillator_simd.c` (the pack8 8×Q15 SIMDe kernel).
 - **The divergence** (the unification target): `synth/backends/arm/spectral_synth_arm32.c` includes
   `spectral_lut.h` + `arm_math.h` but **not** `spectral_osc_q15.h` or the NCO headers — it rolls its **own**
@@ -166,7 +166,7 @@ for **"which paths prohibit Q15 and why"** (GPU/vDSP float-only pending Phase 5)
 paths an embedded build can take"** (Scalar + CMSIS + arm32-Q15). Folds in the SIMDe-is-host correction so
 the docs ship correct. Cheap; unblocks everything; pins reality before any refactor.
 > **Landed:** the matrix is now an authoritative header-comment block at the top of
-> `core/oscillator_dispatch.h` (the program-design locus for backend selection, per the
+> `core/spectral_oscillator_dispatch.h` (the program-design locus for backend selection, per the
 > maintainer's "documentation AND program design" ask) — backends × {float,Q15} × {host,embedded},
 > "which paths prohibit Q15" (vDSP=not-an-oscillator, GPU=float-only, CMSIS-Q15=Phase 2), and the
 > embedded oscillator paths (Scalar / CMSIS-float-today / arm32-Q15; SIMDe is host-only). vDSP is
@@ -211,7 +211,7 @@ Converge the three Q15 worlds onto `spectral_osc_q15.h`.
   folds in arm32 only becomes meaningful once the maintainer resolves the LUT-scale/phase question.
 - **1d — version the contract.** — ✅ DONE (PASS222). `SPECTRAL_OSC_Q15_VERSION 1` added to
   `spectral_osc_q15.h` with a bump-rule comment (mirrors `SPECTRAL_OSC_FORMULAS_VERSION`), pinned via
-  `_Static_assert` in the two production consumers: `oscillator.c` (scalar-Q15) and
+  `_Static_assert` in the two production consumers: `spectral_oscillator.c` (scalar-Q15) and
   `core/port/host/oscillator_simd.c` (pack8 8×Q15, inside `OSC_SIMD_GENERIC`). A silent contract edit
   now fails their build until re-validated. Additive/byte-identical; ctest 12/12 green.
 
@@ -220,15 +220,15 @@ The "every embedded path supports Q15" goal. Today CMSIS is float-only.
 - **2a — add Q15 evaluators to `core/port/embedded/oscillator_simd.c`** — ✅ DONE (PASS223).
   `osc_simd_q15_segment` + `osc_simd_q15_available` added under `OSC_SIMD_CMSIS`, consuming the canonical
   `spectral_osc_q15.h` (3rd `_Static_assert(SPECTRAL_OSC_Q15_VERSION==1)` consumer; the embedded sibling of
-  oscillator.c `osc_q15_eval` and host `osc_q15_wave_scalar`, NOT a 4th copy). Structure: float quadratic
+  spectral_oscillator.c `osc_q15_eval` and host `osc_q15_wave_scalar`, NOT a 4th copy). Structure: float quadratic
   phase + `spectral_osc_q15_phase_from_rads` boundary → canonical Q15 waveform (integer unit) → CMSIS-DSP
   `arm_q15_to_float`/`arm_mult_f32`/`arm_add_f32` widen+amp+accumulate (FPU) — literally the directive's
   "integer-unit Q15 eval concurrent with FPU float phase/amp." Declared backend-uniform in
-  `oscillator_dispatch.h` (same signature as the SIMDe twin). **`arm_sin_q15` DECLINED on anti-drift grounds**:
+  `spectral_oscillator_dispatch.h` (same signature as the SIMDe twin). **`arm_sin_q15` DECLINED on anti-drift grounds**:
   it is CMSIS-DSP's own Q15 sine table → a 2nd Q15 sine forked from canonical `spectral_lut_sin`, exactly the
   drift this initiative prevents. So CMSIS-Q15 is bit-parity with scalar/SIMDe-Q15 **by construction** (shared
   evaluator), already pinned by host `q15_simd_parity`/`q15_compute_precision`.
-- **2a-WIRING — ⏸ SURFACED to maintainer (PASS223).** The kernel has **no live caller**: oscillator.c's whole
+- **2a-WIRING — ⏸ SURFACED to maintainer (PASS223).** The kernel has **no live caller**: spectral_oscillator.c's whole
   Q15 dispatch is `#if !SPECTRAL_EMBEDDED` (PASS216), so embedded Q15 oscillator synthesis is owned by
   `spectral_synth_arm32.c` today and `g_osc_q15_sine_lut` is host-only. Promoting CMSIS-Q15 into the live
   embedded dispatch (a) reverses that deliberate guard, (b) introduces a 2nd embedded Q15 backend alongside
@@ -317,7 +317,7 @@ packing might genuinely pay — the maintainer's instinct — so it gets a real 
 >   auto-apply). Wiring = half2 variant of `synthesize_tile_parallel` + dispatch/quality flag + GPU
 >   parity CTest + on-the-real-kernel re-measure (microbench is the ALU/SFU ceiling; real kernel adds
 >   tiling/barriers/divergence half-sin can't accelerate → realistic win lower but positive).
-> - **Matrix impact if promoted:** `oscillator_dispatch.h` gains a `GPU-Metal | Q15/half` (opt-in) cell —
+> - **Matrix impact if promoted:** `spectral_oscillator_dispatch.h` gains a `GPU-Metal | Q15/half` (opt-in) cell —
 >   the first non-float GPU cell — and Phase-0 docs update. Until then GPU stays documented float-only.
 
 ---

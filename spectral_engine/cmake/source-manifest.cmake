@@ -26,7 +26,7 @@ set(SPECTRAL_SOURCE_ENTRY_MAIN "${SPECTRAL_CMD_CLI_DIR}/main.c")
 set(SPECTRAL_SOURCE_CONVERT_SEGMENTS_ENTRY "${SPECTRAL_CMD_DIR}/convert_segments.c")
 
 set(SPECTRAL_SOURCES_CORE
-    "${SPECTRAL_CORE_DIR}/oscillator.c"
+    "${SPECTRAL_CORE_DIR}/spectral_oscillator.c"
     "${SPECTRAL_CORE_DIR}/spectral_osc_bandlimited.c"
     "${SPECTRAL_CORE_DIR}/spectral_backend.c"
     "${SPECTRAL_CORE_DIR}/spectral_fs.c"
@@ -48,8 +48,8 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_windows.c")
 
 # Per-profile SIMD oscillator implementation. The device-agnostic dispatch state
-# lives in core/oscillator.c; the SIMD segment bodies are build-selected here
-# behind oscillator_dispatch.h.
+# lives in core/spectral_oscillator.c; the SIMD segment bodies are build-selected here
+# behind spectral_oscillator_dispatch.h.
 # Every current target is a host (SIMDe) build, so each picks the HOST set; the
 # CMSIS-DSP body is selected only by a real Cortex-M cross-build.
 set(SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST

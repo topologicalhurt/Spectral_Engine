@@ -8,10 +8,10 @@
  *
  * CPU and CUDA backends include this header directly.
  * Metal MSL backend must match these formulas exactly; constants are injected
- * with SPECTRAL_STR(...) in oscillator.c.
+ * with SPECTRAL_STR(...) in spectral_oscillator.c.
  *
  * IMPORTANT: Any formula change here MUST be mirrored in the Metal shader string
- * in oscillator.c. Run the core math/static tests to verify cross-backend consistency.
+ * in spectral_oscillator.c. Run the core math/static tests to verify cross-backend consistency.
  */
 #ifndef SPECTRAL_OSC_FORMULAS_H
 #define SPECTRAL_OSC_FORMULAS_H
@@ -19,7 +19,7 @@
 #include "spectral_consts.h"
 
 /* Bump when any oscillator formula, fast_sin, normalize_phase, or
- * fade_envelope changes.  Metal shader (oscillator.c) duplicates these
+ * fade_envelope changes.  Metal shader (spectral_oscillator.c) duplicates these
  * as MSL strings and checks this version at compile time. */
 #define SPECTRAL_OSC_FORMULAS_VERSION 6
 #include <math.h>

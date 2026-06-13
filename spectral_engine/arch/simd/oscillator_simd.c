@@ -3,7 +3,7 @@
  * Build-selected for host builds: SIMDe maps the intrinsics to native NEON
  * (macOS ARM), native SSE/AVX (Linux x86), or scalar fallback. The CMSIS
  * (ARM Cortex-M) counterpart lives in arch/arm/oscillator_simd.c.
- * Both implement the oscillator_dispatch.h SIMD segment interface.
+ * Both implement the spectral_oscillator_dispatch.h SIMD segment interface.
  *
  * The vector sustain kernel is width-templated in oscillator_simd_kernel.inc and
  * instantiated here at the machine's natural float vector width (Q2 of
@@ -11,8 +11,8 @@
  * __m128 everywhere else (SSE2, NEON). The scalar single-sample lanes used in
  * the fade regions are width-independent and live in
  * oscillator_simd_scalar_waves.h. */
-#include "oscillator_dispatch.h"
-#include "oscillator.h"
+#include "spectral_oscillator_dispatch.h"
+#include "spectral_oscillator.h"
 #include "spectral_config.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"

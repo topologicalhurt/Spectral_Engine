@@ -1,8 +1,8 @@
-/* oscillator.h - oscillator kernel API: the canonical timbre -> L0-waveform dispatch (L1) */
-#ifndef OSCILLATOR_H
-#define OSCILLATOR_H
+/* spectral_oscillator.h - oscillator kernel API: the canonical timbre -> L0-waveform dispatch (L1) */
+#ifndef SPECTRAL_OSCILLATOR_H
+#define SPECTRAL_OSCILLATOR_H
 
-#include "oscillator_dispatch.h"
+#include "spectral_oscillator_dispatch.h"
 #include "spectral_osc_formulas.h"
 
 #ifdef __cplusplus
@@ -21,7 +21,7 @@ struct SegmentLoopParams;
 /* THE canonical timbre -> L0-waveform map. Single source of truth, expanded in
  * two places that must never drift: the spectral_osc_eval() switch below
  * (single-sample + CUDA device path) and the host-side osc_waveform_fn() pointer
- * selector in oscillator.c (hot per-segment scalar loop). One list, two
+ * selector in spectral_oscillator.c (hot per-segment scalar loop). One list, two
  * expansions, zero divergence. */
 #define SPECTRAL_OSC_TIMBRE_LIST(X)        \
     X(TIMBRE_SINE,      spectral_osc_sine)      \
@@ -42,7 +42,7 @@ struct SegmentLoopParams;
  * via OSC_FORMULA_FUNC.
  *
  * NOTE: the hot host *segment* loop does NOT call this per sample — it hoists
- * the timbre dispatch out of the loop via osc_waveform_fn() (oscillator.c), so
+ * the timbre dispatch out of the loop via osc_waveform_fn() (spectral_oscillator.c), so
  * the inner loop is a tight call to one fixed L0 waveform.  Calling this switch
  * per sample measured ~1.6x slower on the scalar/asin paths (the loop-invariant
  * dispatch was not unswitched).  Both forms are byte-identical; this one is the

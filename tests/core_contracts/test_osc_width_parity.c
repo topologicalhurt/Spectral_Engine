@@ -37,8 +37,8 @@
  * the 8-wide logic is exercised faithfully here even though this host is 4-wide. */
 #include "simde/x86/avx2.h"
 
-#include "oscillator.h"
-#include "oscillator_dispatch.h"
+#include "spectral_oscillator.h"
+#include "spectral_oscillator_dispatch.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
 #include "spectral_osc_formulas.h"

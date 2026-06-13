@@ -8,7 +8,7 @@ set(_tools_pythonpath "@SPECTRAL_TOOLS_PYTHONPATH@")
 set(_metal_osc_output "@SPECTRAL_METAL_OSC_OUTPUT@")
 set(_formulas "@SPECTRAL_CORE_DIR@/spectral_osc_formulas.h")
 set(_segment_math "@SPECTRAL_CORE_DIR@/spectral_segment_math.h")
-set(_oscillator_h "@SPECTRAL_CORE_DIR@/oscillator.h")
+set(_oscillator_h "@SPECTRAL_CORE_DIR@/spectral_oscillator.h")
 set(_common_h "@SPECTRAL_CORE_DIR@/spectral_common.h")
 set(_synth_internal_h "@SPECTRAL_CORE_DIR@/spectral_synth_internal.h")
 

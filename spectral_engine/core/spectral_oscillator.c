@@ -1,6 +1,6 @@
-/* oscillator.c - host per-segment oscillator: timbre dispatch + scalar/Q15 sustain loops */
-#include "oscillator.h"
-#include "oscillator_dispatch.h"
+/* spectral_oscillator.c - host per-segment oscillator: timbre dispatch + scalar/Q15 sustain loops */
+#include "spectral_oscillator.h"
+#include "spectral_oscillator_dispatch.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
 #include "spectral_fast_math.h"
@@ -16,7 +16,7 @@
  * A contract bump (SPECTRAL_OSC_Q15_VERSION) fails this build until the Q15
  * path here is re-validated and the pin updated. */
 _Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
-               "spectral_osc_q15.h contract changed; re-validate oscillator.c Q15 path");
+               "spectral_osc_q15.h contract changed; re-validate spectral_oscillator.c Q15 path");
 
 /* SIMD is the default CPU execution strategy: the host/embedded osc_simd_segment_*
  * paths are written op-for-op against the scalar oscillator and measure ~1.8x

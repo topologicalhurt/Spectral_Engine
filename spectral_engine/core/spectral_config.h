@@ -9,7 +9,7 @@
  *
  * For math constants, see spectral_consts.h
  * For compiler hints/macros, see spectral_macros.h
- * For SIMD detection, see oscillator_dispatch.h
+ * For SIMD detection, see spectral_oscillator_dispatch.h
  */
 #ifndef SPECTRAL_CONFIG_H
 #define SPECTRAL_CONFIG_H

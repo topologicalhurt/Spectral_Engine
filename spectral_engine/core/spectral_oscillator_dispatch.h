@@ -1,5 +1,5 @@
-#ifndef OSCILLATOR_DISPATCH_H
-#define OSCILLATOR_DISPATCH_H
+#ifndef SPECTRAL_OSCILLATOR_DISPATCH_H
+#define SPECTRAL_OSCILLATOR_DISPATCH_H
 
 #include <stdint.h>
 #include "spectral_config.h"
@@ -39,7 +39,7 @@
  * WHAT AN EMBEDDED BUILD CAN TAKE (oscillator paths on real Cortex-M):
  *   - Scalar  : float OR Q15 (spectral_osc_q15.h evaluators).  Universal.
  *   - CMSIS   : float (live); Q15 kernel present (Phase 2) but not yet dispatched --
- *               oscillator.c's Q15 path is deliberately #if !SPECTRAL_EMBEDDED, so
+ *               spectral_oscillator.c's Q15 path is deliberately #if !SPECTRAL_EMBEDDED, so
  *               today embedded Q15 oscillator synthesis is owned by arm32 below.
  *               Promoting CMSIS-Q15 into the live dispatch changes shipped embedded
  *               behavior and needs explicit sign-off.  Cortex-M4/M7/ARMv8-M only.
@@ -175,7 +175,7 @@ void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
  * the waveform through the SAME canonical spectral_osc_q15.h evaluators (one
  * versioned contract, no drift), with float quadratic phase + CMSIS-DSP f32 widen/
  * amp/accumulate. Verification is hardware-gated (real Cortex-M); it has no LIVE
- * caller yet (oscillator.c's Q15 dispatch is host-only by design) -- wiring it
+ * caller yet (spectral_oscillator.c's Q15 dispatch is host-only by design) -- wiring it
  * into the embedded dispatch changes shipped behavior and needs explicit
  * sign-off. See arch/arm/oscillator_simd.c. */
 int osc_simd_q15_available(SpectralTimbre timbre);
@@ -187,4 +187,4 @@ void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
 }
 #endif
 
-#endif /* OSCILLATOR_DISPATCH_H */
+#endif /* SPECTRAL_OSCILLATOR_DISPATCH_H */

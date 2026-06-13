@@ -12,7 +12,7 @@
 #include "spectral_common.h"
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
-#include "oscillator.h"
+#include "spectral_oscillator.h"
 #include "spectral_osc_formulas.h"
 #include "spectral_segment_math.h"
 #include "spectral_log.h"

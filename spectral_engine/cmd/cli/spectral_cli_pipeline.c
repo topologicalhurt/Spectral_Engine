@@ -2,7 +2,7 @@
 #include "spectral_cli_pipeline.h"
 #include "spectral_cli.h"
 #include "spectral_synth.h"
-#include "oscillator.h"
+#include "spectral_oscillator.h"
 #include "spectral_segment_parser.h"
 #include "spectral_seg_cache.h"
 #include "spectral_hash_xx32_xx3.h"

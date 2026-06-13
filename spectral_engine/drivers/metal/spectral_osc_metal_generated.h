@@ -3,7 +3,7 @@
  * Single source of truth for the Metal MSL oscillator + segment math:
  *   core/spectral_osc_formulas.h   (waveforms, phase, fade)
  *   core/spectral_segment_math.h   (segment alpha/beta/d_amp/phase/amp)
- *   core/oscillator.h              (SPECTRAL_OSC_TIMBRE_LIST ordering)
+ *   core/spectral_oscillator.h              (SPECTRAL_OSC_TIMBRE_LIST ordering)
  *   core/spectral_common.h         (SegmentGpu layout)
  *   core/spectral_synth_internal.h (GpuSynthParams/TileRange layouts)
  *

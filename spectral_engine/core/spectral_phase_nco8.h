@@ -21,7 +21,7 @@
 #ifndef SPECTRAL_PHASE_NCO8_H
 #define SPECTRAL_PHASE_NCO8_H
 
-#include "oscillator_dispatch.h"     /* OSC_SIMD_GENERIC + simde/x86/sse2.h */
+#include "spectral_oscillator_dispatch.h"     /* OSC_SIMD_GENERIC + simde/x86/sse2.h */
 
 #if defined(OSC_SIMD_GENERIC)
 

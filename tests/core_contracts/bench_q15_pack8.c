@@ -37,8 +37,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "oscillator.h"
-#include "oscillator_dispatch.h"        /* pulls in simde/x86/sse2.h */
+#include "spectral_oscillator.h"
+#include "spectral_oscillator_dispatch.h"        /* pulls in simde/x86/sse2.h */
 #include "spectral_synth_internal.h"
 #include "spectral_q.h"
 #include "spectral_lut.h"

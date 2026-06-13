@@ -4,7 +4,7 @@
  * spectral_osc_formulas.h.  Q3 of QTYPE_DOMAIN_PLAN.md adds a per-path,
  * opt-in Q15 compute domain for throughput-bound L1 oscillator paths; this
  * header is the single source of those evaluators, shared by production
- * (oscillator.c) and the precision/parity CTests (no drift between what we
+ * (spectral_oscillator.c) and the precision/parity CTests (no drift between what we
  * measure and what we ship).  Float stays the DEFAULT domain — these are
  * reached only when a timbre's Q15 bit is explicitly set (osc_set_q15_enable).
  *
@@ -33,7 +33,7 @@ extern "C" {
 /* Contract version for the Q15 oscillator waveform evaluators + boundary
  * helpers in this header.  Bump on ANY change to spectral_osc_q15_phase_from_rads,
  * spectral_osc_q15_init_sine_lut, or any spectral_osc_q15_<timbre> evaluator.
- * Production consumers (oscillator.c scalar-Q15 and arch/simd/oscillator_simd.c
+ * Production consumers (spectral_oscillator.c scalar-Q15 and arch/simd/oscillator_simd.c
  * pack8) pin this with _Static_assert, so a silent contract edit fails their
  * build -- the Q15 twin of SPECTRAL_OSC_FORMULAS_VERSION (spectral_osc_formulas.h).
  *

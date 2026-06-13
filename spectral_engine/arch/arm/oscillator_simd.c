@@ -2,9 +2,9 @@
  *
  * Build-selected for ARM Cortex-M builds with CMSIS-DSP (arm_math.h). The host
  * SIMDe counterpart lives in arch/simd/oscillator_simd.c. Both implement
- * the oscillator_dispatch.h SIMD segment interface. */
-#include "oscillator_dispatch.h"
-#include "oscillator.h"
+ * the spectral_oscillator_dispatch.h SIMD segment interface. */
+#include "spectral_oscillator_dispatch.h"
+#include "spectral_oscillator.h"
 #include "spectral_config.h"
 #include "spectral_synth_internal.h"
 #include "spectral_envelope.h"
@@ -16,7 +16,7 @@
 #include <string.h>
 
 /* Capability gate: this translation unit is build-selected for CMSIS-DSP targets
- * and uses arm_math.h intrinsics. OSC_SIMD_CMSIS is defined by oscillator_dispatch.h
+ * and uses arm_math.h intrinsics. OSC_SIMD_CMSIS is defined by spectral_oscillator_dispatch.h
  * exactly when CMSIS-DSP is present (Cortex-M class), so the body is inert if the
  * file is ever seen without that capability. */
 #if defined(OSC_SIMD_CMSIS)
@@ -220,7 +220,7 @@ int osc_simd_available(SpectralTimbre timbre) {
  * The embedded Q15 compute twin of the float osc_simd_segment_* above, and the
  * CMSIS sibling of the host pack8 osc_simd_q15_segment (arch/simd/oscillator_simd.c).
  * It renders the WAVEFORM through the SAME canonical spectral_osc_q15_<timbre>
- * evaluators the scalar-Q15 (oscillator.c) and pack8-SIMDe-Q15 paths use -- ONE
+ * evaluators the scalar-Q15 (spectral_oscillator.c) and pack8-SIMDe-Q15 paths use -- ONE
  * versioned contract (SPECTRAL_OSC_Q15_VERSION), no 4th Q15 world. So CMSIS-Q15 is
  * bit-parity with scalar-Q15 / SIMDe-Q15 BY CONSTRUCTION (shared evaluator), and the
  * host q15_simd_parity / q15_compute_precision CTests already pin the waveform numerics.
@@ -246,7 +246,7 @@ int osc_simd_available(SpectralTimbre timbre) {
  * branch, and the dev environment has no arm_math.h / libDaisy, so this body is
  * neither built nor run locally -- it is type-checked against an arm_math.h shim and
  * mirrors the already-shipping float CMSIS path above. NOTE: it also has no LIVE
- * caller yet -- oscillator.c's Q15 dispatch is deliberately #if !SPECTRAL_EMBEDDED, so
+ * caller yet -- spectral_oscillator.c's Q15 dispatch is deliberately #if !SPECTRAL_EMBEDDED, so
  * embedded Q15 oscillator synthesis is owned by spectral_synth_arm32.c today. Wiring
  * this into the live embedded dispatch reverses that deliberate guard and changes
  * shipped embedded behavior, so it needs explicit sign-off (QTYPE_DOMAIN_PLAN.md

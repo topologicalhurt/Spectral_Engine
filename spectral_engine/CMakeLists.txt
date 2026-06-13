@@ -225,10 +225,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/gpu-backend-parity-test.cmake
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy-config-layout-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/convert-segments-units-test.cmake")
 
-# Test/bench targets that compile core/oscillator.c also #include the generated
+# Test/bench targets that compile core/spectral_oscillator.c also #include the generated
 # spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
 # so its own foreach (over the main build targets) cannot reach them — without
-# this, a parallel `tests_all` can compile oscillator.c while the codegen custom
+# this, a parallel `tests_all` can compile spectral_oscillator.c while the codegen custom
 # command is mid-regeneration of the header into the source tree (a known flake).
 # Gate each on generate_metal_osc so the header is present before they compile.
 foreach(_spectral_osc_test_target

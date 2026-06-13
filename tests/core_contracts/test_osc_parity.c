@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "oscillator.h"
+#include "spectral_oscillator.h"
 #include "spectral_synth_internal.h"
 #include "spectral_common.h"
 

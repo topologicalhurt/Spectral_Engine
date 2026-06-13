@@ -55,7 +55,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CORE = _REPO_ROOT / "spectral_engine" / "core"
 DEFAULT_FORMULAS = _CORE / "spectral_osc_formulas.h"
 DEFAULT_SEGMENT_MATH = _CORE / "spectral_segment_math.h"
-DEFAULT_OSCILLATOR_H = _CORE / "oscillator.h"
+DEFAULT_OSCILLATOR_H = _CORE / "spectral_oscillator.h"
 DEFAULT_COMMON_H = _CORE / "spectral_common.h"
 DEFAULT_SYNTH_INTERNAL_H = _CORE / "spectral_synth_internal.h"
 DEFAULT_OUTPUT = _REPO_ROOT / "spectral_engine" / "drivers" / "metal" / "spectral_osc_metal_generated.h"
@@ -408,7 +408,7 @@ def generate_header(
         " * Single source of truth for the Metal MSL oscillator + segment math:",
         " *   core/spectral_osc_formulas.h   (waveforms, phase, fade)",
         " *   core/spectral_segment_math.h   (segment alpha/beta/d_amp/phase/amp)",
-        " *   core/oscillator.h              (SPECTRAL_OSC_TIMBRE_LIST ordering)",
+        " *   core/spectral_oscillator.h              (SPECTRAL_OSC_TIMBRE_LIST ordering)",
         " *   core/spectral_common.h         (SegmentGpu layout)",
         " *   core/spectral_synth_internal.h (GpuSynthParams/TileRange layouts)",
         " *",

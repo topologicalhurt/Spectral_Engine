@@ -12,7 +12,7 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
   config defines, dead macro halves.
 - W3 `Segment units` — per-field unit annotations on the core struct (AI_CANON §9).
 - W4-D1 `eval-switch hoist` — the Q15 timbre→leaf switch (3 hand-copies) → one
-  spectral_osc_q15_eval in oscillator_dispatch.h; codegen-neutral. CLOSES **E1**: the
+  spectral_osc_q15_eval in spectral_oscillator_dispatch.h; codegen-neutral. CLOSES **E1**: the
   dormant CMSIS oscillator now has a fail-on-bug cross-compile pin (a real include-order
   -Werror break was found + fixed in the process).
 - W5a `spectral_q15.{h,c} → spectral_q.{h,c}` — truthful Q-domain filename; pure
@@ -77,10 +77,10 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **blast radius:** **19 files** `#include "spectral_q.h"` (grep-confirmed, across core/arch/analysis/cmd/tests + cmake source lists); public API `spectral_synth.h` does NOT include it (internal-only). Low risk, medium churn. *(The maintainer's flagship example. Merged from 5 lens reports: naming-files, naming-symbols, duplication, wiring-deadcode, architecture-lifecycle.)*
 
 ### A2 — `oscillator.*` family is the only un-`spectral_`-prefixed group in core/, with non-namespaced guards [HIGH] — STRUCTURAL
-- **file:line:** `core/oscillator.c:1`, `core/oscillator.h:1-2` (`#ifndef OSCILLATOR_H`), `core/oscillator_dispatch.c:1`, `core/oscillator_dispatch.h:1` (`#ifndef OSCILLATOR_DISPATCH_H`), `arch/simd/oscillator_simd_scalar_waves.h:10` (`#ifndef OSCILLATOR_SIMD_SCALAR_WAVES_H`). Symbol leak: `osc_set_dispatch`, `osc_get_quality`, `osc_native_available`, `osc_simd_segment_*`, `osc_set_q15_enable` all bare `osc_` while the rest of the engine is uniformly `spectral_*`.
+- **file:line:** `core/spectral_oscillator.c:1`, `core/spectral_oscillator.h:1-2` (`#ifndef OSCILLATOR_H`), `core/oscillator_dispatch.c:1`, `core/spectral_oscillator_dispatch.h:1` (`#ifndef OSCILLATOR_DISPATCH_H`), `arch/simd/oscillator_simd_scalar_waves.h:10` (`#ifndef OSCILLATOR_SIMD_SCALAR_WAVES_H`). Symbol leak: `osc_set_dispatch`, `osc_get_quality`, `osc_native_available`, `osc_simd_segment_*`, `osc_set_q15_enable` all bare `osc_` while the rest of the engine is uniformly `spectral_*`.
 - **rule:** AI.md item 13 + item 7
 - **fix:** Rename files to `spectral_oscillator.{c,h}` / `spectral_oscillator_dispatch.{c,h}`; guards to `SPECTRAL_OSCILLATOR_H` / `SPECTRAL_OSCILLATOR_DISPATCH_H` / `SPECTRAL_OSCILLATOR_SIMD_SCALAR_WAVES_H`; optionally rename `osc_*` public symbols → `spectral_osc_*`. The guard renames are zero-blast and can land first; the file+symbol rename is the structural decision (see SD-2).
-- **blast radius:** **14 files** include `oscillator.h`, **10** include `oscillator_dispatch.h`; ~10 cmake targets + metal codegen + `osc_backend_contract.cmake` reference the paths; `osc_*` symbols span ~6 TUs + tests. Internal-only (public API unaffected). Medium-wide, mechanical; do as one commit. *(Merged from 4 lenses.)*
+- **blast radius:** **14 files** include `spectral_oscillator.h`, **10** include `spectral_oscillator_dispatch.h`; ~10 cmake targets + metal codegen + `osc_backend_contract.cmake` reference the paths; `osc_*` symbols span ~6 TUs + tests. Internal-only (public API unaffected). Medium-wide, mechanical; do as one commit. *(Merged from 4 lenses.)*
 
 ### A3 — `spectral_osc_recursive.h` is named by technique but is the Q31 oscillator; sibling is domain-named [HIGH] — STRUCTURAL
 - **file:line:** `core/spectral_osc_recursive.h:1` ("Coupled-form (true-rotation) Q31 sinusoidal oscillator"); `:27-30` (`q31_t c; q31_t s;`, all primitives Q31). Sibling `spectral_osc_q15.h` is named by domain. No `spectral_osc_q31.h` exists.
@@ -148,9 +148,9 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Strip every `pass N`/`PASS N`/`ULTRAPLAN Phase X` clause; keep the math WHY (q15.c keeps the >>15-vs->>16 −6 dB rationale; fft.c keeps "window amp scale 2/Σwindow, unscaled DFT"; kernel.inc keeps "<=1 ULP class pinned by the osc_width_parity ctest").
 
 ### B6 — Hot-kernel comments saturated with internal phase-codenames (Q3b/Q5b/Q5c/Bv/O1-B/B1) [HIGH]
-- **file:line:** `core/oscillator.c:33,131,143,224,233` ("Q3b oracle, Q5b integer-NCO phase", "Packed 8×Q15 SIMD twin (Q5c)"); `oscillator_dispatch.h:135-137` ("plus sine (B1)"); `spectral_synth_cpu.c:31,260` ("Output-tiling (O1-B)"); `spectral_phase_nco8.h:1` ("(Q5c follow-up \"Bv\")"); `arch/simd/oscillator_simd.c:98-119`.
+- **file:line:** `core/spectral_oscillator.c:33,131,143,224,233` ("Q3b oracle, Q5b integer-NCO phase", "Packed 8×Q15 SIMD twin (Q5c)"); `spectral_oscillator_dispatch.h:135-137` ("plus sine (B1)"); `spectral_synth_cpu.c:31,260` ("Output-tiling (O1-B)"); `spectral_phase_nco8.h:1` ("(Q5c follow-up \"Bv\")"); `arch/simd/oscillator_simd.c:98-119`.
 - **rule:** AI.md item 6; AI_CANON §18 ("state the fact, not the process that produced it")
-- **fix:** Strip the bare codenames; keep the (otherwise good) system framing + math, at most one named plan-doc reference where a derivation lives. e.g. `oscillator.c:143` → "Scalar Q15-compute sustain path: integer-NCO cubic phase, Q15 waveform, float amp/fade".
+- **fix:** Strip the bare codenames; keep the (otherwise good) system framing + math, at most one named plan-doc reference where a derivation lives. e.g. `spectral_oscillator.c:143` → "Scalar Q15-compute sustain path: integer-NCO cubic phase, Q15 waveform, float amp/fade".
 
 ### B7 — `daisy_seed_spectral.c` is wall-to-wall WHAT-comments + filename-echo dividers — doctrine never applied to the public Daisy API [HIGH]
 - **file:line:** `api/daisy_seed/daisy_seed_spectral.c` — 28 bare WHAT-comments incl. `:29` "Initialize oscillator LUT once", `:41` "Set Daisy defaults", `:138` "Track memory usage", `:304` "Compute checksum" (over an XOR loop), `:333` "Checksum OK, execute command"; plus filename-echo dividers `:13` "Static memory pools", `:46` "Initialization", `:52` "SD Card", `:59` "Buffer Loading", `:62` "Parameters". Left untouched while sibling metal/cuda drivers were rewritten.
@@ -183,19 +183,19 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Delete the WHAT-comments and verb-dividers (names already say "process"/"load"/"init"); keep the dense WHY/derivation comments the file already has well.
 
 ### B13 — Extracted-TU banners narrate migration history ("extracted from", "former #else", "when it lived in") [MEDIUM]
-- **file:line:** `arch/simd/spectral_gpu_tile.c:6` ("extracted from core/spectral_synth_internal.c ... its former #if ... body"); `arch/ref/spectral_gpu_tile.c:8` ("mirrors the former #else"); `arch/ref/spectral_out_kernels.c:4` + `arch/simd/spectral_out_kernels.c:4` ("extracted from core/spectral_out.c"); `drivers/metal/spectral_osc_metal_payload.c:6` ("when it lived in core/oscillator.c").
+- **file:line:** `arch/simd/spectral_gpu_tile.c:6` ("extracted from core/spectral_synth_internal.c ... its former #if ... body"); `arch/ref/spectral_gpu_tile.c:8` ("mirrors the former #else"); `arch/ref/spectral_out_kernels.c:4` + `arch/simd/spectral_out_kernels.c:4` ("extracted from core/spectral_out.c"); `drivers/metal/spectral_osc_metal_payload.c:6` ("when it lived in core/spectral_oscillator.c").
 - **rule:** AI.md item 6; AI_CANON §18
 - **fix:** Rewrite each banner to present-tense system role only; drop "extracted from"/"former"/"when it lived in".
 
-### B14 — `spectral_osc_formulas.h` banner claims Metal constants are injected via `SPECTRAL_STR` in `oscillator.c` — false after L4 [MEDIUM]
-- **file:line:** `core/spectral_osc_formulas.h:10-14`, `:21-23` (point at oscillator.c for Metal/SPECTRAL_STR/MSL strings). `oscillator.c` has ZERO such tokens (grep-verified); L4 moved MSL to `drivers/metal/spectral_osc_metal_payload.c` + codegen.
+### B14 — `spectral_osc_formulas.h` banner claims Metal constants are injected via `SPECTRAL_STR` in `spectral_oscillator.c` — false after L4 [MEDIUM]
+- **file:line:** `core/spectral_osc_formulas.h:10-14`, `:21-23` (point at spectral_oscillator.c for Metal/SPECTRAL_STR/MSL strings). `spectral_oscillator.c` has ZERO such tokens (grep-verified); L4 moved MSL to `drivers/metal/spectral_osc_metal_payload.c` + codegen.
 - **rule:** AI.md item 15 + item 6; AI_CANON §6
-- **fix:** Rewrite banner: "Metal MSL is generated by metal-osc-codegen from this header; payload in `drivers/metal/spectral_osc_metal_generated.h`." Remove the oscillator.c claims.
+- **fix:** Rewrite banner: "Metal MSL is generated by metal-osc-codegen from this header; payload in `drivers/metal/spectral_osc_metal_generated.h`." Remove the spectral_oscillator.c claims.
 
-### B15 — `oscillator.h`/`oscillator.c` banners are pure filename restatements [MEDIUM]
-- **file:line:** `core/oscillator.h:1` ("Oscillator module"), `core/oscillator.c:1` ("Oscillator implementation") — the exact anti-pattern the maintainer named. Siblings `spectral_osc_formulas.h`/`_recursive.h`/`_q15.h` each state a real system role.
+### B15 — `spectral_oscillator.h`/`spectral_oscillator.c` banners are pure filename restatements [MEDIUM]
+- **file:line:** `core/spectral_oscillator.h:1` ("Oscillator module"), `core/spectral_oscillator.c:1` ("Oscillator implementation") — the exact anti-pattern the maintainer named. Siblings `spectral_osc_formulas.h`/`_recursive.h`/`_q15.h` each state a real system role.
 - **rule:** AI.md item 6
-- **fix:** Replace with a substantive system banner (host-side oscillator dispatch hub: timbre→L0 X-macro map `SPECTRAL_OSC_TIMBRE_LIST`, the per-sample L1 `spectral_osc_eval` shared with CUDA, dispatch/Q15-enable setters; the hot per-segment loop lives in oscillator.c).
+- **fix:** Replace with a substantive system banner (host-side oscillator dispatch hub: timbre→L0 X-macro map `SPECTRAL_OSC_TIMBRE_LIST`, the per-sample L1 `spectral_osc_eval` shared with CUDA, dispatch/Q15-enable setters; the hot per-segment loop lives in spectral_oscillator.c).
 
 ### B16 — atan2 polynomial coefficients ship ALWAYS-approximate with no provenance/error-bound [MEDIUM]
 - **file:line:** `core/spectral_consts.h:25-29` (`SPECTRAL_ATAN2_A0/A1/A2` under bare "Polynomial atan2 coefficients"); `core/spectral_fast_math.h:31-44` (sharing story but no source/accuracy). Contrast the fully-provenanced `SPECTRAL_MINIMAX_SIN_C3..C9` ("~1.4 ULP vs libm") immediately adjacent — proving the inconsistency.
@@ -229,7 +229,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 ## (D) Duplication
 
 ### D1 — The canonical Q15 timbre→evaluator switch is hand-copied into THREE hot TUs (self-admitted) [HIGH]
-- **file:line:** `core/oscillator.c:132-141` (`osc_q15_eval`), `arch/simd/oscillator_simd.c:124-133` (`osc_q15_wave_scalar`), `arch/arm/oscillator_simd.c:260-269` (`osc_cmsis_q15_eval`) — byte-identical `switch(timbre){ case TIMBRE_SAW: return spectral_osc_q15_saw(pq); ... case TIMBRE_SINE: return spectral_osc_q15_sine(pq, lut); default: return Q15_ZERO; }`. The copies admit it: `oscillator_simd.c:122` "Mirrors oscillator.c's osc_q15_eval"; `arch/arm:259` "the embedded sibling of oscillator.c osc_q15_eval and host osc_q15_wave_scalar". The `SPECTRAL_OSC_Q15_VERSION` `_Static_assert` pins the *evaluators*, NOT this dispatch — three editor copies can drift undetected.
+- **file:line:** `core/spectral_oscillator.c:132-141` (`osc_q15_eval`), `arch/simd/oscillator_simd.c:124-133` (`osc_q15_wave_scalar`), `arch/arm/oscillator_simd.c:260-269` (`osc_cmsis_q15_eval`) — byte-identical `switch(timbre){ case TIMBRE_SAW: return spectral_osc_q15_saw(pq); ... case TIMBRE_SINE: return spectral_osc_q15_sine(pq, lut); default: return Q15_ZERO; }`. The copies admit it: `oscillator_simd.c:122` "Mirrors spectral_oscillator.c's osc_q15_eval"; `arch/arm:259` "the embedded sibling of spectral_oscillator.c osc_q15_eval and host osc_q15_wave_scalar". The `SPECTRAL_OSC_Q15_VERSION` `_Static_assert` pins the *evaluators*, NOT this dispatch — three editor copies can drift undetected.
 - **rule:** AI.md item 1; AI_CANON §17
 - **fix:** Hoist one `static inline q15_t spectral_osc_q15_eval(q15_t pq, SpectralTimbre, const q15_t* lut)` into `spectral_osc_q15.h` (next to the evaluators); call from all three. Additive — all three TUs already include the header; delete the local copies. The `q15_simd_parity` ctest still pins numerics.
 - **blast radius:** 3 callers, all already include the target header. `arch/arm` copy is `OSC_SIMD_CMSIS`-gated (not built on dev host) → `embedded_arm` must be in the verify loop. *(Merged from 3 lenses.)*
@@ -252,7 +252,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **blast radius:** Single CMSIS-only TU (not built on dev host → `embedded_arm` in verify loop).
 
 ### D5 — Three-region fade loop skeleton hand-rewritten in every CPU synth path [MEDIUM]
-- **file:line:** `core/oscillator.c:94-127` (`synth_segment_scalar`) + `:159-187` (`synth_segment_q15`, labeled `:143-144` "Op-for-op the float synth_segment_scalar above"); `arch/simd/oscillator_simd.c:243-325`; `arch/simd/oscillator_simd_kernel.inc:336-405`. Same fade-in / sustain / fade-out traversal + the `(fade_out_start > fade_in_end ? ...)` clamp, fixed 4×; only the inner wave/amp expression differs.
+- **file:line:** `core/spectral_oscillator.c:94-127` (`synth_segment_scalar`) + `:159-187` (`synth_segment_q15`, labeled `:143-144` "Op-for-op the float synth_segment_scalar above"); `arch/simd/oscillator_simd.c:243-325`; `arch/simd/oscillator_simd_kernel.inc:336-405`. Same fade-in / sustain / fade-out traversal + the `(fade_out_start > fade_in_end ? ...)` clamp, fixed 4×; only the inner wave/amp expression differs.
 - **rule:** AI.md item 1; AI.md item 7
 - **fix:** Factor the region walk into a shared driver/macro that emits the three loops given a per-sample expression, so the boundary/clamp arithmetic lives once. Lower priority than D1 (inner bodies genuinely differ float/Q15/vector); the win is the boundary logic.
 
@@ -295,13 +295,13 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Move it to the Reserved set and stop `cli.c:685` claiming "Implemented", OR enable `SPECTRAL_PRECISE_PHASE=1` in a build/test so it is live and covered.
 
 ### E4 — NATIVE oscillator-backend dispatch fully vestigial [HIGH] — STRUCTURAL
-- **file:line:** `core/oscillator_dispatch.h:78` (`OSC_MODE_NATIVE = 2`), `:107` (`OSC_DISPATCH_ALL_NATIVE`), `:159-160` (`osc_native_available`/`osc_set_native_available`), `oscillator_dispatch.c:9-11` (`g_native_backend_available`). Verified: ZERO set/read sites across spectral_engine+tests+api. Dispatch resolves only FALLBACK→SIMD/SCALAR (`oscillator.c:237-276`); no "native" backend exists.
+- **file:line:** `core/spectral_oscillator_dispatch.h:78` (`OSC_MODE_NATIVE = 2`), `:107` (`OSC_DISPATCH_ALL_NATIVE`), `:159-160` (`osc_native_available`/`osc_set_native_available`), `oscillator_dispatch.c:9-11` (`g_native_backend_available`). Verified: ZERO set/read sites across spectral_engine+tests+api. Dispatch resolves only FALLBACK→SIMD/SCALAR (`spectral_oscillator.c:237-276`); no "native" backend exists.
 - **rule:** AI.md item 2 + item 13; AI_CANON §19
 - **fix:** Delete the enum value, the macro, the two accessors, the global. `oscillator_dispatch.c` is then a 0-line TU → also delete it + its manifest entry (see G2). A future device backend should be named for its device (GPU/CMSIS), not "native".
 - **blast radius:** Zero external callers; pure removal. The 2-bit field still encodes 0–3 so dropping value 2 is source-only. Very low risk. *(Merged from naming + wiring lenses.)*
 
 ### E5 — Dead CUDA alias-only macros [HIGH]
-- **file:line:** `core/oscillator.h:83-84` (`#define oscillator_normalize_phase_cuda spectral_normalize_phase`, `#define oscillator_fast_sin_cuda spectral_fast_sin_inline`). Grep over all c/h/cu/metal/py: zero uses (verified). Only `oscillator_cuda` (defined below) is called, from `spectral_synth_cuda.cu:132`. Pure renames with no callsite.
+- **file:line:** `core/spectral_oscillator.h:83-84` (`#define oscillator_normalize_phase_cuda spectral_normalize_phase`, `#define oscillator_fast_sin_cuda spectral_fast_sin_inline`). Grep over all c/h/cu/metal/py: zero uses (verified). Only `oscillator_cuda` (defined below) is called, from `spectral_synth_cuda.cu:132`. Pure renames with no callsite.
 - **rule:** AI_CANON §19; AI.md item 2 + item 13
 - **fix:** Delete both. The CUDA path calls `spectral_normalize_phase` / `spectral_fast_sin_inline` directly via `OSC_FORMULA_FUNC`.
 - **blast radius:** N/A — no references, delete-only.
@@ -312,7 +312,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Delete the two lines.
 
 ### E7 — `osc_get_dispatch` / `osc_get_q15_enable` are write-only state (getters with no readers) [MEDIUM]
-- **file:line:** `core/oscillator.c:31` + `oscillator.h:66`; `oscillator.c:70` + `oscillator.h:77`. Grep (excluding decl/def): empty across spectral_engine + tests. Setters are CLI-used; the getters are never read.
+- **file:line:** `core/spectral_oscillator.c:31` + `spectral_oscillator.h:66`; `spectral_oscillator.c:70` + `spectral_oscillator.h:77`. Grep (excluding decl/def): empty across spectral_engine + tests. Setters are CLI-used; the getters are never read.
 - **rule:** AI.md item 2
 - **fix:** Delete both getters + declarations, OR add a set/get round-trip test reader.
 
@@ -352,7 +352,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Delete each zero-consumer define + its per-compiler variants, OR wire into the site that warrants the hint/unroll. *(SPECTRAL_XSTR and PREFETCH_WRITE_LOCALITY are NOT dead — used internally; leave them.)*
 
 ### F5 — Low-severity macro polish [LOW]
-- `core/oscillator.h:53` (`SPECTRAL_OSC_EVAL_CASE` hides `case ... return FN(rads,width)` and captures `rads`/`width` not args) — X-macro idiom, scoped/`#undef`'d at `:55`; note macro intent or pass `rads`/`width` via X args.
+- `core/spectral_oscillator.h:53` (`SPECTRAL_OSC_EVAL_CASE` hides `case ... return FN(rads,width)` and captures `rads`/`width` not args) — X-macro idiom, scoped/`#undef`'d at `:55`; note macro intent or pass `rads`/`width` via X args.
 - **rule:** AI.md item 3; AI_CANON §19
 
 ---
@@ -365,9 +365,9 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Drop the unimplemented method (it adds a dead enum slot + descriptor row no one can select) and track in a plan doc; OR, if the slot must stay for ABI, replace the TODO with one units/why line. *(Also listed under B10.)*
 
 ### G2 — `oscillator_dispatch.c` is a 12-line TU holding one global bool + two trivial accessors — over-granular split [MEDIUM] — STRUCTURAL
-- **file:line:** `core/oscillator_dispatch.c:1-12` (entire TU: `g_native_backend_available` + the two native accessors). `source-manifest.cmake:29-30` lists both `oscillator.c` AND `oscillator_dispatch.c` in CORE for every profile — no port-pattern reason. The SIMD contract that justifies a separate file lives in the *header*. The maintainer named "the inverse: over-granular splits that should be merged."
+- **file:line:** `core/oscillator_dispatch.c:1-12` (entire TU: `g_native_backend_available` + the two native accessors). `source-manifest.cmake:29-30` lists both `spectral_oscillator.c` AND `oscillator_dispatch.c` in CORE for every profile — no port-pattern reason. The SIMD contract that justifies a separate file lives in the *header*. The maintainer named "the inverse: over-granular splits that should be merged."
 - **rule:** AI.md item 7
-- **fix:** If E4 lands (delete the native vocabulary), this TU becomes empty → delete it + its manifest line; the header `oscillator_dispatch.h` stays as the contract. If for some reason native is kept, fold the 3 lines into `oscillator.c` next to `g_osc_dispatch`.
+- **fix:** If E4 lands (delete the native vocabulary), this TU becomes empty → delete it + its manifest line; the header `spectral_oscillator_dispatch.h` stays as the contract. If for some reason native is kept, fold the 3 lines into `spectral_oscillator.c` next to `g_osc_dispatch`.
 - **blast radius:** 1 manifest entry + 3 lines; no symbol/API change; low risk. *(Couples with E4.)*
 
 ---

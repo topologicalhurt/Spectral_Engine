@@ -37,7 +37,7 @@ typedef enum SpectralOscQuality {
     SPECTRAL_OSC_QUALITY_OVERSAMPLE = 3  /* N x oversample + FIR decimate          */
 } SpectralOscQuality;
 
-/* Process-global oscillator quality, mirroring osc_set_dispatch() in oscillator.c.
+/* Process-global oscillator quality, mirroring osc_set_dispatch() in spectral_oscillator.c.
  * Read once per segment by timbre_synth_segment(); set before synthesis. */
 void osc_set_quality(SpectralOscQuality quality);
 SpectralOscQuality osc_get_quality(void);

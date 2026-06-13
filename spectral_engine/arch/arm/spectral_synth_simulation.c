@@ -15,7 +15,7 @@
 #include "spectral_utils.h"
 #include "spectral_contracts.h"
 #include "spectral_segment_convert.h"
-#include "oscillator.h"
+#include "spectral_oscillator.h"
 
 #include <stdlib.h>
 #include <string.h>

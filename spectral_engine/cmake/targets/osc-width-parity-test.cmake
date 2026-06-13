@@ -12,7 +12,7 @@
 
 add_executable(osc_width_parity_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/core_contracts/test_osc_width_parity.c"
-    "${SPECTRAL_CORE_DIR}/oscillator.c"
+    "${SPECTRAL_CORE_DIR}/spectral_oscillator.c"
     "${SPECTRAL_ARCH_SIMD_DIR}/oscillator_simd.c"
     "${SPECTRAL_CORE_DIR}/spectral_osc_bandlimited.c"
     "${SPECTRAL_CORE_DIR}/spectral_envelope.c"
