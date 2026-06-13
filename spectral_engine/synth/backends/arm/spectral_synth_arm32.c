@@ -44,8 +44,20 @@
  * User must provide dma_start_transfer() via HAL integration.
  */
 #if SPECTRAL_HAS_DMA && SPECTRAL_ARM_M7
+/* DORMANT CONFIGURATION: no build target sets SPECTRAL_HAS_DMA — the two
+ * transfer hooks below are a BSP port contract and verifying them needs a
+ * board. Kept type-correct by test_dormant_dma_branch_still_compiles (DTCM
+ * buffer placement); the cacheable-buffer configuration additionally needs
+ * the CMSIS device header (SCB cache maintenance) and so only compiles in a
+ * firmware build. Fate decided in the on-target campaign. */
 extern void dma_start_transfer(const void* src, void* dst, size_t bytes);
 extern int  dma_transfer_complete(void);
+
+/* CMSIS-core provides __DSB in any firmware build; this fallback (the same
+ * full-system barrier encoding) keeps the TU checkable standalone. */
+#ifndef __DSB
+#define __DSB() __asm volatile("dsb 0xF" ::: "memory")
+#endif
 
 #ifndef SPECTRAL_ARM32_DMA_BUFFER_DTCM
 #define SPECTRAL_ARM32_DMA_BUFFER_DTCM 0

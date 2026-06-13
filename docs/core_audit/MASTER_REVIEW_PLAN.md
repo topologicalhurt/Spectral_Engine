@@ -248,6 +248,14 @@ economy matter most.
   sink; __import__ → import; IFFT memset honesty comment; generate() runs
   the reproducibility double-run; zip sweep (gate compare under
   else-of-drift + strict). ctest 24, pytest 74, gate PASS.
-- W6 next: seven-lens + K&R panel over the highest-risk files; R2 leftover
-  sweeps (dead #if configurations, adaptive-vs-static); R4 capability-not-CPU
-  grep + include-graph scan.
+- **W6 DONE** (panel + sweeps): capability-not-CPU CLEAN; include-graph
+  CLEAN beyond queued inversions; dead-#if sweep found SPECTRAL_HAS_DMA
+  dormant AND rotted (__DSB) → fixed + compile-pinned by
+  test_dormant_dma_branch_still_compiles; IFFT render boundary-validation
+  defect fixed + 4 rejection checks; one-shot GPU cache justified in place;
+  provenance labels verified traveling. NOT covered (honesty): full K&R
+  idiom read of arm32/oscillator kernel bodies (census-pinned; defer to next
+  review instance), memory_model/cli_pipeline R7 cohesion read, MSL codegen
+  (L4). ctest 24, pytest 75, gate PASS.
+- W7 next: full re-verify + adversarial diff review of the review's own
+  changes; close out the plan; then KERNEL_LAYOUT L0+L1.

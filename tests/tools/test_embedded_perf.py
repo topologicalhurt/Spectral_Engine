@@ -580,3 +580,22 @@ def test_qemu_counts_end_to_end_reproducible(tmp_path):
     # The synth kernel must dominate the dynamic instruction stream.
     total = sum(r.insns for r in report.ranges)
     assert process.insns / total > 0.5
+
+@pytest.mark.skipif(not HAVE_ARM_GCC, reason="needs arm-none-eabi-gcc (m7-bootstrap)")
+def test_dormant_dma_branch_still_compiles(tmp_path):
+    """No build target sets SPECTRAL_HAS_DMA (the BSP hooks need a board), so
+    nothing else ever compiles that branch of the arm32 kernel. Dormant code
+    that cannot rot silently: cross-compile the TU with the DMA configuration
+    forced on (syntax/type check only — the BSP externs resolve at link)."""
+    import subprocess
+
+    tc = toolchain.discover(ROOT)
+    tu = ROOT / "spectral_engine/synth/backends/arm/spectral_synth_arm32.c"
+    arm_dir = ROOT / "spectral_engine/synth/backends/arm"
+    result = subprocess.run(
+        [tc.arm_gcc, *tc.cflags(extra_includes=(arm_dir,)),
+         "-DSPECTRAL_HAS_DMA=1", "-DSPECTRAL_ARM32_DMA_BUFFER_DTCM=1",
+         "-fsyntax-only", str(tu)],
+        capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, (
+        f"dormant DMA branch no longer compiles:\n{result.stderr[-3000:]}")

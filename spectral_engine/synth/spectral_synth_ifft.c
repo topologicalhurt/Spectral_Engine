@@ -119,6 +119,19 @@ int spectral_ifft_synth_render(SpectralIfftSynth* s,
                                const SpectralIfftPartial* partials, size_t n,
                                float* out, size_t total) {
     if (!s || (!partials && n > 0) || !out || total == 0) return 1;
+
+    /* Validate at the boundary, ONCE: the float->int floor in place_partial
+     * is int-conversion UB on garbage bins (the defect class the Segment
+     * width bound closes elsewhere), and the contract domain is the header's
+     * bin in (1, n_fft/2 - 1). The negated comparisons also reject NaN. */
+    const size_t half = s->n_fft / 2;
+    const float bin_max = (float)half - 1.0f;
+    for (size_t p = 0; p < n; p++) {
+        if (!(partials[p].bin > 1.0f) || !(partials[p].bin < bin_max) ||
+            !isfinite(partials[p].amp) || !isfinite(partials[p].phase0)) {
+            return 1;
+        }
+    }
     memset(out, 0, total * sizeof(float));
 
     /* Frames at m*hop for m = -1.. so every output sample has full COLA

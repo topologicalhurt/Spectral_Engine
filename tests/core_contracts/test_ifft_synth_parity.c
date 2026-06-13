@@ -102,6 +102,29 @@ static void test_stream_parity(void) {
     }
 
     static float out[TOTAL], out2[TOTAL];
+
+    /* Boundary contract: a partial outside bin in (1, n_fft/2-1), or with a
+     * non-finite field, must be REJECTED — the bin floor-cast would be
+     * int-conversion UB on garbage, and an out-of-domain partial would
+     * silently render nothing of itself. */
+    {
+        SpectralIfftPartial bad = parts[0];
+        bad.bin = (float)N_FFT / 2.0f;
+        CHECK(spectral_ifft_synth_render(s, &bad, 1, out, TOTAL) != 0,
+              "render must reject bin at/above n_fft/2-1");
+        bad.bin = 0.5f;
+        CHECK(spectral_ifft_synth_render(s, &bad, 1, out, TOTAL) != 0,
+              "render must reject bin at/below 1");
+        bad = parts[0];
+        bad.bin = NAN;
+        CHECK(spectral_ifft_synth_render(s, &bad, 1, out, TOTAL) != 0,
+              "render must reject NaN bin");
+        bad = parts[0];
+        bad.amp = INFINITY;
+        CHECK(spectral_ifft_synth_render(s, &bad, 1, out, TOTAL) != 0,
+              "render must reject non-finite amp");
+    }
+
     uint64_t t0 = now_ns();
     CHECK(spectral_ifft_synth_render(s, parts, N_PARTIALS, out, TOTAL) == 0, "render rc");
     uint64_t t_ifft = now_ns() - t0;
