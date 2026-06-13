@@ -38,7 +38,7 @@ static SpectralError synth_derive_param_scalars(float stretch, float pitch,
 
     inv_stretch = 1.0f / stretch;
     inv_stretch_sq = 1.0f / stretch_sq;
-    pitch_factor = SPECTRAL_PITCH_FACTOR(pitch);
+    pitch_factor = spectral_pitch_factor(pitch);
 
     if (!spectral_is_finite_positive_f32(inv_stretch) ||
         !spectral_is_finite_positive_f32(inv_stretch_sq) ||

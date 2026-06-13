@@ -19,7 +19,7 @@
  *   Every float<->Q conversion goes through a NAMED boundary macro — never an
  *   ad-hoc multiply by a raw scale constant. The sanctioned macros are
  *   FLOAT_TO_Q15 / Q15_TO_FLOAT / FLOAT_TO_Q31 / Q31_TO_FLOAT / PHASE_RAD_TO_Q15
- *   / OMEGA_TO_Q88 here, plus SPECTRAL_SAMPLE_TO_FLOAT / FLOAT_TO_SPECTRAL_SAMPLE
+ *   / OMEGA_TO_Q88 here, plus spectral_sample_to_float / float_to_spectral_sample
  *   (the PCM-sample boundary) in spectral_config.h. The raw scale constants
  *   (SPECTRAL_Q15_SCALE / SPECTRAL_INV_Q15_SCALE / SPECTRAL_Q31_SCALE /
  *   SPECTRAL_INV_Q31_SCALE) may ONLY appear inside those macro definitions; the

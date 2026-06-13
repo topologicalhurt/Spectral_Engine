@@ -4,7 +4,7 @@
     "checksum": "77a267f6",
     "code_lines": 33,
     "data_lines": 872,
-    "fixture_digest": "c20b1374094a51d8",
+    "fixture_digest": "07f868f5ac35d606",
     "process_insns": 3762455,
     "process_load_bytes": 4566738,
     "process_store_bytes": 1652298
@@ -42,8 +42,8 @@
     }
   },
   "meta": {
-    "arm_gcc": "/Users/connorsinclair/Desktop/Spectral/tools/toolchains/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-gcc",
-    "llvm_mca": "/opt/homebrew/opt/llvm/bin/llvm-mca",
+    "arm_gcc": "arm-none-eabi-gcc 15.2.1",
+    "llvm_mca": "llvm-mca 21.1.8",
     "tolerances": {
       "measured_insns_rel": 0.05,
       "modeled_cycles_rel": 0.1,

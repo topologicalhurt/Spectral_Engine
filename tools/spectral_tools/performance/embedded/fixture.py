@@ -108,7 +108,7 @@ class WorkloadFixture:
 
 def default_fixture() -> WorkloadFixture:
     return WorkloadFixture(
-        name="campaign3-p2-9voice",
+        name="stagger9-8k",
         sample_rate=48_000,
         total_samples=16_384,
         block_samples=256,

@@ -29,6 +29,8 @@
 #define IFFT_N 512
 #endif
 #define HOP (IFFT_N / 2)
+/* mirrors SPECTRAL_PI_D (core/spectral_consts.h); local so this harness
+ * compiles dependency-free with a bare cc invocation */
 #define PI 3.14159265358979323846
 
 /* xorshift for deterministic partial sets */

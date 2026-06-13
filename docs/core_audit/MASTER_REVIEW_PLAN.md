@@ -217,6 +217,13 @@ economy matter most.
   pytest 74, gate PASS. Remaining R2 sweeps (dead #if configurations,
   adaptive-vs-static review) ride W6; main.c vtable bypass rides
   KERNEL_LAYOUT L0 as planned.
-- W3 next: multi-eval macros → static inline; constants provenance;
-  baseline fixture absolute path + campaign3-p2-9voice id rename
-  (deliberate regeneration).
+- **W3 DONE** (macros + constants): sample-op + pitch-factor macros →
+  static inline across both branches, call sites renamed; MIN/MAX/CLAMP
+  hazard documented; provenance on GPU tile/cache, tracker batch, headrooms,
+  ARM32_MAX_ACTIVE, DAISY caps; Daisy pool tiling enforced by _Static_assert
+  + daisy_config_layout ctest (sabotage-verified); baseline meta de-pathed
+  (basename+version) + fixture id renamed stagger9-8k; baseline regenerated,
+  diff exactly the two intended fields. ctest 23, pytest 74, gate PASS.
+- W4 next: rig_support.h + tests/support/check.h hoists; segment_to_q15
+  conversion-policy unification; shared ELF builder; GPU timbre-cap single
+  constant.

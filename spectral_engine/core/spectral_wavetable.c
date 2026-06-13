@@ -52,7 +52,7 @@ static spectral_sample_t spectral_wavetable_builtin_sample(uint8_t timbre_id, si
         case TIMBRE_TRIANGLE: value = spectral_osc_triangle(rads, 0.0f); break;
         default:              value = 0.0f; break;
     }
-    return FLOAT_TO_SPECTRAL_SAMPLE(value);
+    return float_to_spectral_sample(value);
 }
 
 void spectral_wavetable_generate_builtins(SpectralWavetableBank* bank) {
@@ -234,7 +234,7 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
             return WAVETABLE_ERR_FORMAT;
         }
         for (size_t i = 0; i < hdr.size; i++) {
-            table->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE(temp[i]);
+            table->samples[i] = float_to_spectral_sample(temp[i]);
         }
         free(temp);
     } else {
@@ -251,8 +251,8 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
             return WAVETABLE_ERR_SIZE;
         }
         for (size_t i = 0; i < hdr.size; i++) {
-            float sample_f = SPECTRAL_SAMPLE_TO_FLOAT(temp[i]);
-            table->samples[i] = FLOAT_TO_SPECTRAL_SAMPLE(sample_f);
+            float sample_f = spectral_sample_to_float(temp[i]);
+            table->samples[i] = float_to_spectral_sample(sample_f);
         }
         free(temp);
     }

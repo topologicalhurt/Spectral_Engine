@@ -13,7 +13,9 @@ extern "C" {
 #endif
 
 /* Convert semitones to pitch multiplier: 2^(semitones/12) */
-#define SPECTRAL_PITCH_FACTOR(semitones) powf(2.0f, (semitones) / 12.0f)
+static inline float spectral_pitch_factor(float semitones) {
+    return powf(2.0f, semitones / 12.0f);
+}
 
 /* 64-byte segment (desktop) - cache-line aligned */
 typedef struct __attribute__((aligned(64))) {

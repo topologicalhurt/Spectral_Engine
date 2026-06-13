@@ -35,6 +35,11 @@
 
 /*
  * Utility Macros
+ *
+ * Kept as macros (not static inline) because they are type-generic across
+ * int/size_t/float call sites; #ifndef-guarded since system headers and
+ * vendored code define the same names with identical semantics. They
+ * MULTI-EVALUATE their arguments: never pass expressions with side effects.
  */
 #ifndef MAX
 #define MAX(a, b)               (((a) > (b)) ? (a) : (b))

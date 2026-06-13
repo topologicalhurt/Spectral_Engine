@@ -222,6 +222,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-payload-bounds-test.c
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/ifft-synth-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/simulate-smoke-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/gpu-backend-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy-config-layout-test.cmake")
 
 # Test/bench targets that compile core/oscillator.c also #include the generated
 # spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
@@ -263,7 +264,8 @@ add_dependencies(tests_all
     peak_interp_parabolic_test
     segment_endian_roundtrip_test
     segment_payload_bounds_test
-    ifft_synth_parity_test)
+    ifft_synth_parity_test
+    daisy_config_layout_test)
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")

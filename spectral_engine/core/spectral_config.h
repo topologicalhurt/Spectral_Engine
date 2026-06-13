@@ -166,19 +166,28 @@ typedef int32_t  spectral_acc_t;
 #define SPECTRAL_SAMPLE_ZERO        0
 #define SPECTRAL_SAMPLE_HALF        16384
 
-#define SPECTRAL_SAMPLE_TO_FLOAT(s) ((float)(s) * SPECTRAL_INV_Q15_SCALE)
-#define FLOAT_TO_SPECTRAL_SAMPLE(f) \
-    ((spectral_sample_t)(!((f) == (f)) ? 0 : (f) >= 1.0f ? 32767 : (f) <= -1.0f ? -32768 : (int16_t)((f) * SPECTRAL_Q15_SCALE)))
-
-#define SPECTRAL_SAMPLE_ADD(a, b) \
-    ((spectral_sample_t)(((int32_t)(a) + (int32_t)(b)) > 32767 ? 32767 : \
-                         (((int32_t)(a) + (int32_t)(b)) < -32768 ? -32768 : \
-                          ((int32_t)(a) + (int32_t)(b)))))
-
-#define SPECTRAL_SAMPLE_MUL(a, b) \
-    ((spectral_sample_t)((((int32_t)(a) * (int32_t)(b)) >> 15) > 32767 ? 32767 : \
-                         ((((int32_t)(a) * (int32_t)(b)) >> 15) < -32768 ? -32768 : \
-                          (((int32_t)(a) * (int32_t)(b)) >> 15))))
+static inline float spectral_sample_to_float(spectral_sample_t s) {
+    return (float)s * SPECTRAL_INV_Q15_SCALE;
+}
+/* NaN -> silence; out-of-range saturates (the embedded contract everywhere). */
+static inline spectral_sample_t float_to_spectral_sample(float f) {
+    if (f != f) return 0;
+    if (f >= 1.0f) return SPECTRAL_SAMPLE_MAX;
+    if (f <= -1.0f) return SPECTRAL_SAMPLE_MIN;
+    return (spectral_sample_t)(f * SPECTRAL_Q15_SCALE);
+}
+static inline spectral_sample_t spectral_sample_add(spectral_sample_t a, spectral_sample_t b) {
+    int32_t sum = (int32_t)a + (int32_t)b;
+    if (sum > SPECTRAL_SAMPLE_MAX) return SPECTRAL_SAMPLE_MAX;
+    if (sum < SPECTRAL_SAMPLE_MIN) return SPECTRAL_SAMPLE_MIN;
+    return (spectral_sample_t)sum;
+}
+static inline spectral_sample_t spectral_sample_mul(spectral_sample_t a, spectral_sample_t b) {
+    int32_t prod = ((int32_t)a * (int32_t)b) >> 15;
+    if (prod > SPECTRAL_SAMPLE_MAX) return SPECTRAL_SAMPLE_MAX;
+    if (prod < SPECTRAL_SAMPLE_MIN) return SPECTRAL_SAMPLE_MIN;
+    return (spectral_sample_t)prod;
+}
 
 #define SPECTRAL_SAMPLE_IS_FIXED    1
 #define SPECTRAL_SAMPLE_SPAN_FINITE(s, n) ((void)(s), (void)(n), 1)
@@ -201,10 +210,14 @@ typedef double   spectral_acc_t;
 #define SPECTRAL_SAMPLE_ZERO        0.0f
 #define SPECTRAL_SAMPLE_HALF        0.5f
 
-#define SPECTRAL_SAMPLE_TO_FLOAT(s) (s)
-#define FLOAT_TO_SPECTRAL_SAMPLE(f) (f)
-#define SPECTRAL_SAMPLE_ADD(a, b)   ((a) + (b))
-#define SPECTRAL_SAMPLE_MUL(a, b)   ((a) * (b))
+static inline float spectral_sample_to_float(spectral_sample_t s) { return s; }
+static inline spectral_sample_t float_to_spectral_sample(float f) { return f; }
+static inline spectral_sample_t spectral_sample_add(spectral_sample_t a, spectral_sample_t b) {
+    return a + b;
+}
+static inline spectral_sample_t spectral_sample_mul(spectral_sample_t a, spectral_sample_t b) {
+    return a * b;
+}
 
 #define SPECTRAL_SAMPLE_IS_FIXED    0
 #define SPECTRAL_SAMPLE_SPAN_FINITE(s, n) spectral_f32_span_finite((s), (n))
@@ -408,6 +421,9 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_INTERP_POWER_RATIONAL
 #define SPECTRAL_TRACK_INTERP_POWER_RATIONAL 0
 #endif
+/* Per-frame candidate scratch batch for peak tracking.
+ * [chosen: 128 entries keeps the candidate block cache-resident; the prefetch
+ * benchmark profiles (benchmark_workflow) sweep 64-256 for re-evaluation.] */
 #ifndef SPECTRAL_TRACK_CANDIDATE_BATCH
 #define SPECTRAL_TRACK_CANDIDATE_BATCH  128u
 #endif
@@ -553,7 +569,10 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_OPT_LEVEL      1
 #endif
 
-/* GPU/compute block size for Metal/CUDA backends */
+/* GPU/compute block size for Metal/CUDA backends.
+ * [chosen: a multiple of the 32-wide SIMD-group/warp on both backends, at
+ * half the common 1024 threads/group ceiling for register headroom; not yet
+ * swept on hardware — revisit if a GPU profile shows occupancy pressure.] */
 #ifndef SPECTRAL_GPU_TILE_SIZE
 #define SPECTRAL_GPU_TILE_SIZE          512
 #endif
@@ -564,12 +583,17 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS 0
 #endif
 
-/* Headroom factor for normalization (0.95 = -0.45dB) */
+/* Headroom factor for normalization (0.95 = -0.45 dB).
+ * [chosen: keeps reconstructed inter-sample peaks from clipping after
+ * normalization to the sample-domain max.] */
 #ifndef SPECTRAL_NORMALIZE_HEADROOM
 #define SPECTRAL_NORMALIZE_HEADROOM     0.95f
 #endif
 
-/* Embedded simulation headroom for Q15 amplitude scaling */
+/* Embedded simulation headroom for Q15 amplitude scaling.
+ * [chosen: scales the peak segment amplitude to just under Q15 full scale so
+ * float_to_spectral_sample saturation never engages on the nominal peak; the
+ * 1% margin absorbs envelope/rounding overshoot.] */
 #define SPECTRAL_SIMULATION_HEADROOM    0.99f
 
 /* GPU segment cache size (threadgroup / shared memory).
@@ -641,6 +665,10 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
  * lives in a BSP, not here). Defines SPECTRAL_MEM_FAST / SPECTRAL_MEM_FAST_CODE /
  * SPECTRAL_MEM_BULK / SPECTRAL_CACHE_LINE. */
 #include "port/spectral_mem.h"
+/* Static bound on the arm32 kernel's active-voice state arrays. The REAL-TIME
+ * cap is the WCET-gated DAISY_MAX_ACTIVE (128, capacity table in
+ * M7_PERF_MODEL_PLAN.md); this only sizes storage. [chosen: 4x the runtime
+ * cap so batch/offline use is not storage-bound.] */
 #ifndef SPECTRAL_ARM32_MAX_ACTIVE
 #define SPECTRAL_ARM32_MAX_ACTIVE    512
 #endif

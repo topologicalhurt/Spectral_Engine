@@ -40,7 +40,10 @@
 #define DAISY_AUDIO_CHANNELS        2
 #define DAISY_AUDIO_BLOCK_SIZE      48
 
-/* SDRAM memory budget */
+/* SDRAM memory budget: three pools tile the 64 MB SDRAM exactly
+ * (48 segment + 8 audio + 8 work); each offset is the previous pool's end.
+ * The tiling is enforced below, so resizing one pool without rebalancing
+ * the others fails the build instead of silently overlapping. */
 #define DAISY_SEGMENT_POOL_OFFSET   0x00000000UL
 #define DAISY_SEGMENT_POOL_SIZE     (48UL * 1024 * 1024)
 #define DAISY_AUDIO_POOL_OFFSET     0x03000000UL
@@ -48,9 +51,24 @@
 #define DAISY_WORK_POOL_OFFSET      0x03800000UL
 #define DAISY_WORK_POOL_SIZE        (8UL * 1024 * 1024)
 
+_Static_assert(DAISY_SEGMENT_POOL_OFFSET + DAISY_SEGMENT_POOL_SIZE
+                   == DAISY_AUDIO_POOL_OFFSET,
+               "audio pool must start where the segment pool ends");
+_Static_assert(DAISY_AUDIO_POOL_OFFSET + DAISY_AUDIO_POOL_SIZE
+                   == DAISY_WORK_POOL_OFFSET,
+               "work pool must start where the audio pool ends");
+_Static_assert(DAISY_WORK_POOL_OFFSET + DAISY_WORK_POOL_SIZE
+                   == DAISY_SDRAM_SIZE,
+               "pools must tile the SDRAM exactly");
+
 /* Segment limits */
 #define DAISY_MAX_SEGMENTS          (DAISY_SEGMENT_POOL_SIZE / sizeof(SpectralSegmentQ15))
+/* [chosen: round figure under the ~3.1M (48 MB / 16 B) pool capacity,
+ * leaving slack for pool bookkeeping.] */
 #define DAISY_MAX_SEGMENTS_SAFE     2000000
+/* WCET-gated batch cap: the capacity table guarantees 128 active voices at
+ * 256-sample blocks within the real-time budget (M7_PERF_MODEL_PLAN.md, held
+ * by the m7-baseline STONE scenarios). Raise only with a new WCET proof. */
 #define DAISY_MAX_ACTIVE            128
 
 /* Parameter defaults and limits */

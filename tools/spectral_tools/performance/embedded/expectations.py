@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -169,6 +170,21 @@ def _live_numbers(tc: Toolchain, *, out_dir: Path) -> dict[str, Any]:
     }
 
 
+def _tool_id(tool: str | None, version_flag: str) -> str | None:
+    """basename + version — a committed fixture must carry no machine paths."""
+    if tool is None:
+        return None
+    name = Path(tool).name
+    try:
+        out = subprocess.run([tool, version_flag], capture_output=True,
+                             text=True, timeout=30, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return name
+    first = out.strip().splitlines()[0] if out.strip() else ""
+    match = re.search(r"\d+\.\d+(\.\d+)?", first)
+    return f"{name} {match.group(0)}" if match else name
+
+
 def generate(tc: Toolchain, *, out_dir: Path) -> Path:
     """Freeze the live numbers into the baseline fixture (deliberate act)."""
     live = _live_numbers(tc, out_dir=out_dir)
@@ -178,8 +194,8 @@ def generate(tc: Toolchain, *, out_dir: Path) -> Path:
                     "only for an intended change and say so in the commit. "
                     "Tolerances + stone ceilings live in expectations.py.",
         "meta": {
-            "arm_gcc": tc.arm_gcc,
-            "llvm_mca": tc.llvm_mca,
+            "arm_gcc": _tool_id(tc.arm_gcc, "-dumpversion"),
+            "llvm_mca": _tool_id(tc.llvm_mca, "--version"),
             "tolerances": {k: v["value"] for k, v in TOLERANCES.items()},
         },
         **live,

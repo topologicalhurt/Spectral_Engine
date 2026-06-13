@@ -224,7 +224,7 @@ static SpectralError thread_buffers_combine_native(const ThreadBuffers* tb, spec
         const spectral_sample_t* __restrict__ src = (const spectral_sample_t*)tb->bufs[t];
         spectral_sample_t* __restrict__ dst = out_buffer + lo;
         for (size_t j = 0; j < len; j++) {
-            dst[j] = SPECTRAL_SAMPLE_ADD(dst[j], src[j]);
+            dst[j] = spectral_sample_add(dst[j], src[j]);
         }
     }
     return SPECTRAL_OK;
@@ -394,7 +394,7 @@ static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, c
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
         float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         spectral_sample_t sample = spectral_wavetable_lookup_f(wc->table, phase_norm);
-        out[j] += amp * SPECTRAL_SAMPLE_TO_FLOAT(sample);
+        out[j] += amp * spectral_sample_to_float(sample);
     }
 }
 #endif
@@ -407,7 +407,7 @@ static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, con
         float p = spectral_segment_phase_at_cubic_f32(lp->phase, lp->alpha, lp->c2, lp->c3, (float)j);
         float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         float sample_f = timbre_oscillator(p, amp, tc->timbre, lp->width);
-        out[j] = SPECTRAL_SAMPLE_ADD(out[j], FLOAT_TO_SPECTRAL_SAMPLE(sample_f));
+        out[j] = spectral_sample_add(out[j], float_to_spectral_sample(sample_f));
     }
 }
 
@@ -420,9 +420,9 @@ static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, 
         float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
         float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
         spectral_sample_t sample = spectral_wavetable_lookup_f(nwc->table, phase_norm);
-        spectral_sample_t amp_native = FLOAT_TO_SPECTRAL_SAMPLE(amp);
-        spectral_sample_t scaled = SPECTRAL_SAMPLE_MUL(sample, amp_native);
-        out[j] = SPECTRAL_SAMPLE_ADD(out[j], scaled);
+        spectral_sample_t amp_native = float_to_spectral_sample(amp);
+        spectral_sample_t scaled = spectral_sample_mul(sample, amp_native);
+        out[j] = spectral_sample_add(out[j], scaled);
     }
 }
 
