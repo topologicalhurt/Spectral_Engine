@@ -133,6 +133,14 @@ file moves must be codegen-identical, and the gate PROVES it at ±5% insns)
 - **L1 DONE**: spectral_q15.{h,c} → core/; manifest + 8 test cmakes + daisy
   relative include + toolchain.py rewired; synth/math/ gone; gate-proven
   codegen-identical (ctest 24, pytest 75, gate PASS).
-- L2 next: create arch/{ref,arm,simd}; move port/host SIMDe TUs +
-  port/embedded TUs + backends/arm + sim (after the Q2 surgery: extract
-  conversion policy, move report printing to the caller); retire core/port/.
+- **L2 DONE** (a436f9295c): L2a surgery — runtime conversion →
+  core/spectral_segment_convert (one policy for embedded-bound paths;
+  distinct by design from the at-rest offline converter), sim report
+  printing → the pipeline caller via embedded_sim_last_report. L2b moves —
+  arch/simd ← port/host SIMDe TUs; arch/ref ← port/embedded profile bodies
+  + radix-2 iFFT; arch/arm ← backends/arm + CMSIS osc + sim adapter;
+  drivers/vdsp ← vdsp iFFT (early, so core/port retires now);
+  core/spectral_mem.h ← port/. All vars/paths/rigs rewired; gate-identical.
+- L3 next: synth/ dissolution — api header + cpu backend + IFFT
+  renderer/contract → core; fix the api→arch synth_cpu redirect inversion;
+  synth/ reduced to gpu/ (which L4 then lifts into drivers/).
