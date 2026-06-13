@@ -1,5 +1,38 @@
 # Major-Patchset Review — Instance 2 (Findings Ledger & Execution Plan)
 
+## Execution status (branch `minimal`)
+
+LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf gate):
+- W1 `comment scrub` — units lie (convert_segments Hz→rad/sample), stale-type lie
+  (q63-as-Q30), canon-§6 prefetcher claim + first-person voice (peak_track), all
+  surviving ULTRAPLAN/PASS/Thread-A/codename refs, filename-echo banners, atan2
+  provenance.
+- W2 `dead code` — NATIVE dispatch vocabulary + emptied oscillator_dispatch.c (deleted),
+  CUDA alias macros, unreferenced getters, Pade consts + false GPU comment, 7 orphaned
+  config defines, dead macro halves.
+- W3 `Segment units` — per-field unit annotations on the core struct (AI_CANON §9).
+- W4-D1 `eval-switch hoist` — the Q15 timbre→leaf switch (3 hand-copies) → one
+  spectral_osc_q15_eval in oscillator_dispatch.h; codegen-neutral. CLOSES **E1**: the
+  dormant CMSIS oscillator now has a fail-on-bug cross-compile pin (a real include-order
+  -Werror break was found + fixed in the process).
+- W5a `spectral_q15.{h,c} → spectral_q.{h,c}` — truthful Q-domain filename; pure
+  path/guard rename, no symbol churn.
+
+REMAINING (priority order):
+1. oscillator* → spectral_oscillator* full file+symbol sweep (SD-2, ratified); A3
+   spectral_osc_recursive.h → spectral_osc_q31.h.
+2. SD-5 honesty: stop the CLI advertising adaptive_track_density as "Implemented"
+   (it no-ops); precise-phase → Reserved, code kept for the F-stream.
+3. W4 D7 (locale-dependent tolower triplicate — latent bug), D8 (DSB unify),
+   D3/D5 (fade-loop factoring), D6 (sin_init parity).
+4. W6 SD-4 uq88_t/q30_t typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
+   renames (freq_inc→phase_inc, t_hop→…).
+5. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
+   the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
+   arch-gated via macros), each conversion behind a parity test.
+
+---
+
 ## Honest assessment of what the first pass left on the table
 
 The first pass (W1–W7 + KERNEL_LAYOUT L0–L5) did real, durable work on the parts it actually
