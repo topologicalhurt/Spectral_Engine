@@ -126,5 +126,13 @@ file moves must be codegen-identical, and the gate PROVES it at ±5% insns)
 
 ## Status
 
-- Pass 259: survey complete (fleet map), plan authored, maintainer answers
-  delivered. Execution starts L0+L1 on ratification.
+- Survey complete (fleet map), plan authored, maintainer answers delivered.
+- **L0 DONE** (split across the Master Review + one commit here): simulate
+  glob bug + dead sim API/define (review W2), timbre-cap constant (W4),
+  main.c GPU-cleanup vtable bypass → spectral_backend_cleanup_all().
+- **L1 DONE**: spectral_q15.{h,c} → core/; manifest + 8 test cmakes + daisy
+  relative include + toolchain.py rewired; synth/math/ gone; gate-proven
+  codegen-identical (ctest 24, pytest 75, gate PASS).
+- L2 next: create arch/{ref,arm,simd}; move port/host SIMDe TUs +
+  port/embedded TUs + backends/arm + sim (after the Q2 surgery: extract
+  conversion policy, move report printing to the caller); retire core/port/.
