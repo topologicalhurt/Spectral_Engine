@@ -163,10 +163,6 @@ static void thread_buffers_free(ThreadBuffers* tb) {
 }
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
-#endif
-
-
-#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static SpectralError thread_buffers_combine_float(const ThreadBuffers* tb, float* __restrict__ out_buffer,
                                                   size_t out_len, size_t out_bytes) {
     if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {

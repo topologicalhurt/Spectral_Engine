@@ -13,23 +13,18 @@
  */
 #if defined(__GNUC__) && !defined(__clang__)
 #define SPECTRAL_UNROLL_4       _Pragma("GCC unroll 4")
-#define SPECTRAL_UNROLL_2       _Pragma("GCC unroll 2")
 #elif defined(__clang__)
 #define SPECTRAL_UNROLL_4       _Pragma("clang loop unroll_count(4)")
-#define SPECTRAL_UNROLL_2       _Pragma("clang loop unroll_count(2)")
 #else
 #define SPECTRAL_UNROLL_4
-#define SPECTRAL_UNROLL_2
 #endif
 
 /*
  * Branch Prediction Hints
  */
 #if defined(__GNUC__) || defined(__clang__)
-#define SPECTRAL_LIKELY(x)      __builtin_expect(!!(x), 1)
 #define SPECTRAL_UNLIKELY(x)    __builtin_expect(!!(x), 0)
 #else
-#define SPECTRAL_LIKELY(x)      (x)
 #define SPECTRAL_UNLIKELY(x)    (x)
 #endif
 

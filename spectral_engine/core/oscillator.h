@@ -63,7 +63,6 @@ OSC_HOT float timbre_oscillator(float p, float a, SpectralTimbre timbre, float w
 OSC_HOT void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParams* lp, SpectralTimbre timbre);
 
 void osc_set_dispatch(OscDispatchWord dispatch);
-OscDispatchWord osc_get_dispatch(void);
 
 /* Per-timbre opt-in Q15 *compute* domain (QTYPE_DOMAIN_PLAN.md §5).
  * Bit (1u << timbre) set => that timbre's point-sampled sustain renders via the
@@ -74,14 +73,10 @@ OscDispatchWord osc_get_dispatch(void);
  * path (osc_q15_available); the bit is ignored for any other timbre. */
 #define OSC_Q15_BIT(timbre) ((uint16_t)(1u << (timbre)))
 void osc_set_q15_enable(uint16_t mask);
-uint16_t osc_get_q15_enable(void);
 int osc_q15_available(SpectralTimbre timbre);
 
 /* CUDA oscillator — thin wrapper over the shared L1 kernel above. */
 #ifdef __CUDACC__
-
-#define oscillator_normalize_phase_cuda spectral_normalize_phase
-#define oscillator_fast_sin_cuda        spectral_fast_sin_inline
 
 __device__ __forceinline__ float oscillator_cuda(float phase, int timbre) {
     return spectral_osc_eval(phase, timbre, 0.0f);

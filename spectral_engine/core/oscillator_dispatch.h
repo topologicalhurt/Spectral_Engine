@@ -75,7 +75,6 @@ extern "C" {
 typedef enum {
     OSC_MODE_CPU_SCALAR = 0,
     OSC_MODE_CPU_SIMD   = 1,
-    OSC_MODE_NATIVE     = 2,
     OSC_MODE_FALLBACK   = 3,
 } OscDispatchMode;
 
@@ -104,7 +103,6 @@ typedef union {
 /* Presets */
 #define OSC_DISPATCH_ALL_SCALAR   ((OscDispatchWord){ .word = 0x0000 })
 #define OSC_DISPATCH_ALL_SIMD     ((OscDispatchWord){ .word = 0x5555 })
-#define OSC_DISPATCH_ALL_NATIVE   ((OscDispatchWord){ .word = 0xAAAA })
 #define OSC_DISPATCH_ALL_FALLBACK ((OscDispatchWord){ .word = 0xFFFF })
 
 /* SIMD vector width (floats per vector register) */
@@ -154,10 +152,6 @@ int osc_simd_q15_available(SpectralTimbre timbre);
 void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
                           SpectralTimbre timbre, const int16_t* sine_lut);
 #endif
-
-/* Native backend availability */
-int osc_native_available(void);
-void osc_set_native_available(int available);
 
 #ifdef __cplusplus
 }

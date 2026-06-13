@@ -28,7 +28,6 @@ _Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
 static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SIMD;
 
 void osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
-OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 
 /* Opt-in Q15 compute domain. Float is the default — this mask is 0 unless
  * a caller explicitly enables a path, so the default build moves no bytes. */
@@ -37,8 +36,8 @@ static uint16_t g_osc_q15_enable = 0;
  * optimisation: real embedded firmware synthesises Q15 in spectral_synth_arm32.c
  * (integer NCO) and never reaches this dispatch, so the LUT and the scalar/SIMD
  * Q15 segment helpers are pure .bss/.text waste there.  Compile them out of
- * embedded targets.  The mask, its setter/getter, and osc_q15_available() stay
- * in every build because the CLI pipeline (run_synthesis) references them
+ * embedded targets.  The mask, its setter, and osc_q15_available() stay in
+ * every build because the CLI pipeline (run_synthesis) references them
  * unconditionally — only the LUT-bearing body is conditional. */
 #if !SPECTRAL_EMBEDDED
 static q15_t g_osc_q15_sine_lut[SPECTRAL_OSC_LUT_SIZE + 1];
@@ -67,7 +66,6 @@ void osc_set_q15_enable(uint16_t mask) {
     }
 #endif
 }
-uint16_t osc_get_q15_enable(void) { return g_osc_q15_enable; }
 
 float timbre_oscillator(float p, float a, SpectralTimbre timbre, float width) {
     /* Single-sample API — not hot — uses the L1 kernel directly. Out-of-range

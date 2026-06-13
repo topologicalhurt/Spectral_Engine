@@ -17,11 +17,6 @@
 #define SPECTRAL_HALF_PI        1.57079637f
 #define SPECTRAL_PI_F           3.14159274f
 
-/* Pade [5/4] sine coefficients -- GPU shaders MUST use these same values */
-#define SPECTRAL_PADE_SIN_C1    0.16605f
-#define SPECTRAL_PADE_SIN_C2    0.00761f
-#define SPECTRAL_PADE_SIN_C3    0.00766f
-
 /* Minimax atan coefficients (Horner in s = a^2, ratio a in [0,1]). Consumed only
  * by spectral_atan2_poly (spectral_fast_math.h), which documents the argument
  * reduction, the odd-polynomial form, and the octant reconstruction. GPU/SIMD

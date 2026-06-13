@@ -164,7 +164,6 @@ typedef int32_t  spectral_acc_t;
 #define SPECTRAL_SAMPLE_MAX         32767
 #define SPECTRAL_SAMPLE_MIN         (-32768)
 #define SPECTRAL_SAMPLE_ZERO        0
-#define SPECTRAL_SAMPLE_HALF        16384
 
 static inline float spectral_sample_to_float(spectral_sample_t s) {
     return (float)s * SPECTRAL_INV_Q15_SCALE;
@@ -208,7 +207,6 @@ typedef double   spectral_acc_t;
 #define SPECTRAL_SAMPLE_MAX         1.0f
 #define SPECTRAL_SAMPLE_MIN         (-1.0f)
 #define SPECTRAL_SAMPLE_ZERO        0.0f
-#define SPECTRAL_SAMPLE_HALF        0.5f
 
 static inline float spectral_sample_to_float(spectral_sample_t s) { return s; }
 static inline spectral_sample_t float_to_spectral_sample(float f) { return f; }
@@ -415,9 +413,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_SEGMENT_WIDTH_MAX
 #define SPECTRAL_SEGMENT_WIDTH_MAX      16777216.0f
 #endif
-#ifndef SPECTRAL_TRACK_INTERP_LOG_DOMAIN
-#define SPECTRAL_TRACK_INTERP_LOG_DOMAIN 1
-#endif
 #ifndef SPECTRAL_TRACK_INTERP_POWER_RATIONAL
 #define SPECTRAL_TRACK_INTERP_POWER_RATIONAL 0
 #endif
@@ -442,17 +437,11 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_PREFETCH_PHASE
 #define SPECTRAL_TRACK_PREFETCH_PHASE 1
 #endif
-#ifndef SPECTRAL_TRACK_PREFETCH_WRITE_LOCALITY
-#define SPECTRAL_TRACK_PREFETCH_WRITE_LOCALITY 2
-#endif
 #ifndef SPECTRAL_TRACK_ALLOC_FAILED_POLL_STRIDE
 #define SPECTRAL_TRACK_ALLOC_FAILED_POLL_STRIDE 16u
 #endif
 #ifndef SPECTRAL_TRACK_PAIR_OMP_CHUNK
 #define SPECTRAL_TRACK_PAIR_OMP_CHUNK 0u
-#endif
-#ifndef SPECTRAL_TRACK_SEG_PREFETCH_DISTANCE
-#define SPECTRAL_TRACK_SEG_PREFETCH_DISTANCE 16u
 #endif
 #ifndef SPECTRAL_TRACK_DEBUG_TIMING
 #define SPECTRAL_TRACK_DEBUG_TIMING 0
@@ -481,9 +470,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_PRETOUCH_PAGE_SIZE
 #define SPECTRAL_PRETOUCH_PAGE_SIZE     4096u
 #endif
-#ifndef SPECTRAL_SEGMENT_POOL_BLOCK_SIZE
-#define SPECTRAL_SEGMENT_POOL_BLOCK_SIZE 4096u
-#endif
 
 
 /* Canonical embedded debug LED timing defaults (milliseconds) */
@@ -492,9 +478,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #endif
 #ifndef SPECTRAL_ERROR_BLINK_OFF_MS
 #define SPECTRAL_ERROR_BLINK_OFF_MS     100u
-#endif
-#ifndef SPECTRAL_ERROR_BLINK_PAUSE_MS
-#define SPECTRAL_ERROR_BLINK_PAUSE_MS   500u
 #endif
 #ifndef SPECTRAL_LED_BLINK_PLAYING_MS
 #define SPECTRAL_LED_BLINK_PLAYING_MS   250u
@@ -534,7 +517,6 @@ static inline const char* spectral_exec_mode_name(void) {
 _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
                "SPECTRAL_WAVETABLE_BITS must match SPECTRAL_WAVETABLE_SIZE");
 #endif
-#define SPECTRAL_WAVETABLE_MASK         (SPECTRAL_WAVETABLE_SIZE - 1)
 #ifndef SPECTRAL_MAX_WAVETABLES
 #define SPECTRAL_MAX_WAVETABLES         8
 #endif
