@@ -157,6 +157,17 @@ file moves must be codegen-identical, and the gate PROVES it at ±5% insns)
   map + flat-body rule); the unchecked hand mirror is deleted;
   sabotage-verified. Anchor (d) was already correct. gpu_backend_parity
   green throughout.
-- L5 next: include-graph layering test (allowlist: spectral_backend.c →
-  drivers/*.h registry edge); ENGINE include dirs narrowed per layer;
-  docs trued.
+- **L5 DONE**: tests/tools/test_layering.py parses every engine include
+  edge (365 resolved, 160 cross-layer at adoption, all legal) and fails on
+  any edge the layer law forbids; duplicate header basenames also fail
+  (resolution relies on uniqueness). Allowlist = the two registry edges in
+  spectral_backend.c, documented at the include site. Sabotage-verified.
+  Include-dir narrowing per layer DEFERRED deliberately: the test enforces
+  the contract on real edges every pytest run; narrowing the -I lists is
+  ergonomics (fail at compile instead of test) and rides a future build
+  cleanup. AI.md carries the law.
+
+**CAMPAIGN COMPLETE.** All phases L0-L5 landed; the tree is
+core/ + arch/{ref,arm,simd} + drivers/{metal,cuda,vdsp} + analysis +
+runtime + cmd, with synth/ and core/port/ gone, every move gate-proven
+codegen-identical, and the layer law executable.

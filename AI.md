@@ -18,6 +18,9 @@ the full correctness rules; this file is the orientation.
 - `spectral_engine/runtime/` — console, utils (`spectral_utils.h` lives here)
 - `spectral_engine/cmd/` — CLI
 - `api/daisy_seed/` — Daisy Seed board support / public API
+- Include direction is LAW, enforced by `tests/tools/test_layering.py`: arch/drivers/
+  subsystems include the kernel (core+runtime), never each other or upward; the backend
+  registry holds the one allowlisted core→driver edge.
 
 ## Build & test
 - `make configure && make` → desktop. Other targets: `simulate`, `embedded_arm`,
