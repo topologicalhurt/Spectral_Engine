@@ -44,7 +44,7 @@
 #include "spectral_consts.h"
 #include "spectral_osc_formulas.h"
 #include "spectral_lut.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_osc_q15.h"   /* the production Q15 evaluators under test */
 
 #include "../support/check.h"

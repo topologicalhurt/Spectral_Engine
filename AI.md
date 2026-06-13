@@ -8,7 +8,7 @@ the full correctness rules; this file is the orientation.
 
 ## Layout (Linux-kernel-style: kernel / arch / drivers; see KERNEL_LAYOUT_PLAN.md)
 - `spectral_engine/core/` — the kernel: config, constants, oscillators, windows, segments,
-  Q-domain (`spectral_q15.h`), hashing, contracts, dispatch
+  Q-domain (`spectral_q.h`), hashing, contracts, dispatch
 - `spectral_engine/arch/` — ISA-contingent kernels, build-selected: `ref/` (portable
   fallbacks, always compilable), `arm/` (ARMv7E-M synth + its host-sim adapter),
   `simd/` (host SIMDe bodies)

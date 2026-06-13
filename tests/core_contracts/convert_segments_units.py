@@ -4,7 +4,7 @@
 Runs the REAL binary on a generated SPEC (.bin) file and asserts every
 encoded SPQ field against an independent Python mirror of the named
 boundary conversions (a sanctioned, labeled independent-verification
-implementation — the C truth is spectral_q15.h). This pins the UNITS of
+implementation — the C truth is spectral_q.h). This pins the UNITS of
 every field: the kernel applies amp_q15 + da_q15*offset per SAMPLE, so a
 converter that rescales da/df (the escaped defect class: a 1/1000 "per
 millisecond" scaling quantized typical fades to da_q15 == 0) fails here

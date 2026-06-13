@@ -21,7 +21,7 @@
 
 #include "spectral_config.h"
 #include "spectral_error.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 
 #ifdef __cplusplus
 extern "C" {

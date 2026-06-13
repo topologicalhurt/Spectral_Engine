@@ -36,14 +36,14 @@ endif()
 
 # Files permitted to reference the raw scale constants (matched by basename):
 #   spectral_consts.h   — defines the constants
-#   spectral_q15.h      — FLOAT_TO_Q15 / Q15_TO_FLOAT / FLOAT_TO_Q31 / Q31_TO_FLOAT
+#   spectral_q.h      — FLOAT_TO_Q15 / Q15_TO_FLOAT / FLOAT_TO_Q31 / Q31_TO_FLOAT
 #   spectral_config.h   — SPECTRAL_SAMPLE_TO_FLOAT / FLOAT_TO_SPECTRAL_SAMPLE
 #   spectral_osc_q15.h  — spectral_osc_q15_phase_from_rads, a dedicated rads/pi
 #                         -> Q15 boundary helper (different centering than
 #                         PHASE_RAD_TO_Q15, so it names SPECTRAL_Q15_SCALE itself)
 set(_allow
     "spectral_consts.h"
-    "spectral_q15.h"
+    "spectral_q.h"
     "spectral_config.h"
     "spectral_osc_q15.h")
 
@@ -194,7 +194,7 @@ if(_nv GREATER 0)
     string(REPLACE ";" "\n" _report "${_violations}")
     message(FATAL_ERROR
         "Q-domain contract FAILED (${_nv} violation(s)):\n${_report}\n"
-        "See QTYPE_DOMAIN_PLAN.md / spectral_q15.h for the boundary-macro rule.")
+        "See QTYPE_DOMAIN_PLAN.md / spectral_q.h for the boundary-macro rule.")
 endif()
 
 message(STATUS

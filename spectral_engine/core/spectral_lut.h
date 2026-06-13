@@ -2,7 +2,7 @@
 #ifndef SPECTRAL_LUT_H
 #define SPECTRAL_LUT_H
 
-#include "spectral_q15.h"
+#include "spectral_q.h"
 
 #ifdef __cplusplus
 extern "C" {

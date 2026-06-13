@@ -7,7 +7,7 @@
 #include "spectral_synth_internal.h"
 #include "spectral_error.h"
 #include "spectral_common.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_lut.h"
 #include "spectral_wavetable.h"
 #include "spectral_perf.h"

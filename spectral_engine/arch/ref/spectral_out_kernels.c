@@ -9,7 +9,7 @@
  * SPECTRAL_ARM_M7 branches below are capability gates within the embedded port,
  * inert (scalar) on any build lacking the capability. */
 #include "spectral_io.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_utils.h"
 #include "spectral_contracts.h"
 #include <math.h>

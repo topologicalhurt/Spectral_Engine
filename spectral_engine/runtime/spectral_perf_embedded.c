@@ -14,7 +14,7 @@
 #include "spectral_utils.h"
 #include "spectral_console.h"
 #include "spectral_log.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>

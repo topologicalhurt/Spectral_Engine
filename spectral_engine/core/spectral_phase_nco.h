@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include <math.h>
 
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_consts.h"
 
 #ifdef __cplusplus

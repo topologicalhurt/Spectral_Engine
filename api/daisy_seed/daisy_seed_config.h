@@ -14,7 +14,7 @@
 #define SPECTRAL_NO_PERF            1
 
 #include "../../spectral_engine/core/spectral_config.h"
-#include "../../spectral_engine/core/spectral_q15.h"
+#include "../../spectral_engine/core/spectral_q.h"
 
 /* STM32H750 CPU */
 #define DAISY_CPU_FREQ_HZ           480000000UL

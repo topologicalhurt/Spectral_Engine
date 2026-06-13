@@ -8,7 +8,7 @@
  * arch/ref/spectral_out_kernels.c. The device-agnostic remainder of
  * spectral_out.c (file I/O, float mono->stereo) stays in core/. */
 #include "spectral_io.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_utils.h"
 #include "spectral_contracts.h"
 #include "spectral_vector_ops.h"

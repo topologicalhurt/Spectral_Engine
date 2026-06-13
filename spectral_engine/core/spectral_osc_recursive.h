@@ -18,7 +18,7 @@
 #ifndef SPECTRAL_OSC_RECURSIVE_H
 #define SPECTRAL_OSC_RECURSIVE_H
 
-#include "spectral_q15.h"        /* q31_t, q63_t, Q31_MAX/MIN */
+#include "spectral_q.h"        /* q31_t, q63_t, Q31_MAX/MIN */
 
 #ifdef __cplusplus
 extern "C" {

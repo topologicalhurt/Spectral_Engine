@@ -609,7 +609,7 @@ def test_dormant_cmsis_oscillator_still_compiles(tmp_path):
     bare-metal Cortex-M build would. Dormant code that cannot rot silently:
     cross-compile that TU with the CMSIS configuration forced on, under -Werror.
     (Include ORDER is load-bearing here — arm_math.h must precede the
-    #ifndef-guarded Q-range macros in spectral_q15.h, or they redefine.)"""
+    #ifndef-guarded Q-range macros in spectral_q.h, or they redefine.)"""
     import subprocess
 
     tc = toolchain.discover(ROOT)

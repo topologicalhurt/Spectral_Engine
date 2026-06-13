@@ -46,7 +46,7 @@
 #include "spectral_consts.h"
 #include "spectral_osc_formulas.h"   /* float L0 osc + spectral_normalize_phase */
 #include "spectral_lut.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_osc_q15.h"        /* production Q15 evaluators + phase_from_rads */
 #include "spectral_segment_math.h"   /* spectral_segment_phase_at_cubic_f32 (float path) */
 #include "spectral_phase_nco.h"      /* the integer-NCO primitive under test */

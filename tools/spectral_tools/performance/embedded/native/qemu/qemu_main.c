@@ -15,7 +15,7 @@
 #include "spectral_synth_arm32.h"
 #include "spectral_lut.h"
 #include "spectral_osc_recursive.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 
 /* No newlib: route the LUT-init sinf through the kernel's own self-contained
  * f64 sine (<1e-11 over the reduced range — beyond q15 LUT resolution, so the

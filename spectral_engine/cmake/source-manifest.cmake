@@ -127,7 +127,7 @@ set(SPECTRAL_SOURCES_SYNTH_CPU "${SPECTRAL_CORE_DIR}/spectral_synth_cpu.c")
 set(SPECTRAL_SOURCES_SYNTH_EMBEDDED
     "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_arm32.c"
     "${SPECTRAL_ARCH_ARM_DIR}/spectral_debug_embedded_arm.c"
-    "${SPECTRAL_CORE_DIR}/spectral_q15.c")
+    "${SPECTRAL_CORE_DIR}/spectral_q.c")
 set(SPECTRAL_SOURCES_SYNTH_SIMULATION
     "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_simulation.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_convert.c")
@@ -139,7 +139,7 @@ set(SPECTRAL_SOURCES_SYNTH_CUDA "${SPECTRAL_DRIVERS_CUDA_DIR}/spectral_synth_cud
 set(SPECTRAL_SOURCES_DAISY_ENGINE
     "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_arm32.c"
     "${SPECTRAL_ARCH_ARM_DIR}/spectral_debug_embedded_arm.c"
-    "${SPECTRAL_CORE_DIR}/spectral_q15.c"
+    "${SPECTRAL_CORE_DIR}/spectral_q.c"
     "${SPECTRAL_CORE_DIR}/spectral_wavetable.c")
 
 set(SPECTRAL_SOURCES_HOST_CLI_STACK

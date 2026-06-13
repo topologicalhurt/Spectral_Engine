@@ -1,7 +1,7 @@
 /* spectral_synth_arm32.c - Q15 Fixed-Point Synthesis for ARM Cortex-M7.
  *
  * Targets the Daisy Seed / STM32H7. Correct and host-verifiable (the real path
- * runs on the host via spectral_q15.h portable fallbacks; tests/arm_core asserts
+ * runs on the host via spectral_q.h portable fallbacks; tests/arm_core asserts
  * its audio). On Cortex-M7, -mcpu=cortex-m7 defines __ARM_FEATURE_DSP, so the
  * single-lane saturating DSP intrinsics (__smulbb, __qadd16, __qadd32) are used.
  *

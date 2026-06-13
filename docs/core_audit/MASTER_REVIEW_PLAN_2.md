@@ -8,7 +8,7 @@ analysis_full, and both tracker paths destroy on every error and check every all
 found), the GPU timbre cap was unified, the convert_segments /1000 unit bug was fixed, the MSL
 mirrors were moved to codegen, and the core/arch/drivers move landed. But the maintainer's three
 complaints are all substantiated, and the first pass left a large, coherent debt surface in
-exactly the areas he named. The single biggest miss is **naming**: `spectral_q15.h` is the home of
+exactly the areas he named. The single biggest miss is **naming**: `spectral_q.h` is the home of
 q15/q31/q63/uq16/uq32 (5 types, filename names 1) and was independently re-discovered by **five**
 separate audit lenses; the entire `oscillator.*` family in `core/` is the only un-`spectral_`-prefixed
 group in the kernel, with non-namespaced guards, re-discovered by **four** lenses. The comment
@@ -37,11 +37,11 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 
 ## (A) NAMING & REFACTORING consistency
 
-### A1 — `spectral_q15.h` filename is a lie: it owns q15/q31/q63/uq16/uq32 [HIGH] — STRUCTURAL
-- **file:line:** `spectral_engine/core/spectral_q15.h:1` (banner "Q15 fixed-point types and arithmetic"); `:75-79` (`typedef int16_t q15_t; typedef int32_t q31_t; typedef int64_t q63_t; typedef uint16_t uq16_t; typedef uint32_t uq32_t;`); `:47-74` (Q-DOMAIN MAP listing 7 formats); owns `spectral_qadd32`/`spectral_smlald`/`spectral_q63_to_q15_scaled`. `spectral_q15.c:1` carries the same lie.
+### A1 — `spectral_q.h` filename is a lie: it owns q15/q31/q63/uq16/uq32 [HIGH] — STRUCTURAL
+- **file:line:** `spectral_engine/core/spectral_q.h:1` (banner "Q15 fixed-point types and arithmetic"); `:75-79` (`typedef int16_t q15_t; typedef int32_t q31_t; typedef int64_t q63_t; typedef uint16_t uq16_t; typedef uint32_t uq32_t;`); `:47-74` (Q-DOMAIN MAP listing 7 formats); owns `spectral_qadd32`/`spectral_smlald`/`spectral_q63_to_q15_scaled`. `spectral_q.c:1` carries the same lie.
 - **rule:** AI.md item 13 + item 7; AI_CANON §9/§17
-- **fix:** Rename to `spectral_fixed.h` (recommended) or `spectral_qtypes.h`; rename `spectral_q15.c` in lockstep; move guard `SPECTRAL_Q15_H → SPECTRAL_FIXED_H`; rewrite banner to "Q-format fixed-point types and arithmetic (q15/q31/q63, uq16/uq32)". Keep all type names. The banner fix can land immediately at zero risk; the path rename is mechanical.
-- **blast radius:** **19 files** `#include "spectral_q15.h"` (grep-confirmed, across core/arch/analysis/cmd/tests + cmake source lists); public API `spectral_synth.h` does NOT include it (internal-only). Low risk, medium churn. *(The maintainer's flagship example. Merged from 5 lens reports: naming-files, naming-symbols, duplication, wiring-deadcode, architecture-lifecycle.)*
+- **fix:** Rename to `spectral_fixed.h` (recommended) or `spectral_qtypes.h`; rename `spectral_q.c` in lockstep; move guard `SPECTRAL_Q15_H → SPECTRAL_FIXED_H`; rewrite banner to "Q-format fixed-point types and arithmetic (q15/q31/q63, uq16/uq32)". Keep all type names. The banner fix can land immediately at zero risk; the path rename is mechanical.
+- **blast radius:** **19 files** `#include "spectral_q.h"` (grep-confirmed, across core/arch/analysis/cmd/tests + cmake source lists); public API `spectral_synth.h` does NOT include it (internal-only). Low risk, medium churn. *(The maintainer's flagship example. Merged from 5 lens reports: naming-files, naming-symbols, duplication, wiring-deadcode, architecture-lifecycle.)*
 
 ### A2 — `oscillator.*` family is the only un-`spectral_`-prefixed group in core/, with non-namespaced guards [HIGH] — STRUCTURAL
 - **file:line:** `core/oscillator.c:1`, `core/oscillator.h:1-2` (`#ifndef OSCILLATOR_H`), `core/oscillator_dispatch.c:1`, `core/oscillator_dispatch.h:1` (`#ifndef OSCILLATOR_DISPATCH_H`), `arch/simd/oscillator_simd_scalar_waves.h:10` (`#ifndef OSCILLATOR_SIMD_SCALAR_WAVES_H`). Symbol leak: `osc_set_dispatch`, `osc_get_quality`, `osc_native_available`, `osc_simd_segment_*`, `osc_set_q15_enable` all bare `osc_` while the rest of the engine is uniformly `spectral_*`.
@@ -56,7 +56,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **blast radius:** **3 includers** (the lenses said 1–2; verified: `arch/arm/spectral_synth_arm32.c`, `tests/core_math/test_osc_recursive.c`, **`tools/spectral_tools/performance/embedded/native/qemu/qemu_main.c`** — the third was missed by the lenses) + `osc-recursive-test.cmake` target name. Low risk. *(Merged from 4 lenses; corrected blast radius.)*
 
 ### A4 — `freq_inc` names a phase increment (UQ0.32 per-sample phase step), not a frequency increment [HIGH] — STRUCTURAL
-- **file:line:** `arch/arm/spectral_synth_arm32.c:976` (`uint32_t freq_inc = (uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24;`), `:981` (`phase_acc += sample_offset * freq_inc;` — added straight into the UQ0.32 phase accumulator). The file's own `:504` comment admits "freq_inc is a uint32 phase increment for a uint32 phase". Struct field `q31_t freq_inc;` (`spectral_q15.h:309`); SoA array `q31_t freq_inc[]` (`arm32.h:45`). The genuine chirp slope is the separate `freq_delta` field — making `freq_inc` maximally confusing.
+- **file:line:** `arch/arm/spectral_synth_arm32.c:976` (`uint32_t freq_inc = (uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24;`), `:981` (`phase_acc += sample_offset * freq_inc;` — added straight into the UQ0.32 phase accumulator). The file's own `:504` comment admits "freq_inc is a uint32 phase increment for a uint32 phase". Struct field `q31_t freq_inc;` (`spectral_q.h:309`); SoA array `q31_t freq_inc[]` (`arm32.h:45`). The genuine chirp slope is the separate `freq_delta` field — making `freq_inc` maximally confusing.
 - **rule:** AI.md item 13; AI_CANON §9
 - **fix:** Rename to `phase_inc` everywhere (local var, `SpectralActiveSegQ15.freq_inc` field, `active_soa.freq_inc[]`, `spectral_phase_batch4`/`spectral_coupled*` params).
 - **blast radius:** ~20× in `spectral_synth_arm32.c` + struct field + SoA array; confined to the arm32 backend + one struct. Internal, low risk.
@@ -68,10 +68,10 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **blast radius:** ~49×, confined to analysis/. Internal, low risk.
 
 ### A6 — q88 (UQ8.8) and q30 (Q2.30) ride raw uint16_t/q31_t — self-admitted typedef debt [MEDIUM] — STRUCTURAL
-- **file:line:** `core/spectral_q15.h:62-74` (Q-domain map rows + admission "have NO dedicated typedef yet -- they ride uint16_t and q31_t, and the suffix is the only contract"); `:138-145`, `:263-265`; `SpectralSegmentQ15.freq_q88` (`:278`,`:293`). A `uq16_t` named `freq_q88` is type-indistinguishable from a phase-acc `uq16_t`.
+- **file:line:** `core/spectral_q.h:62-74` (Q-domain map rows + admission "have NO dedicated typedef yet -- they ride uint16_t and q31_t, and the suffix is the only contract"); `:138-145`, `:263-265`; `SpectralSegmentQ15.freq_q88` (`:278`,`:293`). A `uq16_t` named `freq_q88` is type-indistinguishable from a phase-acc `uq16_t`.
 - **rule:** AI.md item 13; AI_CANON §14
 - **fix:** Add `typedef uint16_t uq88_t;` and `typedef q31_t q30_t;` (width-identical, no ABI change); use in `spectral_omega_to_q88` return, `SpectralSegmentQ15.freq_q88`, `spectral_q30_to_q15_scaled`. Replace the planning-narrative tail (see B-section) with a units statement.
-- **blast radius:** No ABI change (same carriers). Touch `spectral_q15.h/.c`, `SpectralSegmentQ15`, `SpectralActiveSegQ15`, `spectral_synth_arm32.c`, `perf_embedded`. Medium scope, low risk. *(Note: the first pass already tracks this in QTYPE_REFACTOR_PLAN; the maintainer named it as STILL-OPEN debt, so it is a live finding to pay, not just track.)*
+- **blast radius:** No ABI change (same carriers). Touch `spectral_q.h/.c`, `SpectralSegmentQ15`, `SpectralActiveSegQ15`, `spectral_synth_arm32.c`, `perf_embedded`. Medium scope, low risk. *(Note: the first pass already tracks this in QTYPE_REFACTOR_PLAN; the maintainer named it as STILL-OPEN debt, so it is a live finding to pay, not just track.)*
 
 ### A7 — Duplicate basenames across arch/ subdirs: `oscillator_simd.c` ×2, `spectral_gpu_tile.c` ×2, `spectral_out_kernels.c` ×2 [MEDIUM] — STRUCTURAL
 - **file:line:** `arch/arm/oscillator_simd.c:1` (CMSIS) + `arch/simd/oscillator_simd.c:1` (SIMDe); `arch/ref/spectral_gpu_tile.c` + `arch/simd/spectral_gpu_tile.c`; `arch/ref/spectral_out_kernels.c` + `arch/simd/spectral_out_kernels.c`. Listed in `source-manifest.cmake:57/59` etc. Distinguished only by directory; object files differ only by path; defeats grep/jump-to-file and stack-frame disambiguation.
@@ -95,9 +95,9 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Change message to `"%u segments omega > 255 rad/sample (encoded /4)"`; rename stat field `high_freq → high_omega`. *(Note: `convert_segments_units` test pins the units — verify it doesn't assert on the string.)*
 
 ### B2 — Hot-loop output comment names the WRONG accumulator type and WRONG conversion function (Q30/`spectral_q30_to_q15_scaled` for q63 code) [HIGH]
-- **file:line:** `arch/arm/spectral_synth_arm32.c:1210-1213` ("Convert the Q30 accumulator ... Q30 -> Q15 is a >>15 shift (see spectral_q30_to_q15_scaled)"). The accumulator is `static q63_t accum[256]` (`:921`); the actual call is `spectral_q63_to_q15_scaled(accum, ...)` (`:1213`). Mirrored at `spectral_q15.h:263-264`, which also carries a banned `pass 145` reference.
+- **file:line:** `arch/arm/spectral_synth_arm32.c:1210-1213` ("Convert the Q30 accumulator ... Q30 -> Q15 is a >>15 shift (see spectral_q30_to_q15_scaled)"). The accumulator is `static q63_t accum[256]` (`:921`); the actual call is `spectral_q63_to_q15_scaled(accum, ...)` (`:1213`). Mirrored at `spectral_q.h:263-264`, which also carries a banned `pass 145` reference.
 - **rule:** AI.md item 6 + item 13; AI_CANON §6
-- **fix:** Rewrite to "Pack the q63 accumulator (exact sum of Q15·Q15 products) to Q15 with the master gain: saturate >>15, then apply scale — `spectral_q63_to_q15_scaled`." Fix `spectral_q15.h:263-264` for the same Q30/Q63 confusion + the pass reference.
+- **fix:** Rewrite to "Pack the q63 accumulator (exact sum of Q15·Q15 products) to Q15 with the master gain: saturate >>15, then apply scale — `spectral_q63_to_q15_scaled`." Fix `spectral_q.h:263-264` for the same Q30/Q63 confusion + the pass reference.
 
 ### B3 — `peak_track.c` repeats the *verbatim* canon-6-forbidden "prefetcher completely hides latency" claim [HIGH]
 - **file:line:** `analysis/spectral_peak_track.c:13-16` ("...perfectly triggers the CPU's L1/L2 hardware prefetcher, completely hiding DRAM load latency."); `:959-961` ("(which stalls the CPU pipeline)"). AI_CANON §6 lists "hardware prefetcher completely hides latency" *by name* as the canonical INCORRECT pattern. No test backs it; this is the hottest analysis kernel where the comment pass was explicitly deferred.
@@ -110,7 +110,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Rewrite to house style: neutral system-POV opener, then technical detail (the 3-condition local-max predicate, the movemask collapse) in third-person imperative. Delete WHAT-restating lines, the `====` bars, the exclamation.
 
 ### B5 — Residual pass/PASS/ULTRAPLAN change-history survives the "scrubbed" claim [HIGH]
-- **file:line:** `core/spectral_q15.c:12-16` ("former code ... halved every output sample ... caught by tests/arm_core, fixed in pass 145", "removed in pass 140"); `spectral_q15.h:264` ("See spectral_q15.c / pass 145."); `arch/simd/oscillator_simd_kernel.inc:24` ("the same <=1 ULP class already accepted at PASS200"); `analysis/spectral_analysis_fft.c:296` ("(PASS8: 2/Σwindow)"); `core/spectral_guarantees.h:1` ("(ULTRAPLAN Phase B1/B2)"); `runtime/spectral_perf_accounting.h:32` ("(ULTRAPLAN A2)"); `arch/arm/spectral_synth_arm32.c:14` ("NOT yet realized (ULTRAPLAN Phase A2/A3 ...)").
+- **file:line:** `core/spectral_q.c:12-16` ("former code ... halved every output sample ... caught by tests/arm_core, fixed in pass 145", "removed in pass 140"); `spectral_q.h:264` ("See spectral_q.c / pass 145."); `arch/simd/oscillator_simd_kernel.inc:24` ("the same <=1 ULP class already accepted at PASS200"); `analysis/spectral_analysis_fft.c:296` ("(PASS8: 2/Σwindow)"); `core/spectral_guarantees.h:1` ("(ULTRAPLAN Phase B1/B2)"); `runtime/spectral_perf_accounting.h:32` ("(ULTRAPLAN A2)"); `arch/arm/spectral_synth_arm32.c:14` ("NOT yet realized (ULTRAPLAN Phase A2/A3 ...)").
 - **rule:** AI.md item 6; AI_CANON §18 (the prompt: any such reference found IS a live finding)
 - **fix:** Strip every `pass N`/`PASS N`/`ULTRAPLAN Phase X` clause; keep the math WHY (q15.c keeps the >>15-vs->>16 −6 dB rationale; fft.c keeps "window amp scale 2/Σwindow, unscaled DFT"; kernel.inc keeps "<=1 ULP class pinned by the osc_width_parity ctest").
 
@@ -171,7 +171,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 
 ### B17 — Low-severity comment polish (batch) [LOW]
 - `core/spectral_config.h:595-598` — "formerly held 128 × 64-byte Segments" → present-tense budget.
-- `core/spectral_q15.h:70-74` — drop "Thread-A follow-up" planning tail (folds into A6 fix).
+- `core/spectral_q.h:70-74` — drop "Thread-A follow-up" planning tail (folds into A6 fix).
 - `core/spectral_macros.h:11-13,25-27,54-56,69-71` — name-echo section dividers ("Loop Unrolling Hints", etc.); delete (keep the Utility-Macros multi-eval WHY at `:36-43`).
 - `core/spectral_lut.c:37` — "now inline in spectral_lut.h" stale move-history; delete.
 - `core/spectral_windows.c:1-4` — "X - X Implementation" filename-echo opener before the good system block; trim (apply to the other `X - X Implementation` openers for consistency).
@@ -309,7 +309,7 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **note:** `STFT_CHUNK_FRAMES=512` here vs MEMORY.md's "4096" is a stale-doc divergence (AI.md item 15) — reconcile.
 
 ### F3 — Undocumented magic literals with no 2^k/format derivation [MEDIUM]
-- **file:line:** `core/spectral_phase_nco8.h:52` (`th[25]` = 3·8+1, unstated); `core/spectral_q15.h:133/144` (`65536.0f` = 2^16 phase, `256.0f` = 2^8 Q8.8, uncommented); `core/spectral_osc_q15.h:53` (`0.99996948` = 32767/32768, unexplained); `core/spectral_config.h:112` (`DMA_BATCH 32` ~512B, only correct for the 16B non-compact segment).
+- **file:line:** `core/spectral_phase_nco8.h:52` (`th[25]` = 3·8+1, unstated); `core/spectral_q.h:133/144` (`65536.0f` = 2^16 phase, `256.0f` = 2^8 Q8.8, uncommented); `core/spectral_osc_q15.h:53` (`0.99996948` = 32767/32768, unexplained); `core/spectral_config.h:112` (`DMA_BATCH 32` ~512B, only correct for the 16B non-compact segment).
 - **rule:** AI.md item 3; AI_CANON §19
 - **fix:** Annotate each with its 2^k/format derivation or name it.
 

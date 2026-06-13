@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include "spectral_config.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_segment_parser.h"
 #include "spectral_endian.h"
 #include "spectral_common.h"

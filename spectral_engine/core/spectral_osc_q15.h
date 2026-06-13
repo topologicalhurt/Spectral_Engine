@@ -22,7 +22,7 @@
 #ifndef SPECTRAL_OSC_Q15_H
 #define SPECTRAL_OSC_Q15_H
 
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_lut.h"
 #include "spectral_consts.h"
 
@@ -44,7 +44,7 @@ extern "C" {
 /* float rads in [-pi, pi) -> signed Q15 phase (rads/pi -> [-1, 1)).
  *
  * This is the lone float->Q boundary of the Q15 oscillator; it stays OUTSIDE
- * the Q-domain region below.  It is NOT the spectral_q15.h PHASE_RAD_TO_Q15
+ * the Q-domain region below.  It is NOT the spectral_q.h PHASE_RAD_TO_Q15
  * macro: that maps [0,2pi) with a -0.5 center (phase 0 -> Q15 -16384), whereas
  * the L0 waveform formulas need rads/pi centered so phase 0 -> 0.  Different
  * convention, dedicated helper. */

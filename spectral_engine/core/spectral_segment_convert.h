@@ -18,7 +18,7 @@
 #include <stddef.h>
 
 #include "spectral_common.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 
 #ifdef __cplusplus
 extern "C" {

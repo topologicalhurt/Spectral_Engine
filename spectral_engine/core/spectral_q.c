@@ -1,9 +1,9 @@
-/* spectral_q15.c - Q15 Fixed-Point DSP Implementation
+/* spectral_q.c - fixed-point Q-domain bulk conversions
  *
- * Scalar primitives are inline in spectral_q15.h for zero call overhead.
+ * Scalar primitives are inline in spectral_q.h for zero call overhead.
  * This file provides only the bulk conversion routines.
  */
-#include "spectral_q15.h"
+#include "spectral_q.h"
 
 /* Wide q63 accumulator -> Q15. The accumulator holds the EXACT sum of Q15*Q15 (Q30)
  * products, so the additive mix is clipped exactly once here (proper mix headroom),

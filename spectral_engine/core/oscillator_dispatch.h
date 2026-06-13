@@ -71,7 +71,7 @@
 /* Q15 leaf evaluators for spectral_osc_q15_eval below. Included AFTER the CMSIS
  * arm_math.h above (not with the other top includes): arm_math_types.h defines
  * the Q15/Q31 range macros UNGUARDED, so CMSIS must precede the #ifndef-guarded
- * copies in spectral_q15.h or the bare-metal build redefines them under -Werror. */
+ * copies in spectral_q.h or the bare-metal build redefines them under -Werror. */
 #include "spectral_osc_q15.h"
 #endif
 

@@ -4,7 +4,7 @@
 # host with the M7 codepath forced on (SPECTRAL_ARM_M7=1) and the dual-MAC
 # capability forced on (SPECTRAL_HAS_DUAL_MAC=1) so the voice-pairing path is
 # covered too -- both run through the portable intrinsic fallbacks in
-# spectral_q15.h (host arm64 has no __ARM_FEATURE_DSP, and the portable smlald
+# spectral_q.h (host arm64 has no __ARM_FEATURE_DSP, and the portable smlald
 # is bit-identical to the hardware SMLALD). Correctness half of ULTRAPLAN A1b;
 # the sim is the perf/resource model over the SAME real code.
 #
@@ -13,7 +13,7 @@
 add_executable(arm_core_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/arm_core/test_arm32_process.c"
     "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_arm32.c"
-    "${SPECTRAL_CORE_DIR}/spectral_q15.c"
+    "${SPECTRAL_CORE_DIR}/spectral_q.c"
     "${SPECTRAL_CORE_DIR}/spectral_lut.c")
 
 spectral_apply_common_target(arm_core_test)

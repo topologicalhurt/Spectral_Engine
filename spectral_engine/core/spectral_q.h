@@ -1,7 +1,7 @@
-/* spectral_q15.h - Q15 fixed-point types and arithmetic
+/* spectral_q.h - fixed-point Q-domain types and arithmetic (q15/q31/q63, uq16/uq32)
  *
  * CANONICAL Q-DOMAIN HEADER (all targets). This is the single source of truth
- * for the fixed-point types (q15_t/q31_t/uq16_t/uq32_t), their saturating
+ * for the fixed-point types (q15_t/q31_t/q63_t/uq16_t/uq32_t), their saturating
  * primitives, and the float<->Q boundary macros. It compiles host-side as well
  * as embedded, so desktop hot paths may select the Q domain too.
  *
@@ -33,8 +33,8 @@
  *   no-mixing rule. Wrap future vectorized Q15 kernels (Q3) in these markers so
  *   they inherit enforcement; keep boundary conversions OUTSIDE the region.
  */
-#ifndef SPECTRAL_Q15_H
-#define SPECTRAL_Q15_H
+#ifndef SPECTRAL_Q_H
+#define SPECTRAL_Q_H
 
 #include <stdint.h>
 #include <math.h>

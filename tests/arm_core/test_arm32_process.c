@@ -17,7 +17,7 @@
 
 #include "spectral_synth_arm32.h"
 #include "spectral_lut.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
