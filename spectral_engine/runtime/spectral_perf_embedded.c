@@ -39,7 +39,7 @@ static const size_t kSegmentQ15Size = sizeof(SpectralSegmentQ15);
 
 /*
  * SpectralActiveSegQ15 size - aligned(4), fixed-size types only
- * Layout: phase_acc(4) + freq_inc(4) + seg_idx(4) + amp_current(2) + amp_delta(2)
+ * Layout: phase_acc(4) + phase_inc(4) + seg_idx(4) + amp_current(2) + amp_delta(2)
  */
 static const size_t kActiveSegQ15Size = sizeof(SpectralActiveSegQ15);
 

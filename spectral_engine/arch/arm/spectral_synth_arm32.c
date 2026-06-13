@@ -19,7 +19,7 @@
  *     .sdram_data, but the Daisy BSP linker uses .dtcmram_bss/.sdram_bss (and has
  *     no ITCM section), so placement is currently INERT -- hot data/code land in
  *     default memory until the section names are bound to the BSP and verified.
- *   - LUT residency: the sine LUT is gathered every sample, strided by freq_inc
+ *   - LUT residency: the sine LUT is gathered every sample, strided by phase_inc
  *     (effectively random in-table -- it does NOT "minimize cache misses"); it is
  *     not pinned to DTCM.
  *   - Cycle/WCET numbers come from the validated M7 measurement stack
@@ -340,16 +340,16 @@ static inline void spectral_perf_amplitude_end(uint32_t start_cycles) {
 /* LUT-path helpers: used by the generic (non-M7) fallback; the M7 path uses the
  * gather-free coupled oscillator. MAYBE_UNUSED so the M7-only build stays warning-clean. */
 SPECTRAL_MAYBE_UNUSED static inline void spectral_phase_batch4(uint32_t phase,
-                                         uint32_t freq_inc,
+                                         uint32_t phase_inc,
                                          uint32_t* p0,
                                          uint32_t* p1,
                                          uint32_t* p2,
                                          uint32_t* p3) {
-    const uint32_t inc2 = freq_inc << 1;
+    const uint32_t inc2 = phase_inc << 1;
     *p0 = phase;
-    *p1 = phase + freq_inc;
+    *p1 = phase + phase_inc;
     *p2 = phase + inc2;
-    *p3 = phase + freq_inc + inc2;
+    *p3 = phase + phase_inc + inc2;
 }
 
 /* Amplitude computation in Q15 domain.
@@ -499,13 +499,13 @@ void spectral_arm32_init(SpectralArm32Ctx* ctx,
      * freq_q88 as Hz and rendered ~sample_rate/(2pi) too low (the desktop float
      * backend and tests/arm_core both render the nominal frequency).
      *
-     * NOTE: the activation-time product `freq_q88 * freq_inc_scale_q24` (uint32) wraps
+     * NOTE: the activation-time product `freq_q88 * phase_inc_scale_q24` (uint32) wraps
      * mod 2^32 for omega > 2*pi (super-2x-Nyquist input). This is CORRECT, not a bug to
-     * "fix" with a wider int: freq_inc is a uint32 phase increment for a uint32 phase
+     * "fix" with a wider int: phase_inc is a uint32 phase increment for a uint32 phase
      * accumulator, so mod-2^32 IS the intended aliasing of an out-of-band partial. A 64-bit
-     * intermediate would be truncated back to the same value; widening freq_inc would change
+     * intermediate would be truncated back to the same value; widening phase_inc would change
      * nothing the accumulator does. Valid partials (omega <= pi) never reach the wrap. */
-    ctx->freq_inc_scale_q24 = (uint32_t)((double)(1u << 24) / SPECTRAL_TWO_PI + 0.5);
+    ctx->phase_inc_scale_q24 = (uint32_t)((double)(1u << 24) / SPECTRAL_TWO_PI + 0.5);
     ctx->amplitude_q15 = Q15_MAX;
     
     /* Ensure caches are coherent after init */
@@ -658,14 +658,14 @@ static inline void synth_core_pair_m7(
     q63_t* restrict accum,
     uint32_t blk_start,
     uint32_t blk_end,
-    uint32_t* restrict phaseA, q15_t* restrict ampA, uint32_t freq_incA, q15_t amp_deltaA,
-    uint32_t* restrict phaseB, q15_t* restrict ampB, uint32_t freq_incB, q15_t amp_deltaB
+    uint32_t* restrict phaseA, q15_t* restrict ampA, uint32_t phase_incA, q15_t amp_deltaA,
+    uint32_t* restrict phaseB, q15_t* restrict ampB, uint32_t phase_incB, q15_t amp_deltaB
 ) {
     SpectralCoupledOsc oA, oB;
     q31_t cwA, swA, cwB, swB;
-    spectral_coupled_init(&oA, (double)freq_incA * SPECTRAL_PHASE_U32_TO_RAD,
+    spectral_coupled_init(&oA, (double)phase_incA * SPECTRAL_PHASE_U32_TO_RAD,
                           (double)(*phaseA) * SPECTRAL_PHASE_U32_TO_RAD, &cwA, &swA);
-    spectral_coupled_init(&oB, (double)freq_incB * SPECTRAL_PHASE_U32_TO_RAD,
+    spectral_coupled_init(&oB, (double)phase_incB * SPECTRAL_PHASE_U32_TO_RAD,
                           (double)(*phaseB) * SPECTRAL_PHASE_U32_TO_RAD, &cwB, &swB);
     q15_t aA = *ampA, aB = *ampB;
     for (uint32_t j = blk_start; j < blk_end; j++) {
@@ -677,8 +677,8 @@ static inline void synth_core_pair_m7(
         aB = spectral_qadd16(aB, amp_deltaB);
     }
     uint32_t blk_len = blk_end - blk_start;
-    *phaseA += freq_incA * blk_len;  *ampA = aA;
-    *phaseB += freq_incB * blk_len;  *ampB = aB;
+    *phaseA += phase_incA * blk_len;  *ampA = aA;
+    *phaseB += phase_incB * blk_len;  *ampB = aB;
 }
 
 #endif /* SPECTRAL_HAS_DUAL_MAC */
@@ -725,7 +725,7 @@ static inline void synth_segment_m7(
     uint32_t blk_start,
     uint32_t blk_end,
     uint32_t phase_start,
-    uint32_t freq_inc,
+    uint32_t phase_inc,
     q15_t amp_start,
     q15_t amp_delta,
     uint32_t* phase_out,
@@ -740,7 +740,7 @@ static inline void synth_segment_m7(
      * each block from the exact uint32 phase IS the drift resync -- no separate renorm. */
     SpectralCoupledOsc osc;
     q31_t cos_w, sin_w;
-    spectral_coupled_init(&osc, (double)freq_inc * SPECTRAL_PHASE_U32_TO_RAD,
+    spectral_coupled_init(&osc, (double)phase_inc * SPECTRAL_PHASE_U32_TO_RAD,
                           (double)phase_start * SPECTRAL_PHASE_U32_TO_RAD, &cos_w, &sin_w);
 
     uint32_t seg_fade_out_start = seg_length - fade_len;
@@ -801,7 +801,7 @@ static inline void synth_segment_m7(
 
     /* Advance the canonical phase by the whole block (mod 2^32, exactly as the per-sample
      * increment would), so the next block re-seeds the oscillator from the exact phase. */
-    *phase_out = phase_start + freq_inc * blk_len;
+    *phase_out = phase_start + phase_inc * blk_len;
     *amp_out = amp;
 }
 
@@ -853,7 +853,7 @@ static inline void spectral_arm32_prune_expired_active(SpectralArm32Ctx* ctx, ui
         if (out_pos >= ctx->active_soa.seg_end[i]) {
             uint16_t last = --ctx->num_active;
             ctx->active_soa.phase_acc[i]   = ctx->active_soa.phase_acc[last];
-            ctx->active_soa.freq_inc[i]    = ctx->active_soa.freq_inc[last];
+            ctx->active_soa.phase_inc[i]    = ctx->active_soa.phase_inc[last];
             ctx->active_soa.amp_current[i] = ctx->active_soa.amp_current[last];
             ctx->active_soa.amp_delta[i]   = ctx->active_soa.amp_delta[last];
             ctx->active_soa.seg_start[i]   = ctx->active_soa.seg_start[last];
@@ -973,12 +973,12 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             /* Backend parity note:
              * This is the fixed-point counterpart of spectral_segment_alpha_f32().
              * Q8.8 frequency is mapped to Q31 phase increment for embedded synthesis. */
-            uint32_t freq_inc = (uint32_t)seg->freq_q88 * ctx->freq_inc_scale_q24;
+            uint32_t phase_inc = (uint32_t)seg->freq_q88 * ctx->phase_inc_scale_q24;
             uint32_t phase_acc = ((uint32_t)((int32_t)seg->phase_q15 + 32768)) << 16;
             q15_t amp_cur;
 
             if (sample_offset > 0) {
-                phase_acc += sample_offset * freq_inc;
+                phase_acc += sample_offset * phase_inc;
                 int64_t amp_target = (int64_t)seg->amp_q15 +
                                      (int64_t)seg->da_q15 * (int64_t)sample_offset;
                 amp_cur = (amp_target > Q15_MAX) ? Q15_MAX
@@ -990,7 +990,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
 #if SPECTRAL_SOA_ACTIVE
             ctx->active_soa.seg_idx[slot] = ctx->next_seg_idx;
-            ctx->active_soa.freq_inc[slot] = freq_inc;
+            ctx->active_soa.phase_inc[slot] = phase_inc;
             ctx->active_soa.phase_acc[slot] = phase_acc;
             ctx->active_soa.amp_current[slot] = amp_cur;
             ctx->active_soa.amp_delta[slot] = seg->da_q15;
@@ -1001,7 +1001,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #else
             SpectralActiveSegment* act = &ctx->active[slot];
             act->seg_idx = ctx->next_seg_idx;
-            act->freq_inc = freq_inc;
+            act->phase_inc = phase_inc;
             act->phase_acc = phase_acc;
             act->amp_current = amp_cur;
             act->amp_delta = seg->da_q15;
@@ -1050,12 +1050,12 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         /* Read current state */
 #if SPECTRAL_SOA_ACTIVE
         uint32_t phase = ctx->active_soa.phase_acc[i];
-        uint32_t freq_inc = (uint32_t)ctx->active_soa.freq_inc[i];
+        uint32_t phase_inc = (uint32_t)ctx->active_soa.phase_inc[i];
         q15_t amp = ctx->active_soa.amp_current[i];
         q15_t d_amp = ctx->active_soa.amp_delta[i];
 #else
         uint32_t phase = act->phase_acc;
-        uint32_t freq_inc = (uint32_t)act->freq_inc;
+        uint32_t phase_inc = (uint32_t)act->phase_inc;
         q15_t amp = act->amp_current;
         q15_t d_amp = act->amp_delta;
 #endif
@@ -1072,19 +1072,19 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             arm32_voice_full_sustain(ctx, (uint16_t)(i + 1u), out_pos, out_end, num_samples)) {
 #if SPECTRAL_SOA_ACTIVE
             uint32_t phaseB    = ctx->active_soa.phase_acc[i + 1];
-            uint32_t freq_incB = (uint32_t)ctx->active_soa.freq_inc[i + 1];
+            uint32_t phase_incB = (uint32_t)ctx->active_soa.phase_inc[i + 1];
             q15_t    ampB      = ctx->active_soa.amp_current[i + 1];
             q15_t    d_ampB    = ctx->active_soa.amp_delta[i + 1];
 #else
             SpectralActiveSegment* actB = &ctx->active[i + 1];
             uint32_t phaseB    = actB->phase_acc;
-            uint32_t freq_incB = (uint32_t)actB->freq_inc;
+            uint32_t phase_incB = (uint32_t)actB->phase_inc;
             q15_t    ampB      = actB->amp_current;
             q15_t    d_ampB    = actB->amp_delta;
 #endif
             synth_core_pair_m7(accum, 0u, num_samples,
-                               &phase, &amp, freq_inc, d_amp,
-                               &phaseB, &ampB, freq_incB, d_ampB);
+                               &phase, &amp, phase_inc, d_amp,
+                               &phaseB, &ampB, phase_incB, d_ampB);
             spectral_perf_paired_voice_samples(num_samples);  /* voice B (A counted above) */
 #if SPECTRAL_SOA_ACTIVE
             ctx->active_soa.phase_acc[i]       = phase;
@@ -1104,7 +1104,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         {
             uint32_t seg_offset = (uint32_t)(out_pos + blk_start) - seg_start;
             synth_segment_m7(accum, blk_start, blk_end,
-                             phase, freq_inc, amp, d_amp,
+                             phase, phase_inc, amp, d_amp,
                              &phase, &amp, seg_offset, seg_length, fade_len);
         }
 #else
@@ -1139,7 +1139,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                 q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                 sample = spectral_mul_q15(sample, fade_val);
                 accum[j] = spectral_mac_q15_64(accum[j], sample, amp);
-                phase += freq_inc;
+                phase += phase_inc;
                 amp = spectral_qadd16(amp, d_amp);
                 fade_val = spectral_qadd16(fade_val, fade_step);
             }
@@ -1153,7 +1153,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             SPECTRAL_UNROLL_4
             for (; j < end4; j += 4) {
                 uint32_t p0, p1, p2, p3;
-                spectral_phase_batch4(phase, freq_inc, &p0, &p1, &p2, &p3);
+                spectral_phase_batch4(phase, phase_inc, &p0, &p1, &p2, &p3);
 
                 q15_t a0, a1, a2, a3;
                 spectral_amp_batch4(amp, d_amp, &a0, &a1, &a2, &a3);
@@ -1166,13 +1166,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 
                 spectral_accum_batch4(accum, j, samples, a0, a1, a2, a3);
 
-                phase = p3 + freq_inc;
+                phase = p3 + phase_inc;
                 amp = spectral_qadd16(a3, d_amp);
             }
             for (; j < fo_start; j++) {
                 q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                 accum[j] = spectral_mac_q15_64(accum[j], sample, amp);
-                phase += freq_inc;
+                phase += phase_inc;
                 amp = spectral_qadd16(amp, d_amp);
             }
 
@@ -1185,7 +1185,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                     q15_t sample = spectral_lut_sin((uq16_t)(phase >> 16), osc_lut);
                     sample = spectral_mul_q15(sample, fade_val);
                     accum[j] = spectral_mac_q15_64(accum[j], sample, amp);
-                    phase += freq_inc;
+                    phase += phase_inc;
                     amp = spectral_qadd16(amp, d_amp);
                     fade_val = spectral_qadd16(fade_val, (q15_t)-fade_step);
                 }

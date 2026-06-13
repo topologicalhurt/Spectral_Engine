@@ -27,13 +27,13 @@ void mca_synth_core_m7(q63_t* restrict accum, SpectralCoupledOsc* restrict osc,
 #if SPECTRAL_HAS_DUAL_MAC
 void mca_synth_core_pair_m7(q63_t* restrict accum, uint32_t blk_start, uint32_t blk_end,
                             uint32_t* restrict phaseA, q15_t* restrict ampA,
-                            uint32_t freq_incA, q15_t amp_deltaA,
+                            uint32_t phase_incA, q15_t amp_deltaA,
                             uint32_t* restrict phaseB, q15_t* restrict ampB,
-                            uint32_t freq_incB, q15_t amp_deltaB) {
+                            uint32_t phase_incB, q15_t amp_deltaB) {
     MCA_BEGIN(synth_core_pair_m7);
     synth_core_pair_m7(accum, blk_start, blk_end,
-                       phaseA, ampA, freq_incA, amp_deltaA,
-                       phaseB, ampB, freq_incB, amp_deltaB);
+                       phaseA, ampA, phase_incA, amp_deltaA,
+                       phaseB, ampB, phase_incB, amp_deltaB);
     MCA_END();
 }
 #endif

@@ -63,12 +63,12 @@ extern "C" {
  *                      ("q88")             values > 255 pre-scaled /4
  *   phase increment    q31_t      Q1.31    per-sample step added to     free (wraps
  *                                          phase_acc                    with the acc)
- *   chirp slope        q31_t      Q1.31    per-sample step of freq_inc  -
+ *   chirp slope        q31_t      Q1.31    per-sample step of phase_inc  -
  *   MAC accumulator    q31_t      Q2.30    sum of Q15*Q15 products;     saturate on
  *                      ("q30")             >>15 + master scale -> q15    final pack
  *
  * NAMING: a field/var suffix states the format -- *_q15, *_q88 (freq_q88),
- * phase_acc, freq_inc/freq_delta. q88 (frequency) and q30 (the MAC accumulator)
+ * phase_acc, phase_inc/freq_delta. q88 (frequency) and q30 (the MAC accumulator)
  * have NO dedicated typedef yet -- they ride uint16_t and q31_t, and the suffix
  * is the only contract. Promoting them to named typedefs is tracked in
  * QTYPE_REFACTOR_PLAN.md. */
@@ -303,7 +303,7 @@ _Static_assert(sizeof(SpectralSegmentQ15) == 16, "size mismatch");
 /* Active segment state at runtime */
 typedef struct __attribute__((aligned(4))) {
     uq32_t   phase_acc;
-    q31_t    freq_inc;
+    q31_t    phase_inc;
 #if SPECTRAL_HAS_CHIRP
     q31_t    freq_delta;
 #endif

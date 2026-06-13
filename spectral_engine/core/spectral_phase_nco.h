@@ -7,7 +7,7 @@
  * float->Q15 conversion, measured (bench_q15_pack8) as too costly to pay if Q15
  * lane-packing is ever to beat float-SIMD. This is the desktop lift of the embedded integer NCO
  * (SpectralActiveSegQ15 / spectral_phase_batch4 in spectral_synth_arm32.c), widened from
- * its linear+quadratic (freq_inc/freq_delta) form to the full cubic (third difference).
+ * its linear+quadratic (phase_inc/freq_delta) form to the full cubic (third difference).
  *
  * PHASE DOMAIN: a uint64 where one full circle (2*pi rad) == 2^64, so the uint64 overflow
  * IS the mod-2*pi wrap (no conditional). The top 16 bits are the signed Q15 phase index

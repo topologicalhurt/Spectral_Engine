@@ -38,11 +38,11 @@ typedef SpectralActiveSegQ15 SpectralActiveSegment;
 #if SPECTRAL_SOA_ACTIVE
 /* SoA (Structure of Arrays) layout for active segments.
  * Each field stored in a contiguous array for better cache line utilization.
- * Phase update loop reads contiguous phase_acc[]/freq_inc[] arrays;
+ * Phase update loop reads contiguous phase_acc[]/phase_inc[] arrays;
  * LDM/STM can load 4 phases at once (32 bytes = 8 phases). */
 typedef struct {
     uq32_t   phase_acc[SPECTRAL_ARM32_MAX_ACTIVE];
-    q31_t    freq_inc[SPECTRAL_ARM32_MAX_ACTIVE];
+    q31_t    phase_inc[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_current[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_delta[SPECTRAL_ARM32_MAX_ACTIVE];
     uint32_t seg_start[SPECTRAL_ARM32_MAX_ACTIVE];
@@ -80,7 +80,7 @@ typedef struct SpectralArm32Ctx {
     const q15_t* osc_lut;
     
     uint32_t sample_rate;
-    uint32_t freq_inc_scale_q24;
+    uint32_t phase_inc_scale_q24;
     q15_t amplitude_q15;
 } SpectralArm32Ctx;
 
