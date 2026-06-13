@@ -21,8 +21,8 @@
 #         MUST contain a `_Static_assert(... SPECTRAL_OSC_Q15_VERSION == ...)` pin. The
 #         consumer set is DISCOVERED (glob), not hard-coded, so a brand-new backend that
 #         includes the contract is automatically held to the rule. Today's three:
-#         core/spectral_oscillator.c (scalar), arch/simd/oscillator_simd.c (SIMDe pack8),
-#         arch/arm/oscillator_simd.c (CMSIS).
+#         core/spectral_oscillator.c (scalar), arch/simd/spectral_oscillator_simd.c (SIMDe pack8),
+#         arch/arm/spectral_oscillator_cmsis.c (CMSIS).
 #
 # WHY ONLY Q15 GETS A PIN RULE (and float does not): the Q15 waveform is RE-IMPLEMENTED
 # per backend, so independent copies can drift -> each needs a version handshake. The
@@ -111,7 +111,7 @@ foreach(_file IN LISTS _sources)
         _pin "${_content}")
     if(_pin STREQUAL "")
         list(APPEND _violations
-            "  ${_file}: includes the canonical Q15 contract (${_q15_header}) but carries no _Static_assert(... SPECTRAL_OSC_Q15_VERSION == ...) pin -- a Q15 re-implementer must version-handshake the contract so a bump forces re-validation here. See SPECTRAL_OSC_Q15_VERSION in ${_q15_header} and the existing pins in spectral_oscillator.c / arch/simd/oscillator_simd.c / arch/arm/oscillator_simd.c.")
+            "  ${_file}: includes the canonical Q15 contract (${_q15_header}) but carries no _Static_assert(... SPECTRAL_OSC_Q15_VERSION == ...) pin -- a Q15 re-implementer must version-handshake the contract so a bump forces re-validation here. See SPECTRAL_OSC_Q15_VERSION in ${_q15_header} and the existing pins in spectral_oscillator.c / arch/simd/spectral_oscillator_simd.c / arch/arm/spectral_oscillator_cmsis.c.")
     endif()
 endforeach()
 

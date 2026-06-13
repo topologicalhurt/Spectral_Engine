@@ -1,4 +1,4 @@
-/* oscillator_simd_kernel.inc - width-templated SIMDe oscillator sustain kernel.
+/* spectral_oscillator_simd_kernel.inc - width-templated SIMDe oscillator sustain kernel.
  *
  * This file is included one or more times per translation unit, once per SIMD
  * vector width tier, to instantiate the float oscillator's vector lanes at that
@@ -11,7 +11,7 @@
  * and must already have included the SIMDe headers for that width (sse2.h for
  * width 4; avx.h/avx2.h for width 8) plus the engine headers the body needs
  * (spectral_synth_internal.h, spectral_envelope.h, spectral_osc_formulas.h,
- * spectral_fast_math.h) and oscillator_simd_scalar_waves.h for WaveformFn1.
+ * spectral_fast_math.h) and spectral_oscillator_simd_scalar_waves.h for WaveformFn1.
  *
  * The width-4 macro expansion is intentionally token-equivalent to the original
  * hand-written __m128 kernel: every OSC_V* op below maps 1:1 to the simde_mm_*

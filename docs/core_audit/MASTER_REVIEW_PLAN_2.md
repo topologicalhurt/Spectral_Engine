@@ -30,14 +30,17 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
 - A3 `spectral_osc_recursive.h → spectral_osc_q31.h` — the Q31 oscillator now named by
   domain, matching spectral_osc_q15.h; guard + includers updated (the test keeps its
   osc_recursive name — it pins the recursive-form numerical-stability contract).
+- SD-3 `arch oscillator_simd pair` — `arch/simd/oscillator_simd.c → spectral_oscillator_simd.c`
+  (SIMDe), `arch/arm/oscillator_simd.c → spectral_oscillator_cmsis.c` (CMSIS; disambiguates
+  the duplicate basename), + the `spectral_oscillator_simd_{scalar_waves.h,kernel.inc}`
+  companions + guard. The ENTIRE oscillator family (core + arch, files + symbols) is now
+  uniformly spectral_-prefixed. Dormant CMSIS pin re-pointed and passing.
 
 REMAINING (priority order):
-1. SD-3: rename the arch `oscillator_simd.{c}` pair (arch/simd = SIMDe, arch/arm = CMSIS;
-   disambiguate the duplicate basename) + the arch/simd `oscillator_simd_*` companion files.
-2. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
-3. W6 SD-4 `uq88_t`/`q30_t` typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
+1. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
+2. W6 SD-4 `uq88_t`/`q30_t` typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
    renames (`freq_inc`→`phase_inc`, `t_hop`→…); a proc-mask honesty ctest.
-4. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
+3. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
    the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
    arch-gated via macros), each conversion behind a parity test.
 

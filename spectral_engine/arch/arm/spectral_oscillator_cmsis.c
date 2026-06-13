@@ -1,7 +1,7 @@
 /* oscillator_simd.c (embedded profile) - CMSIS-DSP oscillator synthesis.
  *
  * Build-selected for ARM Cortex-M builds with CMSIS-DSP (arm_math.h). The host
- * SIMDe counterpart lives in arch/simd/oscillator_simd.c. Both implement
+ * SIMDe counterpart lives in arch/simd/spectral_oscillator_simd.c. Both implement
  * the spectral_oscillator_dispatch.h SIMD segment interface. */
 #include "spectral_oscillator_dispatch.h"
 #include "spectral_oscillator.h"
@@ -218,7 +218,7 @@ int spectral_osc_simd_available(SpectralTimbre timbre) {
 /* ===== CMSIS-Q15 oscillator (Phase 2, OSCILLATOR_BACKEND_CONTRACT_PLAN.md) =====
  *
  * The embedded Q15 compute twin of the float osc_simd_segment_* above, and the
- * CMSIS sibling of the host pack8 spectral_osc_simd_q15_segment (arch/simd/oscillator_simd.c).
+ * CMSIS sibling of the host pack8 spectral_osc_simd_q15_segment (arch/simd/spectral_oscillator_simd.c).
  * It renders the WAVEFORM through the SAME canonical spectral_osc_q15_<timbre>
  * evaluators the scalar-Q15 (spectral_oscillator.c) and pack8-SIMDe-Q15 paths use -- ONE
  * versioned contract (SPECTRAL_OSC_Q15_VERSION), no 4th Q15 world. So CMSIS-Q15 is

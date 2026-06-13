@@ -1,4 +1,4 @@
-/* oscillator_simd_scalar_waves.h - width-independent scalar waveform lanes.
+/* spectral_oscillator_simd_scalar_waves.h - width-independent scalar waveform lanes.
  *
  * The fade-in / fade-out / SIMD-tail regions of the fused oscillator render one
  * sample at a time (per-sample envelope branching makes a SIMD broadcast
@@ -7,8 +7,8 @@
  * the vector sustain lanes they border. They are scalar, so they do NOT depend
  * on the SIMD lane width and live here, shared by oscillator_simd.c and the
  * width-parity test, rather than inside the width-templated kernel. */
-#ifndef OSCILLATOR_SIMD_SCALAR_WAVES_H
-#define OSCILLATOR_SIMD_SCALAR_WAVES_H
+#ifndef SPECTRAL_OSCILLATOR_SIMD_SCALAR_WAVES_H
+#define SPECTRAL_OSCILLATOR_SIMD_SCALAR_WAVES_H
 
 #include "spectral_osc_formulas.h"
 
@@ -45,4 +45,4 @@ static inline float wave_pwm_1(float rads, const void* ctx) {
     return spectral_osc_pwm(rads, width);
 }
 
-#endif /* OSCILLATOR_SIMD_SCALAR_WAVES_H */
+#endif /* SPECTRAL_OSCILLATOR_SIMD_SCALAR_WAVES_H */

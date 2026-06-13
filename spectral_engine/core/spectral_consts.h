@@ -51,7 +51,7 @@
 /* Degree-9 odd minimax polynomial coefficients for sin(x) folded to [-pi/2, pi/2]:
  *   sin(x) ~ x * (1 + x^2*(C3 + x^2*(C5 + x^2*(C7 + x^2*C9)))).
  * SINGLE SOURCE for the scalar fast_sin (spectral_osc_formulas.h) and its SIMD twin
- * (arch/simd/oscillator_simd_kernel.inc); ~1.4 ULP vs libm over the oscillator's
+ * (arch/simd/spectral_oscillator_simd_kernel.inc); ~1.4 ULP vs libm over the oscillator's
  * operating range. Re-tune in ONE place so the two paths cannot drift. */
 #define SPECTRAL_MINIMAX_SIN_C3  (-0.16666647791862488f)
 #define SPECTRAL_MINIMAX_SIN_C5  ( 0.00833289884030819f)

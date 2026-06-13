@@ -12,7 +12,7 @@
 add_executable(bench_q15_pack8 EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/core_contracts/bench_q15_pack8.c"
     "${SPECTRAL_CORE_DIR}/spectral_oscillator.c"
-    "${SPECTRAL_ARCH_SIMD_DIR}/oscillator_simd.c"
+    "${SPECTRAL_ARCH_SIMD_DIR}/spectral_oscillator_simd.c"
     "${SPECTRAL_CORE_DIR}/spectral_osc_bandlimited.c"
     "${SPECTRAL_CORE_DIR}/spectral_envelope.c"
     "${SPECTRAL_CORE_DIR}/spectral_fast_math.c"

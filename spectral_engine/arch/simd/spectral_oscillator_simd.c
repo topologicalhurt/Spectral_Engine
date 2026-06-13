@@ -2,15 +2,15 @@
  *
  * Build-selected for host builds: SIMDe maps the intrinsics to native NEON
  * (macOS ARM), native SSE/AVX (Linux x86), or scalar fallback. The CMSIS
- * (ARM Cortex-M) counterpart lives in arch/arm/oscillator_simd.c.
+ * (ARM Cortex-M) counterpart lives in arch/arm/spectral_oscillator_cmsis.c.
  * Both implement the spectral_oscillator_dispatch.h SIMD segment interface.
  *
- * The vector sustain kernel is width-templated in oscillator_simd_kernel.inc and
+ * The vector sustain kernel is width-templated in spectral_oscillator_simd_kernel.inc and
  * instantiated here at the machine's natural float vector width (Q2 of
  * QTYPE_DOMAIN_PLAN.md): 8-wide __m256 on a 256-bit-float AVX2 target, 4-wide
  * __m128 everywhere else (SSE2, NEON). The scalar single-sample lanes used in
  * the fade regions are width-independent and live in
- * oscillator_simd_scalar_waves.h. */
+ * spectral_oscillator_simd_scalar_waves.h. */
 #include "spectral_oscillator_dispatch.h"
 #include "spectral_oscillator.h"
 #include "spectral_config.h"
@@ -18,7 +18,7 @@
 #include "spectral_envelope.h"
 #include "spectral_fast_math.h"
 #include "spectral_osc_formulas.h"
-#include "oscillator_simd_scalar_waves.h"
+#include "spectral_oscillator_simd_scalar_waves.h"
 #include <math.h>
 #include <float.h>
 #include <limits.h>
@@ -55,7 +55,7 @@ _Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
 
 #define OSC_VW   OSC_KERNEL_W
 #define OSC_VSUF _impl
-#include "oscillator_simd_kernel.inc"
+#include "spectral_oscillator_simd_kernel.inc"
 
 void spectral_osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_sine_v), wave_sine_1, NULL);

@@ -33,7 +33,7 @@ extern "C" {
 /* Contract version for the Q15 oscillator waveform evaluators + boundary
  * helpers in this header.  Bump on ANY change to spectral_osc_q15_phase_from_rads,
  * spectral_osc_q15_init_sine_lut, or any spectral_osc_q15_<timbre> evaluator.
- * Production consumers (spectral_oscillator.c scalar-Q15 and arch/simd/oscillator_simd.c
+ * Production consumers (spectral_oscillator.c scalar-Q15 and arch/simd/spectral_oscillator_simd.c
  * pack8) pin this with _Static_assert, so a silent contract edit fails their
  * build -- the Q15 twin of SPECTRAL_OSC_FORMULAS_VERSION (spectral_osc_formulas.h).
  *

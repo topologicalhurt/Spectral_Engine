@@ -15,8 +15,8 @@
  *   ---------+-------+----------------+----------------+--------------------------
  *   Scalar   |  yes  | yes            | host + embedded| spectral_osc_formulas.h (f32)
  *            |       |                |                | spectral_osc_q15.h      (Q15)
- *   SIMDe    |  yes  | yes (pack8 8xQ15)| HOST ONLY    | arch/simd/oscillator_simd.c
- *   CMSIS    |  yes  | yes (Ph.2)+    | EMBEDDED ONLY  | arch/arm/oscillator_simd.c
+ *   SIMDe    |  yes  | yes (pack8 8xQ15)| HOST ONLY    | arch/simd/spectral_oscillator_simd.c
+ *   CMSIS    |  yes  | yes (Ph.2)+    | EMBEDDED ONLY  | arch/arm/spectral_oscillator_cmsis.c
  *   GPU      |  yes  | float-only*     | host (Metal) / | Metal MSL + CUDA (codegen
  *            |       |                | CUDA dev       | from spectral_osc_formulas.h)
  *   vDSP     |  n/a  | n/a            | host (Apple)   | NOT an oscillator backend --
@@ -147,7 +147,8 @@ typedef union {
 /* Forward declarations */
 struct SegmentLoopParams;
 
-/* SIMD segment synthesis - platform-specific implementations in oscillator_simd.c */
+/* SIMD segment synthesis - platform-specific implementations in
+ * arch/simd/spectral_oscillator_simd.c (SIMDe) and arch/arm/spectral_oscillator_cmsis.c (CMSIS) */
 void spectral_osc_simd_segment_sine(float* dst, const struct SegmentLoopParams* lp);
 void spectral_osc_simd_segment_saw(float* dst, const struct SegmentLoopParams* lp);
 void spectral_osc_simd_segment_square(float* dst, const struct SegmentLoopParams* lp);
@@ -177,7 +178,7 @@ void spectral_osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* l
  * amp/accumulate. Verification is hardware-gated (real Cortex-M); it has no LIVE
  * caller yet (spectral_oscillator.c's Q15 dispatch is host-only by design) -- wiring it
  * into the embedded dispatch changes shipped behavior and needs explicit
- * sign-off. See arch/arm/oscillator_simd.c. */
+ * sign-off. See arch/arm/spectral_oscillator_cmsis.c. */
 int spectral_osc_simd_q15_available(SpectralTimbre timbre);
 void spectral_osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
                           SpectralTimbre timbre, const int16_t* sine_lut);

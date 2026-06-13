@@ -1,7 +1,7 @@
 /* test_osc_width_parity.c - SIMD width-parameterization parity (Q2).
  *
  * Q2 of QTYPE_DOMAIN_PLAN.md width-parameterizes the float L1 sustain kernel
- * (oscillator_simd_kernel.inc) over SIMDE_NATURAL_FLOAT_VECTOR_SIZE: 4-wide
+ * (spectral_oscillator_simd_kernel.inc) over SIMDE_NATURAL_FLOAT_VECTOR_SIZE: 4-wide
  * __m128 on SSE2/NEON, 8-wide __m256 on an AVX2 x86 target. Production picks ONE
  * width per build, so a single-build test can never compare the two. This test
  * force-instantiates BOTH widths in one translation unit (SIMDe provides a
@@ -44,19 +44,19 @@
 #include "spectral_osc_formulas.h"
 #include "spectral_fast_math.h"
 #include "spectral_common.h"
-#include "oscillator_simd_scalar_waves.h"
+#include "spectral_oscillator_simd_scalar_waves.h"
 
 /* Instantiate the kernel at both widths. The .inc suffixes every symbol with
  * OSC_VSUF, so the two instantiations coexist with no clash. */
 #define OSC_VW   4
 #define OSC_VSUF _w4
-#include "oscillator_simd_kernel.inc"
+#include "spectral_oscillator_simd_kernel.inc"
 #undef OSC_VW
 #undef OSC_VSUF
 
 #define OSC_VW   8
 #define OSC_VSUF _w8
-#include "oscillator_simd_kernel.inc"
+#include "spectral_oscillator_simd_kernel.inc"
 #undef OSC_VW
 #undef OSC_VSUF
 

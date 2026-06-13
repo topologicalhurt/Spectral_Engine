@@ -53,9 +53,9 @@ set(SPECTRAL_SOURCES_CORE
 # Every current target is a host (SIMDe) build, so each picks the HOST set; the
 # CMSIS-DSP body is selected only by a real Cortex-M cross-build.
 set(SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST
-    "${SPECTRAL_ARCH_SIMD_DIR}/oscillator_simd.c")
+    "${SPECTRAL_ARCH_SIMD_DIR}/spectral_oscillator_simd.c")
 set(SPECTRAL_SOURCES_CORE_OSC_SIMD_EMBEDDED
-    "${SPECTRAL_ARCH_ARM_DIR}/oscillator_simd.c")
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_oscillator_cmsis.c")
 
 # Per-profile SIMD vector ops (Phase E port-layer split). The host (SIMDe) impl is
 # build-selected onto every host/simulation target — exactly where the former in-file

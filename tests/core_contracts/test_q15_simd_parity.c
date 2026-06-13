@@ -33,7 +33,7 @@
 #include "spectral_osc_q15.h"   /* scalar Q15 evaluators -- the SIMD oracle */
 #include "simde/x86/sse2.h"
 
-/* Test-only handle on the static-inline packed SIMD eval (oscillator_simd.c built
+/* Test-only handle on the static-inline packed SIMD eval (spectral_oscillator_simd.c built
  * with SPECTRAL_EXPOSE_Q15_PACK8_FOR_TEST). */
 simde__m128i spectral_q15_pack8_eval_for_test(simde__m128i pq, SpectralTimbre timbre,
                                               const q15_t* lut);
