@@ -599,3 +599,30 @@ def test_dormant_dma_branch_still_compiles(tmp_path):
         capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, (
         f"dormant DMA branch no longer compiles:\n{result.stderr[-3000:]}")
+
+
+@pytest.mark.skipif(not HAVE_ARM_GCC, reason="needs arm-none-eabi-gcc (m7-bootstrap)")
+def test_dormant_cmsis_oscillator_still_compiles(tmp_path):
+    """Every embedded build is the host simulation, which selects the SIMDe Q15
+    oscillator (arch/simd); nothing sets ARM_MATH_CM7, so no target compiles the
+    CMSIS-DSP oscillator backend (arch/arm/oscillator_simd.c) that a real
+    bare-metal Cortex-M build would. Dormant code that cannot rot silently:
+    cross-compile that TU with the CMSIS configuration forced on, under -Werror.
+    (Include ORDER is load-bearing here — arm_math.h must precede the
+    #ifndef-guarded Q-range macros in spectral_q15.h, or they redefine.)"""
+    import subprocess
+
+    tc = toolchain.discover(ROOT)
+    tu = ROOT / "spectral_engine/arch/arm/oscillator_simd.c"
+    extra = (
+        ROOT / "spectral_engine/arch/arm",
+        ROOT / "api/daisy_seed",
+        ROOT / "third_party/CMSIS-DSP/Include",
+        ROOT / "third_party/CMSIS_6/CMSIS/Core/Include",
+    )
+    result = subprocess.run(
+        [tc.arm_gcc, *tc.cflags(extra_includes=extra),
+         "-DARM_MATH_CM7=1", "-Werror", "-fsyntax-only", str(tu)],
+        capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, (
+        f"dormant CMSIS oscillator no longer compiles:\n{result.stderr[-3000:]}")

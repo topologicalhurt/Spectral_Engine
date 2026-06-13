@@ -67,9 +67,39 @@
     #endif
 #endif
 
+#ifndef __CUDACC__
+/* Q15 leaf evaluators for spectral_osc_q15_eval below. Included AFTER the CMSIS
+ * arm_math.h above (not with the other top includes): arm_math_types.h defines
+ * the Q15/Q31 range macros UNGUARDED, so CMSIS must precede the #ifndef-guarded
+ * copies in spectral_q15.h or the bare-metal build redefines them under -Werror. */
+#include "spectral_osc_q15.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#ifndef __CUDACC__
+/* Canonical Q15 timbre dispatch: map a timbre to its spectral_osc_q15.h leaf
+ * evaluator. One definition shared by every Q15 backend's scalar/fade path (the
+ * core scalar oracle, the SIMDe pack8 fade tail, the CMSIS embedded sibling), so
+ * the timbre->waveform map cannot drift between them. Timbres with no Q15
+ * evaluator (asin/quantized/pwm) return silence. The version pin makes this a
+ * contract consumer: a SPECTRAL_OSC_Q15_VERSION bump fails the build here until
+ * the dispatch is re-validated. */
+_Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
+               "spectral_osc_q15.h contract changed; re-validate spectral_osc_q15_eval");
+static inline q15_t spectral_osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
+    switch (timbre) {
+    case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
+    case TIMBRE_SAW:      return spectral_osc_q15_saw(pq);
+    case TIMBRE_SQUARE:   return spectral_osc_q15_square(pq);
+    case TIMBRE_TRIANGLE: return spectral_osc_q15_triangle(pq);
+    case TIMBRE_PARABOLA: return spectral_osc_q15_parabola(pq);
+    default:              return Q15_ZERO;
+    }
+}
+#endif /* !__CUDACC__ */
 
 /* Dispatch mode: 2 bits per timbre */
 typedef enum {

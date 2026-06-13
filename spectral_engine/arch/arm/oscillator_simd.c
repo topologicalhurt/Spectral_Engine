@@ -255,19 +255,6 @@ int osc_simd_available(SpectralTimbre timbre) {
 _Static_assert(SPECTRAL_OSC_Q15_VERSION == SPECTRAL_OSC_Q15_VERSION_CMSIS_PIN,
                "spectral_osc_q15.h contract changed; re-validate CMSIS-Q15 oscillator");
 
-/* WAVEFORM in Q15 (integer unit), one switch over the canonical v1 evaluators --
- * the embedded sibling of oscillator.c osc_q15_eval and host osc_q15_wave_scalar. */
-static inline q15_t osc_cmsis_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
-    switch (timbre) {
-    case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
-    case TIMBRE_SAW:      return spectral_osc_q15_saw(pq);
-    case TIMBRE_SQUARE:   return spectral_osc_q15_square(pq);
-    case TIMBRE_TRIANGLE: return spectral_osc_q15_triangle(pq);
-    case TIMBRE_PARABOLA: return spectral_osc_q15_parabola(pq);
-    default:              return Q15_ZERO;
-    }
-}
-
 /* The 5 canonical Q15 timbres (matches the host pack8 contract). Square is included:
  * unlike the float path (no vector sign primitive -> scalar) the Q15 square is a cheap
  * integer select, so the whole canonical set is uniform across the Q15 backends. */
@@ -297,7 +284,7 @@ void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
          * boundary), Q15 waveform on the integer unit, float enveloped amplitude. */
         for (int k = 0; k < 4; k++) {
             float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)(j + k)));
-            wq[k] = osc_cmsis_q15_eval(spectral_osc_q15_phase_from_rads(rads), timbre, sine_lut);
+            wq[k] = spectral_osc_q15_eval(spectral_osc_q15_phase_from_rads(rads), timbre, sine_lut);
             amps_v[k] = (amp0 + d_amp * (float)(j + k)) * fade_envelope(j + k, &fp, len);
         }
         /* FPU body: widen Q15 waveform -> float, amp*wave, accumulate onto output. */
@@ -308,7 +295,7 @@ void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
 
     for (; j < len; j++) {
         float rads = phase_to_rads(spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j));
-        float wave = Q15_TO_FLOAT(osc_cmsis_q15_eval(spectral_osc_q15_phase_from_rads(rads), timbre, sine_lut));
+        float wave = Q15_TO_FLOAT(spectral_osc_q15_eval(spectral_osc_q15_phase_from_rads(rads), timbre, sine_lut));
         float amp = (amp0 + d_amp * (float)j) * fade_envelope(j, &fp, len);
         dst[j] += amp * wave;
     }

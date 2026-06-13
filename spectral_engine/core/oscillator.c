@@ -125,19 +125,6 @@ static void synth_segment_scalar(
 }
 
 #if !SPECTRAL_EMBEDDED
-/* Loop-invariant Q15 waveform selector. A scalar oracle: it resolves the timbre
- * per sample, which the SIMD Q15 kernel specializes away. */
-static inline q15_t osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
-    switch (timbre) {
-    case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
-    case TIMBRE_SAW:      return spectral_osc_q15_saw(pq);
-    case TIMBRE_SQUARE:   return spectral_osc_q15_square(pq);
-    case TIMBRE_TRIANGLE: return spectral_osc_q15_triangle(pq);
-    case TIMBRE_PARABOLA: return spectral_osc_q15_parabola(pq);
-    default:              return Q15_ZERO;
-    }
-}
-
 /* Scalar Q15-compute sustain path (QTYPE_DOMAIN_PLAN.md). Op-for-op
  * the float synth_segment_scalar above, except (a) the Q15 phase index is produced
  * by the integer-NCO cubic forward-difference accumulator (spectral_phase_nco.h) —
@@ -165,19 +152,19 @@ static void synth_segment_q15(
     spectral_phase_nco_init(&nco, phase0, alpha, c2, c3);
 
     for (size_t j = 0; j < fade_in_end && j < len; j++) {
-        float wave = Q15_TO_FLOAT(osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
+        float wave = Q15_TO_FLOAT(spectral_osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
         float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_in(j, fp->inv_fade);
         dst[j] += amp * wave;
     }
 
     for (size_t j = fade_in_end; j < fade_out_start && j < len; j++) {
-        float wave = Q15_TO_FLOAT(osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
+        float wave = Q15_TO_FLOAT(spectral_osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
         float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
         dst[j] += amp * wave;
     }
 
     for (size_t j = (fade_out_start > fade_in_end ? fade_out_start : fade_in_end); j < len; j++) {
-        float wave = Q15_TO_FLOAT(osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
+        float wave = Q15_TO_FLOAT(spectral_osc_q15_eval(spectral_phase_nco_step(&nco), timbre, sine_lut));
         float amp = spectral_segment_amp_at_f32(amp0, d_amp, (float)j) * fade_envelope_out(j, len, fp->inv_fade);
         dst[j] += amp * wave;
     }
