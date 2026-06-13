@@ -106,7 +106,7 @@ class CountsReport:
 
 def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) -> Path:
     qemu_dir = NATIVE_DIR / "qemu"
-    arm_backend_dir = tc.repo_root / "spectral_engine/synth/backends/arm"
+    arm_backend_dir = tc.repo_root / "spectral_engine/arch/arm"
     (out_dir / HEADER_NAME).write_text(fixture.to_c_header(), encoding="utf-8")
 
     gc_flags = ("-ffunction-sections", "-fdata-sections")

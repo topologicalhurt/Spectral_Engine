@@ -1,7 +1,7 @@
 /* daisy_seed_mem.h - SPECTRAL_MEM_* placement bindings for the Daisy Seed / STM32H7.
  *
  * Supplied to core via -DSPECTRAL_BSP_MEM_HEADER (set by cmake/daisy-config.cmake), so
- * core/port/spectral_mem.h resolves the device-agnostic placement intent to the section
+ * core/spectral_mem.h resolves the device-agnostic placement intent to the section
  * names libDaisy's linker script actually maps:
  *   .dtcmram_bss -> DTCM  (128 KB, zero-wait, zero-initialized)
  *   .sdram_bss   -> SDRAM (64 MB external)

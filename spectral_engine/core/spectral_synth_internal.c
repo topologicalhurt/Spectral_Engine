@@ -374,8 +374,8 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
 
 /* GPU tile preprocessing (gpu_tile_preprocess) is profile-divergent and lives
  * in build-selected port files behind the spectral_synth_internal.h interface:
- * core/port/host/spectral_gpu_tile.c (real Metal/CUDA-oriented mapping) and
- * core/port/embedded/spectral_gpu_tile.c (SPECTRAL_ERR_BACKEND_UNAVAIL stub,
+ * arch/simd/spectral_gpu_tile.c (real Metal/CUDA-oriented mapping) and
+ * arch/ref/spectral_gpu_tile.c (SPECTRAL_ERR_BACKEND_UNAVAIL stub,
  * no GPU backend). The cache below is device-agnostic and always compiled. */
 
 /* --- GPU tile cache (process-global, single-slot) -----------------------

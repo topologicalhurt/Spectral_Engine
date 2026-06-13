@@ -6,7 +6,7 @@
  * core/spectral_synth_internal.c (its former #if !SPECTRAL_EMBEDDED &&
  * !SPECTRAL_RESTRICTED_MODE body); the embedded/simulation profile, which has
  * no GPU backend, build-selects the SPECTRAL_ERR_BACKEND_UNAVAIL stub in
- * core/port/embedded/spectral_gpu_tile.c instead. The shared declaration lives
+ * arch/ref/spectral_gpu_tile.c instead. The shared declaration lives
  * in spectral_synth_internal.h, so callers are profile-agnostic.
  */
 

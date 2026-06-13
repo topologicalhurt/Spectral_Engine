@@ -4,7 +4,7 @@
  * native NEON (macOS ARM), native SSE/AVX (Linux x86), or scalar fallback. Real
  * Cortex-M (CMSIS) builds have no SIMD vector ops; callers there take scalar
  * fallback paths gated by the spectral_vector_ops.h interface guard, so a future
- * embedded counterpart would live in core/port/embedded/spectral_vector_ops.c.
+ * embedded counterpart would live in arch/ref/spectral_vector_ops.c.
  * The __AVX2__ branches below are capability gates (SIMD width), not profiles. */
 #include "spectral_vector_ops.h"
 #include "spectral_fast_math.h"

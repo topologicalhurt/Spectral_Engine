@@ -6,13 +6,20 @@ Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed). `AI_CANON.md` holds
 the full correctness rules; this file is the orientation.
 **Forward mandate (what to work on next):** `docs/core_audit/REVIEWER_HANDOFF.md`.
 
-## Layout
-- `spectral_engine/core/` — config, constants, oscillators, windows, segments, hashing, ports
+## Layout (Linux-kernel-style: kernel / arch / drivers; see KERNEL_LAYOUT_PLAN.md)
+- `spectral_engine/core/` — the kernel: config, constants, oscillators, windows, segments,
+  Q-domain (`spectral_q15.h`), hashing, contracts, dispatch
+- `spectral_engine/arch/` — ISA-contingent kernels, build-selected: `ref/` (portable
+  fallbacks, always compilable), `arm/` (ARMv7E-M synth + its host-sim adapter),
+  `simd/` (host SIMDe bodies)
+- `spectral_engine/drivers/` — device/library backends behind core contracts: `vdsp/` now;
+  `metal/`, `cuda/` arrive at L4 (today still `synth/backends/gpu/`)
 - `spectral_engine/analysis/` — FFT, peak estimation/tracking, processing chain
-- `spectral_engine/synth/` — synthesis backends (cpu/arm/sim) + `synth/api/spectral_synth.h`
-- `spectral_engine/runtime/` — perf model, console, utils (`spectral_utils.h` lives here)
+- `spectral_engine/synth/` — cpu backend + gpu backends + `synth/api/spectral_synth.h`
+  (dissolves at L3/L4)
+- `spectral_engine/runtime/` — console, utils (`spectral_utils.h` lives here)
 - `spectral_engine/cmd/` — CLI
-- `api/daisy_seed/` — Daisy Seed public API · `core/port/{host,embedded}/` — per-target SIMD/GPU bodies
+- `api/daisy_seed/` — Daisy Seed board support / public API
 
 ## Build & test
 - `make configure && make` → desktop. Other targets: `simulate`, `embedded_arm`,

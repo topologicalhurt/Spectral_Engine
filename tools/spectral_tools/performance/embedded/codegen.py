@@ -176,7 +176,7 @@ def extract_loop_bodies(asm_text: str) -> list[LoopBody]:
 def census(tc: Toolchain, *, out_dir: Path) -> CensusResult:
     """Compile the production ARM TU and count emitted DSP/MAC instructions."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    tu = tc.repo_root / "spectral_engine/synth/backends/arm/spectral_synth_arm32.c"
+    tu = tc.repo_root / "spectral_engine/arch/arm/spectral_synth_arm32.c"
     asm_path = out_dir / "arm32_m7.s"
 
     result = run(
@@ -252,7 +252,7 @@ def loop_analysis(
 
     wrapper = NATIVE_DIR / "kernel_wrappers.c"
     asm_path = out_dir / "kernel_wrappers.s"
-    arm_backend_dir = tc.repo_root / "spectral_engine/synth/backends/arm"
+    arm_backend_dir = tc.repo_root / "spectral_engine/arch/arm"
 
     result = run(
         [tc.arm_gcc, *tc.cflags(extra_includes=(arm_backend_dir,)),

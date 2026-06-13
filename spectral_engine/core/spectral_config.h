@@ -660,7 +660,7 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 /* Memory-class placement (device-agnostic intent; the concrete device binding
  * lives in a BSP, not here). Defines SPECTRAL_MEM_FAST / SPECTRAL_MEM_FAST_CODE /
  * SPECTRAL_MEM_BULK / SPECTRAL_CACHE_LINE. */
-#include "port/spectral_mem.h"
+#include "spectral_mem.h"
 /* Static bound on the arm32 kernel's active-voice state arrays. The REAL-TIME
  * cap is the WCET-gated DAISY_MAX_ACTIVE (128, capacity table in
  * M7_PERF_MODEL_PLAN.md); this only sizes storage. [chosen: 4x the runtime

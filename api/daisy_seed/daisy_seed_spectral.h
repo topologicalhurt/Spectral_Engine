@@ -9,7 +9,7 @@
 #define DAISY_SPECTRAL_API_VERSION_PATCH 0
 
 #include "daisy_seed_config.h"
-#include "../../spectral_engine/synth/backends/arm/spectral_synth_arm32.h"
+#include "../../spectral_engine/arch/arm/spectral_synth_arm32.h"
 
 #ifdef __cplusplus
 extern "C" {

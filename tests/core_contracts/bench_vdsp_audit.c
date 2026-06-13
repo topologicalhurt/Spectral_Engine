@@ -5,9 +5,9 @@
  * build does not, and is Apple-exclusive. Build + run it by hand:
  *
  *   clang -O3 -ffast-math -ffp-contract=fast -march=native -std=c11 \
- *     -Ispectral_engine/core -Ispectral_engine/core/port/host -Ithird_party/simde \
+ *     -Ispectral_engine/core -Ispectral_engine/arch/simd -Ithird_party/simde \
  *     tests/core_contracts/bench_vdsp_audit.c \
- *     spectral_engine/core/port/host/spectral_vector_ops.c \
+ *     spectral_engine/arch/simd/spectral_vector_ops.c \
  *     -framework Accelerate -lm -o /tmp/bench_vdsp_audit && /tmp/bench_vdsp_audit
  *
  * Times each production SIMDe vector op (the REAL spectral_vector_ops.c, compiled

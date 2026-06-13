@@ -11,8 +11,8 @@
  * Layering (one implementation TU per port contract, selected by the build):
  *   - This header is the ONLY surface; no third-party types leak through.
  *   - The inverse-FFT primitive is a port contract implemented by exactly
- *     one TU per build: core/port/host/spectral_ifft_vdsp.c (Apple) or
- *     core/port/host/spectral_ifft_ref.c (portable radix-2 fallback).
+ *     one TU per build: drivers/vdsp/spectral_ifft_vdsp.c (Apple) or
+ *     arch/ref/spectral_ifft_ref.c (portable radix-2 fallback).
  *     The ARM Q31 port (port/cmsis/) lands at F4.
  */
 #ifndef SPECTRAL_SYNTH_IFFT_H

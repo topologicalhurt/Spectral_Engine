@@ -2,7 +2,7 @@
  *
  * Build-selected for host builds: SIMDe maps the intrinsics to native NEON
  * (macOS ARM), native SSE/AVX (Linux x86), or scalar fallback. The CMSIS
- * (ARM Cortex-M) counterpart lives in core/port/embedded/oscillator_simd.c.
+ * (ARM Cortex-M) counterpart lives in arch/arm/oscillator_simd.c.
  * Both implement the oscillator_dispatch.h SIMD segment interface.
  *
  * The vector sustain kernel is width-templated in oscillator_simd_kernel.inc and

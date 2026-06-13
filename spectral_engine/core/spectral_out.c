@@ -3,8 +3,8 @@
  * Device-agnostic audio output: float mono->stereo interleaving and audio file
  * writing (the latter gated by the SPECTRAL_HAS_FILE_IO capability). The
  * profile-divergent normalization and Q15 stereo kernels live in build-selected
- * port files: core/port/host/spectral_out_kernels.c (SIMDe / scalar) and
- * core/port/embedded/spectral_out_kernels.c (scalar / CMSIS / Cortex-M).
+ * port files: arch/simd/spectral_out_kernels.c (SIMDe / scalar) and
+ * arch/ref/spectral_out_kernels.c (scalar / CMSIS / Cortex-M).
  */
 
 #include "spectral_io.h"

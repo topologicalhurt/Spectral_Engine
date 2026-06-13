@@ -590,8 +590,8 @@ def test_dormant_dma_branch_still_compiles(tmp_path):
     import subprocess
 
     tc = toolchain.discover(ROOT)
-    tu = ROOT / "spectral_engine/synth/backends/arm/spectral_synth_arm32.c"
-    arm_dir = ROOT / "spectral_engine/synth/backends/arm"
+    tu = ROOT / "spectral_engine/arch/arm/spectral_synth_arm32.c"
+    arm_dir = ROOT / "spectral_engine/arch/arm"
     result = subprocess.run(
         [tc.arm_gcc, *tc.cflags(extra_includes=(arm_dir,)),
          "-DSPECTRAL_HAS_DMA=1", "-DSPECTRAL_ARM32_DMA_BUFFER_DTCM=1",
