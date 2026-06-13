@@ -336,7 +336,10 @@ int main(int argc, char** argv) {
         omega = sanitize_clamped_field(src->omega, -INFINITY, INFINITY, 0.0f, &stats);
         phase = sanitize_clamped_field(src->phase, -INFINITY, INFINITY, 0.0f, &stats);
         amp = sanitize_clamped_field(src->amp, -1.0f, 1.0f, 0.0f, &stats);
-        da = sanitize_clamped_field(src->da / SPECTRAL_MILLIS_PER_SECOND_F, -1.0f, 1.0f, 0.0f, &stats);
+        /* da/df are PER-SAMPLE end to end (analysis writes (next-amp)*inv_hop,
+         * the kernel applies amp_q15 + da_q15*offset per sample): encode them
+         * unscaled. The units are pinned by the convert_segments_units test. */
+        da = sanitize_clamped_field(src->da, -1.0f, 1.0f, 0.0f, &stats);
 
         if (omega > 255.0f) stats.high_freq++;
         dst->freq_q88 = OMEGA_TO_Q88(omega);
@@ -345,7 +348,7 @@ int main(int argc, char** argv) {
         dst->da_q15 = FLOAT_TO_Q15(da);
 
 #if SPECTRAL_HAS_CHIRP
-        df = sanitize_clamped_field(src->df / SPECTRAL_MILLIS_PER_SECOND_F, -1.0f, 1.0f, 0.0f, &stats);
+        df = sanitize_clamped_field(src->df, -1.0f, 1.0f, 0.0f, &stats);
         dst->df_q15 = FLOAT_TO_Q15(df);
 #endif
     }

@@ -485,10 +485,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #define SPECTRAL_SEGMENT_POOL_BLOCK_SIZE 4096u
 #endif
 
-/* Canonical optional-processing policy flags */
-#ifndef SPECTRAL_PROCESS_STRICT
-#define SPECTRAL_PROCESS_STRICT         0
-#endif
 
 /* Canonical embedded debug LED timing defaults (milliseconds) */
 #ifndef SPECTRAL_ERROR_BLINK_ON_MS

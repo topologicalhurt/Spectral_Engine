@@ -141,11 +141,20 @@ static void test_stream_parity(void) {
             }
         }
         uint64_t t_osc = now_ns() - t1;
+
+        /* Volatile sink AFTER timing: every element feeds the reduction, so
+         * the rendered buffer stays live without perturbing the timed loop. */
+        {
+            static volatile float sink;
+            float acc = 0.0f;
+            for (size_t t = 0; t < TOTAL; t++) acc += ref[t];
+            sink = acc;
+            (void)sink;
+        }
         printf("  MEASURED: ifft %.2f ms vs naive-osc %.2f ms -> %.1fx "
                "(info; not a gate)\n",
                t_ifft / 1e6, t_osc / 1e6,
                t_ifft > 0 ? (double)t_osc / (double)t_ifft : 0.0);
-        if (ref[0] == 42.0f) printf("%f\n", (double)ref[0]); /* keep ref live */
     }
 
     spectral_ifft_synth_destroy(s);

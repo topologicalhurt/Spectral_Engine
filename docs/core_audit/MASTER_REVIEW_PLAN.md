@@ -241,6 +241,13 @@ economy matter most.
   SPECTRAL_GPU_MAX_TIMBRE (4 sites). ELF-builder hoist DECLINED with
   in-place rationale. Conversion-policy comparison found the convert_segments
   /1000 unit BUG (R5) instead of a hoist — fix + E2E class test lead W5.
-- W5 next: convert_segments da/df unit fix + E2E class test; keep-alive
-  hack; __import__ hack; IFFT memset comment-or-fix; generate
-  reproducibility double-run; method-token stubs fail loudly.
+- **W5 DONE** (honesty + bug-class): convert_segments /1000 unit bug fixed
+  + convert_segments_units E2E ctest (fail-on-bug verified); no-op stub
+  stages deleted and unimplemented tokens now fail loudly unconditionally
+  (SPECTRAL_PROCESS_STRICT removed); keep-alive hack → post-timing volatile
+  sink; __import__ → import; IFFT memset honesty comment; generate() runs
+  the reproducibility double-run; zip sweep (gate compare under
+  else-of-drift + strict). ctest 24, pytest 74, gate PASS.
+- W6 next: seven-lens + K&R panel over the highest-risk files; R2 leftover
+  sweeps (dead #if configurations, adaptive-vs-static); R4 capability-not-CPU
+  grep + include-graph scan.

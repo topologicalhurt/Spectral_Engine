@@ -109,9 +109,7 @@ set(SPECTRAL_SOURCES_RUNTIME_PERF_MODEL
 
 set(SPECTRAL_SOURCES_ANALYSIS_PROC
     "${SPECTRAL_ANALYSIS_DIR}/spectral_processing_chain.c"
-    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_adaptive_track_density.c"
-    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_johnston_1988.c"
-    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_serra_smith_1990.c")
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_adaptive_track_density.c")
 
 set(SPECTRAL_SOURCES_ANALYSIS
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis.c"

@@ -44,11 +44,11 @@ def test_tolerances_are_named_and_justified():
 
 
 def test_baseline_fixture_is_frozen_and_complete():
+    from spectral_tools.performance.embedded.wcet import SAMPLES_PER_ITER
+
     base = expectations.Baseline.load(ROOT).doc
     assert "GENERATED" in base["_comment"]
-    assert set(base["kernels"]) == set(
-        __import__("spectral_tools.performance.embedded.wcet",
-                   fromlist=["SAMPLES_PER_ITER"]).SAMPLES_PER_ITER)
+    assert set(base["kernels"]) == set(SAMPLES_PER_ITER)
     assert base["counts"]["process_insns"] > 0
     assert base["counts"]["fixture_digest"]
     assert len(base["wcet_scenarios"]) == len(expectations.STONE_SCENARIOS)

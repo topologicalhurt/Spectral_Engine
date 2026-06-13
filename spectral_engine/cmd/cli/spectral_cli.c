@@ -680,8 +680,10 @@ void spectral_cli_print_usage(void) {
     SPECTRAL_LOG_INFO("  -w <file>  Use wavetable file (.spwt/.bin/.raw/.hex)");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("  -pm, --proc-mask <spec>  Processing chain mask (comma-separated names or integer bitmask)");
-    SPECTRAL_LOG_INFO("      Names: serra_smith_1990, johnston_1988, adaptive_track_density, reassigned,");
-    SPECTRAL_LOG_INFO("             hybrid_render, event_bucket, higher_order_interp, qnoise_shaping");
+    SPECTRAL_LOG_INFO("      Implemented: adaptive_track_density");
+    SPECTRAL_LOG_INFO("      Reserved (parse but fail loudly until implemented): serra_smith_1990,");
+    SPECTRAL_LOG_INFO("             johnston_1988, reassigned, hybrid_render, event_bucket,");
+    SPECTRAL_LOG_INFO("             higher_order_interp, qnoise_shaping");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("      Special: none, default, all");
     SPECTRAL_LOG_INFO("");

@@ -128,6 +128,12 @@ int spectral_ifft_synth_render(SpectralIfftSynth* s,
     for (long m = m_first; m <= m_last; m++) {
         double center = (double)m * (double)s->hop + (double)s->n_fft / 2.0;
 
+        /* Full half-spectrum clear per frame, though only the K-bin
+         * neighborhood of each partial gets written: at N=512 this is 2 KB
+         * per frame against ~2K-tap placement work per partial, and the path
+         * still measured 7.5x over the oscillator loop — not the bottleneck.
+         * Revisit with a dirty-region clear in the ARM port, where the
+         * memory system is the constraint. */
         memset(s->re, 0, (s->n_fft / 2) * sizeof(float));
         memset(s->im, 0, (s->n_fft / 2) * sizeof(float));
         for (size_t p = 0; p < n; p++) {
