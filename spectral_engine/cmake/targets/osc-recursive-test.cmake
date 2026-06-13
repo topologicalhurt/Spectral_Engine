@@ -13,9 +13,6 @@ add_executable(osc_recursive_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/core_math/test_osc_recursive.c")
 
 spectral_apply_common_target(osc_recursive_test)
-# spectral_q15.h lives under synth/math (not a default engine include root); core is.
-target_include_directories(osc_recursive_test PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(osc_recursive_test PRIVATE m)
 
 add_test(NAME osc_recursive COMMAND osc_recursive_test)

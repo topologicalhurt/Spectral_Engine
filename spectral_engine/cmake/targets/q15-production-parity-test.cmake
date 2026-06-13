@@ -21,9 +21,6 @@ add_executable(q15_production_parity_test EXCLUDE_FROM_ALL
     "${SPECTRAL_CORE_DIR}/spectral_log.c")
 
 spectral_apply_common_target(q15_production_parity_test)
-# spectral_q15.h lives under synth/math (not a default engine include root here).
-target_include_directories(q15_production_parity_test PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(q15_production_parity_test PRIVATE m)
 
 if(APPLE)

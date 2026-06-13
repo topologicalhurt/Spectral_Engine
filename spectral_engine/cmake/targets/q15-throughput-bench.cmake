@@ -19,9 +19,6 @@ add_executable(bench_q15_throughput EXCLUDE_FROM_ALL
     "${SPECTRAL_ENGINE_ROOT}/runtime/spectral_utils.c")
 
 spectral_apply_common_target(bench_q15_throughput)
-# spectral_q15.h lives under synth/math (not a default engine include root here).
-target_include_directories(bench_q15_throughput PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(bench_q15_throughput PRIVATE m)
 
 if(APPLE)

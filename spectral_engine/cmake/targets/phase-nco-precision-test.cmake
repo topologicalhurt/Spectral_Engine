@@ -15,10 +15,6 @@ add_executable(phase_nco_precision_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/core_contracts/test_phase_nco_precision.c")
 
 spectral_apply_common_target(phase_nco_precision_test)
-# spectral_q15.h / spectral_phase_nco.h live under synth/math + core (the latter is a
-# default engine include root; synth/math is not, so add it).
-target_include_directories(phase_nco_precision_test PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(phase_nco_precision_test PRIVATE m)
 
 add_test(NAME phase_nco_precision COMMAND phase_nco_precision_test)

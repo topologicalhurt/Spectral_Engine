@@ -12,7 +12,6 @@ add_executable(daisy_config_layout_test EXCLUDE_FROM_ALL
 
 spectral_apply_common_target(daisy_config_layout_test)
 target_include_directories(daisy_config_layout_test PRIVATE
-    "${SPECTRAL_REPO_ROOT}/api/daisy_seed"
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
+    "${SPECTRAL_REPO_ROOT}/api/daisy_seed")
 
 add_test(NAME daisy_config_layout COMMAND daisy_config_layout_test)

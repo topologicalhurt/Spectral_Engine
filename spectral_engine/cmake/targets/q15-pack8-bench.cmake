@@ -19,9 +19,6 @@ add_executable(bench_q15_pack8 EXCLUDE_FROM_ALL
     "${SPECTRAL_ENGINE_ROOT}/runtime/spectral_utils.c")
 
 spectral_apply_common_target(bench_q15_pack8)
-# spectral_q15.h / spectral_phase_nco.h boundary lives under synth/math.
-target_include_directories(bench_q15_pack8 PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(bench_q15_pack8 PRIVATE m)
 
 if(APPLE)

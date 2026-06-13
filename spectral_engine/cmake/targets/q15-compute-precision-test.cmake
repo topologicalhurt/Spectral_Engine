@@ -13,9 +13,6 @@ add_executable(q15_compute_precision_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/core_contracts/test_q15_compute_precision.c")
 
 spectral_apply_common_target(q15_compute_precision_test)
-# spectral_q15.h lives under synth/math (not a default engine include root here).
-target_include_directories(q15_compute_precision_test PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(q15_compute_precision_test PRIVATE m)
 
 add_test(NAME q15_compute_precision COMMAND q15_compute_precision_test)

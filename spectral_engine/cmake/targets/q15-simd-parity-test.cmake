@@ -24,9 +24,6 @@ add_executable(q15_simd_parity_test EXCLUDE_FROM_ALL
 spectral_apply_common_target(q15_simd_parity_test)
 # Expose the static-inline packed Q15 eval so the exhaustive parity sweep can call it.
 target_compile_definitions(q15_simd_parity_test PRIVATE SPECTRAL_EXPOSE_Q15_PACK8_FOR_TEST=1)
-# spectral_q15.h / spectral_phase_nco.h live under synth/math.
-target_include_directories(q15_simd_parity_test PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth/math")
 target_link_libraries(q15_simd_parity_test PRIVATE m)
 
 if(APPLE)

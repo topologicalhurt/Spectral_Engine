@@ -67,7 +67,6 @@ ENGINE_INCLUDE_SUBDIRS = (
     "spectral_engine",
     "spectral_engine/core",
     "spectral_engine/synth",
-    "spectral_engine/synth/math",
     "spectral_engine/synth/api",
     "spectral_engine/runtime",
     "spectral_engine/analysis",
@@ -75,7 +74,7 @@ ENGINE_INCLUDE_SUBDIRS = (
 
 KERNEL_TU_RELPATHS = (
     "spectral_engine/synth/backends/arm/spectral_synth_arm32.c",
-    "spectral_engine/synth/math/spectral_q15.c",
+    "spectral_engine/core/spectral_q15.c",
     "spectral_engine/core/spectral_lut.c",
 )
 
