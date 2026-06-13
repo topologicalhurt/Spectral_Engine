@@ -17,11 +17,21 @@ static inline float spectral_pitch_factor(float semitones) {
     return powf(2.0f, semitones / 12.0f);
 }
 
-/* 64-byte segment (desktop) - cache-line aligned */
+/* 64-byte segment (desktop) - cache-line aligned. One sinusoidal partial over a
+ * time span: the analysis output and the synthesis input. Field units are the
+ * engine-wide contract (AI_CANON 9) and must not drift across backends. */
 typedef struct __attribute__((aligned(64))) {
-    float start, length, phase, omega, df, amp, da;
+    float start;   /* onset, samples */
+    float length;  /* duration, samples */
+    float phase;   /* initial phase, radians */
+    float omega;   /* angular frequency, radians/sample */
+    float df;      /* chirp rate d(omega)/dn, radians/sample^2 */
+    float amp;     /* initial amplitude, linear [-1, 1] */
+    float da;      /* amplitude slope, linear/sample */
     union {
         float _pad[9];
+        /* width: timbre shape param (e.g. PWM duty) in [0,1]; _pad_w: cubic-phase
+         * annotation words, see spectral_segment_set_cubic below. */
         struct { float width; float _pad_w[8]; };
     };
 } Segment;
@@ -65,8 +75,11 @@ typedef struct __attribute__((aligned(4))) {
 _Static_assert(sizeof(SegmentCompact) == 32, "SegmentCompact size");
 #endif
 
-/* 32-byte GPU segment — packs only the 7 active fields used by GPU kernels.
- * Stored in the segment cache for zero-copy GPU upload via mmap. */
+/* 32-byte GPU segment — packs only the 7 active fields used by GPU kernels
+ * (start/length/phase/omega/df/amp/da; units mirror Segment, AI_CANON 9).
+ * Stored in the segment cache for zero-copy GPU upload via mmap. The flat scalar
+ * body is parsed by the Metal struct-mirror codegen (metal_osc.py) — keep it a
+ * flat scalar list so the generated MSL mirror stays byte-equivalent. */
 typedef struct __attribute__((aligned(4))) {
     float start, length, phase, omega, df, amp, da;
     float _pad;
