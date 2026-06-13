@@ -119,7 +119,8 @@ static inline q31_t spectral_float_to_q31(float f) {
 #define Q31_TO_FLOAT(q) ((float)(q) * SPECTRAL_INV_Q31_SCALE)
 
 /* Phase conversion: radians [0, 2pi) -> signed Q15 [-32768, 32767]
- * Normalizes to [0,1), subtracts 0.5 to center at 0, scales to Q15. */
+ * Normalizes to [0,1), subtracts 0.5 to center at 0, scales by 65536 = 2^16
+ * (the phase index spans the full circle as 2^16 — see the Q-domain map). */
 static inline q15_t spectral_phase_rad_to_q15(float rad) {
     float n = 0.0f;
 
@@ -133,8 +134,8 @@ static inline q15_t spectral_phase_rad_to_q15(float rad) {
     return (q15_t)((n - 0.5f) * 65536.0f);
 }
 
-/* Omega (rad/sample) to Q8.8 frequency format.
- * Values > 255 are divided by 4 before encoding. */
+/* Omega (rad/sample) to Q8.8 frequency format (scale by 256 = 2^8, the 8
+ * fractional bits). Values > 255 are pre-divided by 4 so they still fit UQ8.8. */
 static inline uq88_t spectral_omega_to_q88(float omega) {
     float o = omega;
 
