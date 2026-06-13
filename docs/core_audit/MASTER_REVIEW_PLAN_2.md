@@ -17,16 +17,23 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
   -Werror break was found + fixed in the process).
 - W5a `spectral_q15.{h,c} → spectral_q.{h,c}` — truthful Q-domain filename; pure
   path/guard rename, no symbol churn.
+- W5b `oscillator.{c,h}/oscillator_dispatch.h → spectral_oscillator*` — the un-prefixed
+  core group + non-namespaced guards; pure path/guard rename, codegen-identical.
+- SD-5 `adaptive_track_density honesty` — was advertised "Implemented" but no-ops under
+  the default build gate; now CLI lists it Experimental and the compiled-out path fails
+  loudly (returns BACKEND_UNAVAIL) instead of silent OK. Cubic code kept for F-stream.
+- W4-D7 `one ASCII tolower` — three lowercasers (one ASCII + two locale-dependent libc)
+  → one spectral_ascii_tolower; latent locale-sensitivity in token matching removed.
 
 REMAINING (priority order):
-1. oscillator* → spectral_oscillator* full file+symbol sweep (SD-2, ratified); A3
-   spectral_osc_recursive.h → spectral_osc_q31.h.
-2. SD-5 honesty: stop the CLI advertising adaptive_track_density as "Implemented"
-   (it no-ops); precise-phase → Reserved, code kept for the F-stream.
-3. W4 D7 (locale-dependent tolower triplicate — latent bug), D8 (DSB unify),
-   D3/D5 (fade-loop factoring), D6 (sin_init parity).
-4. W6 SD-4 uq88_t/q30_t typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
-   renames (freq_inc→phase_inc, t_hop→…).
+1. The other half of SD-2/SD-3: `osc_*` → `spectral_osc_*` SYMBOL sweep (~34 fns + ~40
+   OSC_ macros across dispatch + band-limited modules) and rename the arch
+   `oscillator_simd.{c}` pair (arch/simd = SIMDe, arch/arm = CMSIS, disambiguate the
+   duplicate basename). LARGE + collision-prone — warrants a fresh, focused pass.
+2. A3 `spectral_osc_recursive.h → spectral_osc_q31.h` (3 includers; small).
+3. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
+4. W6 SD-4 `uq88_t`/`q30_t` typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
+   renames (`freq_inc`→`phase_inc`, `t_hop`→…); a proc-mask honesty ctest.
 5. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
    the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
    arch-gated via macros), each conversion behind a parity test.
