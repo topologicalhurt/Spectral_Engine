@@ -45,13 +45,7 @@ int main(int argc, char** argv) {
     SpectralTimingResults timing;
     PipelineError result = spectral_pipeline_run(&opts, &timing);
     
-    /* Release cached resources */
-#if HAS_METAL
-    metal_cleanup();
-#endif
-#if HAS_CUDA
-    cuda_cleanup();
-#endif
+    spectral_backend_cleanup_all();
 
     if (result != PIPELINE_OK) {
         spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_PIPELINE, result,

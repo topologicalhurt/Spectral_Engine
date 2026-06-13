@@ -63,6 +63,10 @@ typedef struct {
     size_t       max_output_len;
 } SpectralBackendCaps;
 
+/* Release every compiled backend's cached resources (idempotent; the only
+ * teardown entry callers need — no per-backend build-flag sniffing). */
+void spectral_backend_cleanup_all(void);
+
 /* Backend queries */
 int spectral_backend_supports_timbre(SynthBackend backend, int timbre_id);
 int spectral_backend_max_timbre(SynthBackend backend);

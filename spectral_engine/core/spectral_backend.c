@@ -91,6 +91,16 @@ const SpectralBackendVTable* spectral_backend_vtable(SynthBackend backend) {
     }
 }
 
+void spectral_backend_cleanup_all(void) {
+    /* Real backends only: AUTO/EXPORT are virtual entries sharing the
+     * fallback vtable, and a backend missing from this build resolves to
+     * the fallback's no-op cleanup. */
+    static const SynthBackend real[] = { BACKEND_CPU, BACKEND_METAL, BACKEND_CUDA };
+    for (size_t i = 0; i < sizeof(real) / sizeof(real[0]); i++) {
+        spectral_backend_vtable(real[i])->cleanup();
+    }
+}
+
 /* Backend queries — collapsed to vtable lookups */
 
 int spectral_backend_supports_timbre(SynthBackend backend, int timbre_id) {
