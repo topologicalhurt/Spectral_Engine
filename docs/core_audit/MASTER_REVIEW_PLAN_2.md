@@ -40,10 +40,19 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
 - SD-4 `uq88_t` typedef — closes the q88 half of the self-admitted debt (frequency UQ8.8
   carrier, threaded through freq_q88 + omega_to_q88). q30 stays suffix-only: its only q31
   carrier is unused; the live MAC accumulates in q63_t, so a q30_t typedef would be dead.
+- A5 `t_hop → frame_start_sample` — opaque name for a frame's onset-in-samples; renamed
+  across the analysis tracker/interp (chose frame_start_sample over frame_start to avoid the
+  FFT path's frame-INDEX frame_start). All NAMING findings (A1–A5) are now closed.
+- F3 `Q-conversion literal provenance` — annotated 65536=2^16 (full-circle phase index),
+  256=2^8 (UQ8.8 scale), 0.99996948=32767/32768 (largest n casting to Q15_MAX). Comment-only.
 
-REMAINING (priority order):
-1. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
-2. W6 F1–F3 constant provenance; A5 `t_hop` truthful rename; a proc-mask honesty ctest.
+REMAINING (priority order — the careful/separate work):
+1. W6 F1 (tether arm32 256 block size to a named constant + _Static_assert), F2 (prefetch/
+   STFT-chunk knob provenance + sysconf page size) — partly code, need verified derivations.
+2. W4 D3/D5 (fade-loop factoring — behavioral hot-kernel refactor), D6 (sin_init parity test),
+   D8 (DSB-barrier unify); a proc-mask honesty ctest.
+3. **Scoped follow-up** (its own campaign): grow spectral_q.h into the full cross-format
+   conversion library (q15↔q31↔q63 hardware/bit-hack fast paths, arch-gated via macros).
 3. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
    the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
    arch-gated via macros), each conversion behind a parity test.
