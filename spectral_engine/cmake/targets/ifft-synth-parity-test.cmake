@@ -10,13 +10,11 @@
 
 add_executable(ifft_synth_parity_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/core_contracts/test_ifft_synth_parity.c"
-    "${SPECTRAL_ENGINE_ROOT}/synth/spectral_synth_ifft.c"
+    "${SPECTRAL_CORE_DIR}/spectral_synth_ifft.c"
     "${SPECTRAL_DRIVERS_VDSP_DIR}/spectral_ifft_vdsp.c"
     "${SPECTRAL_ARCH_REF_DIR}/spectral_ifft_ref.c")
 
 spectral_apply_common_target(ifft_synth_parity_test)
-target_include_directories(ifft_synth_parity_test PRIVATE
-    "${SPECTRAL_ENGINE_ROOT}/synth")
 target_link_libraries(ifft_synth_parity_test PRIVATE m)
 if(APPLE)
     target_link_libraries(ifft_synth_parity_test PRIVATE "-framework Accelerate")

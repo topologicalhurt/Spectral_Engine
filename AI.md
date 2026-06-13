@@ -15,8 +15,7 @@ the full correctness rules; this file is the orientation.
 - `spectral_engine/drivers/` — device/library backends behind core contracts: `vdsp/` now;
   `metal/`, `cuda/` arrive at L4 (today still `synth/backends/gpu/`)
 - `spectral_engine/analysis/` — FFT, peak estimation/tracking, processing chain
-- `spectral_engine/synth/` — cpu backend + gpu backends + `synth/api/spectral_synth.h`
-  (dissolves at L3/L4)
+- `spectral_engine/synth/` — gpu backends only (lifted into `drivers/` at L4)
 - `spectral_engine/runtime/` — console, utils (`spectral_utils.h` lives here)
 - `spectral_engine/cmd/` — CLI
 - `api/daisy_seed/` — Daisy Seed board support / public API
@@ -90,7 +89,7 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATO
   Rationale: spectral_tools ADR-0003.
 
 ## Public API (SemVer, 0.x = unstable)
-- Desktop: `spectral_engine/synth/api/spectral_synth.h`
+- Desktop: `spectral_engine/core/spectral_synth.h`
 - Daisy Seed: `api/daisy_seed/daisy_seed_spectral.h`
 - `api/spectral_api.h` does not exist; these two are the contract.
 

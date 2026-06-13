@@ -2,6 +2,7 @@
  * Allows testing embedded synthesis path without hardware.
  */
 
+#include "spectral_synth.h"   /* the synth_cpu contract this TU implements */
 #include "spectral_synth_arm32.h"
 #include "spectral_synth_internal.h"
 #include "spectral_error.h"
@@ -67,13 +68,16 @@ static SpectralError simulation_timbre_fallback_invoke(
     int n_threads, double* t_synth, void* user_data)
 {
     (void)user_data;
-    return synth_arm32_simulation(sa, out_buffer, out_len, stretch, pitch,
-                                  timbre, n_threads, t_synth);
+    return synth_cpu(sa, out_buffer, out_len, stretch, pitch,
+                     timbre, n_threads, t_synth);
 }
 
 /* Desktop simulation entry point */
 
-SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t out_len,
+/* The build-selected CPU synthesis entry: in the embedded-synth profiles
+ * THIS TU defines synth_cpu (the float OpenMP body in spectral_synth_cpu.c
+ * compiles itself out), so callers dispatch by symbol — no rename macro. */
+SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
                                      float stretch, float pitch, SpectralTimbre timbre,
                                      int n_threads, double* t_synth) {
     SpectralError result = SPECTRAL_OK;
@@ -312,9 +316,6 @@ int embedded_sim_last_report(EmbeddedTargetConfig* cfg,
     return 1;
 }
 
-/* synth_cpu is provided via macro in spectral_synth_arm32.h
- * when SPECTRAL_USE_EMBEDDED_SYNTH is defined, redirecting to synth_arm32_simulation */
-
 /* Wavetable version - falls back to simulation (wavetables not yet supported) */
 #ifdef SPECTRAL_USE_EMBEDDED_SYNTH
 SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out_len,
@@ -339,7 +340,7 @@ SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out
         spectral_format_resolution_context(resolution, sizeof(resolution), &context);
         SPECTRAL_WARN_ONCE(TIMBRE_COUNT + 1, "%s", resolution);
     }
-    return synth_arm32_simulation(sa, out_buffer, out_len, stretch, pitch,
-                                  timbre, n_threads, t_synth);
+    return synth_cpu(sa, out_buffer, out_len, stretch, pitch,
+                     timbre, n_threads, t_synth);
 }
 #endif

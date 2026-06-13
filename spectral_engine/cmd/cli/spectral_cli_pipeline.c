@@ -1211,7 +1211,7 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
                                                    opts->n_threads, t_synth,
                                                    &effective_backend, &effective_timbre);
     if (err == SPECTRAL_OK) {
-#if SPECTRAL_IS_EMBEDDED_SIM
+#if SPECTRAL_IS_EMBEDDED_SIM && !SPECTRAL_NO_PERF
         {
             EmbeddedTargetConfig sim_cfg;
             EmbeddedPerfEstimate sim_est;

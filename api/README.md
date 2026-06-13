@@ -54,7 +54,7 @@ Optional Daisy example firmware:
 Two versioned public surfaces (SemVer, currently 0.1.0 — pre-1.0, still subject
 to change):
 
-    spectral_engine/synth/api/spectral_synth.h   Desktop synthesis (float)
+    spectral_engine/core/spectral_synth.h        Desktop synthesis (float)
     api/daisy_seed/daisy_seed_spectral.h          Daisy Seed (Q15, Cortex-M7)
 
 

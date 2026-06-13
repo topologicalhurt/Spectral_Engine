@@ -157,14 +157,6 @@ int embedded_sim_last_report(EmbeddedTargetConfig* cfg,
                              EmbeddedPerfEstimate* est,
                              EmbeddedMemoryUsage* mem);
 
-SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t out_len,
-                                     float stretch, float pitch, SpectralTimbre timbre,
-                                     int n_threads, double* t_synth);
-
-#ifdef SPECTRAL_USE_EMBEDDED_SYNTH
-#define synth_cpu synth_arm32_simulation
-#endif
-
 #endif /* SPECTRAL_USE_EMBEDDED_SYNTH || SPECTRAL_EMBEDDED_SIMULATION */
 
 #ifdef __cplusplus

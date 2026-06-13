@@ -66,8 +66,6 @@ def daisy_target_flags(repo_root: Path) -> tuple[str, ...]:
 ENGINE_INCLUDE_SUBDIRS = (
     "spectral_engine",
     "spectral_engine/core",
-    "spectral_engine/synth",
-    "spectral_engine/synth/api",
     "spectral_engine/runtime",
     "spectral_engine/analysis",
 )

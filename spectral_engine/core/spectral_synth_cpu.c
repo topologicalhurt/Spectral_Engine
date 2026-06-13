@@ -428,8 +428,8 @@ static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, 
 
 /* Public synthesis functions */
 
-/* When SPECTRAL_USE_EMBEDDED_SYNTH is defined, synth_cpu is macro-redirected
- * to synth_arm32_simulation (defined in spectral_synth_simulation.c). */
+/* Under SPECTRAL_USE_EMBEDDED_SYNTH the build selects the simulation TU's
+ * synth_cpu definition instead; this float OpenMP body compiles itself out. */
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
                         float stretch, float pitch, SpectralTimbre timbre, int n_threads,
