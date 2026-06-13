@@ -32,16 +32,11 @@
 #define TOTAL 8192u
 #define N_PARTIALS 64u
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
+
+#include "../support/xorshift_rng.h"
 
 static unsigned rng_state = 0x5eed5eedu;
-static double rng01(void) {
-    unsigned x = rng_state;
-    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-    rng_state = x;
-    return (double)(x & 0xffffffu) / 16777216.0;
-}
 
 static double dbfs(double x) { return 20.0 * log10(x > 1e-300 ? x : 1e-300); }
 
@@ -62,13 +57,13 @@ static void test_backend_contract(void) {
     double fre[N_FFT], fim[N_FFT];
     memset(fre, 0, sizeof fre); memset(fim, 0, sizeof fim);
 
-    re[0] = (float)(rng01() - 0.5);              /* DC */
-    im[0] = (float)(rng01() - 0.5);              /* Nyquist (packed) */
+    re[0] = (float)(xorshift32_unit(&rng_state) - 0.5);              /* DC */
+    im[0] = (float)(xorshift32_unit(&rng_state) - 0.5);              /* Nyquist (packed) */
     fre[0] = re[0];
     fre[N_FFT / 2] = im[0];
     for (size_t k = 1; k < N_FFT / 2; k++) {
-        re[k] = (float)(rng01() - 0.5);
-        im[k] = (float)(rng01() - 0.5);
+        re[k] = (float)(xorshift32_unit(&rng_state) - 0.5);
+        im[k] = (float)(xorshift32_unit(&rng_state) - 0.5);
         fre[k] = re[k];           fim[k] = im[k];
         fre[N_FFT - k] = re[k];   fim[N_FFT - k] = -im[k];   /* Hermitian */
     }
@@ -101,9 +96,9 @@ static void test_stream_parity(void) {
     static SpectralIfftPartial parts[N_PARTIALS];
     rng_state = 0xc0ffee11u;
     for (size_t p = 0; p < N_PARTIALS; p++) {
-        parts[p].bin = (float)(10.0 + 230.0 * rng01());
-        parts[p].amp = (float)((0.05 + 0.95 * rng01()) / N_PARTIALS);
-        parts[p].phase0 = (float)(2.0 * SPECTRAL_PI_D * rng01() - SPECTRAL_PI_D);
+        parts[p].bin = (float)(10.0 + 230.0 * xorshift32_unit(&rng_state));
+        parts[p].amp = (float)((0.05 + 0.95 * xorshift32_unit(&rng_state)) / N_PARTIALS);
+        parts[p].phase0 = (float)(2.0 * SPECTRAL_PI_D * xorshift32_unit(&rng_state) - SPECTRAL_PI_D);
     }
 
     static float out[TOTAL], out2[TOTAL];

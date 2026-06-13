@@ -20,8 +20,7 @@
 
 #include "spectral_osc_formulas.h"
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 static int is_finite_f(float x) { return isfinite(x) != 0; }
 

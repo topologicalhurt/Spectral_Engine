@@ -60,8 +60,7 @@
 #undef OSC_VW
 #undef OSC_VSUF
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Same per-sample budget as osc_parity (FMA-contraction class). */
 #define BUDGET_ABS 1.0e-5

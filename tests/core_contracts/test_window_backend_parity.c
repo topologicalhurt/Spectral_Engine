@@ -25,8 +25,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Documented SSOT references in double precision, symmetric (N-1) with the
  * canonical textbook coefficients — so a convention change (N vs N-1) OR a

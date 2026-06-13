@@ -60,14 +60,14 @@ static const SpectralBackendVTable vtable_cpu = {
 
 #if HAS_METAL
 static const SpectralBackendVTable vtable_metal = {
-    BACKEND_METAL, "Metal", TIMBRE_PARABOLA, BACKEND_METAL_WAVETABLE_SUPPORT, 1,
+    BACKEND_METAL, "Metal", SPECTRAL_GPU_MAX_TIMBRE, BACKEND_METAL_WAVETABLE_SUPPORT, 1,
     metal_init, metal_available, synth_metal, metal_cleanup
 };
 #endif
 
 #if HAS_CUDA
 static const SpectralBackendVTable vtable_cuda = {
-    BACKEND_CUDA, "CUDA", TIMBRE_PARABOLA, BACKEND_CUDA_WAVETABLE_SUPPORT, 1,
+    BACKEND_CUDA, "CUDA", SPECTRAL_GPU_MAX_TIMBRE, BACKEND_CUDA_WAVETABLE_SUPPORT, 1,
     cuda_init, cuda_available, synth_cuda, cuda_cleanup
 };
 #endif

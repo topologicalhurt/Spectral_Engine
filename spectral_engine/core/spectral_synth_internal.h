@@ -78,8 +78,13 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
                                            int n_threads, double* t_synth,
                                            int* out_continue_backend);
 
+/* Highest timbre the GPU shader sets implement: the width-parameterized
+ * timbres (quantized/pwm) have no MSL/CUDA port. ONE constant — the backend
+ * vtables, this predicate, and the fallback router must agree on the cap. */
+#define SPECTRAL_GPU_MAX_TIMBRE TIMBRE_PARABOLA
+
 static inline int gpu_timbre_supported(SpectralTimbre timbre) {
-    return (int)timbre <= TIMBRE_PARABOLA;
+    return (int)timbre <= SPECTRAL_GPU_MAX_TIMBRE;
 }
 
 /* GPU tile preprocessing - shared between Metal and CUDA backends */

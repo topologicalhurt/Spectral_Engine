@@ -23,8 +23,7 @@
 #include "spectral_common.h"
 #include "spectral_contracts.h"
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 static void populate_valid(Segment* s) {
     memset(s, 0, sizeof(*s));

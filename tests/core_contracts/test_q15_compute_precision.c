@@ -47,8 +47,7 @@
 #include "spectral_q15.h"
 #include "spectral_osc_q15.h"   /* the production Q15 evaluators under test */
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Correctness sanity floor: any correct Q15 waveform eval beats this by 20+ dB.
  * This is a tripwire for gross bugs, not the precision bar — see the file header. */

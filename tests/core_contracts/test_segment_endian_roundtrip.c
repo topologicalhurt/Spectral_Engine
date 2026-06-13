@@ -25,8 +25,7 @@
 #include "spectral_common.h"
 #include "spectral_endian.h"
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Distinct, non-byte-palindrome float values so each word visibly changes under
  * a byte swap (e.g. 1.5f = 0x3FC00000 -> 0x0000C03F). */

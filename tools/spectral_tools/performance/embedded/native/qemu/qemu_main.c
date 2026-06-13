@@ -40,21 +40,7 @@ typedef struct {
 static const FixtureVoice fixture_spec[N_SEG] = { FIXTURE_VOICES(X) };
 #undef X
 
-static void semihost_write0(const char* s) {
-    register uint32_t r0 __asm("r0") = 0x04;   /* SYS_WRITE0 */
-    register const char* r1 __asm("r1") = s;
-    /* r0 is in-out: the semihosting trap writes a result into it. */
-    __asm volatile("bkpt 0xab" : "+r"(r0) : "r"(r1) : "memory");
-}
-
-static void write_hex_u32(const char* label, uint32_t v) {
-    static const char hexd[] = "0123456789abcdef";
-    char buf[12];
-    for (int i = 0; i < 8; i++) buf[i] = hexd[(v >> (28 - 4 * i)) & 0xFu];
-    buf[8] = '\n'; buf[9] = '\0';
-    semihost_write0(label);
-    semihost_write0(buf);
-}
+#include "rig_support.h"
 
 static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
 /* The segment store mirrors the Daisy placement contract (SPECTRAL_MEM_BULK ->

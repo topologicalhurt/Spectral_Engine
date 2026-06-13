@@ -67,6 +67,11 @@ class FftProbeResult:
 
 
 def _build_fft_elf(tc: Toolchain, *, out_dir: Path, fft_n: int, iters: int) -> Path:
+    """One-shot freestanding build, deliberately NOT shared with
+    counts._build_runner_elf: that one needs a per-TU compile plan (per-TU
+    flags, generated fixture header) and these probe numbers are published —
+    changing the build shape would re-baseline them for no measurement gain.
+    The shared contract is the board: startup.c + mps2_an500.ld + rig_support.h."""
     dsp = tc.repo_root / "third_party/CMSIS-DSP"
     core = tc.repo_root / "third_party/CMSIS_6/CMSIS/Core/Include"
     if not (dsp / "Include/arm_math.h").is_file():

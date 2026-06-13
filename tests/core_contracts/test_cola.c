@@ -25,8 +25,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Periodic (DFT-even) Hann: w[n] = 0.5*(1 - cos(2*pi*n/N)). Unlike the symmetric
  * N-1 form, this satisfies COLA at hop = N/2, N/4, ... exactly. */

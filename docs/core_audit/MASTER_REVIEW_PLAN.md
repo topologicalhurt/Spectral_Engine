@@ -117,6 +117,18 @@ per matrix target (class fix above); the gate zip-truncation escaped because
 comparison loops over parallel lists lacked a set-equality precondition
 (class rule: assert set equality before element-compare — now in the gate;
 sweep other zips: `grep -n "zip(" tools/`).
+- **BUG (found by the W4 conversion-policy comparison): `convert_segments.c`
+  scales `da`/`df` by 1/1000 (`SPECTRAL_MILLIS_PER_SECOND_F`) before Q15
+  encoding.** The unit chain is per-SAMPLE end to end: analysis writes
+  `da = (next_amp - amp) * inv_hop`, desktop synth consumes
+  `da * inv_stretch`, the arm32 kernel computes `amp_q15 + da_q15 * offset`
+  per sample, and the sim conversion encodes per-sample. /1000 makes typical
+  fades (|da| ~ 2e-4) quantize to da_q15 == 0 — offline-converted .spq
+  segments lose fades and chirp entirely. Escaped because NO harness runs
+  the convert_segments tool and checks its output against the kernel's unit
+  contract. Class fix (W5): E2E test runs the real binary on a generated
+  segments.bin and asserts the encoded fields match the named boundary
+  macros applied to the input — units pinned by test, for every field.
 
 ### R6 Comments — the conversational-reference scrub (cardinal sin; the standing rule is AI.md's "No AI/prompt/planning-referential
 text in code", violated extensively by recent work)
@@ -224,6 +236,11 @@ economy matter most.
   + daisy_config_layout ctest (sabotage-verified); baseline meta de-pathed
   (basename+version) + fixture id renamed stagger9-8k; baseline regenerated,
   diff exactly the two intended fields. ctest 23, pytest 74, gate PASS.
-- W4 next: rig_support.h + tests/support/check.h hoists; segment_to_q15
-  conversion-policy unification; shared ELF builder; GPU timbre-cap single
-  constant.
+- **W4 DONE** (dup hoists): check.h (14 tests), xorshift_rng.h +
+  rig_support.h (4 TUs, sequences byte-identical, gate-proven),
+  SPECTRAL_GPU_MAX_TIMBRE (4 sites). ELF-builder hoist DECLINED with
+  in-place rationale. Conversion-policy comparison found the convert_segments
+  /1000 unit BUG (R5) instead of a hoist — fix + E2E class test lead W5.
+- W5 next: convert_segments da/df unit fix + E2E class test; keep-alive
+  hack; __import__ hack; IFFT memset comment-or-fix; generate
+  reproducibility double-run; method-token stubs fail loudly.

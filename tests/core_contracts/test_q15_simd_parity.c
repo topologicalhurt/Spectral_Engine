@@ -38,8 +38,7 @@
 simde__m128i spectral_q15_pack8_eval_for_test(simde__m128i pq, SpectralTimbre timbre,
                                               const q15_t* lut);
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 #define MAX_LEN 2048
 

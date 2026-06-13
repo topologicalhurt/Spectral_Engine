@@ -248,7 +248,7 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
                                            int* out_continue_backend) {
     return spectral_handle_unsupported_timbre(
         backend_name,
-        TIMBRE_PARABOLA,
+        SPECTRAL_GPU_MAX_TIMBRE,
         timbre,
         timbre,
         SPECTRAL_RESOLUTION_REASON_GPU_TIMBRE_LIMIT,

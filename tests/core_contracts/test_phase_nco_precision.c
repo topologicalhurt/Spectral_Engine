@@ -52,8 +52,7 @@
 #include "spectral_phase_nco.h"      /* the integer-NCO primitive under test */
 #include "spectral_phase_nco8.h"     /* the vectorized 8-wide uint32 NCO (Bv) under test */
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Correctness sanity floor: any sane phase source clears this by 20+ dB. Tripwire for a
  * gross NCO bug (wrong scale, dropped term), NOT the precision bar -- the table is. */

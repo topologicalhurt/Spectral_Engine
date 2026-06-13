@@ -33,14 +33,10 @@
  * compiles dependency-free with a bare cc invocation */
 #define PI 3.14159265358979323846
 
-/* xorshift for deterministic partial sets */
+#include "../../support/xorshift_rng.h"
+
+/* deterministic partial sets */
 static unsigned rng_state = 0x9e3779b9u;
-static double rng01(void) {
-    unsigned x = rng_state;
-    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-    rng_state = x;
-    return (double)(x & 0xffffffu) / 16777216.0;
-}
 
 static double win[IFFT_N];
 static void make_window(void) {
@@ -114,9 +110,9 @@ static void frame_test(int K, int O) {
     double worst = 0.0;
 
     for (int c = 0; c < 24; c++) {
-        double bin = 20.0 + 200.0 * rng01();
-        double amp = 0.1 + 0.9 * rng01();
-        double phi = 2.0 * PI * rng01() - PI;
+        double bin = 20.0 + 200.0 * xorshift32_unit(&rng_state);
+        double amp = 0.1 + 0.9 * xorshift32_unit(&rng_state);
+        double phi = 2.0 * PI * xorshift32_unit(&rng_state) - PI;
         double omega = 2.0 * PI * bin / IFFT_N;
 
         memset(re, 0, sizeof re); memset(im, 0, sizeof im);
@@ -145,9 +141,9 @@ static void stream_test(int K, int O, int P) {
 
     rng_state = 0xc0ffee11u;
     for (int p = 0; p < P; p++) {
-        binv[p] = 8.0 + 230.0 * rng01();
-        ampv[p] = (0.05 + 0.95 * rng01()) / P;     /* headroom */
-        phiv[p] = 2.0 * PI * rng01() - PI;
+        binv[p] = 8.0 + 230.0 * xorshift32_unit(&rng_state);
+        ampv[p] = (0.05 + 0.95 * xorshift32_unit(&rng_state)) / P;     /* headroom */
+        phiv[p] = 2.0 * PI * xorshift32_unit(&rng_state) - PI;
     }
 
     for (int mfr = 0; mfr < n_frames; mfr++) {

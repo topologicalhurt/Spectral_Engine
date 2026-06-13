@@ -30,8 +30,7 @@
 #include "spectral_synth_internal.h"
 #include "spectral_common.h"
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Budgets. Measured worst case on this tree (Apple Silicon, default build):
  *   per-sample max abs diff = 2.38e-7  (quantized; sine/saw/triangle/parabola

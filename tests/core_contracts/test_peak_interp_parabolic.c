@@ -17,8 +17,7 @@
 
 #include "spectral_windows.h"
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 #define LOG_FLOOR 1.0e-30
 #define DENOM_EPS 1.0e-20
