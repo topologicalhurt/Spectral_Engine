@@ -24,17 +24,20 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
   loudly (returns BACKEND_UNAVAIL) instead of silent OK. Cubic code kept for F-stream.
 - W4-D7 `one ASCII tolower` — three lowercasers (one ASCII + two locale-dependent libc)
   → one spectral_ascii_tolower; latent locale-sensitivity in token matching removed.
+- W5c `osc_* → spectral_osc_*` — the 18 exported oscillator API symbols (dispatch + SIMD
+  interface + band-limited) renamed across 17 files; word-boundary, collision-checked;
+  OSC_ macros / g_osc_ statics / ctest names deliberately left. SD-2 (files+symbols) DONE.
+- A3 `spectral_osc_recursive.h → spectral_osc_q31.h` — the Q31 oscillator now named by
+  domain, matching spectral_osc_q15.h; guard + includers updated (the test keeps its
+  osc_recursive name — it pins the recursive-form numerical-stability contract).
 
 REMAINING (priority order):
-1. The other half of SD-2/SD-3: `osc_*` → `spectral_osc_*` SYMBOL sweep (~34 fns + ~40
-   OSC_ macros across dispatch + band-limited modules) and rename the arch
-   `oscillator_simd.{c}` pair (arch/simd = SIMDe, arch/arm = CMSIS, disambiguate the
-   duplicate basename). LARGE + collision-prone — warrants a fresh, focused pass.
-2. A3 `spectral_osc_recursive.h → spectral_osc_q31.h` (3 includers; small).
-3. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
-4. W6 SD-4 `uq88_t`/`q30_t` typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
+1. SD-3: rename the arch `oscillator_simd.{c}` pair (arch/simd = SIMDe, arch/arm = CMSIS;
+   disambiguate the duplicate basename) + the arch/simd `oscillator_simd_*` companion files.
+2. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
+3. W6 SD-4 `uq88_t`/`q30_t` typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
    renames (`freq_inc`→`phase_inc`, `t_hop`→…); a proc-mask honesty ctest.
-5. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
+4. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
    the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
    arch-gated via macros), each conversion behind a parity test.
 
@@ -89,8 +92,8 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **fix:** Rename files to `spectral_oscillator.{c,h}` / `spectral_oscillator_dispatch.{c,h}`; guards to `SPECTRAL_OSCILLATOR_H` / `SPECTRAL_OSCILLATOR_DISPATCH_H` / `SPECTRAL_OSCILLATOR_SIMD_SCALAR_WAVES_H`; optionally rename `osc_*` public symbols → `spectral_osc_*`. The guard renames are zero-blast and can land first; the file+symbol rename is the structural decision (see SD-2).
 - **blast radius:** **14 files** include `spectral_oscillator.h`, **10** include `spectral_oscillator_dispatch.h`; ~10 cmake targets + metal codegen + `osc_backend_contract.cmake` reference the paths; `osc_*` symbols span ~6 TUs + tests. Internal-only (public API unaffected). Medium-wide, mechanical; do as one commit. *(Merged from 4 lenses.)*
 
-### A3 — `spectral_osc_recursive.h` is named by technique but is the Q31 oscillator; sibling is domain-named [HIGH] — STRUCTURAL
-- **file:line:** `core/spectral_osc_recursive.h:1` ("Coupled-form (true-rotation) Q31 sinusoidal oscillator"); `:27-30` (`q31_t c; q31_t s;`, all primitives Q31). Sibling `spectral_osc_q15.h` is named by domain. No `spectral_osc_q31.h` exists.
+### A3 — `spectral_osc_q31.h` is named by technique but is the Q31 oscillator; sibling is domain-named [HIGH] — STRUCTURAL
+- **file:line:** `core/spectral_osc_q31.h:1` ("Coupled-form (true-rotation) Q31 sinusoidal oscillator"); `:27-30` (`q31_t c; q31_t s;`, all primitives Q31). Sibling `spectral_osc_q15.h` is named by domain. No `spectral_osc_q31.h` exists.
 - **rule:** AI.md item 13 + item 7 (the maintainer's domain-vs-technique example, named explicitly)
 - **fix:** Rename to `spectral_osc_q31.h` (domain-consistent with `spectral_osc_q15.h`/`spectral_osc_formulas.h`); document the coupled-form technique inside; guard `SPECTRAL_OSC_RECURSIVE_H → SPECTRAL_OSC_Q31_H`.
 - **blast radius:** **3 includers** (the lenses said 1–2; verified: `arch/arm/spectral_synth_arm32.c`, `tests/core_math/test_osc_recursive.c`, **`tools/spectral_tools/performance/embedded/native/qemu/qemu_main.c`** — the third was missed by the lenses) + `osc-recursive-test.cmake` target name. Low risk. *(Merged from 4 lenses; corrected blast radius.)*
@@ -263,8 +266,8 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **rule:** AI.md item 1; AI.md item 7
 - **fix:** Factor the region walk into a shared driver/macro that emits the three loops given a per-sample expression, so the boundary/clamp arithmetic lives once. Lower priority than D1 (inner bodies genuinely differ float/Q15/vector); the win is the boundary logic.
 
-### D6 — `spectral_osc_recursive.h` carries a third hand-written sine polynomial [MEDIUM]
-- **file:line:** `core/spectral_osc_recursive.h:58-67` (`spectral_osc_sin_init_f64` — degree-15 odd Taylor with literal factorials + private PI/INV_PI fold) duplicates the range-reduce-then-odd-polynomial structure of `spectral_osc_formulas.h:65-81` (`spectral_fast_sin_inline`) and the SIMD twin in `oscillator_simd_kernel.inc:154`. `peak_estimator.c:96` was specifically written to AVOID "divergent polynomial trig copies".
+### D6 — `spectral_osc_q31.h` carries a third hand-written sine polynomial [MEDIUM]
+- **file:line:** `core/spectral_osc_q31.h:58-67` (`spectral_osc_sin_init_f64` — degree-15 odd Taylor with literal factorials + private PI/INV_PI fold) duplicates the range-reduce-then-odd-polynomial structure of `spectral_osc_formulas.h:65-81` (`spectral_fast_sin_inline`) and the SIMD twin in `oscillator_simd_kernel.inc:154`. `peak_estimator.c:96` was specifically written to AVOID "divergent polynomial trig copies".
 - **rule:** AI.md item 1; AI_CANON §17 + §7
 - **fix:** Route the init through a shared double-precision sine helper, OR if f64 precision is required only here, add a parity test pinning `spectral_osc_sin_init_f64` against libm `sin` over `[-3π/2, 3π/2]` (`test_osc_recursive` currently tests rotation SNR, not the init polynomial).
 - **blast radius:** Header included by 3 TUs (see A3) + cmake target. Low.

@@ -14,7 +14,7 @@
 #include "spectral_fixture_generated.h"
 #include "spectral_synth_arm32.h"
 #include "spectral_lut.h"
-#include "spectral_osc_recursive.h"
+#include "spectral_osc_q31.h"
 #include "spectral_q.h"
 
 /* No newlib: route the LUT-init sinf through the kernel's own self-contained

@@ -31,7 +31,7 @@
 #include "spectral_config.h"
 #include "spectral_io.h"
 #include "spectral_lut.h"
-#include "spectral_osc_recursive.h"
+#include "spectral_osc_q31.h"
 #include "spectral_perf_accounting.h"
 #include "spectral_utils.h"
 

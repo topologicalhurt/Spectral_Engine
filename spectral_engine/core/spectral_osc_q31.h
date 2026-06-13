@@ -1,4 +1,4 @@
-/* spectral_osc_recursive.h - Coupled-form (true-rotation) Q31 sinusoidal oscillator.
+/* spectral_osc_q31.h - Coupled-form (true-rotation) Q31 sinusoidal oscillator.
  *
  * Generates sin(omega*n + phi) by rotating a unit (cos, sin) vector by angle omega each
  * sample -- no phase->table gather, so it has DETERMINISTIC latency (no cache miss) and
@@ -15,8 +15,8 @@
  * so unlike the LUT's pipelineable loads it has no cross-sample ILP -- its win is removing
  * the memory gather, not adding parallelism.
  */
-#ifndef SPECTRAL_OSC_RECURSIVE_H
-#define SPECTRAL_OSC_RECURSIVE_H
+#ifndef SPECTRAL_OSC_Q31_H
+#define SPECTRAL_OSC_Q31_H
 
 #include "spectral_q.h"        /* q31_t, q63_t, Q31_MAX/MIN */
 
@@ -91,4 +91,4 @@ static inline void spectral_coupled_init(SpectralCoupledOsc* o, double omega, do
 }
 #endif
 
-#endif /* SPECTRAL_OSC_RECURSIVE_H */
+#endif /* SPECTRAL_OSC_Q31_H */

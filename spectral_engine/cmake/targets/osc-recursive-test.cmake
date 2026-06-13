@@ -1,7 +1,7 @@
 # Coupled-form Q31 recursive oscillator: fixed-point SNR/stability contract (CTest, C1).
 #
 # Make-or-break gate for the LUT-gather replacement (TEMP_MEM_OPT_PLAN C1). Steps the
-# coupled-form oscillator (spectral_osc_recursive.h) for 8 s per frequency across a sweep,
+# coupled-form oscillator (spectral_osc_q31.h) for 8 s per frequency across a sweep,
 # with per-block renorm, and asserts SNR >= 72 dB vs exact sin plus a drift bound -- the
 # precision/stability the magic-circle form failed. Header-only + the test TU; nothing in
 # the engine links it yet.

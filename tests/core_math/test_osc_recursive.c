@@ -5,7 +5,7 @@
  * with per-block renorm. This is the make-or-break the magic-circle form failed (see plan):
  * if the polynomial/scaling regresses, or renorm breaks, SNR collapses and this fails.
  */
-#include "spectral_osc_recursive.h"
+#include "spectral_osc_q31.h"
 #include <math.h>
 #include <stdio.h>
 
