@@ -59,8 +59,8 @@ extern "C" {
  *   phase accumulator  uq32_t     UQ0.32   full circle == 2^32; top 16  free mod-2^32
  *                                          bits = the phase index       (= 2pi, no fmod)
  *   phase acc (narrow) uq16_t     UQ0.16   full circle == 2^16          free mod-2^16
- *   frequency (omega)  uint16_t   UQ8.8    rad/sample, [0, 255.99];     -
- *                      ("q88")             values > 255 pre-scaled /4
+ *   frequency (omega)  uq88_t     UQ8.8    rad/sample, [0, 255.99];     -
+ *                                          values > 255 pre-scaled /4
  *   phase increment    q31_t      Q1.31    per-sample step added to     free (wraps
  *                                          phase_acc                    with the acc)
  *   chirp slope        q31_t      Q1.31    per-sample step of phase_inc  -
@@ -68,15 +68,15 @@ extern "C" {
  *                      ("q30")             >>15 + master scale -> q15    final pack
  *
  * NAMING: a field/var suffix states the format -- *_q15, *_q88 (freq_q88),
- * phase_acc, phase_inc/freq_delta. q88 (frequency) and q30 (the MAC accumulator)
- * have NO dedicated typedef yet -- they ride uint16_t and q31_t, and the suffix
- * is the only contract. Promoting them to named typedefs is tracked in
- * QTYPE_REFACTOR_PLAN.md. */
+ * phase_acc, phase_inc/freq_delta. The frequency UQ8.8 carrier is uq88_t; the
+ * Q2.30 MAC accumulator ("q30") rides q31_t with the suffix as its only contract
+ * (the live multi-voice mix accumulates in the wider q63_t). */
 typedef int16_t  q15_t;
 typedef int32_t  q31_t;
 typedef int64_t  q63_t;   /* wide accumulator for exact multi-voice MAC (SMLALD) */
 typedef uint16_t uq16_t;
 typedef uint32_t uq32_t;
+typedef uint16_t uq88_t;  /* UQ8.8 frequency (omega); same carrier as uq16_t, different binary point */
 
 /* Q range macros. #ifndef-guarded for CMSIS-DSP coexistence: arm_math_types.h
  * (vendored CMSIS-DSP) defines the same four names with identical VALUES but
@@ -135,13 +135,13 @@ static inline q15_t spectral_phase_rad_to_q15(float rad) {
 
 /* Omega (rad/sample) to Q8.8 frequency format.
  * Values > 255 are divided by 4 before encoding. */
-static inline uint16_t spectral_omega_to_q88(float omega) {
+static inline uq88_t spectral_omega_to_q88(float omega) {
     float o = omega;
 
     if (!isfinite(o) || o <= 0.0f) return 0u;
     if (o > 255.0f) o /= 4.0f;
     if (o > 255.0f) o = 255.0f;
-    return (uint16_t)(o * 256.0f);
+    return (uq88_t)(o * 256.0f);
 }
 
 #define PHASE_RAD_TO_Q15(rad) spectral_phase_rad_to_q15((float)(rad))
@@ -272,7 +272,7 @@ void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, 
 typedef struct __attribute__((packed, aligned(2))) {
     uint32_t start;
     uint16_t length;
-    uint16_t freq_q88;
+    uq88_t   freq_q88;
     int16_t  phase_q15;
     int16_t  amp_q15;
     int16_t  da_q15;
@@ -287,7 +287,7 @@ _Static_assert(sizeof(SpectralSegmentQ15) == 14, "size mismatch");
 typedef struct __attribute__((packed, aligned(2))) {
     uint32_t start;
     uint16_t length;
-    uint16_t freq_q88;
+    uq88_t   freq_q88;
     int16_t  phase_q15;
     int16_t  amp_q15;
     int16_t  da_q15;

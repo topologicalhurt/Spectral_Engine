@@ -35,11 +35,15 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
   the duplicate basename), + the `spectral_oscillator_simd_{scalar_waves.h,kernel.inc}`
   companions + guard. The ENTIRE oscillator family (core + arch, files + symbols) is now
   uniformly spectral_-prefixed. Dormant CMSIS pin re-pointed and passing.
+- A4 `freq_inc → phase_inc` — the per-sample phase increment was misnamed as a frequency
+  increment (the chirp freq_delta stays); whole-stem rename across 7 files, codegen-neutral.
+- SD-4 `uq88_t` typedef — closes the q88 half of the self-admitted debt (frequency UQ8.8
+  carrier, threaded through freq_q88 + omega_to_q88). q30 stays suffix-only: its only q31
+  carrier is unused; the live MAC accumulates in q63_t, so a q30_t typedef would be dead.
 
 REMAINING (priority order):
 1. W4 D8 (DSB unify), D3/D5 (fade-loop factoring), D6 (sin_init parity).
-2. W6 SD-4 `uq88_t`/`q30_t` typedefs; F1–F3 constant provenance; A4/A5 truthful symbol
-   renames (`freq_inc`→`phase_inc`, `t_hop`→…); a proc-mask honesty ctest.
+2. W6 F1–F3 constant provenance; A5 `t_hop` truthful rename; a proc-mask honesty ctest.
 3. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
    the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
    arch-gated via macros), each conversion behind a parity test.
