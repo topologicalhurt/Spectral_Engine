@@ -19,31 +19,6 @@ typedef struct SpectralWavetableBank SpectralWavetableBank;
 extern "C" {
 #endif
 
-/* Metal backend (macOS) */
-#if defined(__APPLE__) && !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
-#define HAS_METAL 1
-void metal_init(void);
-int  metal_available(void);
-SpectralError synth_metal(SegmentArray sa, float* out_buffer, size_t out_len,
-                          float stretch, float pitch, SpectralTimbre timbre, double* t_synth);
-void metal_cleanup(void);
-#else
-#define HAS_METAL 0
-#endif
-
-/* CUDA backend (Linux/NVIDIA) */
-#if defined(USE_CUDA) && !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
-#define HAS_CUDA 1
-void cuda_init(void);
-int  cuda_available(void);
-size_t cuda_vram_usage_bytes(void);
-SpectralError synth_cuda(SegmentArray sa, float* out_buffer, size_t out_len,
-                         float stretch, float pitch, SpectralTimbre timbre, double* t_synth);
-void cuda_cleanup(void);
-#else
-#define HAS_CUDA 0
-#endif
-
 /* CPU synthesis - returns SPECTRAL_OK on success, error code on failure */
 SpectralError synth_cpu(SegmentArray sa, float* out_buffer, size_t out_len,
                         float stretch, float pitch, SpectralTimbre timbre, int n_threads, double* t_synth);

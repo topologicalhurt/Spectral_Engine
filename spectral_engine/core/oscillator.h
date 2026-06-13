@@ -89,13 +89,6 @@ __device__ __forceinline__ float oscillator_cuda(float phase, int timbre) {
 
 #endif
 
-#if defined(__APPLE__) && !defined(__CUDACC__)
-/* Both defined in core/spectral_osc_metal_generated.h (codegen from the C
- * synthesis contract), included by oscillator.c. */
-extern const char* oscillator_metal_source;
-extern const char* spectral_segment_math_metal_source;
-#endif
-
 #ifdef __cplusplus
 }
 #endif

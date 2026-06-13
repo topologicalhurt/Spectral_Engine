@@ -6,7 +6,7 @@
 # version locks).  python_env.cmake is already included by utilities.cmake.
 
 set(SPECTRAL_METAL_OSC_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/spectral_tools/generators/metal_osc.py")
-set(SPECTRAL_METAL_OSC_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_osc_metal_generated.h")
+set(SPECTRAL_METAL_OSC_OUTPUT "${SPECTRAL_ENGINE_ROOT}/drivers/metal/spectral_osc_metal_generated.h")
 set(SPECTRAL_METAL_OSC_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_metal_osc.cmake")
 set(SPECTRAL_METAL_OSC_INPUTS
     "${SPECTRAL_CORE_DIR}/spectral_osc_formulas.h"
@@ -49,13 +49,8 @@ add_custom_target(verify_metal_osc
         ${SPECTRAL_METAL_OSC_INPUTS}
     VERBATIM)
 
-# oscillator.c (every target compiles it) #includes the generated header; the
-# Apple/Metal guard inside means non-Apple builds compile it to nothing, but the
-# file must exist and stay in sync, so gate each target on the verify step.
-foreach(_spectral_metal_osc_target
-        desktop simulate simulate_daisy
-        embedded_arm embedded_arm_float embedded_arm_restricted)
-    if(TARGET ${_spectral_metal_osc_target})
-        add_dependencies(${_spectral_metal_osc_target} verify_metal_osc)
-    endif()
-endforeach()
+# Only the Metal driver's payload TU includes the generated header, so only
+# the desktop build (the one target that links the driver) gates on verify.
+if(TARGET desktop)
+    add_dependencies(desktop verify_metal_osc)
+endif()

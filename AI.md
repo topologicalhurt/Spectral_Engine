@@ -12,10 +12,9 @@ the full correctness rules; this file is the orientation.
 - `spectral_engine/arch/` — ISA-contingent kernels, build-selected: `ref/` (portable
   fallbacks, always compilable), `arm/` (ARMv7E-M synth + its host-sim adapter),
   `simd/` (host SIMDe bodies)
-- `spectral_engine/drivers/` — device/library backends behind core contracts: `vdsp/` now;
-  `metal/`, `cuda/` arrive at L4 (today still `synth/backends/gpu/`)
+- `spectral_engine/drivers/` — device/library backends behind core contracts:
+  `metal/` (synth + generated MSL payload), `cuda/`, `vdsp/`
 - `spectral_engine/analysis/` — FFT, peak estimation/tracking, processing chain
-- `spectral_engine/synth/` — gpu backends only (lifted into `drivers/` at L4)
 - `spectral_engine/runtime/` — console, utils (`spectral_utils.h` lives here)
 - `spectral_engine/cmd/` — CLI
 - `api/daisy_seed/` — Daisy Seed board support / public API

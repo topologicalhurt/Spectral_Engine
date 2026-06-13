@@ -1,12 +1,13 @@
 /* spectral_synth_metal.m - Metal GPU synthesis (macOS)
  * 
  * Uses oscillator functions from oscillator.h for GPU waveform generation.
- * The Metal shader source (oscillator_metal_source) is defined in oscillator.c.
+ * The Metal shader source (oscillator_metal_source) is defined in the payload TU (spectral_osc_metal_payload.c).
  * 
  */
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#include "spectral_metal.h"   /* the driver surface this TU implements */
 #include "spectral_synth.h"
 #include "spectral_synth_internal.h"
 #include "spectral_utils.h"
@@ -15,7 +16,7 @@
 
 /* The oscillator and segment-math MSL functions are CODEGEN'd from the canonical
  * C contract (spectral_osc_formulas.h / spectral_segment_math.h) into
- * core/spectral_osc_metal_generated.h by tools/.../generators/metal_osc.py and
+ * drivers/metal/spectral_osc_metal_generated.h by tools/.../generators/metal_osc.py and
  * exposed as oscillator_metal_source + spectral_segment_math_metal_source.  The
  * CMake verify_metal_osc target enforces they match the C formulas every build,
  * which replaces the old _Static_assert(VERSION==N) drift reminders. */

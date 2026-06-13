@@ -3,6 +3,8 @@
  * Handles parsing for desktop, simulation, and restricted build modes.
  */
 #include "spectral_cli.h"
+#include "spectral_metal.h"
+#include "spectral_cuda.h"
 #include "spectral_synth.h"
 #include "spectral_utils.h"
 #include "spectral_log.h"

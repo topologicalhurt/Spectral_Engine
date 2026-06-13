@@ -4,11 +4,15 @@
  * CPU, Metal, and CUDA synthesis backends via a vtable.
  */
 
-/* Include spectral_synth.h for HAS_METAL/HAS_CUDA definitions and
- * forward declarations of synth_cpu, synth_metal, synth_cuda, etc. */
+/* spectral_synth.h declares the CPU entry points; the driver headers carry
+ * each backend's HAS_* capability and externs. This registry TU is the ONE
+ * sanctioned core->driver include edge (the static vtable table must name
+ * the driver symbols; everything else reaches them through the vtable). */
 #include "spectral_synth.h"
 #include "spectral_backend.h"
 #include "spectral_synth_internal.h"
+#include "spectral_metal.h"
+#include "spectral_cuda.h"
 #include "spectral_utils.h"
 #include "spectral_log.h"
 #include <stdio.h>

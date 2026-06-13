@@ -281,16 +281,3 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
         lp->amp, lp->d_amp, lp->width, &fp, osc_waveform_fn(timbre)
     );
 }
-
-/* Metal shader source — generated from the C synthesis contract
- * (spectral_osc_formulas.h / spectral_segment_math.h / SPECTRAL_OSC_TIMBRE_LIST)
- * by tools/spectral_tools/generators/metal_osc.py.  The generated header defines
- * both oscillator_metal_source and spectral_segment_math_metal_source under the
- * Apple/non-CUDA guard, with constant *values* still injected by the C
- * preprocessor via SPECTRAL_STR (single source = spectral_consts.h).
- *
- * The old hand-mirrored MSL string + _Static_assert version lock are gone: the
- * CMake verify_metal_osc target regenerates this header from the C formulas every
- * build and fails if the committed copy drifts, so the Metal shader can no longer
- * silently diverge from the CPU/CUDA backends. */
-#include "spectral_osc_metal_generated.h"

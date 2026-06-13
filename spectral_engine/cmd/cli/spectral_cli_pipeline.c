@@ -26,6 +26,7 @@
 /* Perf tracking (includes spectral_get_time_sec) */
 #if !SPECTRAL_NO_PERF
 #include "spectral_perf.h"
+#include "spectral_cuda.h"
 #if SPECTRAL_IS_EMBEDDED_SIM
 #include "spectral_synth_arm32.h"
 #endif
