@@ -4,7 +4,6 @@
 #include "spectral_utils.h"
 #include "spectral_log.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +51,7 @@ void spectral_process_params_default(SpectralProcessParams* params) {
 
 static int token_equal_ci(const char* a, const char* b) {
     while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        if (spectral_ascii_tolower(*a) != spectral_ascii_tolower(*b)) return 0;
         a++;
         b++;
     }

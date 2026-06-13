@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <limits.h>
-#include <ctype.h>
 
 /* 
  * String Formatting
@@ -234,7 +233,7 @@ static int spectral_parse_bool_str(const char* s, int* out) {
     if (strcmp(s, "0") == 0) { *out = 0; return 1; }
 
     while (s[n] != '\0' && n < sizeof(lowered) - 1) {
-        lowered[n] = (char)tolower((unsigned char)s[n]);
+        lowered[n] = spectral_ascii_tolower(s[n]);
         n++;
     }
     lowered[n] = '\0';

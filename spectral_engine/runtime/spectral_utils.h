@@ -21,6 +21,15 @@
 extern "C" {
 #endif
 
+/* Locale-independent ASCII lowercase: maps A-Z to a-z and leaves every other
+ * byte (digits, punctuation, UTF-8 continuation bytes) untouched. Use this for
+ * case-insensitive matching of ASCII tokens (option names, file suffixes);
+ * libc tolower() depends on the active locale and can reclassify bytes outside
+ * the C locale, which would make token matching locale-sensitive. */
+static inline char spectral_ascii_tolower(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
 /*
  * Byte-size conversion macros
  */

@@ -48,11 +48,6 @@ typedef struct {
 
 static PipelineOutputPaths g_paths = {0};
 
-static char pipeline_ascii_tolower(char c) {
-    if (c >= 'A' && c <= 'Z') return (char)(c - 'A' + 'a');
-    return c;
-}
-
 static int pipeline_path_has_suffix_ci(const char* path, const char* suffix) {
     size_t path_len = 0;
     size_t suffix_len = 0;
@@ -66,7 +61,7 @@ static int pipeline_path_has_suffix_ci(const char* path, const char* suffix) {
 
     tail = path + (path_len - suffix_len);
     for (i = 0; i < suffix_len; i++) {
-        if (pipeline_ascii_tolower(tail[i]) != pipeline_ascii_tolower(suffix[i])) {
+        if (spectral_ascii_tolower(tail[i]) != spectral_ascii_tolower(suffix[i])) {
             return 0;
         }
     }
