@@ -26,6 +26,9 @@
 /* Perf tracking (includes spectral_get_time_sec) */
 #if !SPECTRAL_NO_PERF
 #include "spectral_perf.h"
+#if SPECTRAL_IS_EMBEDDED_SIM
+#include "spectral_synth_arm32.h"
+#endif
 static inline void SPECTRAL_MAYBE_UNUSED pipeline_perf_free_input_bytes(size_t bytes) {
     if (bytes > 0) {
         perf_track_free(bytes);
@@ -1208,6 +1211,17 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
                                                    opts->n_threads, t_synth,
                                                    &effective_backend, &effective_timbre);
     if (err == SPECTRAL_OK) {
+#if SPECTRAL_IS_EMBEDDED_SIM
+        {
+            EmbeddedTargetConfig sim_cfg;
+            EmbeddedPerfEstimate sim_est;
+            EmbeddedMemoryUsage sim_mem;
+            if (embedded_sim_last_report(&sim_cfg, &sim_est, &sim_mem)) {
+                embedded_perf_print(&sim_cfg, &sim_est);
+                embedded_memory_print(&sim_mem);
+            }
+        }
+#endif
         SPECTRAL_LOG_INFO("Backend used: %s", spectral_backend_name(effective_backend));
         SPECTRAL_LOG_INFO("Timbre used: %s", timbre_name(effective_timbre));
 #if HAS_CUDA

@@ -131,7 +131,9 @@ set(SPECTRAL_SOURCES_SYNTH_EMBEDDED
     "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_synth_arm32.c"
     "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_debug_embedded_arm.c"
     "${SPECTRAL_CORE_DIR}/spectral_q15.c")
-set(SPECTRAL_SOURCES_SYNTH_SIMULATION "${SPECTRAL_SYNTH_BACKEND_SIM_DIR}/spectral_synth_simulation.c")
+set(SPECTRAL_SOURCES_SYNTH_SIMULATION
+    "${SPECTRAL_SYNTH_BACKEND_SIM_DIR}/spectral_synth_simulation.c"
+    "${SPECTRAL_CORE_DIR}/spectral_segment_convert.c")
 set(SPECTRAL_SOURCES_SYNTH_METAL "${SPECTRAL_SYNTH_BACKEND_GPU_METAL_DIR}/spectral_synth_metal.m")
 set(SPECTRAL_SOURCES_SYNTH_CUDA "${SPECTRAL_SYNTH_BACKEND_GPU_CUDA_DIR}/spectral_synth_cuda.cu")
 

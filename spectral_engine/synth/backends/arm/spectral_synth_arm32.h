@@ -148,6 +148,14 @@ void arm32_synth_get_op_counts(SpectralPerfCounters* out);
 #if defined(SPECTRAL_USE_EMBEDDED_SYNTH) || defined(SPECTRAL_EMBEDDED_SIMULATION)
 
 #include "spectral_common.h"
+#include "spectral_perf.h"
+
+/* Last run's embedded-target perf/memory report. Returns 0 until a
+ * simulation synthesis has completed. The backend only RECORDS the report;
+ * printing is the caller's job (embedded_perf_print/embedded_memory_print). */
+int embedded_sim_last_report(EmbeddedTargetConfig* cfg,
+                             EmbeddedPerfEstimate* est,
+                             EmbeddedMemoryUsage* mem);
 
 SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t out_len,
                                      float stretch, float pitch, SpectralTimbre timbre,

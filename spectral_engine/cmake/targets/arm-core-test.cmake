@@ -13,7 +13,7 @@
 add_executable(arm_core_test EXCLUDE_FROM_ALL
     "${SPECTRAL_REPO_ROOT}/tests/arm_core/test_arm32_process.c"
     "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_synth_arm32.c"
-    "${SPECTRAL_SYNTH_MATH_DIR}/spectral_q15.c"
+    "${SPECTRAL_CORE_DIR}/spectral_q15.c"
     "${SPECTRAL_CORE_DIR}/spectral_lut.c")
 
 spectral_apply_common_target(arm_core_test)

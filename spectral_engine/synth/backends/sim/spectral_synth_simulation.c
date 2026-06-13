@@ -13,6 +13,7 @@
 #include "spectral_perf_accounting.h"
 #include "spectral_utils.h"
 #include "spectral_contracts.h"
+#include "spectral_segment_convert.h"
 #include "oscillator.h"
 
 #include <stdlib.h>
@@ -29,63 +30,20 @@
 static EmbeddedTargetConfig g_sim_config;
 static int g_sim_config_initialized = 0;
 
+/* Last synthesis run's embedded-target report, for the caller to print. */
+static struct {
+    EmbeddedTargetConfig cfg;
+    EmbeddedPerfEstimate est;
+    EmbeddedMemoryUsage  mem;
+    int valid;
+} g_last_report;
+
 static EmbeddedTargetConfig* get_simulation_config(void) {
     if (!g_sim_config_initialized) {
         g_sim_config = embedded_perf_default_config();
         g_sim_config_initialized = 1;
     }
     return &g_sim_config;
-}
-
-/* Float Segment -> embedded SpectralSegmentQ15 conversion.
- *
- * This is the desktop-side equivalent of cmd/convert_segments.c, but it also
- * folds in the runtime stretch/pitch parameters because the real ARM32 backend
- * applies neither at synthesis time (spectral_arm32_set_stretch() is a no-op;
- * pitch/stretch are baked into start/length/frequency here):
- *   - start/length  : scaled by stretch (length clamped to the 16-bit field)
- *   - freq_q88       : omega*pitch*inv_stretch encoded as Q8.8 via OMEGA_TO_Q88
- *   - amp_q15/da_q15 : scaled by amp_scale (Q15 headroom normalization)
- *   - df_q15         : forced to 0 — the ARM32 hot path does not consume chirp
- *                      and spectral_arm32_load() rejects df_q15 != 0.
- * Returns 1 on a valid segment, 0 if the segment should be dropped. */
-static int segment_to_q15(const Segment* src, SpectralSegmentQ15* dst,
-                          float amp_scale, const SynthParams* params, size_t out_len) {
-    double start_d = 0.0;
-    double length_d = 0.0;
-    float amp_scaled = 0.0f;
-    float da_scaled = 0.0f;
-
-    if (!src || !dst || !params || !spectral_segment_valid_for_synth(src) ||
-        !spectral_is_finite_positive_f32(amp_scale) || out_len == 0u) {
-        return 0;
-    }
-    *dst = (SpectralSegmentQ15){0};
-
-    start_d = (double)src->start * (double)params->stretch;
-    length_d = (double)src->length * (double)params->stretch;
-    if (!spectral_is_finite_f64(start_d) || !spectral_is_finite_f64(length_d) ||
-        start_d < 0.0 || start_d >= (double)out_len || start_d > (double)UINT32_MAX ||
-        length_d <= 0.0) {
-        return 0;
-    }
-    if (length_d > 65535.0) length_d = 65535.0;
-
-    dst->start = (uint32_t)start_d;
-    dst->length = (uint16_t)length_d;
-    if (dst->length == 0u) return 0;
-
-    dst->freq_q88 = OMEGA_TO_Q88(
-        spectral_segment_alpha_f32(src->omega, params->pitch_factor, params->inv_stretch));
-    dst->phase_q15 = PHASE_RAD_TO_Q15(src->phase);
-
-    amp_scaled = spectral_clamp_f32(src->amp * amp_scale, 0.0f, 1.0f);
-    dst->amp_q15 = FLOAT_TO_Q15(amp_scaled);
-
-    da_scaled = spectral_segment_d_amp_f32(src->da, params->inv_stretch) * amp_scale;
-    dst->da_q15 = FLOAT_TO_Q15(spectral_clamp_f32(da_scaled, -1.0f, 1.0f));
-    /* df_q15 stays 0 (zero-initialized above): chirp is intentionally dropped. */
-    return 1;
 }
 
 /* Oscillator LUT — supplied to the real ARM32 context as ctx->osc_lut. */
@@ -181,7 +139,7 @@ SpectralError synth_arm32_simulation(SegmentArray sa, float* out_buffer, size_t 
         }
         for (size_t i = 0; i < sa.count; i++) {
             SpectralSegmentQ15 tmp;
-            if (segment_to_q15(&sa.segs[i], &tmp, amp_scale, &params, out_len)) {
+            if (spectral_segment_to_q15_runtime(&sa.segs[i], &tmp, amp_scale, &params, out_len)) {
                 q15_src[loaded++] = tmp;
             }
         }
@@ -325,22 +283,33 @@ cleanup:
         double elapsed = spectral_get_time_sec() - start_time;
         *t_synth = elapsed;
 
-        /* Embedded-target perf/memory estimate over the loaded segment set. */
-        EmbeddedPerfEstimate est = embedded_perf_estimate(
+        /* Embedded-target perf/memory estimate over the loaded segment set.
+         * Recorded, not printed: console output belongs to the caller
+         * (embedded_sim_last_report), never to a synthesis backend. */
+        g_last_report.cfg = *cfg;
+        g_last_report.est = embedded_perf_estimate(
             cfg, &ops, out_len, loaded, peak_active, elapsed);
-        embedded_perf_print(cfg, &est);
-
-        EmbeddedMemoryUsage mem = embedded_memory_usage(
+        g_last_report.mem = embedded_memory_usage(
             loaded,
             block_size,
             SPECTRAL_OSC_LUT_BITS,
             SIMULATION_MAX_ACTIVE,
             cfg->max_memory_kb
         );
-        embedded_memory_print(&mem);
+        g_last_report.valid = 1;
     }
 
     return SPECTRAL_OK;
+}
+
+int embedded_sim_last_report(EmbeddedTargetConfig* cfg,
+                             EmbeddedPerfEstimate* est,
+                             EmbeddedMemoryUsage* mem) {
+    if (!g_last_report.valid || !cfg || !est || !mem) return 0;
+    *cfg = g_last_report.cfg;
+    *est = g_last_report.est;
+    *mem = g_last_report.mem;
+    return 1;
 }
 
 /* synth_cpu is provided via macro in spectral_synth_arm32.h
