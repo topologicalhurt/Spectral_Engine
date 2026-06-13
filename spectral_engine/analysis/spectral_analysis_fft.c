@@ -293,7 +293,7 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     /* vDSP_fft_zrip(FFT_FORWARD) emits the textbook DFT scaled by 2 (Apple's
      * packed-real convention, uniform across DC realp[0], Nyquist imagp[0] and
      * the interior bins). Undo it here so magnitudes match the textbook/FFTW
-     * branch and the window amp scales (PASS8: 2/Σwindow), which are derived for
+     * branch and the window amp scales (2/Σwindow), which are derived for
      * the unscaled DFT. Uniform on re+im, so phases are unaffected. */
     {
         float vdsp_half = 0.5f;

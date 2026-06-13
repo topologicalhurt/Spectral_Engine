@@ -21,7 +21,7 @@
  * within the FMA-contraction budget pinned by the osc_width_parity ctest (it is
  * NOT bit-identical only because the SIMD/scalar-tail boundary moves from a
  * multiple of 4 to a multiple of 8, shifting a few boundary samples between the
- * vector and scalar lanes - the same <=1 ULP class already accepted at PASS200).
+ * vector and scalar lanes - the same <=1 ULP class the osc_width_parity ctest pins).
  *
  * No include guard: this file is deliberately re-includable. */
 

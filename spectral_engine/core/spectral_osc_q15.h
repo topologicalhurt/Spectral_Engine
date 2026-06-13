@@ -1,4 +1,4 @@
-/* spectral_osc_q15.h - Production Q15 oscillator waveform evaluators (Q3b).
+/* spectral_osc_q15.h - production Q15 oscillator waveform evaluators.
  *
  * The opt-in Q15 *compute* twin of the float L0 formulas in
  * spectral_osc_formulas.h.  Q3 of QTYPE_DOMAIN_PLAN.md adds a per-path,

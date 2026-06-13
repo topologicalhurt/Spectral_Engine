@@ -265,8 +265,8 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
     return err;
 }
 
-/* TODO: implement mmap-backed hashing; currently falls back to SPECTRAL_ERR_BACKEND_UNAVAIL.
- * When implemented: mmap the file, call update() over the mapped region, munmap. */
+/* mmap-backed hashing is unimplemented: this method reports
+ * SPECTRAL_ERR_BACKEND_UNAVAIL so callers fall back to the streaming path. */
 static SpectralError spectral_hash_method_consume_file_mmap_impl(
     SpectralHashFileMethod* method,
     FILE* file)

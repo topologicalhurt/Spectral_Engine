@@ -1,4 +1,4 @@
-/* daisy_seed_spectral.c - Daisy Seed spectral synthesis wrapper */
+/* daisy_seed_spectral.c - Daisy Seed board API implementation */
 #include "daisy_seed_spectral.h"
 #include "daisy_seed_sdram.h"
 #include "spectral_lut.h"

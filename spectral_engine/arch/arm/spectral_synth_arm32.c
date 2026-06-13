@@ -11,7 +11,7 @@
  *   - The hot loop (synth_core_m7) is SCALAR Q15, unrolled by 4 (4 independent
  *     single-lane MACs), segment-major.
  *
- * NOT yet realized (ULTRAPLAN Phase A2/A3 -- do not read the following as done):
+ * NOT yet realized (do not read the following as done):
  *   - Dual 16-bit MAC: spectral_smlad() exists but is NOT called here. Exploiting
  *     it needs a voice-parallel (sample-major) loop nest so two voices' (sine,amp)
  *     pack into one SMLAD. The current segment-major nest makes SoA buy nothing.
@@ -1207,8 +1207,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     spectral_perf_oscillator_end(osc_start);
     spectral_perf_track_active(ctx->num_active);
     
-    /* Convert the Q30 accumulator (sum of Q15*Q15 MAC products) to Q15 with the
-     * master gain. Q30 -> Q15 is a >>15 shift (see spectral_q30_to_q15_scaled). */
+    /* The q63 accumulator holds the exact Q2.30 sum of the Q15*Q15 voice products
+     * (64-bit carrier so the multi-voice sum cannot overflow). spectral_q63_to_q15_scaled
+     * reduces Q2.30 -> Q15 with a >>15 shift, applies the master gain, and saturates
+     * once at the output. */
     uint32_t amp_start = spectral_perf_amplitude_start();
     spectral_q63_to_q15_scaled(accum, out_left, num_samples, master_amp);
     
@@ -1274,7 +1276,6 @@ void arm32_synth_reset_profile(void) {
     spectral_perf_counters_reset(&s_perf_op_counts);
 }
 
-/* TODO: DMA transfer whole struct or pack for UART/SWO */
 uint32_t arm32_synth_get_total_cycles(void) {
     return s_perf_stats.process.total_cycles;
 }

@@ -1,4 +1,4 @@
-/* oscillator.h - Oscillator module */
+/* oscillator.h - oscillator kernel API: the canonical timbre -> L0-waveform dispatch (L1) */
 #ifndef OSCILLATOR_H
 #define OSCILLATOR_H
 
@@ -65,7 +65,7 @@ OSC_HOT void timbre_synth_segment(float* __restrict__ dst, const struct SegmentL
 void osc_set_dispatch(OscDispatchWord dispatch);
 OscDispatchWord osc_get_dispatch(void);
 
-/* Per-timbre opt-in Q15 *compute* domain (Q3b, QTYPE_DOMAIN_PLAN.md §5).
+/* Per-timbre opt-in Q15 *compute* domain (QTYPE_DOMAIN_PLAN.md §5).
  * Bit (1u << timbre) set => that timbre's point-sampled sustain renders via the
  * Q15 evaluators (spectral_osc_q15.h) instead of float.  Float is the DEFAULT
  * (mask 0); Q15 is lossy (~-85..-92 dBFS vs float; floors pinned by

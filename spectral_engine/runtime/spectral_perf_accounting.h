@@ -29,7 +29,7 @@ typedef struct SpectralPerfCounters {
     /* Accumulator memory traffic (q31 read-modify-write). Segment-major touches a
      * slot once PER VOICE (O(voices*samples)); a voice-parallel nest touches it once
      * per sample (O(samples)). This counter makes that memory-bandwidth difference
-     * measurable rather than asserted (ULTRAPLAN A2). */
+     * measurable rather than asserted. */
     uint64_t accum_rw_words;       /* q31 accumulator loads + stores */
 } SpectralPerfCounters;
 

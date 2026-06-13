@@ -1,23 +1,19 @@
-/* spectral_peak_track.c - Peak Tracking 
+/* spectral_peak_track.c - sinusoidal peak tracking: magnitude STFT -> segment list
  *
- * STRATEGY:
- * The Peak Tracking phase is the most mathematically dense stage of the engine.
- * To achieve multi-GiB/s bandwidth, it avoids scalar branching wherever possible.
+ * Third analysis stage. Reads the magnitude STFT and emits the sinusoidal
+ * segments (start, length, omega, phase, amp, da) that synthesis renders. One
+ * core serves two entry shapes: spectral_track_peaks() processes a whole STFT in
+ * one shot; the SpectralTracker API streams it chunk-by-chunk so memory stays
+ * bounded on large inputs.
  *
- * 1. Filtering: We use AVX2/SSE SIMD intrinsics to scan up to 8 bins per cycle.
- *    Instead of evaluating `sqrtf` on everything, we compare raw power (magnitude
- *    squared) against `threshsq`. The result is a hardware bitmask of valid peaks.
- * 2. Queueing: Rather than immediately allocating memory and calculating exact
- *    sub-bin interpolations per peak, we push raw candidate array indices into a
- *    small size-128 local execution batch (`candidate_batch`).
- * 3. Batch Emission: Once the batch fills, we loop over it. Because the STFT memory
- *    is accessed strictly sequentially by candidate index, this perfectly triggers
- *    the CPU's L1/L2 hardware prefetcher, completely hiding DRAM load latency.
- *    Only verified local-maximas are passed into the ALU-heavy `spectral_tracker_emit_segment`.
- *
- * Two modes:
- *   1. spectral_track_peaks()  — single-shot (processes entire STFT)
- *   2. SpectralTracker API     — incremental (processes chunks)
+ * The hot loop is pre-scan -> batched emit, so the costly per-peak work (sub-bin
+ * interpolation, segment continuation) runs only on bins that clear the threshold:
+ *   1. Pre-scan compares raw power (|X|^2, avoiding the per-bin sqrt) against
+ *      threshsq eight bins at a time with SIMD, yielding a candidate-bin mask.
+ *   2. Candidate indices accumulate into a fixed size-128 batch rather than being
+ *      emitted one at a time. The batch bounds the per-thread peak working set and
+ *      is visited in increasing bin order, so the drain walks the row front-to-back.
+ *   3. Only confirmed local maxima reach spectral_tracker_emit_segment().
  */
 
 #include "spectral_peak_track_internal.h"
@@ -952,27 +948,13 @@ void spectral_tracker_process(SpectralTracker* tracker,
 #endif
 
             size_t f = 1;
-            /* 
-             * =========================================================================
-             *  SIMD Peak Detection Strategy
-             * =========================================================================
-             * To avoid evaluating `sqrtf` or utilizing expensive branch prediction on
-             * every frequency bin (which stalls the CPU pipeline), we use AVX2/SSE 
-             * intrinsics to scan up to 8 bins in parallel.
-             * 
-             * A bin is considered a valid "peak candidate" if it satisfies 3 conditions:
-             *   1. center > threshsq   (It exceeds the absolute minimum noise floor power)
-             *   2. center > left       (It is strictly greater than its lower frequency neighbor)
-             *   3. center > right      (It is strictly greater than its upper frequency neighbor)
-             * 
-             * We calculate these 3 boolean masks using float comparisons (`cmp_gt`).
-             * We then mathematically AND them together: mask = (1) & (2) & (3).
-             * Finally, `movemask_ps` collapses the 32-bit SIMD lane outputs into a
-             * single integer bitmask. Each bit tells us if the bin at that lane index 
-             * is a peak. If the 8-bit integer is 0, we found no peaks and instantly 
-             * skip to the next 8 bins!
-             * =========================================================================
-             */
+            /* SIMD peak pre-scan. A bin is a candidate iff it is a strict local
+             * maximum above the noise floor:
+             *   center > threshsq && center > left && center > right
+             * Comparing raw power (|X|^2) skips the per-bin sqrtf and the data-
+             * dependent branch it would gate. The three float comparisons AND into
+             * one mask; movemask_ps collapses the lanes to an integer word, so a
+             * zero word advances past eight bins with no per-bin work. */
 #ifdef __AVX2__
             {
                 const simde__m256 vthresh = simde_mm256_set1_ps(threshsq);

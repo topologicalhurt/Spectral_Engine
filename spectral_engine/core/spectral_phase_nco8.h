@@ -1,4 +1,4 @@
-/* spectral_phase_nco8.h - Vectorized 8-wide cubic integer-NCO phase (Q5c follow-up "Bv").
+/* spectral_phase_nco8.h - vectorized 8-wide cubic integer-NCO phase.
  *
  * The 8-lane SIMD twin of spectral_phase_nco.h: eight independent cubic forward-
  * difference chains in uint32 lanes (full circle == 2^32, so the top 16 bits are the
@@ -6,7 +6,7 @@
  * fractional headroom), each lane offset by one sample and advancing by 8 (stride-8
  * differences) so ONE step emits 8 CONSECUTIVE sample indices in a simde__m128i. This
  * removes the serial scalar phase, measured at ~31-35% of the packed-Q15 kernel
- * (QTYPE_DOMAIN_PLAN.md Q5c) -- the gap between the shipped 1.2-1.4x and the ~2x
+ * (QTYPE_DOMAIN_PLAN.md) -- the gap between the shipped 1.2-1.4x and the ~2x
  * eval+accumulate floor.
  *
  * PRECISION: uint32 keeps only 16 fractional bits where the uint64 scalar NCO keeps 48,

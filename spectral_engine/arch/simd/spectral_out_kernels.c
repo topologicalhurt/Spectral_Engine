@@ -1,7 +1,7 @@
 /* spectral_out_kernels.c (host profile) - normalization + Q15 stereo kernels.
  *
  * Build-selected for host/simulation builds. These are the profile-divergent
- * bodies extracted from core/spectral_out.c: float normalization uses the SIMDe
+ * output bodies: float normalization uses the SIMDe
  * vector ops (spectral_vmaxmgv / spectral_vsmul); the Q15 normalize and Q15
  * mono->stereo use portable scalar code (host/sim has no CMSIS DSP or Cortex-M
  * unroll). The CMSIS / Cortex-M counterparts live in

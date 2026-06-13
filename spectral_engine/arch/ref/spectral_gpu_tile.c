@@ -1,12 +1,9 @@
 /* spectral_gpu_tile.c (embedded profile) - GPU tile preprocessing stub.
  *
- * Build-selected for the embedded/simulation profile, which has no GPU backend
- * (Metal/CUDA). The shared gpu_tile_preprocess() declaration in
- * spectral_synth_internal.h is satisfied here by a stub that reports the
- * capability is unavailable, so the device-agnostic wrapper
- * gpu_tile_preprocess_cached() can call it unconditionally. The real host
- * implementation lives in arch/simd/spectral_gpu_tile.c. This mirrors the
- * former #else (SPECTRAL_ERR_BACKEND_UNAVAIL) arm of the wrapper's profile #if.
+ * The embedded/simulation profile has no GPU backend, so it satisfies the shared
+ * gpu_tile_preprocess() declaration (spectral_synth_internal.h) with a stub that
+ * reports the capability unavailable -- letting gpu_tile_preprocess_cached() call
+ * it unconditionally. The real host implementation is arch/simd/spectral_gpu_tile.c.
  */
 
 #include "spectral_synth_internal.h"

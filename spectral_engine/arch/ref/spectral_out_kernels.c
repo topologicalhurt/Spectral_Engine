@@ -1,7 +1,7 @@
 /* spectral_out_kernels.c (embedded profile) - normalization + Q15 stereo kernels.
  *
  * Build-selected for bare-metal Cortex-M builds. These are the profile-divergent
- * bodies extracted from core/spectral_out.c: float normalization is portable
+ * output bodies: float normalization is portable
  * scalar (no host SIMDe vector ops on embedded); the Q15 normalize and Q15
  * mono->stereo use CMSIS-DSP / Cortex-M code when the capability is present,
  * falling back to scalar otherwise. The host (SIMDe) counterpart lives in

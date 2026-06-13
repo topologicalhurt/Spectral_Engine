@@ -1,13 +1,10 @@
 /* spectral_gpu_tile.c (host profile) - GPU tile preprocessing.
  *
- * Build-selected for the host/desktop profile, where a GPU backend
- * (Metal/CUDA) actually exists. Maps segments to output tiles for GPU
- * dispatch. This is the real implementation extracted from
- * core/spectral_synth_internal.c (its former #if !SPECTRAL_EMBEDDED &&
- * !SPECTRAL_RESTRICTED_MODE body); the embedded/simulation profile, which has
- * no GPU backend, build-selects the SPECTRAL_ERR_BACKEND_UNAVAIL stub in
- * arch/ref/spectral_gpu_tile.c instead. The shared declaration lives
- * in spectral_synth_internal.h, so callers are profile-agnostic.
+ * Maps segments to output tiles for GPU (Metal/CUDA) dispatch. Build-selected
+ * for the host/desktop profile, the only profile where a GPU backend exists; the
+ * embedded/simulation profile build-selects the BACKEND_UNAVAIL stub in
+ * arch/ref/spectral_gpu_tile.c instead. The shared declaration in
+ * spectral_synth_internal.h keeps callers profile-agnostic.
  */
 
 #include "spectral_synth_internal.h"

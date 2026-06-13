@@ -1,4 +1,4 @@
-/* spectral_guarantees.h - Active-guarantee manifest + self-report (ULTRAPLAN Phase B1/B2)
+/* spectral_guarantees.h - active-guarantee manifest + self-report
  *
  * The single machine-readable place that records which kernel numeric/behavioral
  * invariants are in force in *this* build. Each bit corresponds to one invariant
@@ -9,7 +9,7 @@
  * when handed a descriptor that assumes a guarantee this build does not provide.
  *
  * The gates are the ones the source code actually branches on (verified by grep,
- * not by the plan's aspirational list): see docs/core_audit/CORE_CONTRACTS.md for
+ * not an aspirational list): see docs/core_audit/CORE_CONTRACTS.md for
  * the per-gate manifest (invariant, default, cost, error budget, drift test).
  * The companion drift test (tests/core_contracts/test_guarantees.c) pins the
  * measured error budget for each approximation so a flip of the documented

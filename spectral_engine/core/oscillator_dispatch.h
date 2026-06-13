@@ -132,7 +132,7 @@ void osc_simd_segment_pwm(float* dst, const struct SegmentLoopParams* lp);
 int osc_simd_available(SpectralTimbre timbre);
 
 #if defined(OSC_SIMD_GENERIC)
-/* Packed 8xQ15 SIMD oscillator (Q5c) - host/SIMDe only, opt-in via the Q15
+/* Packed 8xQ15 SIMD oscillator - host/SIMDe only, opt-in via the Q15
  * compute domain. osc_simd_q15_available() advertises the 4 algebraic timbres
  * plus sine (B1): sine's eval is a serial LUT gather using sine_lut, the algebraic
  * timbres ignore it but keep the param for a uniform call site. */

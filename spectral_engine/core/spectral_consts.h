@@ -22,7 +22,10 @@
 #define SPECTRAL_PADE_SIN_C2    0.00761f
 #define SPECTRAL_PADE_SIN_C3    0.00766f
 
-/* Polynomial atan2 coefficients */
+/* Minimax atan coefficients (Horner in s = a^2, ratio a in [0,1]). Consumed only
+ * by spectral_atan2_poly (spectral_fast_math.h), which documents the argument
+ * reduction, the odd-polynomial form, and the octant reconstruction. GPU/SIMD
+ * copies MUST use these same values (parity-tested against atan2f). */
 #define SPECTRAL_ATAN2_A0       (-0.0464964749f)
 #define SPECTRAL_ATAN2_A1       0.15931422f
 #define SPECTRAL_ATAN2_A2       (-0.327622764f)

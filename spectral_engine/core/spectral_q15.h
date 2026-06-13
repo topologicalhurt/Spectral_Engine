@@ -70,8 +70,8 @@ extern "C" {
  * NAMING: a field/var suffix states the format -- *_q15, *_q88 (freq_q88),
  * phase_acc, freq_inc/freq_delta. q88 (frequency) and q30 (the MAC accumulator)
  * have NO dedicated typedef yet -- they ride uint16_t and q31_t, and the suffix
- * is the only contract. Promoting them to named typedefs is a Thread-A
- * follow-up (see QTYPE_REFACTOR_PLAN.md). */
+ * is the only contract. Promoting them to named typedefs is tracked in
+ * QTYPE_REFACTOR_PLAN.md. */
 typedef int16_t  q15_t;
 typedef int32_t  q31_t;
 typedef int64_t  q63_t;   /* wide accumulator for exact multi-voice MAC (SMLALD) */
@@ -260,9 +260,6 @@ static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
 }
 // SPECTRAL_Q_DOMAIN END
 
-/* Q30 accumulator (sum of Q15*Q15 MAC products) -> Q15 output with master
- * scaling, via a >>15 shift. See spectral_q15.c / pass 145. */
-void spectral_q30_to_q15_scaled(const q31_t* accum, q15_t* dst, uint32_t count, q15_t scale);
 /* Wide (q63) accumulator variant: exact sum of Q15*Q15 products, saturated to Q15
  * once at the end (>>15) before applying the master scale. */
 void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, q15_t scale);

@@ -1,4 +1,4 @@
-/* oscillator.c - Oscillator implementation */
+/* oscillator.c - host per-segment oscillator: timbre dispatch + scalar/Q15 sustain loops */
 #include "oscillator.h"
 #include "oscillator_dispatch.h"
 #include "spectral_synth_internal.h"
@@ -30,7 +30,7 @@ static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SIMD;
 void osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
 OscDispatchWord osc_get_dispatch(void) { return g_osc_dispatch; }
 
-/* Opt-in Q15 compute domain (Q3b). Float is the default — this mask is 0 unless
+/* Opt-in Q15 compute domain. Float is the default — this mask is 0 unless
  * a caller explicitly enables a path, so the default build moves no bytes. */
 static uint16_t g_osc_q15_enable = 0;
 /* The desktop Q15 compute path (and its ~8 KB sine LUT) is a host-only
@@ -128,7 +128,7 @@ static void synth_segment_scalar(
 
 #if !SPECTRAL_EMBEDDED
 /* Loop-invariant Q15 waveform selector. A scalar oracle: it resolves the timbre
- * per sample, which the SIMD Q15 kernel (Q3b step 2) will specialize away. */
+ * per sample, which the SIMD Q15 kernel specializes away. */
 static inline q15_t osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* lut) {
     switch (timbre) {
     case TIMBRE_SINE:     return spectral_osc_q15_sine(pq, lut);
@@ -140,8 +140,7 @@ static inline q15_t osc_q15_eval(q15_t pq, SpectralTimbre timbre, const q15_t* l
     }
 }
 
-/* Scalar Q15-compute sustain path (QTYPE_DOMAIN_PLAN.md: Q3b oracle, Q5b
- * integer-NCO phase). Op-for-op
+/* Scalar Q15-compute sustain path (QTYPE_DOMAIN_PLAN.md). Op-for-op
  * the float synth_segment_scalar above, except (a) the Q15 phase index is produced
  * by the integer-NCO cubic forward-difference accumulator (spectral_phase_nco.h) —
  * 3 integer adds per sample, no float and no per-sample float->Q15 conversion on the
@@ -221,7 +220,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
         return;
     }
 
-    /* Opt-in Q15 compute domain (Q3b): a domain choice orthogonal to the
+    /* Opt-in Q15 compute domain: a domain choice orthogonal to the
      * float scalar/SIMD dispatch below. Engaged only when this timbre's bit is
      * set AND it has a Q15 path; otherwise fall through to the float dispatch.
      * The point-sampled (NAIVE) path only — band-limited quality already
@@ -230,7 +229,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
 #if !SPECTRAL_EMBEDDED
     if ((g_osc_q15_enable & OSC_Q15_BIT(timbre)) && osc_q15_available(timbre)) {
 #if defined(OSC_SIMD_GENERIC)
-        /* Packed 8xQ15 SIMD twin (Q5c): the Q15 compute domain composes with the
+        /* Packed 8xQ15 SIMD twin: the Q15 compute domain composes with the
          * float scalar/SIMD axis. When this timbre's dispatch resolves to SIMD and
          * it is one of the algebraic Q15 timbres, render it 8-wide (sine's serial
          * LUT loses, so it stays on the scalar Q15 path below). --scalar honoured. */

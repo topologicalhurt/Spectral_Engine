@@ -34,7 +34,7 @@ typedef struct ConvertStats {
     uint32_t invalid_bounds;
     uint32_t invalid_fields;
     uint32_t end_saturated;
-    uint32_t high_freq;
+    uint32_t high_omega;
 } ConvertStats;
 
 static size_t default_pool_max_segments(void) {
@@ -341,7 +341,7 @@ int main(int argc, char** argv) {
          * unscaled. The units are pinned by the convert_segments_units test. */
         da = sanitize_clamped_field(src->da, -1.0f, 1.0f, 0.0f, &stats);
 
-        if (omega > 255.0f) stats.high_freq++;
+        if (omega > 255.0f) stats.high_omega++;
         dst->freq_q88 = OMEGA_TO_Q88(omega);
         dst->phase_q15 = PHASE_RAD_TO_Q15(phase);
         dst->amp_q15 = FLOAT_TO_Q15(amp);
@@ -366,8 +366,8 @@ int main(int argc, char** argv) {
     if (stats.end_saturated) {
         SPECTRAL_LOG_INFO("  %u segments had end overflow (saturated)", stats.end_saturated);
     }
-    if (stats.high_freq) {
-        SPECTRAL_LOG_INFO("  %u segments freq > 255 Hz (encoded /4)", stats.high_freq);
+    if (stats.high_omega) {
+        SPECTRAL_LOG_INFO("  %u segments omega > 255 rad/sample (pre-scaled /4 for Q8.8)", stats.high_omega);
     }
 #if !SPECTRAL_HAS_CHIRP
     SPECTRAL_LOG_INFO("  Note: df (chirp) values ignored in compact mode");

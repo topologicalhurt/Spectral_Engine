@@ -28,7 +28,7 @@ typedef struct {
     int    n_threads;
     size_t buf_stride;  /* Distance between thread buffers (aligned) */
     size_t buf_size;    /* Actual used size per buffer */
-    /* Output-tiling (O1-B): each partition's segments occupy a contiguous output
+    /* Output tiling: each partition's segments occupy a contiguous output
      * span [span_lo, span_lo+span_len).  Per-thread buffers are sized to the
      * widest span (buf_size) instead of the full output, and the combine pass
      * sums each span back at its offset — eliminating the O(threads*out_len)
@@ -257,7 +257,7 @@ static SpectralError synth_cpu_driver(
         return SPECTRAL_ERR_OVERFLOW;
     }
 
-    /* O1-B output tiling: each partition owns segments by contiguous INDEX range;
+    /* Output tiling: each partition owns segments by contiguous INDEX range;
      * those segments write a contiguous output window [span_lo, span_lo+span_len).
      * Sizing per-thread buffers to the widest window (max_span) instead of the
      * full output replaces the O(threads*out_len) private-buffer footprint with

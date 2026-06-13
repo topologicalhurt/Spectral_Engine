@@ -95,7 +95,7 @@ int osc_simd_available(SpectralTimbre timbre) {
 }
 
 #if defined(OSC_SIMD_GENERIC)
-/* ===== Packed 8xQ15 SIMD oscillator (Q5c, QTYPE_DOMAIN_PLAN.md) ============
+/* ===== Packed 8xQ15 SIMD oscillator (QTYPE_DOMAIN_PLAN.md) =================
  *
  * The throughput twin of the scalar synth_segment_q15: an opt-in desktop kernel
  * that renders the 8x16-bit Q15 waveform of one 128-bit register per iteration

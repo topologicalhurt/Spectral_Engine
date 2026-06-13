@@ -1,5 +1,5 @@
-/* spectral_wavetable.c - Wavetable Implementation
- * 
+/* spectral_wavetable.c - wavetable bank: built-in waveform generation + .spwt load/store
+ *
  * Wavetable Management:
  *   - Bank holds up to SPECTRAL_MAX_WAVETABLES (default 8)
  *   - Built-in generation for sine, saw, square, triangle
