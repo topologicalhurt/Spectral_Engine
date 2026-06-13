@@ -66,7 +66,7 @@
 #define NCO_INDEX_LSB_GATE 3
 
 /* Vectorized uint32 8-wide NCO (Bv) gates -- conditional on c3, because production SCOPES
- * the vec NCO to c3==0 segments (osc_simd_q15_segment uses it only when lp->c3==0.0f, else
+ * the vec NCO to c3==0 segments (spectral_osc_simd_q15_segment uses it only when lp->c3==0.0f, else
  * falls back to the shipped scalar pack8). uint32 lanes keep 16 fractional bits vs the
  * scalar uint64's 48: with c3==0 (linear/quad) the narrowing is sub-LSB and the vec index
  * holds the SAME few-LSB floor as the scalar NCO, so the SHIPPED path is gated TIGHT (==

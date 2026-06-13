@@ -6,7 +6,7 @@
  * header is the single source of those evaluators, shared by production
  * (spectral_oscillator.c) and the precision/parity CTests (no drift between what we
  * measure and what we ship).  Float stays the DEFAULT domain — these are
- * reached only when a timbre's Q15 bit is explicitly set (osc_set_q15_enable).
+ * reached only when a timbre's Q15 bit is explicitly set (spectral_osc_set_q15_enable).
  *
  * SCOPE: this evaluates the WAVEFORM in Q15.  Phase accumulation stays in
  * float (the cubic NCO); QTYPE_DOMAIN_PLAN.md treats integer-NCO phase

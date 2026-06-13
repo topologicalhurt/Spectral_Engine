@@ -6,13 +6,13 @@
  * dispatch timbre_synth_segment() twice —
  *
  *   float reference : Q15 disabled  (the shipping default domain)
- *   Q15 compute     : osc_set_q15_enable(OSC_Q15_BIT(timbre))
+ *   Q15 compute     : spectral_osc_set_q15_enable(OSC_Q15_BIT(timbre))
  *
  * — and asserts the per-timbre RMS error stays at the characterized Q15 floor.
  * This is the CI lock on the QTYPE_DOMAIN_PLAN.md §7 per-path sign-off: float
  * stays default, and a regression that breaks a Q15 path (or silently widens its
  * error) fails the build. The five timbres are the full Q15-capable set
- * (sine/saw/square/triangle/parabola, osc_q15_available); asin/quantized/pwm
+ * (sine/saw/square/triangle/parabola, spectral_osc_q15_available); asin/quantized/pwm
  * have no Q15 path.
  *
  * Both paths carry the real fade-in/out envelope and amp ramp, so the rendered
@@ -111,13 +111,13 @@ static void test_q15_parity(void) {
             memset(buf_q15,   0, sizeof(buf_q15));
 
             /* Reference: the shipping default (Q15 off, float dispatch). */
-            osc_set_q15_enable(0);
+            spectral_osc_set_q15_enable(0);
             timbre_synth_segment(buf_float, &lp, k_timbres[t].timbre);
 
             /* Opt-in Q15 (also builds the sine LUT for the sine path). */
-            osc_set_q15_enable(OSC_Q15_BIT(k_timbres[t].timbre));
+            spectral_osc_set_q15_enable(OSC_Q15_BIT(k_timbres[t].timbre));
             timbre_synth_segment(buf_q15, &lp, k_timbres[t].timbre);
-            osc_set_q15_enable(0);
+            spectral_osc_set_q15_enable(0);
 
             for (size_t j = 0; j < lp.length; j++) {
                 double d = (double)buf_q15[j] - (double)buf_float[j];

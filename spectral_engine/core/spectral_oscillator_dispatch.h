@@ -24,7 +24,7 @@
  *
  *   * GPU Q15 double-pack (Metal half / CUDA __half2) is a measure-first
  *     Phase-5 investigation; default stays float.
- *   + CMSIS-Q15 (osc_simd_q15_segment under OSC_SIMD_CMSIS) shares the canonical
+ *   + CMSIS-Q15 (spectral_osc_simd_q15_segment under OSC_SIMD_CMSIS) shares the canonical
  *     spectral_osc_q15.h evaluators (parity by construction).  It is BUILT only on
  *     real Cortex-M and is NOT yet wired into the live embedded dispatch -- see the
  *     prohibit/embedded notes below.
@@ -148,24 +148,24 @@ typedef union {
 struct SegmentLoopParams;
 
 /* SIMD segment synthesis - platform-specific implementations in oscillator_simd.c */
-void osc_simd_segment_sine(float* dst, const struct SegmentLoopParams* lp);
-void osc_simd_segment_saw(float* dst, const struct SegmentLoopParams* lp);
-void osc_simd_segment_square(float* dst, const struct SegmentLoopParams* lp);
-void osc_simd_segment_triangle(float* dst, const struct SegmentLoopParams* lp);
-void osc_simd_segment_parabola(float* dst, const struct SegmentLoopParams* lp);
-void osc_simd_segment_quantized(float* dst, const struct SegmentLoopParams* lp);
-void osc_simd_segment_pwm(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_sine(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_saw(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_square(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_triangle(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_parabola(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_quantized(float* dst, const struct SegmentLoopParams* lp);
+void spectral_osc_simd_segment_pwm(float* dst, const struct SegmentLoopParams* lp);
 
 /* Query if SIMD is available for a timbre (some timbres may not have SIMD paths) */
-int osc_simd_available(SpectralTimbre timbre);
+int spectral_osc_simd_available(SpectralTimbre timbre);
 
 #if defined(OSC_SIMD_GENERIC)
 /* Packed 8xQ15 SIMD oscillator - host/SIMDe only, opt-in via the Q15
- * compute domain. osc_simd_q15_available() advertises the 4 algebraic timbres
+ * compute domain. spectral_osc_simd_q15_available() advertises the 4 algebraic timbres
  * plus sine (B1): sine's eval is a serial LUT gather using sine_lut, the algebraic
  * timbres ignore it but keep the param for a uniform call site. */
-int osc_simd_q15_available(SpectralTimbre timbre);
-void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
+int spectral_osc_simd_q15_available(SpectralTimbre timbre);
+void spectral_osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
                           SpectralTimbre timbre, const int16_t* sine_lut);
 #endif
 
@@ -178,8 +178,8 @@ void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
  * caller yet (spectral_oscillator.c's Q15 dispatch is host-only by design) -- wiring it
  * into the embedded dispatch changes shipped behavior and needs explicit
  * sign-off. See arch/arm/oscillator_simd.c. */
-int osc_simd_q15_available(SpectralTimbre timbre);
-void osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
+int spectral_osc_simd_q15_available(SpectralTimbre timbre);
+void spectral_osc_simd_q15_segment(float* dst, const struct SegmentLoopParams* lp,
                           SpectralTimbre timbre, const int16_t* sine_lut);
 #endif
 

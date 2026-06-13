@@ -40,7 +40,7 @@
  * heavy waveform/scale/accumulate work is handed to CMSIS-DSP vector kernels
  * (arm_*_f32) over 4-sample blocks. A scalar tail finishes the final <4 samples. */
 
-void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
@@ -75,7 +75,7 @@ void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
 }
 
 /* Sawtooth: scale each wrapped phase by -1/pi (arm_scale_f32) -> ramp in (-1, 1]. */
-void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
@@ -109,7 +109,7 @@ void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
 
 /* Square: no useful CMSIS vector primitive for the sign test, so this stays a
  * plain scalar loop (+1 where rads > 0, else -1), matching spectral_osc_square(). */
-void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
@@ -130,7 +130,7 @@ void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
 
 /* Triangle: |rads|/pi (arm_abs after pre-scaling), then 1 - 2*|..| via
  * scale(-2)+offset(1). Peak +1 at rads 0, troughs -1 at +/-pi. */
-void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
@@ -166,7 +166,7 @@ void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
 
 /* Parabola: rads^2 (arm_mult by itself), scaled by -1/pi^2, offset +1 -> an
  * inverted parabola, +1 at rads 0 down to ~-1 at +/-pi. */
-void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
     const size_t len = lp->length;
     if (len == 0) return;
 
@@ -202,15 +202,15 @@ void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
 
 /* Quantized and PWM have no efficient CMSIS vector form (their domain guards are
  * per-lane branches), so they are intentionally not advertised by
- * osc_simd_available() below and dispatch routes them to the scalar oscillator.
+ * spectral_osc_simd_available() below and dispatch routes them to the scalar oscillator.
  * These no-op stubs exist only to satisfy the link-time symbol contract; they
  * are never called for these timbres. */
-void osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) { (void)dst; (void)lp; }
-void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) { (void)dst; (void)lp; }
+void spectral_osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) { (void)dst; (void)lp; }
+void spectral_osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) { (void)dst; (void)lp; }
 
 /* Timbres this profile renders with CMSIS SIMD. Square (scalar sign test),
  * asin, quantized, and pwm are excluded and fall back to the scalar oscillator. */
-int osc_simd_available(SpectralTimbre timbre) {
+int spectral_osc_simd_available(SpectralTimbre timbre) {
     return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW ||
            timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
 }
@@ -218,7 +218,7 @@ int osc_simd_available(SpectralTimbre timbre) {
 /* ===== CMSIS-Q15 oscillator (Phase 2, OSCILLATOR_BACKEND_CONTRACT_PLAN.md) =====
  *
  * The embedded Q15 compute twin of the float osc_simd_segment_* above, and the
- * CMSIS sibling of the host pack8 osc_simd_q15_segment (arch/simd/oscillator_simd.c).
+ * CMSIS sibling of the host pack8 spectral_osc_simd_q15_segment (arch/simd/oscillator_simd.c).
  * It renders the WAVEFORM through the SAME canonical spectral_osc_q15_<timbre>
  * evaluators the scalar-Q15 (spectral_oscillator.c) and pack8-SIMDe-Q15 paths use -- ONE
  * versioned contract (SPECTRAL_OSC_Q15_VERSION), no 4th Q15 world. So CMSIS-Q15 is
@@ -258,12 +258,12 @@ _Static_assert(SPECTRAL_OSC_Q15_VERSION == SPECTRAL_OSC_Q15_VERSION_CMSIS_PIN,
 /* The 5 canonical Q15 timbres (matches the host pack8 contract). Square is included:
  * unlike the float path (no vector sign primitive -> scalar) the Q15 square is a cheap
  * integer select, so the whole canonical set is uniform across the Q15 backends. */
-int osc_simd_q15_available(SpectralTimbre timbre) {
+int spectral_osc_simd_q15_available(SpectralTimbre timbre) {
     return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW || timbre == TIMBRE_SQUARE ||
            timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
 }
 
-void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
+void spectral_osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
                           SpectralTimbre timbre, const q15_t* sine_lut) {
     const size_t len = lp->length;
     if (len == 0) return;

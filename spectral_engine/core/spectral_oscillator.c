@@ -23,11 +23,11 @@ _Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
  * faster on the vectorizable timbres (saw/square/triangle/parabola), ~1.1x on
  * sine (sinf-bound).  Output is <=1 ULP from scalar (FMA-contraction only under
  * -ffast-math), not byte-identical; the scalar reference stays reachable via the
- * CLI --scalar flag (osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR)).  Timbres without
- * a SIMD path (e.g. asin) fall through to scalar via osc_simd_available(). */
+ * CLI --scalar flag (spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR)).  Timbres without
+ * a SIMD path (e.g. asin) fall through to scalar via spectral_osc_simd_available(). */
 static OscDispatchWord g_osc_dispatch = OSC_DISPATCH_ALL_SIMD;
 
-void osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
+void spectral_osc_set_dispatch(OscDispatchWord dispatch) { g_osc_dispatch = dispatch; }
 
 /* Opt-in Q15 compute domain. Float is the default — this mask is 0 unless
  * a caller explicitly enables a path, so the default build moves no bytes. */
@@ -36,7 +36,7 @@ static uint16_t g_osc_q15_enable = 0;
  * optimisation: real embedded firmware synthesises Q15 in spectral_synth_arm32.c
  * (integer NCO) and never reaches this dispatch, so the LUT and the scalar/SIMD
  * Q15 segment helpers are pure .bss/.text waste there.  Compile them out of
- * embedded targets.  The mask, its setter, and osc_q15_available() stay in
+ * embedded targets.  The mask, its setter, and spectral_osc_q15_available() stay in
  * every build because the CLI pipeline (run_synthesis) references them
  * unconditionally — only the LUT-bearing body is conditional. */
 #if !SPECTRAL_EMBEDDED
@@ -44,7 +44,7 @@ static q15_t g_osc_q15_sine_lut[SPECTRAL_OSC_LUT_SIZE + 1];
 static int g_osc_q15_sine_lut_ready = 0;
 #endif
 
-int osc_q15_available(SpectralTimbre timbre) {
+int spectral_osc_q15_available(SpectralTimbre timbre) {
     switch (timbre) {
     case TIMBRE_SINE: case TIMBRE_SAW: case TIMBRE_SQUARE:
     case TIMBRE_TRIANGLE: case TIMBRE_PARABOLA:
@@ -54,11 +54,11 @@ int osc_q15_available(SpectralTimbre timbre) {
     }
 }
 
-void osc_set_q15_enable(uint16_t mask) {
+void spectral_osc_set_q15_enable(uint16_t mask) {
     g_osc_q15_enable = mask;
 #if !SPECTRAL_EMBEDDED
     /* Build the sine table once here (single-threaded setup call, like
-     * osc_set_dispatch) so the per-segment OMP render loop only reads it —
+     * spectral_osc_set_dispatch) so the per-segment OMP render loop only reads it —
      * no lazy-init race on the hot path. */
     if ((mask & OSC_Q15_BIT(TIMBRE_SINE)) && !g_osc_q15_sine_lut_ready) {
         spectral_osc_q15_init_sine_lut(g_osc_q15_sine_lut);
@@ -199,9 +199,9 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
      * unchanged (bit-identical default build).  A non-naive mode renders the
      * segment itself and returns 1, except for timbre/mode pairs it does not
      * support (e.g. asin under PolyBLEP), which return 0 to fall through to naive. */
-    SpectralOscQuality osc_quality = osc_get_quality();
+    SpectralOscQuality osc_quality = spectral_osc_get_quality();
     if (osc_quality != SPECTRAL_OSC_QUALITY_NAIVE &&
-        osc_bandlimited_synth_segment(dst, lp, timbre, osc_quality)) {
+        spectral_osc_bandlimited_synth_segment(dst, lp, timbre, osc_quality)) {
         return;
     }
 
@@ -212,7 +212,7 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
      * returned above. Host-only (the LUT and Q15 segment helpers above are
      * compiled out of embedded, which synthesises Q15 via spectral_synth_arm32.c). */
 #if !SPECTRAL_EMBEDDED
-    if ((g_osc_q15_enable & OSC_Q15_BIT(timbre)) && osc_q15_available(timbre)) {
+    if ((g_osc_q15_enable & OSC_Q15_BIT(timbre)) && spectral_osc_q15_available(timbre)) {
 #if defined(OSC_SIMD_GENERIC)
         /* Packed 8xQ15 SIMD twin: the Q15 compute domain composes with the
          * float scalar/SIMD axis. When this timbre's dispatch resolves to SIMD and
@@ -220,10 +220,10 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
          * LUT loses, so it stays on the scalar Q15 path below). --scalar honoured. */
         OscDispatchMode q15_mode = OSC_GET_MODE(g_osc_dispatch, timbre);
         if (q15_mode == OSC_MODE_FALLBACK) {
-            q15_mode = osc_simd_q15_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
+            q15_mode = spectral_osc_simd_q15_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
         }
-        if (q15_mode == OSC_MODE_CPU_SIMD && osc_simd_q15_available(timbre)) {
-            osc_simd_q15_segment(dst, lp, timbre, g_osc_q15_sine_lut);
+        if (q15_mode == OSC_MODE_CPU_SIMD && spectral_osc_simd_q15_available(timbre)) {
+            spectral_osc_simd_q15_segment(dst, lp, timbre, g_osc_q15_sine_lut);
             return;
         }
 #endif
@@ -239,22 +239,22 @@ void timbre_synth_segment(float* __restrict__ dst, const struct SegmentLoopParam
     OscDispatchMode dispatch_mode = OSC_GET_MODE(g_osc_dispatch, timbre);
 
     if (dispatch_mode == OSC_MODE_FALLBACK) {
-        dispatch_mode = osc_simd_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
+        dispatch_mode = spectral_osc_simd_available(timbre) ? OSC_MODE_CPU_SIMD : OSC_MODE_CPU_SCALAR;
     }
 
     /* Cubic phase (SPECTRAL_PRECISE_PHASE) needs no special redirect: the host
      * SIMD oscillator evaluates the cubic Horner under the same flag, and every
      * scalar path uses spectral_segment_phase_at_cubic_f32() directly, so c2/c3
      * are honoured whichever path is dispatched. */
-    if (dispatch_mode == OSC_MODE_CPU_SIMD && osc_simd_available(timbre)) {
+    if (dispatch_mode == OSC_MODE_CPU_SIMD && spectral_osc_simd_available(timbre)) {
         switch (timbre) {
-        case TIMBRE_SINE:      osc_simd_segment_sine(dst, lp);      return;
-        case TIMBRE_SAW:       osc_simd_segment_saw(dst, lp);       return;
-        case TIMBRE_SQUARE:    osc_simd_segment_square(dst, lp);    return;
-        case TIMBRE_TRIANGLE:  osc_simd_segment_triangle(dst, lp);  return;
-        case TIMBRE_PARABOLA:  osc_simd_segment_parabola(dst, lp);  return;
-        case TIMBRE_QUANTIZED: osc_simd_segment_quantized(dst, lp); return;
-        case TIMBRE_PWM:       osc_simd_segment_pwm(dst, lp);       return;
+        case TIMBRE_SINE:      spectral_osc_simd_segment_sine(dst, lp);      return;
+        case TIMBRE_SAW:       spectral_osc_simd_segment_saw(dst, lp);       return;
+        case TIMBRE_SQUARE:    spectral_osc_simd_segment_square(dst, lp);    return;
+        case TIMBRE_TRIANGLE:  spectral_osc_simd_segment_triangle(dst, lp);  return;
+        case TIMBRE_PARABOLA:  spectral_osc_simd_segment_parabola(dst, lp);  return;
+        case TIMBRE_QUANTIZED: spectral_osc_simd_segment_quantized(dst, lp); return;
+        case TIMBRE_PWM:       spectral_osc_simd_segment_pwm(dst, lp);       return;
         default: break;
         }
     }

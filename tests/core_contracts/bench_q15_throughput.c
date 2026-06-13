@@ -5,9 +5,9 @@
  * configs and prints ns/sample, so the slice-2 SIMD-kernel decision is made on
  * data, not a guess:
  *
- *   float-scalar : osc_set_dispatch(ALL_SCALAR), Q15 off  (apples-to-apples ref)
- *   q15-scalar   : osc_set_dispatch(ALL_SCALAR), Q15 on   (the scalar Q15 oracle)
- *   float-simd   : osc_set_dispatch(ALL_SIMD),   Q15 off  (real-world default)
+ *   float-scalar : spectral_osc_set_dispatch(ALL_SCALAR), Q15 off  (apples-to-apples ref)
+ *   q15-scalar   : spectral_osc_set_dispatch(ALL_SCALAR), Q15 on   (the scalar Q15 oracle)
+ *   float-simd   : spectral_osc_set_dispatch(ALL_SIMD),   Q15 off  (real-world default)
  *
  * The Q15 path is scalar regardless of dispatch (dispatch only steers the float
  * path), so float-scalar vs q15-scalar is the honest equal-vectorization compare.
@@ -94,16 +94,16 @@ int main(void) {
     for (size_t t = 0; t < N_TIMBRES; t++) {
         SpectralTimbre tb = k_timbres[t].timbre;
 
-        osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
-        osc_set_q15_enable(0);
+        spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
+        spectral_osc_set_q15_enable(0);
         double f_scalar = bench(tb, &sink);
 
-        osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
-        osc_set_q15_enable(OSC_Q15_BIT(tb));
+        spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
+        spectral_osc_set_q15_enable(OSC_Q15_BIT(tb));
         double q_scalar = bench(tb, &sink);
-        osc_set_q15_enable(0);
+        spectral_osc_set_q15_enable(0);
 
-        osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
+        spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
         double f_simd = bench(tb, &sink);
 
         printf("  %-9s %12.3f %12.3f %12.3f   %9.2fx %9.2fx\n",

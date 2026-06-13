@@ -157,7 +157,7 @@ static void test_width_parity(void) {
             memset(buf_w4, 0, sizeof(buf_w4));
             memset(buf_w8, 0, sizeof(buf_w8));
 
-            osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
+            spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
             timbre_synth_segment(buf_scalar, &lp, k_timbres[t].timbre);
             render_w4(buf_w4, &lp, k_timbres[t].timbre, &width);
             render_w8(buf_w8, &lp, k_timbres[t].timbre, &width);

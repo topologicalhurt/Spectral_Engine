@@ -34,14 +34,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Process-global quality state (mirrors osc_set_dispatch in spectral_oscillator.c) ---- */
+/* ---- Process-global quality state (mirrors spectral_osc_set_dispatch in spectral_oscillator.c) ---- */
 
 static SpectralOscQuality g_osc_quality = SPECTRAL_OSC_QUALITY_NAIVE;
 
-void osc_set_quality(SpectralOscQuality quality) { g_osc_quality = quality; }
-SpectralOscQuality osc_get_quality(void) { return g_osc_quality; }
+void spectral_osc_set_quality(SpectralOscQuality quality) { g_osc_quality = quality; }
+SpectralOscQuality spectral_osc_get_quality(void) { return g_osc_quality; }
 
-const char* osc_quality_name(SpectralOscQuality quality) {
+const char* spectral_osc_quality_name(SpectralOscQuality quality) {
     switch (quality) {
     case SPECTRAL_OSC_QUALITY_NAIVE:      return "naive";
     case SPECTRAL_OSC_QUALITY_POLYBLEP:   return "polyblep";
@@ -51,7 +51,7 @@ const char* osc_quality_name(SpectralOscQuality quality) {
     }
 }
 
-int osc_quality_parse(const char* text, SpectralOscQuality* out) {
+int spectral_osc_quality_parse(const char* text, SpectralOscQuality* out) {
     if (!text || !out) return 0;
 
     /* Single-digit integer 0..3. */
@@ -406,7 +406,7 @@ static int osc_bl_oversample(float* dst, const SegmentLoopParams* lp, SpectralTi
 
 /* ---- Public dispatch ---- */
 
-int osc_bandlimited_synth_segment(float* dst, const SegmentLoopParams* lp,
+int spectral_osc_bandlimited_synth_segment(float* dst, const SegmentLoopParams* lp,
                                   SpectralTimbre timbre, SpectralOscQuality quality) {
     if (lp->length == 0) return 1;   /* nothing to render; treat as handled */
 

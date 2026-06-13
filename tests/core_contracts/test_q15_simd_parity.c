@@ -1,19 +1,19 @@
 /* test_q15_simd_parity.c - packed 8xQ15 SIMD vs scalar Q15 parity (Q5c).
  *
  * Q5b locked the SCALAR Q15 path (integer-NCO phase) against float in
- * q15_production_parity. Q5c adds the packed 8xQ15 SIMD twin (osc_simd_q15_segment).
+ * q15_production_parity. Q5c adds the packed 8xQ15 SIMD twin (spectral_osc_simd_q15_segment).
  * This test pins the SIMD kernel against its scalar Q15 ORACLE: it renders the same
  * representative segments through the production dispatch timbre_synth_segment()
  * twice with Q15 enabled, toggling only the float scalar/SIMD axis --
  *
- *   scalar Q15 : osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR)  -> synth_segment_q15
- *   SIMD   Q15 : osc_set_dispatch(OSC_DISPATCH_ALL_SIMD)    -> osc_simd_q15_segment
+ *   scalar Q15 : spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR)  -> synth_segment_q15
+ *   SIMD   Q15 : spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SIMD)    -> spectral_osc_simd_q15_segment
  *
  * -- and asserts the per-timbre RMS error stays at the Q15-eval LSB floor. The SIMD
  * eval matches the scalar spectral_osc_q15_* evaluators to <=1 LSB everywhere (the
  * triangle double-subtract and the pq pre-clamp keep the saturating corners bounded),
  * so any regression that breaks a lane op, the widen, or the amp ramp (>> 1 LSB) is
- * caught with room to spare. The five timbres are osc_simd_q15_available()'s set
+ * caught with room to spare. The five timbres are spectral_osc_simd_q15_available()'s set
  * (saw/square/triangle/parabola + sine). Sine's SIMD path is a serial LUT gather --
  * bit-identical to scalar spectral_osc_q15_sine -- so its only SIMD-vs-scalar delta
  * is the <=1 LSB vec-phase rounding, the same floor as the algebraic timbres.
@@ -75,7 +75,7 @@ typedef struct {
 
 /* Low / high / chirped / odd-length segments (same spread as q15_production_parity), PLUS a
  * deliberately aggressive cubic segment (c3 != 0). The first four (c3 == 0) exercise the
- * vectorized uint32 8-wide phase (osc_simd_q15_segment's use_vec branch); the cubic one
+ * vectorized uint32 8-wide phase (spectral_osc_simd_q15_segment's use_vec branch); the cubic one
  * exercises the scalar pack8 FALLBACK that production takes when c3 != 0. Both branches must
  * land within budget. The cubic c3 is large enough that a BROKEN scope gate (vec wrongly
  * applied to c3 != 0) would drift the phase tens of LSB and blow the -84 dBFS budget -- so
@@ -107,10 +107,10 @@ static void fill_lp(SegmentLoopParams* lp, const Q15Segment* s) {
 
 static void render(SegmentLoopParams* lp, SpectralTimbre timbre, OscDispatchWord dispatch, float* dst) {
     memset(dst, 0, sizeof(float) * MAX_LEN);
-    osc_set_dispatch(dispatch);
-    osc_set_q15_enable(OSC_Q15_BIT(timbre));
+    spectral_osc_set_dispatch(dispatch);
+    spectral_osc_set_q15_enable(OSC_Q15_BIT(timbre));
     timbre_synth_segment(dst, lp, timbre);
-    osc_set_q15_enable(0);
+    spectral_osc_set_q15_enable(0);
 }
 
 static void test_q15_simd_parity(void) {

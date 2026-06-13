@@ -98,8 +98,8 @@ __attribute__((noinline)) static double consume_buf(const float* b) {
 static double bench_prod_fsimd4(SpectralTimbre timbre, double* sink) {
     SegmentLoopParams lp; fill_lp(&lp);
     float buf[SEG_LEN];
-    osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
-    osc_set_q15_enable(0);
+    spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
+    spectral_osc_set_q15_enable(0);
     for (int it = 0; it < 64; it++) { memset(buf, 0, sizeof(buf)); timbre_synth_segment(buf, &lp, timbre); }
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     double acc = 0.0;
@@ -318,7 +318,7 @@ static double bench_pack8_f(SpectralTimbre timbre, const q15_t* lut, int phase_m
 }
 
 /* ===== B2 experiment: amp ramp + scale folded into Q15 (mulhrs) ============
- * The shipping kernel (bench_pack8_f / osc_simd_q15_segment) widens Q15->float
+ * The shipping kernel (bench_pack8_f / spectral_osc_simd_q15_segment) widens Q15->float
  * THEN does amp*wave + accumulate in float -- 2 float muls per 8 samples plus a
  * float amp-ramp carry. This variant folds the amp into ONE 8-wide mulhrs in Q15
  * BEFORE the widen, so the only float left is the (unavoidable, float-dst) load/

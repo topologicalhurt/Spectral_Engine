@@ -1156,22 +1156,22 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
     SpectralTimbre effective_timbre = opts->timbre;
 
     /* Anti-alias oscillator quality is a CPU-float-path feature; the GPU (Metal/
-     * CUDA) and Q15-native backends ignore osc_get_quality().  To let the user
+     * CUDA) and Q15-native backends ignore spectral_osc_get_quality().  To let the user
      * actually audition a non-naive mode, force the CPU backend for it.  NAIVE
      * leaves the requested backend untouched (and renders bit-identically). */
-    osc_set_quality(opts->osc_quality);
+    spectral_osc_set_quality(opts->osc_quality);
 
     /* CPU oscillator execution strategy: SIMD by default (~1.8x on saw/square,
      * <=1 ULP vs scalar), scalar reference on --scalar.  Only affects the CPU
      * float path; GPU and Q15-native backends have their own kernels. */
-    osc_set_dispatch(opts->osc_force_scalar ? OSC_DISPATCH_ALL_SCALAR
+    spectral_osc_set_dispatch(opts->osc_force_scalar ? OSC_DISPATCH_ALL_SCALAR
                                             : OSC_DISPATCH_ALL_SIMD);
 
     SynthBackend req_backend = opts->backend;
     if (opts->osc_quality != SPECTRAL_OSC_QUALITY_NAIVE) {
         req_backend = BACKEND_CPU;
         SPECTRAL_LOG_INFO("Oscillator quality: %s (CPU float path; forcing CPU backend)",
-                          osc_quality_name(opts->osc_quality));
+                          spectral_osc_quality_name(opts->osc_quality));
     }
 
     /* Opt-in Q15 fixed-point compute domain (--q15). The Q15 kernels (packed
@@ -1181,12 +1181,12 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
      * single timbre, so only that timbre's bit matters; timbres without a Q15
      * path (asin/quantized/pwm) stay on float. */
     if (opts->enable_q15) {
-        if (osc_q15_available(opts->timbre)) {
-            osc_set_q15_enable(OSC_Q15_BIT(opts->timbre));
+        if (spectral_osc_q15_available(opts->timbre)) {
+            spectral_osc_set_q15_enable(OSC_Q15_BIT(opts->timbre));
             req_backend = BACKEND_CPU;
             int packed = 0;
 #if defined(OSC_SIMD_GENERIC)
-            packed = !opts->osc_force_scalar && osc_simd_q15_available(opts->timbre);
+            packed = !opts->osc_force_scalar && spectral_osc_simd_q15_available(opts->timbre);
 #endif
             SPECTRAL_LOG_INFO("Q15 compute domain: ENABLED for %s (%s; forcing CPU backend)",
                               timbre_name(opts->timbre),

@@ -31,7 +31,7 @@
 #include "spectral_phase_nco8.h"        /* vectorized uint32 8-wide NCO (c3==0 fast phase) */
 #include "simde/x86/ssse3.h"            /* abs_epi16 / mulhrs_epi16 */
 #include "simde/x86/sse4.1.h"           /* cvtepi16_epi32 (1-op sign-extend) */
-/* Pin the Q15 waveform contract: the pack8 8xQ15 kernel below (osc_simd_q15_segment)
+/* Pin the Q15 waveform contract: the pack8 8xQ15 kernel below (spectral_osc_simd_q15_segment)
  * is written op-for-op against the v1 spectral_osc_q15_<timbre> evaluators and must
  * stay <=1 LSB of them. A contract bump fails this build until the kernel is
  * re-validated against q15_simd_parity and the pin updated. */
@@ -57,37 +57,37 @@ _Static_assert(SPECTRAL_OSC_Q15_VERSION == 1,
 #define OSC_VSUF _impl
 #include "oscillator_simd_kernel.inc"
 
-void osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_sine(float* dst, const SegmentLoopParams* lp) {
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_sine_v), wave_sine_1, NULL);
 }
 
-void osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_saw(float* dst, const SegmentLoopParams* lp) {
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_saw_v), wave_saw_1, NULL);
 }
 
-void osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_square(float* dst, const SegmentLoopParams* lp) {
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_square_v), wave_square_1, NULL);
 }
 
-void osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_triangle(float* dst, const SegmentLoopParams* lp) {
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_triangle_v), wave_triangle_1, NULL);
 }
 
-void osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_parabola(float* dst, const SegmentLoopParams* lp) {
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_parabola_v), wave_parabola_1, NULL);
 }
 
-void osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_quantized(float* dst, const SegmentLoopParams* lp) {
     float width = lp->width;
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_quantized_v), wave_quantized_1, &width);
 }
 
-void osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) {
+void spectral_osc_simd_segment_pwm(float* dst, const SegmentLoopParams* lp) {
     float width = lp->width;
     OSC_FN(osc_simd_fused_sustain)(dst, lp, OSC_FN(wave_pwm_v), wave_pwm_1, &width);
 }
 
-int osc_simd_available(SpectralTimbre timbre) {
+int spectral_osc_simd_available(SpectralTimbre timbre) {
     return timbre == TIMBRE_SINE || timbre == TIMBRE_SAW ||
            timbre == TIMBRE_SQUARE || timbre == TIMBRE_TRIANGLE ||
            timbre == TIMBRE_PARABOLA || timbre == TIMBRE_QUANTIZED ||
@@ -216,7 +216,7 @@ simde__m128i spectral_q15_pack8_eval_for_test(simde__m128i pq, SpectralTimbre ti
 }
 #endif
 
-int osc_simd_q15_available(SpectralTimbre timbre) {
+int spectral_osc_simd_q15_available(SpectralTimbre timbre) {
     /* The 4 algebraic timbres plus sine. Sine's eval is a serial LUT gather (no
      * vector form), but B1 re-measured it: with the vectorized phase + float
      * widen/amp/accumulate around the gather, pack8 sine beats both the scalar Q15
@@ -226,7 +226,7 @@ int osc_simd_q15_available(SpectralTimbre timbre) {
            timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA;
 }
 
-void osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
+void spectral_osc_simd_q15_segment(float* dst, const SegmentLoopParams* lp,
                           SpectralTimbre timbre, const q15_t* sine_lut) {
     const size_t len = lp->length;
     if (len == 0) return;

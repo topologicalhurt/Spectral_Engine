@@ -490,7 +490,7 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
                 cli_fail(opts, "Missing mode after -q/--quality");
                 goto fail;
             }
-            if (!osc_quality_parse(argv[i + 1], &opts->osc_quality)) {
+            if (!spectral_osc_quality_parse(argv[i + 1], &opts->osc_quality)) {
                 cli_fail(opts, "Invalid oscillator quality. Use naive|polyblep|additive|oversample (aliases blep/add/os) or 0..3");
                 goto fail;
             }

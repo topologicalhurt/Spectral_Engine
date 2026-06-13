@@ -15,7 +15,7 @@
  *       measurement (RMS error ~ -159 dBFS).
  *
  * Both paths are driven through the REAL production dispatch, timbre_synth_segment()
- * under osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR | OSC_DISPATCH_ALL_SIMD) - no
+ * under spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR | OSC_DISPATCH_ALL_SIMD) - no
  * reimplementation of either kernel. Default oscillator quality (NAIVE) is left
  * untouched so the band-limited path is never entered.
  *
@@ -116,10 +116,10 @@ static void test_parity(void) {
             memset(buf_scalar, 0, sizeof(buf_scalar));
             memset(buf_simd,   0, sizeof(buf_simd));
 
-            osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
+            spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
             timbre_synth_segment(buf_scalar, &lp, k_timbres[t].timbre);
 
-            osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
+            spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
             timbre_synth_segment(buf_simd, &lp, k_timbres[t].timbre);
 
             for (size_t j = 0; j < lp.length; j++) {
@@ -181,9 +181,9 @@ static void test_quantized_int_max_boundary(void) {
     memset(buf_scalar, 0, sizeof(buf_scalar));
     memset(buf_simd,   0, sizeof(buf_simd));
 
-    osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
+    spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SCALAR);
     timbre_synth_segment(buf_scalar, &lp, TIMBRE_QUANTIZED);
-    osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
+    spectral_osc_set_dispatch(OSC_DISPATCH_ALL_SIMD);
     timbre_synth_segment(buf_simd, &lp, TIMBRE_QUANTIZED);
 
     double max_diff = 0.0;

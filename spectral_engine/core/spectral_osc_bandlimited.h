@@ -37,24 +37,24 @@ typedef enum SpectralOscQuality {
     SPECTRAL_OSC_QUALITY_OVERSAMPLE = 3  /* N x oversample + FIR decimate          */
 } SpectralOscQuality;
 
-/* Process-global oscillator quality, mirroring osc_set_dispatch() in spectral_oscillator.c.
+/* Process-global oscillator quality, mirroring spectral_osc_set_dispatch() in spectral_oscillator.c.
  * Read once per segment by timbre_synth_segment(); set before synthesis. */
-void osc_set_quality(SpectralOscQuality quality);
-SpectralOscQuality osc_get_quality(void);
+void spectral_osc_set_quality(SpectralOscQuality quality);
+SpectralOscQuality spectral_osc_get_quality(void);
 
 /* Human-readable name (for logging/usage). Never NULL. */
-const char* osc_quality_name(SpectralOscQuality quality);
+const char* spectral_osc_quality_name(SpectralOscQuality quality);
 
 /* Parse "naive|polyblep|additive|oversample" (aliases: blep, add, os) or an
  * integer 0..3.  Returns 1 and writes *out on success, 0 on failure. */
-int osc_quality_parse(const char* text, SpectralOscQuality* out);
+int spectral_osc_quality_parse(const char* text, SpectralOscQuality* out);
 
 /* Band-limited synthesis of one segment.  Accumulates (dst[j] += amp*wave) using
  * the same fade/amplitude envelope as the naive scalar path, so it is a drop-in
  * quality swap.  Returns 1 if it fully rendered the segment, or 0 if this
  * timbre/quality pair is not handled (the caller must fall back to naive).
  * Never call with quality == NAIVE. */
-int osc_bandlimited_synth_segment(float* dst, const struct SegmentLoopParams* lp,
+int spectral_osc_bandlimited_synth_segment(float* dst, const struct SegmentLoopParams* lp,
                                   SpectralTimbre timbre, SpectralOscQuality quality);
 
 #ifdef __cplusplus
