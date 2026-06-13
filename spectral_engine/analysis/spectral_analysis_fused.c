@@ -11,7 +11,7 @@
  *   row       = magsq[pair]
  *   next_row  = magsq[pair + 1]
  *   phase_row = phase[pair]
- *   t_hop     = pair * hop
+ *   frame_start_sample     = pair * hop
  *
  * Keeping this contract explicit is more important than shaving one duplicate
  * FFT at chunk boundaries. The latter can be reintroduced only after parity

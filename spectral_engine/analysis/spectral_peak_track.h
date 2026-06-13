@@ -58,7 +58,7 @@ typedef struct {
     const float* __restrict__ next_row;
     const float* __restrict__ phase_row;
     const float* __restrict__ next_phase_row;
-    float t_hop;
+    float frame_start_sample;
     float threshsq;
     int can_start_new;
 } SpectralFrameContext;

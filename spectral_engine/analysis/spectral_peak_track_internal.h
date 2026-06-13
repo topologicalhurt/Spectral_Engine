@@ -127,21 +127,21 @@ static inline SpectralError spectral_tracker_frame_context_init(
     float threshsq,
     int can_start_new)
 {
-    float t_hop = 0.0f;
+    float frame_start_sample = 0.0f;
     SpectralError err = SPECTRAL_OK;
 
     if (!ctx || !row || !next_row || !phase_row) {
         return SPECTRAL_ERR_PARAM;
     }
 
-    err = spectral_tracker_frame_time_from_index(frame_index, hop_float, &t_hop);
+    err = spectral_tracker_frame_time_from_index(frame_index, hop_float, &frame_start_sample);
     if (err != SPECTRAL_OK) return err;
 
     ctx->row = row;
     ctx->next_row = next_row;
     ctx->phase_row = phase_row;
     ctx->next_phase_row = next_phase_row;
-    ctx->t_hop = t_hop;
+    ctx->frame_start_sample = frame_start_sample;
     ctx->threshsq = threshsq;
     ctx->can_start_new = can_start_new;
     return SPECTRAL_OK;

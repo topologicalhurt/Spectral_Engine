@@ -66,7 +66,7 @@ int spectral_tracker_validate_candidate(
 
 static int spectral_tracker_emitted_segment_valid(const SpectralTracker* tracker,
                                                   int tid,
-                                                  float t_hop,
+                                                  float frame_start_sample,
                                                   float hop_float,
                                                   float phase,
                                                   const SpectralPeakEstimate* estimate)
@@ -77,7 +77,7 @@ static int spectral_tracker_emitted_segment_valid(const SpectralTracker* tracker
     if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities) {
         return 0;
     }
-    if (!isfinite(t_hop) || t_hop < 0.0f ||
+    if (!isfinite(frame_start_sample) || frame_start_sample < 0.0f ||
         !isfinite(hop_float) || hop_float <= 0.0f ||
         !isfinite(phase) ||
         !isfinite(SPECTRAL_TRACK_DEFAULT_WIDTH) || SPECTRAL_TRACK_DEFAULT_WIDTH <= 0.0f) {
@@ -101,7 +101,7 @@ int spectral_tracker_emit_segment(
     const float* __restrict__ phase_row,
     const float* __restrict__ next_phase_row,
     size_t cf,
-    float t_hop,
+    float frame_start_sample,
     float freq_step_omega,
     float freq_step_df,
     float inv_hop,
@@ -163,7 +163,7 @@ int spectral_tracker_emit_segment(
     phase_start = omp_get_wtime();
 #endif
 
-    if (!spectral_tracker_emitted_segment_valid(tracker, tid, t_hop, hop_float, phase_row[cf], &estimate)) {
+    if (!spectral_tracker_emitted_segment_valid(tracker, tid, frame_start_sample, hop_float, phase_row[cf], &estimate)) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
         return 0;
     }
@@ -197,7 +197,7 @@ int spectral_tracker_emit_segment(
 
     seg = &tracker->seg_arrays[tid][count];
 
-    seg->start = t_hop;
+    seg->start = frame_start_sample;
     seg->length = hop_float;
     seg->phase = phase_row[cf];
     seg->width = SPECTRAL_TRACK_DEFAULT_WIDTH;
