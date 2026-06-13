@@ -11,6 +11,7 @@
  * With the flag off the stage is a no-op and the synth path is bit-identical to
  * the legacy per-grain quadratic model. */
 #include "spectral_proc_adaptive_track_density.h"
+#include "spectral_log.h"
 
 #if SPECTRAL_PRECISE_PHASE
 #include "spectral_common.h"
@@ -124,6 +125,12 @@ SpectralError spectral_proc_adaptive_track_density_apply(
     (void)sa;
     (void)sample_rate;
     (void)params;
-    return SPECTRAL_OK;
+    /* The cubic-phase implementation above is compiled out in this build. A
+     * request to run the stage cannot be honored, so fail loudly rather than
+     * silently returning OK — honesty is not a build option. Rebuild with
+     * SPECTRAL_PRECISE_PHASE=1 to enable it. */
+    SPECTRAL_LOG_ERROR_STDERR(
+        "adaptive_track_density is inactive: this build has SPECTRAL_PRECISE_PHASE=0");
+    return SPECTRAL_ERR_BACKEND_UNAVAIL;
 #endif
 }
