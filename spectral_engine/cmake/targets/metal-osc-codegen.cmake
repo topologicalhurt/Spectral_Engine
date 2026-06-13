@@ -11,7 +11,9 @@ set(SPECTRAL_METAL_OSC_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_metal_osc.cmake")
 set(SPECTRAL_METAL_OSC_INPUTS
     "${SPECTRAL_CORE_DIR}/spectral_osc_formulas.h"
     "${SPECTRAL_CORE_DIR}/spectral_segment_math.h"
-    "${SPECTRAL_CORE_DIR}/oscillator.h")
+    "${SPECTRAL_CORE_DIR}/oscillator.h"
+    "${SPECTRAL_CORE_DIR}/spectral_common.h"
+    "${SPECTRAL_CORE_DIR}/spectral_synth_internal.h")
 configure_file(
     "${SPECTRAL_ENGINE_ROOT}/cmake/scripts/run_metal_osc.cmake.in"
     "${SPECTRAL_METAL_OSC_RUNNER}"

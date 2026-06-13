@@ -4,6 +4,8 @@
  *   core/spectral_osc_formulas.h   (waveforms, phase, fade)
  *   core/spectral_segment_math.h   (segment alpha/beta/d_amp/phase/amp)
  *   core/oscillator.h              (SPECTRAL_OSC_TIMBRE_LIST ordering)
+ *   core/spectral_common.h         (SegmentGpu layout)
+ *   core/spectral_synth_internal.h (GpuSynthParams/TileRange layouts)
  *
  * Regenerate: cmake --build build --target generate_metal_osc
  * Verify:     cmake --build build --target verify_metal_osc
@@ -14,6 +16,37 @@
 #define SPECTRAL_OSC_METAL_GENERATED_H
 
 #if defined(__APPLE__) && !defined(__CUDACC__)
+
+const char* gpu_structs_metal_source =
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"\n"
+"struct SegmentGpu {\n"
+"    float start;\n"
+"    float length;\n"
+"    float phase;\n"
+"    float omega;\n"
+"    float df;\n"
+"    float amp;\n"
+"    float da;\n"
+"    float _pad;\n"
+"};\n"
+"\n"
+"struct SynthParams {\n"
+"    float stretch;\n"
+"    float inv_stretch;\n"
+"    float inv_stretch_sq;\n"
+"    float pitch_factor;\n"
+"    uint out_len;\n"
+"    uint num_segments;\n"
+"    uint tile_size;\n"
+"    uint timbre;\n"
+"};\n"
+"\n"
+"struct TileRange {\n"
+"    uint start;\n"
+"    uint count;\n"
+"};\n";
 
 const char* oscillator_metal_source =
 "#define TIMBRE_SINE    0\n"

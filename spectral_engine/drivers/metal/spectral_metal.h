@@ -30,6 +30,7 @@ void metal_cleanup(void);
  * spectral_osc_metal_generated.h and compiled by the payload TU
  * (spectral_osc_metal_payload.c) — only the Metal driver carries the
  * shader strings; no other target holds them as rodata. */
+extern const char* gpu_structs_metal_source;
 extern const char* oscillator_metal_source;
 extern const char* spectral_segment_math_metal_source;
 

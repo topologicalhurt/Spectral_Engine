@@ -148,10 +148,15 @@ file moves must be codegen-identical, and the gate PROVES it at ±5% insns)
   IFFT renderer/contract. synth/ = backends/gpu only. Bonus fix: the sim
   report block's guard now matches the perf include (NO_PERF profiles
   compiled it only via the old macro chain). Gate PASS.
-- L4 next: gpu → drivers/{metal,cuda} with the four anchor cuts — (a) MSL
-  payload out of core/oscillator.c, (b) GPU externs out of the public
-  header into per-driver headers, (c) MSL struct-mirror codegen, (d) plan/
-  cache layer stays in core (already correct). gpu_backend_parity (the
-  L4 parity requirement) already exists from the review's W2.
-- L5 next: include-graph layering test; ENGINE include dirs narrowed per
-  layer; docs trued.
+- **L4 DONE** (59b528281b + struct codegen): drivers/{metal,cuda} stood up,
+  synth/ no longer exists. Anchor (a): MSL payload in its own driver TU —
+  strings(1)-verified absent from non-desktop binaries; verify gate desktop-
+  only. Anchor (b): HAS_* + externs in per-driver public headers; the
+  backend registry is the one documented core→driver edge. Anchor (c):
+  gpu_structs_metal_source codegen'd from the C layouts (fail-loud type
+  map + flat-body rule); the unchecked hand mirror is deleted;
+  sabotage-verified. Anchor (d) was already correct. gpu_backend_parity
+  green throughout.
+- L5 next: include-graph layering test (allowlist: spectral_backend.c →
+  drivers/*.h registry edge); ENGINE include dirs narrowed per layer;
+  docs trued.

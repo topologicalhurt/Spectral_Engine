@@ -56,7 +56,9 @@ _CORE = _REPO_ROOT / "spectral_engine" / "core"
 DEFAULT_FORMULAS = _CORE / "spectral_osc_formulas.h"
 DEFAULT_SEGMENT_MATH = _CORE / "spectral_segment_math.h"
 DEFAULT_OSCILLATOR_H = _CORE / "oscillator.h"
-DEFAULT_OUTPUT = _CORE / "spectral_osc_metal_generated.h"
+DEFAULT_COMMON_H = _CORE / "spectral_common.h"
+DEFAULT_SYNTH_INTERNAL_H = _CORE / "spectral_synth_internal.h"
+DEFAULT_OUTPUT = _REPO_ROOT / "spectral_engine" / "drivers" / "metal" / "spectral_osc_metal_generated.h"
 DEFAULT_MODE = "generate"
 MODE_CHOICES = ("generate", "verify")
 
@@ -306,6 +308,68 @@ def build_segment_math_source(segment_math: str) -> list[str]:
     return lines
 
 
+# C type -> MSL type for the GPU-shared structs. Anything else fails loudly:
+# a new field type needs a deliberate mapping decision, not a silent guess.
+_MSL_TYPES = {"float": "float", "uint32_t": "uint"}
+
+# C struct name -> (header it lives in, MSL struct name). SynthParams is the
+# kernel-side name of GpuSynthParams (the C-side carries the Gpu prefix to
+# avoid colliding with the engine's own SynthParams).
+_GPU_STRUCTS = (
+    ("SegmentGpu", "common", "SegmentGpu"),
+    ("GpuSynthParams", "synth_internal", "SynthParams"),
+    ("TileRange", "synth_internal", "TileRange"),
+)
+
+
+def _struct_fields(source: str, c_name: str) -> list[tuple[str, str]]:
+    """(msl_type, field_name) list for a C struct, in declaration order.
+
+    Handles comma-grouped declarations (`float a, b, c;`). Unknown types or
+    an unmatched struct stop the build."""
+    # body restricted to brace-free content: the GPU-shared structs are flat
+    # scalar lists; a nested struct/union has no defined MSL mirror and must
+    # fail the build here, not generate something plausible.
+    match = re.search(
+        r"typedef struct[^{]*\{([^{}]*)\}\s*" + re.escape(c_name) + r"\s*;",
+        _strip_block_comments(source), re.DOTALL)
+    if match is None:
+        raise GeneratorError(f"struct {c_name} not found in its header")
+    fields: list[tuple[str, str]] = []
+    for decl in match.group(1).split(";"):
+        decl = decl.strip()
+        if not decl:
+            continue
+        ctype, _, names = decl.partition(" ")
+        if ctype not in _MSL_TYPES:
+            raise GeneratorError(
+                f"struct {c_name}: no MSL mapping for C type '{ctype}' "
+                f"(decl: '{decl}') — extend _MSL_TYPES deliberately")
+        for name in (n.strip() for n in names.split(",")):
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise GeneratorError(f"struct {c_name}: unparsable field '{name}'")
+            fields.append((_MSL_TYPES[ctype], name))
+    if not fields:
+        raise GeneratorError(f"struct {c_name}: no fields parsed")
+    return fields
+
+
+def build_gpu_structs_source(common: str, synth_internal: str) -> list[str]:
+    """Assemble the `gpu_structs_metal_source` MSL string: the shader-side
+    mirrors of the GPU-shared structs, generated from the C definitions so
+    field name/order/type can never drift (layouts are sequences of 4-byte
+    scalars on both sides, so matching order IS matching layout)."""
+    sources = {"common": common, "synth_internal": synth_internal}
+    lines = ["#include <metal_stdlib>", "using namespace metal;", ""]
+    for c_name, where, msl_name in _GPU_STRUCTS:
+        lines.append(f"struct {msl_name} {{")
+        for msl_type, field in _struct_fields(sources[where], c_name):
+            lines.append(f"    {msl_type} {field};")
+        lines.append("};")
+        lines.append("")
+    return lines[:-1]
+
+
 def _as_c_string_block(name: str, lines: list[str]) -> list[str]:
     """Wrap raw MSL lines as a C `const char* name = "...";` definition.
 
@@ -328,10 +392,13 @@ def generate_header(
     formulas: str,
     segment_math: str,
     oscillator_h: str,
+    common_h: str,
+    synth_internal_h: str,
 ) -> str:
     timbres = parse_timbre_list(oscillator_h)
     osc_lines = build_oscillator_source(formulas, timbres)
     seg_lines = build_segment_math_source(segment_math)
+    struct_lines = build_gpu_structs_source(common_h, synth_internal_h)
     osc_version = _version(formulas, "SPECTRAL_OSC_FORMULAS_VERSION")
     seg_version = _version(segment_math, "SPECTRAL_SEGMENT_MATH_VERSION")
 
@@ -342,6 +409,8 @@ def generate_header(
         " *   core/spectral_osc_formulas.h   (waveforms, phase, fade)",
         " *   core/spectral_segment_math.h   (segment alpha/beta/d_amp/phase/amp)",
         " *   core/oscillator.h              (SPECTRAL_OSC_TIMBRE_LIST ordering)",
+        " *   core/spectral_common.h         (SegmentGpu layout)",
+        " *   core/spectral_synth_internal.h (GpuSynthParams/TileRange layouts)",
         " *",
         " * Regenerate: cmake --build build --target generate_metal_osc",
         " * Verify:     cmake --build build --target verify_metal_osc",
@@ -354,7 +423,9 @@ def generate_header(
         "#if defined(__APPLE__) && !defined(__CUDACC__)",
         "",
     ]
-    body = _as_c_string_block("oscillator_metal_source", osc_lines)
+    body = _as_c_string_block("gpu_structs_metal_source", struct_lines)
+    body.append("")
+    body += _as_c_string_block("oscillator_metal_source", osc_lines)
     body.append("")
     body += _as_c_string_block("spectral_segment_math_metal_source", seg_lines)
     footer = [
@@ -372,6 +443,8 @@ def main() -> int:
     parser.add_argument("--formulas", type=Path, default=DEFAULT_FORMULAS)
     parser.add_argument("--segment-math", type=Path, default=DEFAULT_SEGMENT_MATH)
     parser.add_argument("--oscillator-h", type=Path, default=DEFAULT_OSCILLATOR_H)
+    parser.add_argument("--common-h", type=Path, default=DEFAULT_COMMON_H)
+    parser.add_argument("--synth-internal-h", type=Path, default=DEFAULT_SYNTH_INTERNAL_H)
     parser.add_argument("-o", "--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("-m", "--mode", choices=MODE_CHOICES, default=DEFAULT_MODE)
     args = parser.parse_args()
@@ -382,6 +455,8 @@ def main() -> int:
             read_utf8_lf(args.formulas),
             read_utf8_lf(args.segment_math),
             read_utf8_lf(args.oscillator_h),
+            read_utf8_lf(args.common_h),
+            read_utf8_lf(args.synth_internal_h),
         )
     except GeneratorError as exc:
         console.print_error(f"metal_osc generation failed: {exc}")

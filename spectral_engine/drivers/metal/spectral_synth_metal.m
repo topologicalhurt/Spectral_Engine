@@ -21,41 +21,9 @@
  * CMake verify_metal_osc target enforces they match the C formulas every build,
  * which replaces the old _Static_assert(VERSION==N) drift reminders. */
 
-/* Metal kernel source - struct definitions and synthesis kernel.
- * Oscillator + segment-math functions come from the generated MSL strings.
- * Uses SegmentGpu (32 bytes) for parity with CUDA — doubles threadgroup cache. */
-static const char* metalKernelStructs = 
-"#include <metal_stdlib>\n"
-"using namespace metal;\n"
-"\n"
-/* NOTE: Must match SegmentGpu layout in spectral_common.h (no compile-time check possible) */
-"struct SegmentGpu {\n"
-"    float start;\n"
-"    float length;\n"
-"    float phase;\n"
-"    float omega;\n"
-"    float df;\n"
-"    float amp;\n"
-"    float da;\n"
-"    float _pad;\n"
-"};\n"
-"\n"
-"struct SynthParams {\n"
-"    float stretch;\n"
-"    float inv_stretch;\n"
-"    float inv_stretch_sq;\n"
-"    float pitch_factor;\n"
-"    uint out_len;\n"
-"    uint num_segments;\n"
-"    uint tile_size;\n"
-"    uint timbre;\n"
-"};\n"
-"\n"
-"struct TileRange {\n"
-"    uint start;\n"
-"    uint count;\n"
-"};\n"
-"\n";
+/* The struct definitions (SegmentGpu/SynthParams/TileRange) come from the
+ * generated gpu_structs_metal_source — codegen from the C layouts, so the
+ * old "must match, no compile-time check possible" hand mirror is gone. */
 
 static const char* metalKernelCode = 
 "#define THREADS_PER_TILE " SPECTRAL_STR(SPECTRAL_GPU_TILE_SIZE) "\n"
@@ -184,16 +152,17 @@ void metal_init(void) {
 #endif
         options.languageVersion = MTLLanguageVersion2_4;
         
-        if (!oscillator_metal_source || !spectral_segment_math_metal_source) {
-            SPECTRAL_WARN("Metal: generated MSL source is NULL (oscillator.c not linked?)");
+        if (!gpu_structs_metal_source || !oscillator_metal_source ||
+            !spectral_segment_math_metal_source) {
+            SPECTRAL_WARN("Metal: generated MSL source is NULL (payload TU not linked?)");
             return;
         }
 
-        /* Combine shader sources: structs + generated oscillator + generated
-         * segment math + kernel.  The two middle strings are codegen'd from the
-         * C contract (spectral_osc_metal_generated.h). */
+        /* Combine shader sources: generated structs + generated oscillator +
+         * generated segment math + kernel.  The first three strings are
+         * codegen'd from the C contract (spectral_osc_metal_generated.h). */
         NSString* source = [NSString stringWithFormat:@"%s%s%s%s",
-                           metalKernelStructs,
+                           gpu_structs_metal_source,
                            oscillator_metal_source,
                            spectral_segment_math_metal_source,
                            metalKernelCode];
