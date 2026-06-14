@@ -171,6 +171,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/metal-q15pack-bench.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-sin-init-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/proc-mask-honesty-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
@@ -218,6 +219,7 @@ add_dependencies(tests_all
     phase_nco_precision_test
     osc_recursive_test
     osc_sin_init_parity_test
+    proc_mask_honesty_test
     full_fused_parity_test
     osc_formulas_domain_test
     window_backend_parity_test
