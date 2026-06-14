@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark_types import TestStatus
-from ..core.constants import DEFAULT_PEEK_TAIL_LINES, STAGE_MARKER_LINE_RE
+from ..core.constants import (
+    DEFAULT_PEEK_TAIL_LINES,
+    DEFAULT_SUITE_BENCH_ARGS,
+    STAGE_MARKER_LINE_RE,
+)
 from ..core.process import run
 from ..core.utils import tail_lines
 
@@ -31,7 +35,8 @@ RENDER_TIMING_RE = re.compile(
 MARKER_LINE_RE = STAGE_MARKER_LINE_RE  # module-local alias for readability
 MARKER_STRICT_STAGES = ("fft", "track", "synth", "norm", "write")
 MARKER_FALLBACK_STAGES = ("analysis", "synth", "norm", "write")
-DEFAULT_PERF_CLI_ARGS = ["0", "1", "0", "4096", "128", "-85", "20", "0"]
+# Same positional CLI contract as the suite default, in list form (single source).
+DEFAULT_PERF_CLI_ARGS = DEFAULT_SUITE_BENCH_ARGS.split()
 
 
 @dataclass(slots=True)

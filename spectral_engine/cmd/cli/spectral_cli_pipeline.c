@@ -1223,7 +1223,7 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
 #if HAS_CUDA
         if (effective_backend == BACKEND_CUDA) {
             size_t vram = cuda_vram_usage_bytes();
-            SPECTRAL_LOG_INFO("VRAM used: %.1f MB", (double)vram / (1024.0 * 1024.0));
+            SPECTRAL_LOG_INFO("VRAM used: %.1f MB", BYTES_TO_MB(vram));
         }
 #endif
     }

@@ -320,7 +320,7 @@ int main(int argc, char** argv) {
         const Segment* src = &float_segs[i];
         SpectralSegmentQ15* dst = &q15_segs[i];
         uint32_t seg_end;
-        float omega, phase, amp, da, df;
+        float omega, phase, amp, da;
 
         dst->start = clamp_start_sample(src->start, &stats);
         dst->length = clamp_length_sample(src->length, &stats);
@@ -348,7 +348,7 @@ int main(int argc, char** argv) {
         dst->da_q15 = FLOAT_TO_Q15(da);
 
 #if SPECTRAL_HAS_CHIRP
-        df = sanitize_clamped_field(src->df, -1.0f, 1.0f, 0.0f, &stats);
+        float df = sanitize_clamped_field(src->df, -1.0f, 1.0f, 0.0f, &stats);
         dst->df_q15 = FLOAT_TO_Q15(df);
 #endif
     }

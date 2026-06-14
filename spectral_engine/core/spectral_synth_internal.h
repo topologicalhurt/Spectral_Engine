@@ -142,7 +142,6 @@ static inline SpectralError gpu_synth_params_pack_checked(
     *out = (GpuSynthParams){0};
 
     if (sp->out_len > (size_t)UINT32_MAX ||
-        sp->num_segments > UINT32_MAX ||
         (int)timbre < TIMBRE_SINE ||
         (int)timbre > TIMBRE_PWM) {
         return SPECTRAL_ERR_OVERFLOW;
