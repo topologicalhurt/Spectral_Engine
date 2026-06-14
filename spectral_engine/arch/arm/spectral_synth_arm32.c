@@ -39,6 +39,20 @@
 
 #include <string.h>
 
+/* Maximum samples this kernel renders per spectral_arm32_process() call. The
+ * static DTCM accumulator (accum[]) and the interleaved scratch (temp[]) are
+ * sized to this, and a larger num_samples is truncated to it. This is the
+ * engine's canonical embedded block size (SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE,
+ * spectral_config.h) -- the same block the M7 perf model / WCET budget assume
+ * (daisy_seed_config.h: "128 active voices at 256-sample blocks"). The
+ * _Static_assert below pins the value: if the engine block size ever moves off
+ * 256, this fires rather than letting the buffers silently desynchronize from
+ * the cap. */
+#define SPECTRAL_ARM32_MAX_BLOCK SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE
+_Static_assert(SPECTRAL_ARM32_MAX_BLOCK == 256u,
+               "arm32 accum[]/temp[] buffers and the block cap are sized to 256; "
+               "update them together with SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE");
+
 /*
  * DMA prefetch from SDRAM to DTCM buffer.
  * User must provide dma_start_transfer() via HAL integration.
@@ -891,9 +905,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         return 0;
     }
 
-    if (SPECTRAL_UNLIKELY(num_samples > 256u)) {
-        SPECTRAL_DBG("arm32: block size %u truncated to 256", (unsigned)num_samples);
-        num_samples = 256u;
+    if (SPECTRAL_UNLIKELY(num_samples > SPECTRAL_ARM32_MAX_BLOCK)) {
+        SPECTRAL_DBG("arm32: block size %u truncated to %u",
+                     (unsigned)num_samples, (unsigned)SPECTRAL_ARM32_MAX_BLOCK);
+        num_samples = SPECTRAL_ARM32_MAX_BLOCK;
     }
 
     if (SPECTRAL_UNLIKELY(ctx->output_position >= ctx->output_length ||
@@ -918,11 +933,11 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     /* Static accumulator in DTCM for zero wait-state access on Cortex-M7.
      * Safe for embedded: single-threaded audio callback, no reentrancy. */
 #if defined(__GNUC__) || defined(__clang__)
-    static q63_t accum[256] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
+    static q63_t accum[SPECTRAL_ARM32_MAX_BLOCK] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-    static _Alignas(32) q63_t accum[256];
+    static _Alignas(32) q63_t accum[SPECTRAL_ARM32_MAX_BLOCK];
 #else
-    static q63_t accum[256];
+    static q63_t accum[SPECTRAL_ARM32_MAX_BLOCK];
 #endif
     
     /* Clear the q63 accumulator through the one retargetable zeroing primitive
@@ -1237,11 +1252,11 @@ uint32_t spectral_arm32_process_interleaved(SpectralArm32Ctx* ctx,
     
     /* Cache-aligned temp buffer for efficient SIMD copy to interleaved output */
 #if defined(__GNUC__) || defined(__clang__)
-    q15_t temp[256] __attribute__((aligned(SPECTRAL_CACHE_LINE)));
+    q15_t temp[SPECTRAL_ARM32_MAX_BLOCK] __attribute__((aligned(SPECTRAL_CACHE_LINE)));
 #else
-    q15_t temp[256];
+    q15_t temp[SPECTRAL_ARM32_MAX_BLOCK];
 #endif
-    if (num_samples > 256) num_samples = 256;
+    if (num_samples > SPECTRAL_ARM32_MAX_BLOCK) num_samples = SPECTRAL_ARM32_MAX_BLOCK;
     
     uint32_t written = spectral_arm32_process(ctx, temp, NULL, num_samples);
     
