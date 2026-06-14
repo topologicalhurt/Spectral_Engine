@@ -23,8 +23,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 /* Goertzel power of a real signal at frequency f (Hz). */
 static double goertzel_power(const float* x, uint32_t n, double f, double sr) {

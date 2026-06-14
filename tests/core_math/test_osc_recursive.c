@@ -19,8 +19,7 @@
 #define SNR_BUDGET 72.0        /* dB; coupled+renorm measured 83-128, LUT bar 75-86 */
 #define DRIFT_MAX  1.0e-3      /* max |amp-1| over the run */
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL: " __VA_ARGS__); printf("\n"); g_fail = 1; } } while (0)
+#include "../support/check.h"
 
 static void test_freq(double freq) {
     double w = 2.0 * M_PI * freq / FS, phi = 0.31;
