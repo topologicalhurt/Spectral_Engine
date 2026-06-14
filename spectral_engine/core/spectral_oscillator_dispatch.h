@@ -101,7 +101,9 @@ static inline q15_t spectral_osc_q15_eval(q15_t pq, SpectralTimbre timbre, const
 }
 #endif /* !__CUDACC__ */
 
-/* Dispatch mode: 2 bits per timbre */
+/* Dispatch mode: 2 bits per timbre. Values 0/1/3 are live; 2 is reserved (the
+ * vacated device-backend slot) -- a decoded 2 has no enumerator and the dispatch
+ * falls through to the scalar path. */
 typedef enum {
     OSC_MODE_CPU_SCALAR = 0,
     OSC_MODE_CPU_SIMD   = 1,
@@ -123,12 +125,9 @@ typedef union {
     uint16_t word;
 } OscDispatchWord;
 
-/* Accessor macros for generic timbre index access */
+/* Accessor for generic timbre index access */
 #define OSC_GET_MODE(dispatch, timbre) \
     ((OscDispatchMode)(((dispatch).word >> ((timbre) * 2)) & 0x3))
-
-#define OSC_SET_MODE(dispatch, timbre, mode) \
-    ((dispatch).word = ((dispatch).word & ~(0x3u << ((timbre) * 2))) | ((uint16_t)(mode) << ((timbre) * 2)))
 
 /* Presets */
 #define OSC_DISPATCH_ALL_SCALAR   ((OscDispatchWord){ .word = 0x0000 })

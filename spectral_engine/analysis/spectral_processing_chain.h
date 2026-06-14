@@ -71,8 +71,6 @@ typedef struct {
 } SpectralProcessReport;
 
 typedef struct {
-    float deterministic_residual_db;
-    float psychoacoustic_margin_db;
     uint32_t adaptive_max_segments;
     float adaptive_keep_ratio;
     int hop;    /* STFT hop size (samples); 0 if unknown */

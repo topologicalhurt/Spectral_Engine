@@ -25,14 +25,6 @@ static void spectral_console_writeln(const char* fmt, ...) {
     va_end(args);
 }
 
-const BoxChars BOX_ASCII = {
-    .top_left = '+', .top_right = '+',
-    .bottom_left = '+', .bottom_right = '+',
-    .horizontal = '-', .vertical = '|',
-    .cross = '+', .t_down = '+', .t_up = '+',
-    .t_left = '+', .t_right = '+'
-};
-
 void print_padded_str(const char* str, int width, TableAlign align) {
     int len = (int)strlen(str);
     int pad = width - len;

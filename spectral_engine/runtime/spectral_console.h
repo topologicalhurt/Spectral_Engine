@@ -57,25 +57,6 @@ void print_padded_int(int value, int width, TableAlign align);
 void print_padded_float(double value, int width, int precision, TableAlign align);
 void print_padded_str(const char* str, int width, TableAlign align);
 
-/*
- * Box drawing character sets
- */
-typedef struct {
-    char top_left;
-    char top_right;
-    char bottom_left;
-    char bottom_right;
-    char horizontal;
-    char vertical;
-    char cross;
-    char t_down;
-    char t_up;
-    char t_left;
-    char t_right;
-} BoxChars;
-
-extern const BoxChars BOX_ASCII;
-
 #ifdef __cplusplus
 }
 #endif

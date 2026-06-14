@@ -136,19 +136,6 @@ int spectral_backend_available(SynthBackend backend) {
     return vt->available();
 }
 
-SpectralBackendCaps spectral_backend_get_caps(SynthBackend backend) {
-    const SpectralBackendVTable* vt = spectral_backend_vtable(backend);
-    SpectralBackendCaps caps = {0};
-    caps.id = backend;
-    caps.name = spectral_backend_name(backend);
-    caps.available = spectral_backend_available(backend);
-    caps.max_timbre = vt->max_timbre;
-    caps.has_wavetable = vt->has_wavetable;
-    caps.is_gpu = vt->is_gpu;
-    caps.is_parallel = 1;
-    return caps;
-}
-
 SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu) {
     (void)timbre_id; /* used conditionally by HAS_METAL/HAS_CUDA */
     if (prefer_gpu) {

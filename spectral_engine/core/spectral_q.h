@@ -165,16 +165,8 @@ static inline uq88_t spectral_omega_to_q88(float omega) {
 #define PHASE_RAD_TO_Q15(rad) spectral_phase_rad_to_q15((float)(rad))
 #define OMEGA_TO_Q88(omega)   spectral_omega_to_q88((float)(omega))
 
-#if defined(__GNUC__)
-#define Q15_HOT __attribute__((hot))
-#else
-#define Q15_HOT
-#endif
-
 /* Inline Q15 primitives — eliminates function-call overhead in hot loops.
  * ARM DSP intrinsic path compiles to single-cycle instructions. */
-
-#define SPECTRAL_Q15_INLINE_DEFINED 1
 
 #if defined(__ARM_FEATURE_DSP) && __ARM_FEATURE_DSP
 #include <arm_acle.h>
@@ -323,8 +315,6 @@ static inline q15_t spectral_q63_to_q15_round(q63_t x) {
     return spectral_ssat16((q31_t)w);                      /* |w| <= 32768 -> fits q31 */
 }
 // SPECTRAL_Q_DOMAIN END
-
-#define SPECTRAL_Q15_TYPES
 
 /* Embedded Q15 segment - 14 bytes (compact) or 16 bytes (full) */
 #if SPECTRAL_Q15_COMPACT

@@ -41,8 +41,6 @@ static const ProcessStage k_stages[] = {
 
 void spectral_process_params_default(SpectralProcessParams* params) {
     if (!params) return;
-    params->deterministic_residual_db = -60.0f;
-    params->psychoacoustic_margin_db = 3.0f;
     params->adaptive_max_segments = 0;
     params->adaptive_keep_ratio = 1.0f;
     params->hop = 0;

@@ -16,8 +16,8 @@
 #include "../../spectral_engine/core/spectral_config.h"
 #include "../../spectral_engine/core/spectral_q.h"
 
-/* STM32H750 CPU */
-#define DAISY_CPU_FREQ_HZ           480000000UL
+/* STM32H750 CPU. The core clock lives in daisy_seed_sdram.h
+ * (SPECTRAL_DAISY_CPU_HZ), which the perf model and WCET parse. */
 #define DAISY_HAS_FPU               1
 #define DAISY_HAS_DSP               1
 
@@ -75,12 +75,7 @@ _Static_assert(DAISY_WORK_POOL_OFFSET + DAISY_WORK_POOL_SIZE
 #define DAISY_DEFAULT_AMPLITUDE     0.8f
 #define DAISY_STRETCH_MIN           0.25f
 #define DAISY_STRETCH_MAX           4.0f
-#define DAISY_Q214_UNITY            16384
-#define DAISY_ADC_BITS              12
 #define DAISY_ADC_MAX               4095
-/* Q2.14: 0.25 = 4096, 4.0 = 65536, range = 61440 */
-#define DAISY_STRETCH_Q214_MIN      4096
-#define DAISY_STRETCH_Q214_RANGE    61440
 
 /* Type aliases moved to daisy_seed_spectral.h (avoid circular dependency) */
 
@@ -88,7 +83,6 @@ _Static_assert(DAISY_WORK_POOL_OFFSET + DAISY_WORK_POOL_SIZE
 #ifndef DAISY_USE_CMSIS_DSP
 #define DAISY_USE_CMSIS_DSP         0
 #endif
-#define DAISY_SYNTH_UNROLL_FACTOR   4
 
 /* GCC section attributes - only valid on ARM embedded targets */
 #if defined(__GNUC__) && defined(__arm__)
@@ -125,15 +119,6 @@ _Static_assert(DAISY_WORK_POOL_OFFSET + DAISY_WORK_POOL_SIZE
 #define DAISY_PIN_RESET_BTN         27
 #define DAISY_PIN_LED_STATUS        25
 #define DAISY_LED_ONBOARD           0
-
-/* Timing */
-#define DAISY_AUDIO_PERIOD_US_48K   1000
-#define DAISY_AUDIO_PERIOD_US_96K   500
-#define DAISY_CYCLES_PER_BLOCK_48K  480000
-#define DAISY_CYCLES_PER_BLOCK_96K  240000
-#define DAISY_CYCLE_BUDGET_PERCENT  70
-#define DAISY_CYCLES_BUDGET_48K     (DAISY_CYCLES_PER_BLOCK_48K * DAISY_CYCLE_BUDGET_PERCENT / 100)
-#define DAISY_CYCLES_BUDGET_96K     (DAISY_CYCLES_PER_BLOCK_96K * DAISY_CYCLE_BUDGET_PERCENT / 100)
 
 #ifndef DAISY_DEBUG
 #define DAISY_DEBUG                 0
