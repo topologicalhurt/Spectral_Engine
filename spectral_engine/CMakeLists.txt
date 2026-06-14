@@ -145,49 +145,6 @@ set(SPECTRAL_EMBEDDED_RESTRICTED_DEFINES
     SPECTRAL_RESTRICTED_MODE=1
     SPECTRAL_NO_PERF=1)
 
-# --- CACHE HEURISTICS ---
-set(L3_SIZE_KB 0)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
-    execute_process(
-        COMMAND sh -c "cat /sys/devices/system/cpu/cpu0/cache/index3/size 2>/dev/null | sed 's/K//'"
-        OUTPUT_VARIABLE L3_SYSFS_OUT
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(L3_SYSFS_OUT MATCHES "^[0-9]+$")
-        set(L3_SIZE_KB ${L3_SYSFS_OUT})
-    endif()
-elseif(APPLE)
-    execute_process(
-        COMMAND sysctl -n hw.l3cachesize
-        OUTPUT_VARIABLE L3_SYSCTL_OUT
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(L3_SYSCTL_OUT MATCHES "^[0-9]+$")
-        # hw.l3cachesize is in bytes
-        math(EXPR L3_SIZE_KB "${L3_SYSCTL_OUT} / 1024")
-    endif()
-endif()
-
-set(COMPUTED_STFT_CHUNK_FRAMES 512)
-if(L3_SIZE_KB GREATER 0)
-    # L3_SIZE_KB is e.g. 16384 (16MB). Target 50% of L3 cache to avoid thrashing, divided by 4 threads.
-    # 50% of L3 (KB) = L3_SIZE_KB / 2. Per thread = L3_SIZE_KB / 8.
-    # For a 4096 FFT, 2049 bins * 8 bytes (magsq+phase) = ~16 KB per frame.
-    # frames = (L3_SIZE_KB / 8) / 16 = L3_SIZE_KB / 128
-    math(EXPR COMPUTED_STFT_CHUNK_FRAMES "${L3_SIZE_KB} / 128")
-endif()
-
-# Clamp bounds (64 to 4096)
-if(COMPUTED_STFT_CHUNK_FRAMES LESS 64)
-    set(COMPUTED_STFT_CHUNK_FRAMES 64)
-elseif(COMPUTED_STFT_CHUNK_FRAMES GREATER 4096)
-    set(COMPUTED_STFT_CHUNK_FRAMES 4096)
-endif()
-
-add_compile_definitions(SPECTRAL_STFT_CHUNK_FRAMES=${COMPUTED_STFT_CHUNK_FRAMES})
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/host-config.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/desktop.cmake")
@@ -284,4 +241,3 @@ message(STATUS "  reproducible profile: ${SPECTRAL_REPRO_BUILD}")
 message(STATUS "  debug logging: ${SPECTRAL_DEBUG_LOGGING}")
 message(STATUS "  custom fast math mode: ${SPECTRAL_CUSTOM_FAST_MATH_MODE_STATUS}")
 message(STATUS "  track pair omp chunk: ${SPECTRAL_TRACK_PAIR_OMP_CHUNK_CANONICAL}")
-message(STATUS "  stft cache chunk frames: ${COMPUTED_STFT_CHUNK_FRAMES}")

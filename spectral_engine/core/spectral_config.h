@@ -466,9 +466,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_PEAK_AMP_MAX_GAIN
 #define SPECTRAL_PEAK_AMP_MAX_GAIN 8.0f
 #endif
-#ifndef SPECTRAL_STFT_CHUNK_FRAMES
-#define SPECTRAL_STFT_CHUNK_FRAMES      512u
-#endif
 /* STFT-size trip point for AUTO path selection (spectral_analysis.c:
  * use_fused_path = total_bins > THRESHOLD). Unit is BINS.
  * [derived: the full-matrix path materializes 2 floats/bin (magsq + phase) = 8 B,
