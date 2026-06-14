@@ -46,16 +46,32 @@ LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf 
 - F3 `Q-conversion literal provenance` — annotated 65536=2^16 (full-circle phase index),
   256=2^8 (UQ8.8 scale), 0.99996948=32767/32768 (largest n casting to Q15_MAX). Comment-only.
 
-REMAINING (priority order — the careful/separate work):
-1. W6 F1 (tether arm32 256 block size to a named constant + _Static_assert), F2 (prefetch/
-   STFT-chunk knob provenance + sysconf page size) — partly code, need verified derivations.
-2. W4 D3/D5 (fade-loop factoring — behavioral hot-kernel refactor), D6 (sin_init parity test),
-   D8 (DSB-barrier unify); a proc-mask honesty ctest.
-3. **Scoped follow-up** (its own campaign): grow spectral_q.h into the full cross-format
-   conversion library (q15↔q31↔q63 hardware/bit-hack fast paths, arch-gated via macros).
-3. **Scoped follow-up** (maintainer-directed, its own campaign): grow spectral_q.h into
-   the full cross-format conversion library (q15↔q31↔q63 hardware/bit-hack fast paths,
-   arch-gated via macros), each conversion behind a parity test.
+- F1 `arm32 256 block size -> SPECTRAL_ARM32_MAX_BLOCK + _Static_assert` — tethered to
+  SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE (verified, not the 48-sample codec block); codegen-identical.
+- F2 `tuning-knob provenance + runtime page size` — [chosen]/[derived] comments on the live
+  prefetch/STFT/pretouch knobs; the hardcoded 4096 pretouch page -> sysconf(_SC_PAGESIZE) (a real
+  fix on 16 KiB-page hosts). Surfaced + removed the dead L3-autotuned STFT_CHUNK_FRAMES subsystem.
+- D6 `spectral_osc_sin_init_f64 parity ctest` — domain + 1e-9 tol derived from code; four
+  independent checks; fail-on-bug verified (a 1e-6 perturbation fails, restore passes). ctest 25.
+- D8 `one arm32 data-sync barrier` — dma_rx_sync calls the relocated helper (encoding-identical);
+  live path codegen-identical, the dormant DMA pin confirms it still cross-compiles.
+- D3/D5 `fade-walk factoring` — DECLINED on evidence (the four walks are stateful-cursor and
+  irreconcilable; a shared driver would move the m7-pinned codegen). Recorded as a written
+  accepted-duplication note at the fade-params declaration.
+
+## REVIEW INSTANCE 2 — COMPLETE
+
+Every finding is closed — fixed, or declined in writing with rationale. The careful tail
+(F1/F2/D6/D8/D3-D5) was grounded + adversarially verified by the review2-remainder workflow,
+then each landed through the build -> ctest -> perf-gate -> commit loop. ctest 24 -> 25, the
+m7-baseline perf gate stayed green throughout.
+
+Out of review scope (separate efforts, NOT instance-2 findings):
+- A proc-mask honesty ctest formalizing SD-5's adaptive_track_density fail-loud — the behavior
+  is already verified ad-hoc; this would make it a permanent CLI-integration gate.
+- **The spectral_q.h cross-format conversion library** (maintainer-directed campaign): grow it
+  into q15<->q31<->q63 conversions with arch-gated hardware/bit-hack fast paths, each behind a
+  parity test + benchmark. New feature work, not a review fix.
 
 ---
 
