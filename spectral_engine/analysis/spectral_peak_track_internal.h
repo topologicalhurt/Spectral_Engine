@@ -17,14 +17,14 @@
 #include <sys/mman.h>
 #include <unistd.h>   /* sysconf(_SC_PAGESIZE) for the merge pre-touch path */
 
-/* Removed force-define */
-
 /* MADV_POPULATE_WRITE is Linux 5.14+. Keep a local fallback constant to
  * preserve compatibility with older libc headers. */
 #if defined(__linux__)
   #if defined(MADV_POPULATE_WRITE)
     #define SPECTRAL_TRACK_MADV_POPULATE_WRITE MADV_POPULATE_WRITE
   #else
+    /* Linux UAPI value from asm-generic/mman-common.h; used only when libc
+     * headers predate the macro. */
     #define SPECTRAL_TRACK_MADV_POPULATE_WRITE 23
   #endif
 #endif

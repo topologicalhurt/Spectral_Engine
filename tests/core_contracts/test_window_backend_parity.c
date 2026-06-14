@@ -63,8 +63,6 @@ static void compare(const char* name, window_fn gen, ref_fn ref) {
         CHECK(max_dev <= tol,
               "%s N=%zu deviates from symmetric SSOT by %.3g at i=%zu "
               "(periodic-convention regression?)", name, N, max_dev, worst);
-        /* Endpoints: symmetric Hann/Blackman are exactly 0 at i=0 and i=N-1;
-         * the periodic form is NOT zero at i=N-1. This is the sharpest tell. */
         free(w);
     }
 }

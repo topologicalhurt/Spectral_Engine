@@ -781,8 +781,8 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     }
 
     /* Start with a bounded per-thread segment capacity and grow on demand.
-     * The previous 16M-per-thread virtual allocation depended on Linux
-     * overcommit behavior and is not a portable real-time contract. */
+     * Capacity must not depend on virtual-memory overcommit (a worst-case-sized
+     * per-thread reservation), which is not a portable real-time contract. */
     size_t init_cap = (size_t)SPECTRAL_TRACK_INITIAL_SEG_CAP;
     size_t thread_slots = 0;
     size_t thread_slots_bytes = 0;

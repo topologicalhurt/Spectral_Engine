@@ -940,8 +940,10 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     SPECTRAL_MAYBE_UNUSED const q15_t* restrict osc_lut = ctx->osc_lut;  /* generic (non-M7) LUT path */
     const q15_t master_amp = ctx->amplitude_q15;
 
-    /* Static accumulator in DTCM for zero wait-state access on Cortex-M7.
-     * Safe for embedded: single-threaded audio callback, no reentrancy. */
+    /* Static q63 accumulator, cache-line aligned and tagged SPECTRAL_MEM_FAST so a
+     * bound BSP can place it in DTCM for zero wait-state access. Placement is INERT
+     * until the BSP section names are bound (see file header); today it lands in
+     * default memory. Single-threaded audio callback, no reentrancy. */
 #if defined(__GNUC__) || defined(__clang__)
     static q63_t accum[SPECTRAL_ARM32_MAX_BLOCK] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L

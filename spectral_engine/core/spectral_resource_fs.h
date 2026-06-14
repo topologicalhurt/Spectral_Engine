@@ -57,10 +57,11 @@ typedef struct SpectralResourceFsEntry {
 extern const SpectralResourceFsEntry spectral_resource_hashes[];
 extern const size_t                  spectral_resource_hashes_count;
 
-/* FNV-1a 32-bit algorithm constants used by spectral_resource_file_id_from_path().
- * MUST match the constants used in
- * tools/spectral_tools/generators/resource_hashes.py::file_id_from_path()
- * — any divergence causes silent ID mismatches on embedded targets. */
+/* FNV-1a 32-bit constants: the single forward-hash source of truth for
+ * spectral_resource_file_id_from_path(). resource_hashes.py::file_id_from_path()
+ * computes the forward id through the C bridge, so it inherits these. The Python
+ * FNV1A_32_* copies exist only for decode_fnv1a32_offset_basis() (a reverse
+ * self-check) and must match these. */
 #define SPECTRAL_FNV1A_32_OFFSET_BASIS  UINT32_C(2166136261)
 #define SPECTRAL_FNV1A_32_PRIME         UINT32_C(16777619)
 

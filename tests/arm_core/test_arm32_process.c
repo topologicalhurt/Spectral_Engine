@@ -108,14 +108,14 @@ static void test_single_tone(const q15_t* lut, uint32_t sr) {
            peak, best_f, nominal_f);
 
     /* A single amp=0.5 segment must render at peak ~0.5, matching the float CPU
-     * backend (out += amp*osc). Pass 145 fixed the Q30->Q15 conversion (>>15). */
+     * backend (out += amp*osc); this pins the Q30->Q15 accumulator pack as a >>15. */
     CHECK(peak > 0.45f && peak < 0.52f, "peak should be ~0.5 (amp), got %.4f", peak);
     /* Q8.8 omega quantization at 1 kHz is ~14 Hz/LSB; allow generous slack. */
     CHECK(fabs(best_f - nominal_f) < 25.0, "dominant freq should track nominal (got %.0f)", best_f);
     free(out);
 }
 
-/* Short-segment fade continuity (pass 168).
+/* Short-segment fade continuity.
  *
  * The fade ramp must span [0, full-scale] over the ACTUAL fade_len, which the
  * activator clamps to seg_length/2 (down to 1) for segments shorter than

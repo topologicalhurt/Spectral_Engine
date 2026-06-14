@@ -6,21 +6,24 @@
  *   - 8 waveform generators (sine, saw, square, triangle, asin, parabola, quantized, pwm)
  *   - Fade envelope (Hann-window ramp)
  *
- * CPU and CUDA backends include this header directly.
- * Metal MSL backend must match these formulas exactly; constants are injected
- * with SPECTRAL_STR(...) in spectral_oscillator.c.
+ * CPU and CUDA backends include this header directly. The Metal MSL backend does
+ * not hand-copy these formulas: tools/spectral_tools/generators/metal_osc.py
+ * regenerates them into drivers/metal/spectral_osc_metal_generated.h, and the
+ * verify_metal_osc CMake target re-runs the generator in verify mode to fail the
+ * build if the committed header drifts from this contract.
  *
- * IMPORTANT: Any formula change here MUST be mirrored in the Metal shader string
- * in spectral_oscillator.c. Run the core math/static tests to verify cross-backend consistency.
+ * IMPORTANT: on any formula change, bump SPECTRAL_OSC_FORMULAS_VERSION below and
+ * regenerate (cmake --build build --target generate_metal_osc); the version line in
+ * the generated header moves with it. Do not edit the generated MSL by hand.
  */
 #ifndef SPECTRAL_OSC_FORMULAS_H
 #define SPECTRAL_OSC_FORMULAS_H
 
 #include "spectral_consts.h"
 
-/* Bump when any oscillator formula, fast_sin, normalize_phase, or
- * fade_envelope changes.  Metal shader (spectral_oscillator.c) duplicates these
- * as MSL strings and checks this version at compile time. */
+/* Bump when any oscillator formula, fast_sin, normalize_phase, or fade_envelope
+ * changes.  The generated Metal header (spectral_osc_metal_generated.h) stamps this
+ * value as osc_formulas_version; verify_metal_osc fails the build if it drifts. */
 #define SPECTRAL_OSC_FORMULAS_VERSION 6
 #include <math.h>
 #include <limits.h>

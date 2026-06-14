@@ -222,8 +222,9 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
 
     /* Full-direct hashing reads the whole remaining file into one heap buffer.
      * The file-position API reports uint64_t, but the allocation and update
-     * contract is size_t.  Never narrow silently: if the region cannot fit in a
-     * size_t buffer, seek back and use the streaming implementation instead. */
+     * contract is size_t.  On a 64-bit host (every target that compiles this TU)
+     * the > SIZE_MAX guard below is always false; it is retained for a hypothetical
+     * 32-bit host port, where an over-size region falls back to streaming. */
     total_len_u64 = end_pos - start_pos;
     if (start_pos > (uint64_t)INT64_MAX) {
         return SPECTRAL_ERR_OVERFLOW;
@@ -294,8 +295,8 @@ static const SpectralHashFileMethodDescriptor k_hash_file_method_desc[SPECTRAL_H
         .available = 0
     },
     /* STREAM is always available: callers feed data via update() directly.
-     * consume_file() is not available on embedded (no file API), but the
-     * reset/update/digest path works on all targets. */
+     * consume_file() is the host-file-API convenience wrapper (present on every
+     * host/simulation build); the reset/update/digest path works on all targets. */
     [SPECTRAL_HASH_FILE_STREAM] = {
         .type      = SPECTRAL_HASH_FILE_STREAM,
         .name      = "stream",

@@ -4,9 +4,9 @@
 
 #include <stddef.h>
 
-/* Bump when any formula below changes.  Metal shader (spectral_synth_metal.m)
- * duplicates these formulas as MSL strings and checks this version at
- * compile time.  A mismatch means the Metal copy is stale. */
+/* Bump when any formula below changes.  metal_osc.py regenerates these into
+ * drivers/metal/spectral_osc_metal_generated.h (stamped segment_math_version);
+ * verify_metal_osc fails the build if the committed MSL drifts from this contract. */
 #define SPECTRAL_SEGMENT_MATH_VERSION 1
 
 #ifdef __cplusplus
