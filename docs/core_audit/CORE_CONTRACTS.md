@@ -51,16 +51,16 @@ every tile_segment_ids[j] < segment_count
 
 ---
 
-# Guarantee registry (Phase B)
+# Guarantee registry
 
 The single place that records which kernel correctness/quality invariants hold,
 which are relaxed by a flag or runtime path, and how a caller/test discovers the
 active set. Generalizes the maintainer's WOLA/COLA concern to all invariants
 "hidden behind obfuscations or branches".
 
-Status: **B0/B1/B2 landed**. B0 = reconstruction invariant defined + tested.
-B1 = every relaxing gate enumerated below with an error budget + drift test.
-B2 = compile-time `SPECTRAL_ACTIVE_GUARANTEES` bitset + runtime query API.
+It has three parts: the reconstruction invariant (defined + tested); the guarantee
+manifest below — every relaxing gate enumerated with an error budget + drift test;
+and the compile-time `SPECTRAL_ACTIVE_GUARANTEES` bitset + runtime query API.
 
 ## Reconstruction invariant — COLA / WOLA overlap-add
 
@@ -104,8 +104,8 @@ engine spectral_window_hann (SYMMETRIC), hop N/2
 hop does not divide N / hop==N (Hann) / NULL analysis -> rejected
 ```
 
-The test forces `SPECTRAL_USE_VDSP=0`, a now-redundant belt-and-suspenders: as
-of the window unification (pass 248) `spectral_windows.c` has **no** vDSP window
+The test forces `SPECTRAL_USE_VDSP=0`, a now-redundant belt-and-suspenders: after
+the window unification `spectral_windows.c` has **no** vDSP window
 path — `vDSP_hann_window`/`hamm`/`blkman` used Apple's *periodic* (`2pi n/N`)
 convention and silently diverged from the symmetric form on desktop. All
 backends now generate the single documented symmetric formula regardless of
@@ -115,7 +115,7 @@ compiled with `SPECTRAL_USE_VDSP=1` so any reintroduced periodic window fails.
 
 **Finding the registry now records.** The shipping windows are *symmetric* (`N-1`
 denominator — `spectral_windows.h`: "conventional, unnormalized window shapes")
-on **every** backend (desktop included, since pass 248).
+on **every** backend (desktop included).
 They are analysis windows and do NOT strictly satisfy COLA; only periodic (`N`
 denominator) windows at `hop = N/2, N/4, ...` and the rectangular window do. The
 symmetric Hann's overlap deviation is O(1/N) (~1.5e-3 at N=1024). This is
@@ -125,7 +125,7 @@ generators rather than an active runtime guarantee. The contract makes this
 explicit and gives any future inverse-STFT/WOLA path a ready gate: use a periodic
 window (or normalize by `env`) and assert `spectral_overlap_add_is_constant`.
 
-## Guarantee manifest (B1 — landed)
+## Guarantee manifest
 
 Every correctness/quality-relaxing gate the **C sources actually branch on** (verified
 by grep, not the plan's aspirational list), the invariant it relaxes, its default,
@@ -137,7 +137,7 @@ on, rounded up ~2-3x for platform FP variance.
 guarantee bit            gate (default)                              relaxes / cost                                   budget (measured)        drift test
 ieee_strict_fp           SPECTRAL_CUSTOM_FAST_MATH_MODE (CMake)      project-wide -ffast-math (reassoc, signed-zero,  whole-program; gated     bit-state (reflects
                            =1 in dev, =0 when SPECTRAL_REPRO_BUILD     reciprocal, fp-contract=fast) / vectorizable FP  out of repro/production  the build profile)
-exact_trig               SPECTRAL_ENABLE_APPROX_TRIG (0)             sinf -> odd-Taylor poly / speed in osc+peak      5e-6 abs (1.72e-6)       core_guarantees_drift
+exact_trig               SPECTRAL_ENABLE_APPROX_TRIG (0)             sinf -> odd-Taylor poly / speed in osc+peak      2e-6 abs (1.72e-6)       core_guarantees_drift
 exact_atan2              SPECTRAL_ENABLE_APPROX_ATAN2 (0)            atan2f -> rational poly / speed in phase         5e-4 rad (2.03e-4)       core_guarantees_drift
 exact_inv_sqrt           SPECTRAL_ENABLE_APPROX_INV_SQRT (0)         1/sqrtf -> Quake rsqrt (2 Newton) / speed        1e-5 rel (4.74e-6)       core_guarantees_drift
 exact_peak_log           SPECTRAL_ENABLE_APPROX_PEAK_LOG (0)         logf -> atanh series (z^11) / speed in peak dB   2e-6 abs (1.03e-6)       core_guarantees_drift
@@ -156,7 +156,7 @@ therefore represented in the manifest *through* `ieee_strict_fp`, not as its own
 source reads it, so it gates no guarantee. The ULTRAPLAN claim that `>= 2` drops LUT
 interpolation to nearest is aspirational; do not add a bit until code honors the level.
 
-## Self-report (B2 — landed)
+## Self-report
 
 `core/spectral_guarantees.h` derives a compile-time bitset from the gates above. Each
 bit is SET when its invariant holds and CLEARED when a flag relaxed it (the

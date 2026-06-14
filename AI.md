@@ -53,9 +53,9 @@ the full correctness rules; this file is the orientation.
   be live under another build flag.
 
 ## Build flags that gate code
-`SPECTRAL_EMBEDDED`, `SPECTRAL_IS_EMULATOR`, `SPECTRAL_USE_EMBEDDED_SYNTH`,
+`SPECTRAL_EMBEDDED`, `SPECTRAL_IS_EMBEDDED_SIM`, `SPECTRAL_USE_EMBEDDED_SYNTH`,
 `SPECTRAL_USE_CUDA`, `SPECTRAL_USE_VDSP`, `__APPLE__`. Code inside any of these `#if`
-branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMULATOR`.
+branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM`.
 
 ## Single sources of truth — use them, don't re-roll
 - Math constants (`SPECTRAL_PI`, `SPECTRAL_TWO_PI`, `SPECTRAL_ATAN2_*`): `core/spectral_consts.h`

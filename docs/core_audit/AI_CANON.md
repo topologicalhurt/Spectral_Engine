@@ -1,6 +1,6 @@
 # AI/Human Canon for Spectral Engine Core Work
 
-This file records repeated mistake classes that are canonically incorrect for this repository. Treat it as a guardrail before touching `spectral_engine/core`, `spectral_engine/analysis`, `spectral_engine/synth`, or GPU/embedded parity code.
+This file records repeated mistake classes that are canonically incorrect for this repository. Treat it as a guardrail before touching `spectral_engine/core`, `spectral_engine/analysis`, `spectral_engine/arch`, `spectral_engine/drivers`, or GPU/embedded parity code.
 
 ## 1. Phase normalization must preserve phase zero
 
