@@ -98,6 +98,14 @@ typedef uint16_t uq88_t;  /* UQ8.8 frequency (omega); same carrier as uq16_t, di
 #ifndef Q31_MIN
 #define Q31_MIN     ((q31_t)-2147483648L)
 #endif
+/* q63 extremes for the signed ladder. Written as (max-1)-form so no token
+ * overflows at parse, and #ifndef-guarded to coexist with CMSIS-DSP. */
+#ifndef Q63_MAX_L
+#define Q63_MAX_L   ((q63_t)9223372036854775807LL)
+#endif
+#ifndef Q63_MIN_L
+#define Q63_MIN_L   ((q63_t)(-9223372036854775807LL - 1))
+#endif
 
 static inline q15_t spectral_float_to_q15(float f) {
     if (!isfinite(f)) return Q15_ZERO;
@@ -264,6 +272,48 @@ static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
 /* Wide (q63) accumulator variant: exact sum of Q15*Q15 products, saturated to Q15
  * once at the end (>>15) before applying the master scale. */
 void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, q15_t scale);
+
+/* ============================ SIGNED Q LADDER ============================
+ * Cross-product format conversions between the signed Q types, treating every
+ * code as the SAME fraction in [-1, 1): q15 = Q1.15 (code/2^15), q31 = Q1.31
+ * (code/2^31), q63 = Q1.63 (code/2^63). The three widenings are exact arithmetic
+ * left shifts (gain fractional bits, lossless); the three narrowings are
+ * round-half-up (add a half-LSB, then arithmetic right shift) followed by
+ * saturation to the asymmetric two's-complement range. Each is pinned bit-exact
+ * by the q_ladder_parity CTest against an integer (__int128) oracle.
+ *
+ * This is the FORMAT ladder. It is deliberately distinct from the other two q63
+ * roles on the same int64 carrier: spectral_q63_to_q15_scaled treats q63 as a
+ * Q2.30 MAC accumulator (>>15 + master scale), and spectral_q31_to_q15_sat is a
+ * TRUNCATING >>16 narrow. The ladder narrowings ROUND; keep the names separate.
+ *
+ * The +half-LSB is computed in the next-wider type so it never overflows; on the
+ * q63 narrowings the only value that could overflow the add already saturates, so
+ * it is short-circuited before the add. ssat clamps via __ssat on ARM. */
+// SPECTRAL_Q_DOMAIN BEGIN
+/* Widen in UNSIGNED then reinterpret: left-shifting a negative SIGNED value is
+ * undefined behavior (C11 6.5.7p4) and the min code is negative. The unsigned
+ * shift wraps deterministically; the reinterpret recovers the exact widened
+ * value (and keeps the conversions UBSan-clean, like the SMLAD packers above). */
+static inline q31_t spectral_q15_to_q31(q15_t x) { return (q31_t)((uint32_t)(int32_t)x << 16); }
+static inline q63_t spectral_q15_to_q63(q15_t x) { return (q63_t)((uint64_t)(int64_t)x << 48); }
+static inline q63_t spectral_q31_to_q63(q31_t x) { return (q63_t)((uint64_t)(int64_t)x << 32); }
+
+static inline q15_t spectral_q31_to_q15_round(q31_t x) {
+    int64_t w = ((int64_t)x + (int64_t)(1 << 15)) >> 16;   /* round-half-up */
+    return spectral_ssat16((q31_t)w);                      /* |w| <= 32768 -> fits q31 */
+}
+static inline q31_t spectral_q63_to_q31_round(q63_t x) {
+    if (x > Q63_MAX_L - (q63_t)(1LL << 31)) return Q31_MAX; /* add would overflow -> sat */
+    int64_t w = (x + (q63_t)(1LL << 31)) >> 32;
+    return (w > Q31_MAX) ? Q31_MAX : (w < Q31_MIN) ? Q31_MIN : (q31_t)w;
+}
+static inline q15_t spectral_q63_to_q15_round(q63_t x) {
+    if (x > Q63_MAX_L - (q63_t)(1LL << 47)) return Q15_MAX; /* add would overflow -> sat */
+    int64_t w = (x + (q63_t)(1LL << 47)) >> 48;
+    return spectral_ssat16((q31_t)w);                      /* |w| <= 32768 -> fits q31 */
+}
+// SPECTRAL_Q_DOMAIN END
 
 #define SPECTRAL_Q15_TYPES
 

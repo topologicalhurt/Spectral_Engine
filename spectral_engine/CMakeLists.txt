@@ -162,6 +162,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-width-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q-domain-contract-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-backend-contract-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q-ladder-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-compute-precision-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-production-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-simd-parity-test.cmake")
@@ -213,6 +214,7 @@ add_dependencies(tests_all
     core_guarantees_drift_test
     osc_parity_test
     osc_width_parity_test
+    q_ladder_parity_test
     q15_compute_precision_test
     q15_production_parity_test
     q15_simd_parity_test
