@@ -39,6 +39,25 @@
 
 #include <string.h>
 
+/* Full data-synchronisation barrier. Defined here (ahead of the DMA RX path,
+ * which calls it) and reused by the live synth path below. On a real Cortex-M
+ * this is a `dsb sy` (== `dsb 0xF`, the same encoding CMSIS __DSB() emits); on
+ * a forced-M7 host-sim it degrades to a seq-cst thread fence (ordering only).
+ * Single source of truth for the barrier so the dormant DMA path and the live
+ * path cannot drift. Guard kept identical to the prefetch helpers' guard. */
+#if SPECTRAL_ARM_M7 && defined(__GNUC__)
+static inline void spectral_data_sync_barrier(void) {
+#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
+    __asm__ volatile ("dsb" ::: "memory");   /* real Cortex-M: full data sync barrier */
+#else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST); /* host (incl. forced-M7 host-sim): ordering only */
+#endif
+}
+#else
+static inline void spectral_data_sync_barrier(void) {
+}
+#endif
+
 /* Maximum samples this kernel renders per spectral_arm32_process() call. The
  * static DTCM accumulator (accum[]) and the interleaved scratch (temp[]) are
  * sized to this, and a larger num_samples is truncated to it. This is the
@@ -131,11 +150,10 @@ static void spectral_arm32_dma_rx_sync(const void* ptr, size_t bytes) {
     (void)ptr;
     (void)bytes;
 #endif
-#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
-    __DSB();
-#else
-    __sync_synchronize();
-#endif
+    /* Same full data-sync barrier the live path uses; see
+     * spectral_data_sync_barrier() above. On real Cortex-M this is `dsb sy`
+     * (identical encoding to the former inline __DSB()). */
+    spectral_data_sync_barrier();
 }
 
 static void spectral_arm32_dma_prefetch(SpectralArm32Ctx* ctx) {
@@ -406,20 +424,12 @@ static SPECTRAL_MAYBE_UNUSED inline void prefetch_segment(const SpectralSegmentQ
     SPECTRAL_PREFETCH_READ(seg);
 }
 
-static inline void spectral_data_sync_barrier(void) {
-#if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
-    __asm__ volatile ("dsb" ::: "memory");   /* real Cortex-M: full data sync barrier */
-#else
-    __atomic_thread_fence(__ATOMIC_SEQ_CST); /* host (incl. forced-M7 host-sim): ordering only */
-#endif
-}
+/* spectral_data_sync_barrier() is defined near the top of the TU (ahead of the
+ * dormant DMA RX path that also calls it). */
 
 #else
 static SPECTRAL_MAYBE_UNUSED inline void prefetch_segment(const SpectralSegmentQ15* seg) {
     (void)seg;
-}
-
-static inline void spectral_data_sync_barrier(void) {
 }
 #endif
 
