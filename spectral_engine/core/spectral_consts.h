@@ -34,7 +34,9 @@
 #define SPECTRAL_Q30_SCALE      1073741824.0
 #define SPECTRAL_INV_Q30_SCALE  (1.0 / SPECTRAL_Q30_SCALE)
 
-/* LUT amplitude scale */
+/* Q15 sine-LUT amplitude scale. Held below full scale (32767) by ~-0.02 dB to
+ * leave overflow headroom for linear interpolation between table entries -- see
+ * spectral_osc_q15.h. */
 #define SPECTRAL_LUT_AMP_SCALE  32700.0f
 
 /* Q15/Q31 conversion constants */

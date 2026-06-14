@@ -54,7 +54,7 @@ static inline void spectral_segment_file_header_swap_le(SegmentFileHeader* hdr)
  * Binary format for pre-converted Q15 segments used on embedded targets.
  * Created by tools/convert_segments from desktop .bin files.
  */
-#define SPQ_FILE_MAGIC  0x31515053
+#define SPQ_FILE_MAGIC  0x31515053  /* little-endian ASCII "SPQ1" */
 #define SPQ_FILE_VERSION 1
 
 typedef struct __attribute__((packed, aligned(4))) {

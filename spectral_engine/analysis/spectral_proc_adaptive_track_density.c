@@ -46,6 +46,9 @@ static void atd_link_frames(Segment* segs,
         const float T = sp->length;
         if (!(T > 0.0f)) continue;
 
+        /* When n_fft is unknown (tol_omega == 0) fall back to a 5%-of-omega
+         * relative band -- a typical inter-frame partial drift -- plus a
+         * 1e-6 rad/sample floor so near-DC partials still match. */
         const float tol = (tol_omega > 0.0f)
                             ? tol_omega
                             : (0.05f * fabsf(w_k) + 1e-6f);

@@ -92,9 +92,9 @@ static inline uint32_t spectral_debug_cpu_freq_hz(void) {
 #if defined(SPECTRAL_CPU_FREQ_HZ)
     return (uint32_t)SPECTRAL_CPU_FREQ_HZ;
 #elif defined(SPECTRAL_PLATFORM_DAISY)
-    return 480000000u;
+    return 480000000u;  /* STM32H7 / Daisy Seed core clock, 480 MHz */
 #else
-    return 168000000u;
+    return 168000000u;  /* generic Cortex-M fallback, 168 MHz */
 #endif
 }
 
