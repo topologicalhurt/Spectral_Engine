@@ -38,15 +38,11 @@ extern "C" {
 #define spectral_get_time_sec() omp_get_wtime()
 
 typedef struct {
-    size_t peak_resident_mb;
     size_t current_resident_mb;
-    size_t virtual_mb;
     double user_time_ms;
     double sys_time_ms;
     double wall_time_ms;
     int num_cores;
-    double cpu_utilization;
-    size_t tracked_allocs;
 } PerfMetrics;
 
 extern size_t g_peak_alloc;

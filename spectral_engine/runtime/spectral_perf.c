@@ -118,13 +118,9 @@ PerfMetrics perf_snapshot(double wall_start) {
     perf_get_memory(&res_kb, &virt_kb);
     perf_get_cpu_time(&m.user_time_ms, &m.sys_time_ms);
     m.current_resident_mb = res_kb / SPECTRAL_BYTES_PER_KIB;
-    m.virtual_mb = virt_kb / SPECTRAL_BYTES_PER_KIB;
+    (void)virt_kb;  /* virtual size is not reported; perf_get_memory fills it anyway */
     m.num_cores = perf_get_num_cores();
     m.wall_time_ms = (omp_get_wtime() - wall_start) * SPECTRAL_MILLIS_PER_SECOND_D;
-    m.tracked_allocs = g_peak_alloc;
-    m.peak_resident_mb = m.current_resident_mb;
-    m.cpu_utilization = (m.wall_time_ms > 0) ?
-        100.0 * (m.user_time_ms + m.sys_time_ms) / (m.wall_time_ms * m.num_cores) : 0;
     return m;
 }
 
