@@ -18,6 +18,35 @@ isolated and flagged.
 
 ---
 
+## Execution status — LANDED
+
+Waves A–G (incl. F-1/F-2) executed, one green commit each, gated by all-6-targets build +
+ctest + the m7-baseline perf gate throughout. ctest 26 → **28** (added `resource_path_canonical`;
+`q_ladder_parity`/`proc_mask_honesty` already present). Commit range on `minimal` (after the
+review-2 close at `2838a92`):
+- **A** doc truth — ghost flag, dissolved dir, drift budget 5e-6→2e-6, canon-doc narration.
+- **B** comment honesty — Metal codegen (not hand-mirror), accum DTCM-inert, resource_fs C-is-SSOT,
+  consume_file host-only, dead-branch + pass-number + change-history comments.
+- **C** constant provenance — LUT_AMP_SCALE, SPQ "SPQ1" magic, MQ tolerance, CPU-clock fallbacks.
+- **D** dead-code deletion — OSC_SET_MODE, 3 Q15 macros, 5 consts, OSC_LUT_MASK, BoxChars/BOX_ASCII,
+  daisy clock/Q2.14/cycle-budget clusters, backend_get_caps, 2 proc fields (all zero-consumer).
+- **E** SSOT reuse — synth_cpu fade ACTIVE, dead UINT32_MAX check, omp clock-check, BYTES_TO_MB,
+  df scope, python DEFAULT args derivation.
+- **F-1** tests — 9 `test_core_pass*` renamed (rule 18), check.h hoist into 2 stragglers.
+- **F-2** security — new `resource_path_canonical` class test (fail-on-bug verified).
+- **G** behavioral/honesty — analysis_full instrumentation no longer aborts a valid analysis;
+  embedded_arm_float marked the reserved no-op gate it is (config + CMake + matrix rows).
+- plus **rdc-perf-02** — deleted PerfMetrics' 4 write-only fields + the peak_resident_mb naming lie.
+
+REJECT confirmed by hand: **arch-cmsis-osc-02** (the `test_dormant_cmsis_oscillator_still_compiles`
+pin compiles it `-DARM_MATH_CM7=1 -Werror`, so the `_Static_assert` fires — already-handled).
+
+Remaining = the **DEFER** set below (perf-gate-risk / firmware-only / structural decisions),
+unchanged except rdc-perf-02 (now landed). Lowest-value untouched: IF-1 bench_vdsp wiring and
+xcut-dup-04 bench-clock DRY (host-only dev benches; wire-or-delete, no gate impact).
+
+---
+
 ## Waves (FIX)
 
 ### Wave A — doc truth (comment-only; no code)
@@ -91,7 +120,9 @@ isolated and flagged.
 - **analysis-track-03 [LOW]** the SIMD local-max pre-scan is written 4× across `process` + `run_fused_frame`. **Recommend:** one `static SPECTRAL_FORCEINLINE` scan helper. **Why deferred:** codegen-possible, finder itself set fix_safe=false; needs byte-identical before/after proof.
 - **analysis-track-01 [MED]** the chunked-streaming tracker API (`update_threshold` + `overlap_magsq_row`) is orphaned (only caller passes NULL; `update_threshold` zero callers). **Recommend:** delete the dead streaming branch + trim the header contract, OR add a multi-chunk ctest. **Why deferred:** touches the non-fused tracker path; decide delete-vs-keep-as-public with the maintainer.
 - **arch-out-kernels-03 [MED]** `arch/ref/spectral_out_kernels.c` is compiled by no target and its scalar bodies duplicate the host TU — this is review-2 **E2** (HIGH) + **D2**, listed but never resolved. **Recommend:** D2 hoist (`core/spectral_out_kernels_q15.h` shared `static inline`) so ref keeps only its CMSIS `#if`, then either wire a bare-metal target or delete the dead manifest entry. **Why deferred:** structural decision touching the embedded out-kernel path; kept deliberately for a future bare-metal build, so the maintainer should ratify delete-vs-wire.
-- **rdc-perf-02 [MED]** `spectral_perf.c:121-127` `perf_snapshot` writes `virtual_mb`/`tracked_allocs`/`peak_resident_mb`/`cpu_utilization` that no reader consumes; `perf_print` recomputes from deltas; `peak_resident_mb` is a naming lie (assigned current, no max). **Recommend:** delete the four write-only fields or wire `perf_print` to read them + make peak a running max. **Why deferred:** small but a behavior/契约 decision on the perf struct; low risk, can fold into a later wave.
+- ~~**rdc-perf-02 [MED]**~~ **LANDED** — deleted the four write-only `PerfMetrics` fields
+  (`virtual_mb`/`tracked_allocs`/`peak_resident_mb`/`cpu_utilization`) and the `peak_resident_mb`
+  naming lie; `perf_print` already recomputed from deltas + printed `g_peak_alloc` directly.
 
 ---
 
