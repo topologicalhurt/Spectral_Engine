@@ -66,6 +66,15 @@ extern "C" {
  *   chirp slope        q31_t      Q1.31    per-sample step of phase_inc  -
  *   MAC accumulator    q31_t      Q2.30    sum of Q15*Q15 products;     saturate on
  *                      ("q30")             >>15 + master scale -> q15    final pack
+ *   MAC accum (wide)   q63_t      Q2.30    live multi-voice mix sum;    saturate on
+ *                                          >>15 + master scale -> q15    final pack
+ *   format ladder      q63_t      Q1.63    [-1, +1); widens from / nar- saturate
+ *                                          rows to q15 & q31 (Q ladder)  (narrow only)
+ *
+ * The SAME int64 carrier (q63_t) plays both q63 rows: a Q2.30 accumulator for the
+ * mix-down (spectral_q63_to_q15_scaled, >>15) and a Q1.63 fraction for the signed
+ * Q ladder (spectral_q15_to_q63 .. spectral_q63_to_q15_round) -- disambiguated by
+ * use-site, exactly as q31_t carries both Q1.31 and the "q30" accumulator above.
  *
  * NAMING: a field/var suffix states the format -- *_q15, *_q88 (freq_q88),
  * phase_acc, phase_inc/freq_delta. The frequency UQ8.8 carrier is uq88_t; the
