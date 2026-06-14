@@ -66,12 +66,29 @@ Every finding is closed — fixed, or declined in writing with rationale. The ca
 then each landed through the build -> ctest -> perf-gate -> commit loop. ctest 24 -> 25, the
 m7-baseline perf gate stayed green throughout.
 
-Out of review scope (separate efforts, NOT instance-2 findings):
-- A proc-mask honesty ctest formalizing SD-5's adaptive_track_density fail-loud — the behavior
-  is already verified ad-hoc; this would make it a permanent CLI-integration gate.
-- **The spectral_q.h cross-format conversion library** (maintainer-directed campaign): grow it
-  into q15<->q31<->q63 conversions with arch-gated hardware/bit-hack fast paths, each behind a
-  parity test + benchmark. New feature work, not a review fix.
+Out of review scope (separate efforts, NOT instance-2 findings) — BOTH NOW LANDED:
+- **proc-mask honesty ctest** (`6a8ccf43ed`) — `test_proc_mask_honesty.c` (ctest #8) pins the
+  SD-5 contract through the real chain dispatch: NONE -> OK, the reserved johnston_1988 stage ->
+  loud non-OK, adaptive_track_density -> `BACKEND_UNAVAIL` when `SPECTRAL_PRECISE_PHASE=0` (and
+  OK when on, so it gates BOTH build configs). A requested stage runs or fails loudly — never a
+  silent no-op. fail-on-bug verified.
+- **The spectral_q.h cross-format conversion library** (maintainer-directed campaign, `66c4c49702`
+  + `85bbcfbe50`) — the SIGNED Q LADDER: the cross-product q15<->q31<->q63. Three widenings
+  (exact, lossless, single shift — UB-clean unsigned-domain idiom) + three `_round` narrowings
+  (round-half-up + saturate, reusing the arch-gated `spectral_ssat16`). Arch-gating is
+  deliberately minimal-justified: a shift is optimal on every ISA and `__ssat` would be *wrong*
+  for a widening, while the narrowings inherit the existing `__ARM_FEATURE_DSP` split through
+  `spectral_ssat16` rather than re-wrapping it. New ctest `q_ladder_parity` (#9): exhaustive over
+  all 65536 q15 + directed boundary table (ties + both saturation bands) + 12M random narrowings,
+  each bit-exact vs an independent `__int128` oracle, the whole test built under UBSan so a
+  reintroduced negative-shift traps. q63's dual role (Q1.63 ladder fraction vs Q2.30 mix
+  accumulator on the one int64 carrier) is now an explicit Q-DOMAIN MAP row. A design+verify
+  Workflow (11 agents) independently re-derived the spec and confirmed every decision; the one
+  defect it found (a negative `__int128` left-shift in the test oracle) was already fixed.
+  Declined as speculative: truncating q63 twins, and a named-macro for the overflow-guard literal.
+  The throughput benchmark the design flagged remains an optional follow-up (the bodies are
+  shift-class / `__ssat`; no speed is *asserted* anywhere, per the measured-or-obviously-optimal
+  rule) — land it if a hot caller appears.
 
 ---
 
