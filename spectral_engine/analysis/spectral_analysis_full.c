@@ -19,8 +19,7 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     (void)n_samples;
 
     if (spectral_analysis_stft_matrix_alloc(&stft, n_frames, n_freqs) != SPECTRAL_OK ||
-        spectral_analysis_window_context_init(&window_ctx, (size_t)n_fft, SPECTRAL_WINDOW_HANN) != SPECTRAL_OK ||
-        !spectral_analysis_estimate_fft_bytes(n_frames, (size_t)n_fft, n_freqs, &fft_bytes)) {
+        spectral_analysis_window_context_init(&window_ctx, (size_t)n_fft, SPECTRAL_WINDOW_HANN) != SPECTRAL_OK) {
         spectral_analysis_stft_matrix_free(&stft);
         spectral_analysis_window_context_free(&window_ctx);
         return spectral_analysis_return_empty(t_fft, t_track);
@@ -46,7 +45,13 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
         *t_fft = omp_get_wtime() - fft_start;
 
         {
-            double fft_bw_gibps = spectral_bandwidth_gibps(fft_bytes, *t_fft);
+            /* The byte estimate is for the bandwidth log line only; it must never
+             * gate the analysis. On size_t overflow it reports 0 (= unknown). */
+            double fft_bw_gibps = 0.0;
+            if (spectral_analysis_estimate_fft_bytes(n_frames, (size_t)n_fft, n_freqs, &fft_bytes))
+                fft_bw_gibps = spectral_bandwidth_gibps(fft_bytes, *t_fft);
+            else
+                fft_bytes = 0;
             SPECTRAL_LOG_INFO("Analysis full FFT: frames=%zu bytes=%.1fMiB time=%.3fms bw=%.2fGiB/s",
                               n_frames,
                               BYTES_TO_MB(fft_bytes),

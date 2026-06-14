@@ -97,9 +97,12 @@
 #define SPECTRAL_RESTRICTED_PROFILE 0
 #endif
 
-/* Embedded float mode: use FPU instead of Q15 integer for synthesis.
- * Storage remains Q15 for memory efficiency, but synthesis uses float.
- * Requires FPU (Cortex-M4F/M7 with VFPv4). */
+/* Embedded float mode (RESERVED -- not yet implemented). Intended to use the FPU
+ * (Cortex-M4F/M7, VFPv4) for synthesis instead of Q15 integer, with storage kept
+ * in Q15 for memory efficiency. No code branches on this gate yet, so defining it
+ * changes nothing: the embedded_arm_float target currently compiles identically to
+ * embedded_arm. Wire an #if SPECTRAL_EMBEDDED_FLOAT synthesis path (with a
+ * divergence test) before treating the two targets as distinct. */
 #ifndef SPECTRAL_EMBEDDED_FLOAT
 #define SPECTRAL_EMBEDDED_FLOAT 0
 #endif
