@@ -15,6 +15,7 @@
 #include <stdatomic.h>
 #include "spectral_error.h"
 #include <sys/mman.h>
+#include <unistd.h>   /* sysconf(_SC_PAGESIZE) for the merge pre-touch path */
 
 /* Removed force-define */
 

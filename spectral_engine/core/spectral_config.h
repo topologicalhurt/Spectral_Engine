@@ -428,9 +428,17 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_PREFETCH_LOOKAHEAD
 #define SPECTRAL_TRACK_PREFETCH_LOOKAHEAD 12u
 #endif
+/* Software-prefetch lookahead for the SIMD peak pre-scan over the float magsq
+ * spectrum (spectral_peak_track.c: prefetch row + f + 8/4 + DISTANCE).
+ * [chosen: 48 floats = 192 B ~= 3 x 64 B cache lines of read-ahead, enough to
+ *  cover the loadu/compare latency of the streaming scan.] */
 #ifndef SPECTRAL_TRACK_SCAN_PREFETCH_DISTANCE
 #define SPECTRAL_TRACK_SCAN_PREFETCH_DISTANCE 48u
 #endif
+/* `locality` argument of __builtin_prefetch(addr, 0, locality) (0..3 per the
+ * GCC/Clang builtin: 0 = no temporal reuse/NTA, 3 = keep in all cache levels).
+ * [chosen: 2 = moderate temporal locality; each magsq row is touched once in a
+ *  streaming scan, so it should land in L2/L3 without evicting hot L1 lines.] */
 #ifndef SPECTRAL_TRACK_PREFETCH_READ_LOCALITY
 #define SPECTRAL_TRACK_PREFETCH_READ_LOCALITY 2
 #endif
@@ -461,12 +469,27 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_STFT_CHUNK_FRAMES
 #define SPECTRAL_STFT_CHUNK_FRAMES      512u
 #endif
+/* STFT-size trip point for AUTO path selection (spectral_analysis.c:
+ * use_fused_path = total_bins > THRESHOLD). Unit is BINS.
+ * [derived: the full-matrix path materializes 2 floats/bin (magsq + phase) = 8 B,
+ *  so 32 Mi bins x 8 B = 256 MiB STFT; above that the fused SPSC path is used to
+ *  avoid the full-matrix footprint.] */
 #ifndef SPECTRAL_STFT_CHUNK_THRESHOLD
 #define SPECTRAL_STFT_CHUNK_THRESHOLD   (32ul * 1024ul * 1024ul)
 #endif
+/* Segment-merge size above which the contiguous merge buffer is page-aligned and
+ * kernel pre-faulted (spectral_peak_track.c, compared to merge_bytes). Unit is
+ * BYTES. [chosen: 64 MiB; below it ordinary malloc is fine, above it the
+ * ~63K minor page faults of the parallel copy are worth the posix_memalign +
+ * MADV_POPULATE_WRITE / pre-touch path.] */
 #ifndef SPECTRAL_PRETOUCH_THRESHOLD
 #define SPECTRAL_PRETOUCH_THRESHOLD     (64ul * 1024ul * 1024ul)
 #endif
+/* Fallback page size for the pre-touch path. The merge code prefers the runtime
+ * sysconf(_SC_PAGESIZE) and only falls back to this macro if sysconf fails;
+ * 4096 is the classic 4 KiB page. [chosen: portable default for hosts without a
+ * usable sysconf; NOTE Apple Silicon uses 16 KiB pages, which is exactly why the
+ * runtime query is preferred over this literal.] */
 #ifndef SPECTRAL_PRETOUCH_PAGE_SIZE
 #define SPECTRAL_PRETOUCH_PAGE_SIZE     4096u
 #endif

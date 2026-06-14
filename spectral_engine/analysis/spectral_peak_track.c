@@ -1173,7 +1173,14 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
      * 63K+ individual minor page faults during the parallel copy. */
     if (total_segs > 0) {
         if (merge_bytes > SPECTRAL_PRETOUCH_THRESHOLD) {
-            if (posix_memalign((void**)&segs, SPECTRAL_PRETOUCH_PAGE_SIZE, merge_bytes) != 0) {
+            /* Use the true runtime page size for alignment and the fault stride;
+             * a hardcoded 4 KiB under-aligns and under-touches on 16 KiB-page
+             * hosts (e.g. Apple Silicon). Fall back to the compile-time default
+             * if sysconf is unavailable. */
+            long page_sz_l = sysconf(_SC_PAGESIZE);
+            size_t page_size = (page_sz_l > 0) ? (size_t)page_sz_l
+                                               : (size_t)SPECTRAL_PRETOUCH_PAGE_SIZE;
+            if (posix_memalign((void**)&segs, page_size, merge_bytes) != 0) {
                 segs = NULL;
                 goto fail;
             }
@@ -1181,10 +1188,10 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
             if (madvise(segs, merge_bytes, SPECTRAL_TRACK_MADV_POPULATE_WRITE) != 0)
 #endif
             {
-                size_t n_pages = (merge_bytes + SPECTRAL_PRETOUCH_PAGE_SIZE - 1) / SPECTRAL_PRETOUCH_PAGE_SIZE;
+                size_t n_pages = (merge_bytes + page_size - 1) / page_size;
                 #pragma omp parallel for schedule(static)
                 for (size_t pg = 0; pg < n_pages; pg++) {
-                    ((volatile char*)segs)[pg * SPECTRAL_PRETOUCH_PAGE_SIZE] = 0;
+                    ((volatile char*)segs)[pg * page_size] = 0;
                 }
             }
         } else {
