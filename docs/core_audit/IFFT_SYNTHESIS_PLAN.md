@@ -89,13 +89,20 @@ generator, committed artifact — resource-hash pattern).
     re-frozen + parity oracle green + maintainer golden (F3) for the embedded set.
 - **F5 — capacity republish.** Re-run the capacity table with the hybrid;
   update M7_PERF_MODEL_PLAN + the published guarantees.
-- **F6 — CPU parallelization (SIMDe host / vDSP / CMSIS-DSP).** The FFT⁻¹ pipeline
-  is data-parallel in all three stages, but a MEASUREMENT (pass 259) reshaped this:
-  the inverse FFT is already vDSP, and SIMDe-vectorizing the tap scatter gave no win
-  (it is ~2% of cost — declined). The live target is the **per-partial `cosf`/`sinf`**
-  (SIMD sincos across partials, or phase recursion) + the FFT. Embedded: the M7 has
-  NO NEON — CMSIS-DSP `arm_*_f32` + the dual-issue FPU. Done-when: a measured
-  per-backend ns/sample drop in `bench_ifft_synth` (or a recorded decline-on-data).
+- **F6 — CPU SIMD trig — LANDED (pass 259), measured ~1.3×.** Two declines then a win,
+  all measured: (1) tap-scatter SIMD = no win (~2%, declined); (2) scalar poly swap =
+  no win (the build's `-ffast-math` libm `sinf` is already ~2.4 ns/eval). The win came
+  from a microbench (`bench_ifft_synth`) showing a 4-wide minimax sin at **6.7× the
+  scalar sinf** — the renderer's trig was scalar AND interleaved with the scatter, so
+  the compiler could not vectorize it. Fix: `ifft_render_frame` now runs **Phase A**
+  (blocked: scalar+double phase reduction, then `ifft_fast_sin4` SIMD `cr/ci` across the
+  block) + **Phase B** (scatter via `place_partial_cri`). Result: **64 partials 24.0 →
+  18.5 ns/sample, IFFT-vs-osc 9.0× → 11.6×**, #24 parity unchanged (the SIMD minimax is
+  the SSOT poly, ~3 ULP, far below the floor). Host-only + `APPROX_TRIG`-gated (exact and
+  embedded builds take the scalar SSOT path; the M7 has no NEON → its share rides the F4
+  CMSIS-DSP port). The inverse FFT (3.7 ns, ~20%) and the **motif-scatter (`motif_eval`,
+  now the largest term ~10 ns)** are what remain — the next CPU lever is the scatter, not
+  the trig.
 - **F7 — GPU FFT⁻¹ synthesis (Metal / CUDA).** The big lever (Savioja et al. —
   additive synthesis is "embarrassingly parallel", ~1000× CPU on GPU). Parallel
   partial→bin scatter (one thread per partial or per bin), batched inverse FFT
@@ -331,14 +338,17 @@ numbers at 64 partials, N_FFT=512, desktop host port (the FFT is data-independen
 was isolated by timing the backend on a random spectrum):
 - full IFFT render: **23.9 ns/sample**
 - inverse FFT alone: **3.76 ns/sample → only ~16%**
-- ⇒ placement + per-frame spectrum clear + OLA = **~84%**, and the per-partial
-  `cosf`/`sinf` is the bulk of that: 64·33·2 ≈ 0.52 trig/sample × ~35 ns ≈ **~71%**.
+- ⇒ placement + per-frame spectrum clear + OLA = **~84%**.
 This INVERTS the naive "the FFT dominates" intuition — the FFT is already vDSP-parallel
-and is the *small* part. Two corollaries: (i) SIMDe-vectorizing the 16-tap scatter was
-bit-identical but gave **zero speedup** (it is ~2% of cost) — **F6a scatter SIMD DECLINED
-on data**; (ii) the **per-partial trig is the whole CPU game**, with a ~71% ceiling — a
-real ~2–3× IFFT speedup is on the table if it is vectorized or recursed away. That is
-where F6 must go.
+and is the *small* part. **CORRECTION (post-F6 measurement):** an early estimate here put
+the trig at ~71% off a ~35 ns/trig guess — WRONG. The build's `-ffast-math` libm `sinf`
+is ~2.4 ns/eval, so the scalar-but-interleaved trig was ~6.5 ns/sample (~27%); the F6 SIMD
+batching removed ~5.5 of it (24.0 → 18.5, see the F6 phase). The genuinely largest term is
+the **motif scatter (`motif_eval` per tap, ~10 ns/sample)** — that, not the trig, is the
+next CPU lever. Corollaries that held: (i) SIMDe-vectorizing the 16-tap scatter ADD was
+bit-identical but zero-win (~2%) — **DECLINED**; (ii) the scalar poly swap was also zero-win
+(libm already fast) — only the SIMD-across-partials batching paid off, because the
+interleaved scalar trig was un-vectorizable in place.
 
 **Sequencing (revised by the measurement):**
 - **F6a — per-partial trig (the real lever).** Either a SIMD `sincos` evaluating 4
@@ -370,16 +380,16 @@ trig is.** So parallelizing the *FFT* (GPU/batched) barely helps; the lever is t
   blocker below.
 
 **Validated sequence (re-ranked by the critique):**
-1. **THE shippable win — within-frame trig on the SHARED `ifft_render_frame`** (helps both
-   the static and the production dynamic path; RT + offline + embedded). Two composing moves:
-   (a) drop the per-partial double `fmod` (spectral_synth_ifft.c:156) — `osc_vfastsin`'s
-   `q=round(x/π)` fold range-reduces arbitrary phase, so the fmod is redundant; (b)
-   restructure into Phase-A (walk partials, evaluate `cr/ci` in SIMD blocks via the existing
-   **bit-validated `osc_vfastsin`**, arch/simd/spectral_oscillator_simd_kernel.inc:154, 1.4
-   ULP; `cos=osc_vfastsin(φ+π/2)`, `sin=osc_vfastsin(φ)`) + Phase-B (pure scatter with
-   precomputed cr/ci). **Honest target: ~1.4–1.5× on the full render (25.1 → ~17 ns/sample)**,
-   tolerance-gated by `ifft_synth_parity` (#24, currently −72.8/−87.5, well under the floor)
-   + `bench_ifft_synth`. NOT a bit-identity change (vfastsin ≠ libm) — tolerance, not byte parity.
+1. **THE shippable win — within-frame trig on the SHARED `ifft_render_frame` — LANDED
+   (pass 259), MEASURED ~1.3× (24.0 → 18.5 ns/sample, IFFT-vs-osc 9.0× → 11.6×).** Phase-A
+   (blocked scalar+double phase reduction, then `cr/ci` via a SIMD minimax `ifft_fast_sin4` —
+   SSOT coefficients, host-only, `APPROX_TRIG`-gated) + Phase-B (`place_partial_cri` scatter).
+   #24 parity unchanged (~3 ULP, tolerance not byte parity). NOTE vs the original spec: the
+   double `fmod` was KEPT (it is load-bearing for precision — phi is thousands of rad and the
+   poly fold would lose ~1e-3 on the float); only the sin/cos was vectorized, which was the
+   whole win because the interleaved scalar trig was un-vectorizable in place. A standalone
+   `ifft_fast_sin4` was used rather than instantiating the templated `osc_vfastsin` (lighter;
+   same SSOT coefficients). Target was ~1.4–1.5×; delivered ~1.3× (the scatter eats the rest).
 2. **Phase recursion (coupled-form rotor) — DEPRIORITIZED.** Elegant and trig-killing, but
    it carries per-partial state across frames, which only the STATIC path can do — and the
    static path has **zero production callers**. The dynamic/hybrid path rebuilds the partial

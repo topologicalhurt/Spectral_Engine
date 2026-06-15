@@ -13,6 +13,41 @@
 #include <string.h>
 
 #include "spectral_consts.h"
+#include "spectral_config.h"          /* SPECTRAL_EMBEDDED / SPECTRAL_ENABLE_APPROX_TRIG */
+#include "spectral_osc_formulas.h"    /* spectral_fast_sin_inline — the trig SSOT */
+
+/* F6 host SIMD trig: the per-partial sin/cos is the renderer's largest non-FFT
+ * term, and it is scalar+interleaved in the frame loop so the compiler cannot
+ * vectorize it. A microbench (bench_ifft_synth) measured a 4-wide minimax sin at
+ * ~6.7× the scalar sinf, so the frame loop batches the trig into a SIMD Phase A.
+ * Host only (SIMDe → SSE2/NEON) AND only when the poly is the active trig; exact
+ * (APPROX_TRIG=0) and embedded builds take the scalar SSOT path. */
+#if !SPECTRAL_EMBEDDED && SPECTRAL_ENABLE_APPROX_TRIG
+#  include "simde/x86/sse2.h"
+#  include "simde/x86/sse4.1.h"        /* floor_ps */
+#  define SPECTRAL_IFFT_TRIG_SIMD 1
+/* 4-wide minimax sin, SSOT coefficients (mirrors osc_vfastsin: q=round(x/pi) fold). */
+static inline simde__m128 ifft_fast_sin4(simde__m128 x) {
+    const simde__m128 inv_pi = simde_mm_set1_ps(SPECTRAL_INV_PI);
+    const simde__m128 pi     = simde_mm_set1_ps(SPECTRAL_PI);
+    const simde__m128 half   = simde_mm_set1_ps(0.5f);
+    const simde__m128 two    = simde_mm_set1_ps(2.0f);
+    const simde__m128 one    = simde_mm_set1_ps(1.0f);
+    simde__m128 q  = simde_mm_floor_ps(simde_mm_add_ps(simde_mm_mul_ps(x, inv_pi), half));
+    simde__m128 xr = simde_mm_sub_ps(x, simde_mm_mul_ps(q, pi));
+    simde__m128 x2 = simde_mm_mul_ps(xr, xr);
+    simde__m128 p  = simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C9);
+    p = simde_mm_add_ps(simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C7), simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C5), simde_mm_mul_ps(x2, p));
+    p = simde_mm_add_ps(simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C3), simde_mm_mul_ps(x2, p));
+    p = simde_mm_mul_ps(xr, simde_mm_add_ps(one, simde_mm_mul_ps(x2, p)));
+    simde__m128 frac = simde_mm_sub_ps(q, simde_mm_mul_ps(two, simde_mm_floor_ps(simde_mm_mul_ps(q, half))));
+    simde__m128 sign = simde_mm_sub_ps(one, simde_mm_mul_ps(two, frac));
+    return simde_mm_mul_ps(p, sign);
+}
+#else
+#  define SPECTRAL_IFFT_TRIG_SIMD 0
+#endif
 
 /* F1-measured operating point (IFFT_SYNTHESIS_PLAN error budget): K=8 taps
  * per side -> -55 dBFS frame / -83 dBFS stream RMS floor; O=16 oversampling
@@ -104,14 +139,10 @@ static inline float motif_eval(const float* t, float d) {
     return t[i0] * (1.0f - f) + t[i0 + 1] * f;
 }
 
-/* Place one partial into the packed half-spectrum (Hermitian implicit).
- * NB (F6a, measured pass-259): SIMDe-vectorizing this contiguous 2K-tap scatter
- * was bit-identical but gave NO measurable speedup — the scatter is ~2% of the
- * IFFT cost; the per-partial cosf/sinf and the FFT dominate. Declined per
- * measure-first; F6 is redirected to the trig (see the plan). */
-static void place_partial(SpectralIfftSynth* s, float bin, float amp, float phi_c) {
-    float cr = 0.5f * amp * cosf(phi_c);
-    float ci = 0.5f * amp * sinf(phi_c);
+/* Scatter one partial's precomputed (cr, ci) into the packed half-spectrum
+ * (Hermitian implicit). The trig that produces cr/ci is batched into the frame
+ * loop's Phase A (F6 SIMD) so it can vectorize across partials. */
+static void place_partial_cri(SpectralIfftSynth* s, float bin, float cr, float ci) {
     int k0 = (int)floorf(bin);
     int half = (int)(s->n_fft / 2);
     for (int tap = -IFFT_MOTIF_K + 1; tap <= IFFT_MOTIF_K; tap++) {
@@ -151,10 +182,41 @@ static void ifft_render_frame(SpectralIfftSynth* s,
      * the ARM port, where the memory system is the constraint. */
     memset(s->re, 0, (s->n_fft / 2) * sizeof(float));
     memset(s->im, 0, (s->n_fft / 2) * sizeof(float));
-    for (size_t p = 0; p < n; p++) {
-        double omega = 2.0 * SPECTRAL_PI_D * (double)partials[p].bin / (double)s->n_fft;
-        double phi = fmod(omega * center + (double)partials[p].phase0, 2.0 * SPECTRAL_PI_D);
-        place_partial(s, partials[p].bin, partials[p].amp, (float)phi);
+
+    /* Phase A: (cr, ci) for every partial. The phase reduction stays scalar+double
+     * (phi can be thousands of rad → float would lose ~1e-3), but the sin/cos is
+     * batched into a SIMD minimax pass (F6). Phase B scatters. Blocked so the
+     * per-block scratch is bounded regardless of n. cos(x)=sin(x+pi/2). */
+    enum { IFFT_TRIG_BLK = 64 };
+    float phi[IFFT_TRIG_BLK], cr[IFFT_TRIG_BLK], ci[IFFT_TRIG_BLK];
+    for (size_t b0 = 0; b0 < n; b0 += IFFT_TRIG_BLK) {
+        size_t bn = (n - b0 < IFFT_TRIG_BLK) ? (n - b0) : (size_t)IFFT_TRIG_BLK;
+        for (size_t j = 0; j < bn; j++) {
+            double omega = 2.0 * SPECTRAL_PI_D * (double)partials[b0 + j].bin / (double)s->n_fft;
+            phi[j] = (float)fmod(omega * center + (double)partials[b0 + j].phase0,
+                                 2.0 * SPECTRAL_PI_D);
+        }
+        size_t j = 0;
+#if SPECTRAL_IFFT_TRIG_SIMD
+        const simde__m128 hpi = simde_mm_set1_ps(SPECTRAL_HALF_PI);
+        for (; j + 4 <= bn; j += 4) {
+            simde__m128 ph = simde_mm_loadu_ps(&phi[j]);
+            simde__m128 ha = simde_mm_setr_ps(0.5f * partials[b0 + j].amp,
+                                              0.5f * partials[b0 + j + 1].amp,
+                                              0.5f * partials[b0 + j + 2].amp,
+                                              0.5f * partials[b0 + j + 3].amp);
+            simde_mm_storeu_ps(&cr[j], simde_mm_mul_ps(ha, ifft_fast_sin4(simde_mm_add_ps(ph, hpi))));
+            simde_mm_storeu_ps(&ci[j], simde_mm_mul_ps(ha, ifft_fast_sin4(ph)));
+        }
+#endif
+        for (; j < bn; j++) {   /* SIMD tail + the scalar/exact/embedded path */
+            float ha = 0.5f * partials[b0 + j].amp;
+            cr[j] = ha * spectral_fast_sin_inline(phi[j] + SPECTRAL_HALF_PI);
+            ci[j] = ha * spectral_fast_sin_inline(phi[j]);
+        }
+        for (j = 0; j < bn; j++) {
+            place_partial_cri(s, partials[b0 + j].bin, cr[j], ci[j]);
+        }
     }
 
     spectral_ifft_backend_inverse(s->backend, s->re, s->im, s->frame);
