@@ -90,9 +90,12 @@ generator, committed artifact — resource-hash pattern).
   vs the exact oscillator sum **−72.8 dBFS max / −87.5 dBFS RMS** at 64
   dense partials; deterministic; **MEASURED 7.5× over the naive oscillator
   loop on desktop** (matches the embedded pricing's ~8× at 64 partials).
-- Next: F2b — the hybrid density router into the engine dispatch (segment
+- F2b IN PROGRESS — the hybrid density router into the engine dispatch (segment
   semantics: stationary sine interiors → IFFT, fades/chirps/non-sine →
-  oscillator bank; opt-in flag, no default change), then F3 golden.
+  oscillator bank; opt-in flag, no default change), then F3 golden. **Step 1
+  LANDED** (renderer per-frame-activity foundation + ctest rung 4); Step 2 (the
+  synth_cpu router) characterized — its boundary DSP (COLA-coverage vs per-segment
+  fade) is the focused work remaining. See the F2b build log below.
 
 ## F2b — implementation design (characterized 2026-06-15, NOT yet built)
 
@@ -149,3 +152,36 @@ discontinuity at the interior↔edge handoff). Plus an informational desktop spe
 coverage at interior boundaries (the renderer needs frames overlapping the interior
 edges); (c) the crossover fallback must not double-count a partial (IFFT or osc, never
 both, for a given span). Default-on acceptance rides F3 (golden, maintainer).
+
+### F2b build log
+
+- **Step 1 DONE (pass 259, this commit-stream).** The renderer per-frame-activity
+  foundation: `spectral_ifft_synth_render_dynamic(s, fn, ctx, out, total)` with the
+  framing/OLA/motif extracted into one shared `ifft_render_frame()` + `ifft_partial_valid()`;
+  the static `spectral_ifft_synth_render` now delegates (stream parity unchanged at
+  −72.81/−87.46 dBFS, byte-for-byte the pre-refactor numbers; backend rung 5.6e-9).
+  ctest rung 4 added: constant set == static **bit-exact**, time-localized activity keeps
+  energy to active frames (far edges exactly 0.0), out-of-domain partials skipped. The
+  IFFT TU still has no production caller — the Step-2 router is its first.
+
+- **Step 2 — the segment→partial mapping is verified; the boundary is the hard part.**
+  Segment model (spectral_common.h:23): `start,length,phase,omega,df,amp,da,width` +
+  cubic c2/c3 in pad. The IFFT partial for an eligible segment is
+  `bin = omega·n_fft/2π`, `amp = seg.amp`, `phase0 = seg.phase − omega·seg.start`
+  (matches the osc `phase_at_cubic(phase, omega, …, j)` at absolute `t = start+j`).
+  Eligibility = **global timbre == sine** (the motif is a single cosine bin; non-sine
+  timbres have harmonics the IFFT can't place) AND `|df|≈0` AND `|da·length|` below the
+  intra-frame threshold AND no cubic AND `bin ∈ (1, n_fft/2−1)` (out-of-domain → osc,
+  never dropped). **The boundary subtlety (the real Step-2 work):** the fade is
+  per-segment (`fade_params_init(length, SPECTRAL_FADE_SAMPLES_ACTIVE)` in every
+  `segment_fn_*`, spectral_synth_cpu.c:381+). The IFFT activity boundary does NOT yield
+  a sharp edge — COLA coverage ramps 0→1 over ~one frame (n_fft) as successive frames
+  start including the partial, and `fade_len` is generally narrower than n_fft. So a
+  simple interior/edge truncation leaves a COLA ramp, not the intended fade. The correct
+  decomposition is **additive**: IFFT renders the full steady span `[start,end]`
+  (coverage = COLA_coverage(t)); the osc renders the seam correction
+  `(fade(t) − COLA_coverage(t))·steady` over the boundary region (width ≈ max(fade_len,
+  n_fft)), which is 0 in the deep interior. COLA_coverage(t) = Σ_active-frames
+  window(t − m·hop) — exact and computable, but it MUST match or the seam steps
+  audibly. The tolerance test must assert seam continuity, not just bulk parity. This
+  boundary DSP is why Step 2 is its own focused unit.
