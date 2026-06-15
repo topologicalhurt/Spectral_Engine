@@ -352,3 +352,60 @@ where F6 must go.
   batched FFT + parallel OLA, with a GPU↔CPU parity ctest in the #26 pattern.
 - (The contiguous-scatter SIMD + OLA-vadd remain available but unmotivated until a
   profile shows them mattering — recorded here so they are not re-attempted blind.)
+
+## Parallelization roadmap (deep-research pass 259 — 5-angle workflow + adversarial critique)
+
+A 7-agent dig (frame-parallel, pipeline/divide-conquer, GPU end-to-end, SIMD trig, other-
+engine survey → synthesize → adversarial critique that **independently re-measured**).
+Headline reframe, MEASURED: full IFFT 25.1 ns/sample, **inverse FFT only 3.7 (≈15%)**,
+trig+fmod ≈ 10 of the 17.5 ns placement. **The FFT is not the bottleneck — the per-partial
+trig is.** So parallelizing the *FFT* (GPU/batched) barely helps; the lever is the trig.
+
+**The load-bearing axis is real-time vs offline:**
+- **Real-time / streaming** (embedded M7 `spectral_arm32_process`, ~48–256-sample blocks =
+  ~1 hop = ONE IFFT frame, no lookahead): the ONLY applicable levers are **within-frame** —
+  fmod-fold + SIMD/CMSIS sincos. Frame-threading, batched FFT, and GPU all have ZERO value
+  (no frames to batch; OpenMP fork/join and ~30–60 µs GPU launch blow a 1–5 ms budget).
+- **Offline / bulk file render** (whole timeline known): everything applies — but see the
+  blocker below.
+
+**Validated sequence (re-ranked by the critique):**
+1. **THE shippable win — within-frame trig on the SHARED `ifft_render_frame`** (helps both
+   the static and the production dynamic path; RT + offline + embedded). Two composing moves:
+   (a) drop the per-partial double `fmod` (spectral_synth_ifft.c:156) — `osc_vfastsin`'s
+   `q=round(x/π)` fold range-reduces arbitrary phase, so the fmod is redundant; (b)
+   restructure into Phase-A (walk partials, evaluate `cr/ci` in SIMD blocks via the existing
+   **bit-validated `osc_vfastsin`**, arch/simd/spectral_oscillator_simd_kernel.inc:154, 1.4
+   ULP; `cos=osc_vfastsin(φ+π/2)`, `sin=osc_vfastsin(φ)`) + Phase-B (pure scatter with
+   precomputed cr/ci). **Honest target: ~1.4–1.5× on the full render (25.1 → ~17 ns/sample)**,
+   tolerance-gated by `ifft_synth_parity` (#24, currently −72.8/−87.5, well under the floor)
+   + `bench_ifft_synth`. NOT a bit-identity change (vfastsin ≠ libm) — tolerance, not byte parity.
+2. **Phase recursion (coupled-form rotor) — DEPRIORITIZED.** Elegant and trig-killing, but
+   it carries per-partial state across frames, which only the STATIC path can do — and the
+   static path has **zero production callers**. The dynamic/hybrid path rebuilds the partial
+   set per frame, so a rotor would have to key state to segment identity inside the hybrid
+   (a bigger change). Revisit only if/when the hybrid grows persistent per-segment state.
+3. **Offline tier — ALL blocked behind F2b/F3 pipeline wiring (no production caller today),
+   so it is dead code until the hybrid is wired into the render path.** In order, after wiring:
+   chunked-OLA frame-parallel (clone the analysis-fused OMP loop + synth_cpu's span/thread-
+   buffer reduction; **prerequisite: hoist `s->re/im/frame` to per-thread scratch**; halo =
+   exactly `n_fft`; reproduce the ascending float-add order) → batched `vDSP_fftm_zrip` (near-
+   worthless alone: ~1.1× net on a 15% slice) → GPU FFT⁻¹ backend (privatized per-frame
+   scatter + batched C2R + gather-OLA; the incremental win over the EXISTING GPU oscillator
+   bank is only the ~8–15× algorithmic factor on dense stationary material; hot-bin scatter
+   contention + packing-parity risk; sequence last + golden-gated).
+4. **Split OUT as an independent subsystem: GPU-batched ANALYSIS forward-STFT.** The single
+   CPU-only FFT stage (grep: ZERO cuFFT/MPS/VkFFT in-tree despite a full Metal+CUDA *synthesis*
+   backend). Textbook batched-1D-FFT GPU workload, gated on the existing `STFT_CHUNK_THRESHOLD`,
+   offline/transfer-bound — no dependency on the IFFT work; highest other-engine ceiling.
+
+**Other untapped CPU SIMD (measure-first conditionals):** `segment_fn_wavetable_float`
+(spectral_synth_cpu.c) is still scalar per-sample while the algebraic timbres are SIMD
+(~1.3–1.6×, but NEON has no native gather — measure before building); per-candidate peak
+estimator SIMD (sparse → low payoff); multi-file resource hashing (build-time, low value).
+
+**Risks to honor:** tolerance-not-bit-exact (both trig moves); coupled-form amplitude drift
+over thousands of streaming frames (periodic renorm); per-thread-scratch data race + halo
+off-by-one + float-add-order in chunked-OLA; GPU real-complex packing/scale parity vs the
+vDSP zrip convention; GPU hot-bin scatter contention; **and the overarching one — none of
+the offline/GPU tier delivers value until F2b/F3 gives the IFFT a production caller.**
