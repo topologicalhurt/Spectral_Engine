@@ -145,6 +145,34 @@ static inline float motif_eval(const float* t, float d) {
 static void place_partial_cri(SpectralIfftSynth* s, float bin, float cr, float ci) {
     int k0 = (int)floorf(bin);
     int half = (int)(s->n_fft / 2);
+    const int n_tap = 2 * IFFT_MOTIF_K;
+    const int klo = k0 - IFFT_MOTIF_K + 1;
+
+    /* Interior fast path: the motif index advances by exactly O per tap and the lerp
+     * weight f = x - i0 is tap-INDEPENDENT, so hoist the lookup setup out of the loop.
+     * Bit-identical to the per-tap motif_eval (i0_j = i0_0 + j*O, same f) with no
+     * DC/Nyquist skip (window interior) and no table-edge clamp — the latter needs
+     * frac > 0: an exact-integer bin (frac=0, measure-zero) would push the last tap to
+     * the table end, so it falls to the per-tap path which clamps the edge correctly. */
+    const float frac = bin - (float)k0;
+    if (klo >= 1 && klo + n_tap - 1 <= half - 1 && frac > 0.0f) {
+        const float* t = s->motif;
+        float xf = (1.0f - frac) * (float)IFFT_MOTIF_O;   /* x at the first tap */
+        int i0 = (int)xf;
+        float f = xf - (float)i0;
+        float w0 = 1.0f - f;
+        for (int j = 0; j < n_tap; j++) {
+            int k = klo + j;
+            float m = t[i0] * w0 + t[i0 + 1] * f;
+            float sgn = (k & 1) ? -1.0f : 1.0f;
+            s->re[k] += sgn * m * cr;
+            s->im[k] += sgn * m * ci;
+            i0 += IFFT_MOTIF_O;
+        }
+        return;
+    }
+
+    /* Boundary: per-tap motif_eval with the DC/Nyquist skip. */
     for (int tap = -IFFT_MOTIF_K + 1; tap <= IFFT_MOTIF_K; tap++) {
         int k = k0 + tap;
         if (k <= 0 || k >= half) continue;     /* DC/Nyquist kept clear */

@@ -281,10 +281,45 @@ static void test_dynamic_render(void) {
     spectral_ifft_synth_destroy(s);
 }
 
+/* Rung 5: exact-integer bins (frac=0) exercise place_partial_cri's per-tap boundary
+ * fallback — the hoisted interior fast path gates on frac>0 because an integer bin
+ * would otherwise index one past the motif table on the last tap. Verify they render
+ * correctly (a regression that dropped the frac>0 guard would read past the table). */
+static void test_integer_bins(void) {
+    printf("test_integer_bins:\n");
+    SpectralIfftSynth* s = spectral_ifft_synth_create(N_FFT);
+    CHECK(s != NULL, "synth create (int bins)");
+    if (!s) return;
+
+    static SpectralIfftPartial parts[8];
+    for (size_t p = 0; p < 8; p++) {
+        parts[p].bin = (float)(16 + 24 * (int)p);   /* exact integers 16..184, all interior */
+        parts[p].amp = 0.1f;
+        parts[p].phase0 = (float)(0.3 * (double)p);
+    }
+    static float out[TOTAL];
+    CHECK(spectral_ifft_synth_render(s, parts, 8, out, TOTAL) == 0, "int-bin render rc");
+
+    double worst = 0.0;
+    for (size_t t = N_FFT; t < TOTAL - N_FFT; t++) {
+        double want = 0.0;
+        for (size_t p = 0; p < 8; p++) {
+            double omega = 2.0 * SPECTRAL_PI_D * (double)parts[p].bin / (double)N_FFT;
+            want += (double)parts[p].amp * cos(omega * (double)t + (double)parts[p].phase0);
+        }
+        double err = fabs((double)out[t] - want);
+        if (err > worst) worst = err;
+    }
+    printf("  integer-bin max err: %.2f dBFS\n", dbfs(worst));
+    CHECK(dbfs(worst) < -55.0, "integer-bin render must beat -55 dBFS (got %.2f)", dbfs(worst));
+    spectral_ifft_synth_destroy(s);
+}
+
 int main(void) {
     test_backend_contract();
     test_stream_parity();
     test_dynamic_render();
+    test_integer_bins();
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;
 }

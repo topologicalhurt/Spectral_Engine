@@ -89,8 +89,14 @@ generator, committed artifact — resource-hash pattern).
     re-frozen + parity oracle green + maintainer golden (F3) for the embedded set.
 - **F5 — capacity republish.** Re-run the capacity table with the hybrid;
   update M7_PERF_MODEL_PLAN + the published guarantees.
-- **F6 — CPU SIMD trig + fmod kill — LANDED (pass 259), measured ~1.8× (24.0 → 13.2
-  ns/sample; IFFT-vs-osc 9.0× → 16.3×).** All measured, two declines then two wins:
+- **F6 — CPU optimization — LANDED (pass 259), measured ~2.6× (24.0 → 9.1 ns/sample;
+  IFFT-vs-osc 9.0× → 23.7×).** Three wins (trig, fmod, motif) after two measure-first
+  declines. **Win C — motif scatter:** the per-tap `motif_eval` recomputed the table index
+  + lerp weight, but the index advances by exactly `O` per tap and the weight is
+  tap-independent, so `place_partial_cri` hoists the lookup setup and strides the lerp —
+  bit-identical (gated `frac>0`: an exact-integer bin would index one past the motif table,
+  so it falls to the per-tap path; ctest rung 5 covers it). 13.2 → 9.1: the scatter
+  arithmetic WAS on the critical path (not load-bound as feared). Wins A+B below:
   (1) tap-scatter SIMD = no win (~2%, declined); (2) scalar poly swap = no win (the
   build's `-ffast-math` libm `sinf` is already ~2.4 ns/eval). **Win A — SIMD trig:** a
   microbench showed a 4-wide minimax sin at **6.7× the scalar sinf** (the renderer's trig
