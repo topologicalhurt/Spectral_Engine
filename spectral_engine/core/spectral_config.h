@@ -686,9 +686,6 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #ifndef SPECTRAL_DEFAULT_DB_THRESH
 #define SPECTRAL_DEFAULT_DB_THRESH  (-70.0f)
 #endif
-#ifndef SPECTRAL_CACHE_ALIGN
-#define SPECTRAL_CACHE_ALIGN        32
-#endif
 #else
 #ifndef SPECTRAL_DEFAULT_N_FFT
 #define SPECTRAL_DEFAULT_N_FFT      4096
@@ -699,9 +696,13 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #ifndef SPECTRAL_DEFAULT_DB_THRESH
 #define SPECTRAL_DEFAULT_DB_THRESH  (-85.0f)
 #endif
-#ifndef SPECTRAL_CACHE_ALIGN
-#define SPECTRAL_CACHE_ALIGN        64
 #endif
+
+/* Allocation alignment follows the cache-line SSOT (spectral_mem.h, included
+ * above): one quantity, so the simulate host (cache-line 64) cannot disagree with
+ * a 32-byte alloc alignment. A BSP that overrides SPECTRAL_CACHE_LINE moves both. */
+#ifndef SPECTRAL_CACHE_ALIGN
+#define SPECTRAL_CACHE_ALIGN        SPECTRAL_CACHE_LINE
 #endif
 
 #endif /* SPECTRAL_CONFIG_H */
