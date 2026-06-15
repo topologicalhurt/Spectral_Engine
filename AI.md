@@ -6,7 +6,7 @@ Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed). `AI_CANON.md` holds
 the full correctness rules; this file is the orientation.
 **Forward mandate (what to work on next):** `docs/core_audit/REVIEWER_HANDOFF.md`.
 
-## Layout (Linux-kernel-style: kernel / arch / drivers; see KERNEL_LAYOUT_PLAN.md)
+## Layout (Linux-kernel-style: kernel / arch / drivers; see archive/KERNEL_LAYOUT_PLAN.md)
 - `spectral_engine/core/` — the kernel: config, constants, oscillators, windows, segments,
   Q-domain (`spectral_q.h`), hashing, contracts, dispatch
 - `spectral_engine/arch/` — ISA-contingent kernels, build-selected: `ref/` (portable
@@ -192,8 +192,9 @@ story, comments that carry intuition.
     doc in the same unit of work; a stale claim is a bug with the same
     severity as the code defect it describes.
 
-The review's findings ledger and execution waves for the current instance
-live in `docs/core_audit/MASTER_REVIEW_PLAN.md`.
+Each completed instance's findings ledger + execution waves are archived under
+`docs/core_audit/archive/` (`MASTER_REVIEW_PLAN.md`, `_2.md`, `_3.md`). The next
+instance opens a fresh ledger in `docs/core_audit/`.
 
 ## Reference docs
 `docs/core_audit/`: `AI_CANON.md` (rules), `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md`

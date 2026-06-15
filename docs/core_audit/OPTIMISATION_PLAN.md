@@ -29,8 +29,9 @@ Goldens are captured from the **current, unoptimised** kernel FIRST (ULTRAPLAN l
 freezing today's numerical behaviour as the contract. Every change here is verified by
 diffing against those goldens. Deliberate behaviour changes (the foundation work changes
 the segment representation and may change reconstruction within tolerance) get a **new,
-signed-off golden** — never a silently-moved tolerance. The two deferred ULTRAPLAN
-observations stay Phase D's, not this plan's.
+signed-off golden** — never a silently-moved tolerance. The remaining deferred ULTRAPLAN
+observation (GPU fade-tail) stays Phase D's, not this plan's; its companion (Daisy .spq
+re-validation) landed in review-3.
 
 ---
 
@@ -425,7 +426,9 @@ Suggested execution order (value × safety): **Phase0 → O3-B → O4-B → O1-B
 
 ```text
 - Neural / differentiable synthesis (DDSP etc.) — different engine class.
-- The two deferred ULTRAPLAN observations (GPU fade-tail; Daisy .spq re-validation).
+- The deferred GPU fade-tail-under-time-stretch observation. (Its companion, the Daisy .spq
+  re-validation, LANDED in review-3 / rdc-daisy-01: load_sd routes through the new
+  spectral_arm32_load_in_place, which validates + SDRAM-fences before synthesis.)
 - Non-ARM hand assembly (directive: ARM only for now).
 - Building the SMS residual (A6) or Johnston masking (A7) now — recorded as named future
   work; F2 keeps the door open (residual is near-free under inverse-FFT synthesis).

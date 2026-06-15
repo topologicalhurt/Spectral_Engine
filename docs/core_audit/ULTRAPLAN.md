@@ -882,13 +882,13 @@ SWEPT (one pass per cluster; defects fixed in place + documented in the pass):
         the NUL itself (no OOB). get_memory clamps total_used<=SDRAM_SIZE before the subtraction (no
         underflow); load_sd/load_buffer reject num_segments>capacity before the pool copy; ADC/param maps
         CLAMP before use; playback API is NULL-guarded passthrough to the pass-181 embedded core. ONE
-        deferred observation (NOT changed): load_sd reads the .spq segments straight into the pool and
-        commits without re-validation (load_buffer validates via spectral_arm32_load). Bounded to audio
-        quality NOT memory safety — the runtime activation gate `num_active<MAX_ACTIVE` + prune (pass 181)
-        drop malformed segments rather than overrun. Deferred because the file builds in NO host target
-        (arm-none-eabi + FATFS headers absent; SD code is #ifdef DAISY_HAS_FATFS) and the validator is
-        static (a real fix needs an API change to triad code or a temp buffer) — unverifiable here, so
-        maintainer-directed alongside the GPU fade-tail item. Verified: no source changed -> Pass 187
+        deferred observation, NOW LANDED in review-3 (rdc-daisy-01): load_sd previously read the .spq
+        segments straight into the pool and committed without re-validation. The validator (formerly
+        static, needing an API change) is now exposed as spectral_arm32_load_in_place(), which load_sd
+        calls — same overflow/monotonic/MAX_ACTIVE contract as spectral_arm32_load plus the SDRAM
+        barrier; host-verified via the validation function + test_arm32_process (the daisy .c itself
+        still only builds under DAISY_HAS_FATFS, but the validation path it now calls is tested).
+        Remaining maintainer-directed item: the GPU fade-tail. Verified: no source changed -> Pass 187
         green preserved (and the file is in no triad target regardless).
 
   [189] Tree-wide defect-CLASS cross-cut + last inline-logic headers (runtime/spectral_perf_accounting.h,
@@ -994,10 +994,11 @@ inline-logic
 headers. All major compute AND support surfaces (CPU additive/wavetable, Q15 embedded,
 Metal + CUDA GPU, persistence/file-I/O, the utility-math layer, backend dispatch + wavetable load/lookup,
 the debug-instrumentation + optional-processing-chain surface, and the Daisy firmware glue + UART
-command protocol) now audited. TWO bounded, unverifiable-on-host observations are recorded (deferred,
-maintainer-directed: the GPU fade-tail-under-time-stretch non-monotonicity, and the Daisy SD `.spq`
-load skipping segment re-validation — both memory-safe, both await the relevant toolchain/golden-vector
-loop). Phase D IN PROGRESS: D0 (harness infra) done ahead of schedule + D1 (full/fused parity)
+command protocol) now audited. Two bounded observations were recorded; the Daisy SD `.spq` load
+skipping segment re-validation LANDED in review-3 (rdc-daisy-01: load_sd routes through the new
+spectral_arm32_load_in_place — validate + SDRAM barrier). ONE remains (deferred, maintainer-directed):
+the GPU fade-tail-under-time-stretch non-monotonicity (awaits the GPU toolchain/golden-vector loop).
+Phase D IN PROGRESS: D0 (harness infra) done ahead of schedule + D1 (full/fused parity)
 landed (12/12 ctest green, full==fused 0-ULP on 6 fixtures); D2 golden-vector oracle NEXT
 (maintainer sign-off on frozen fixtures/tolerances), D3/D4/D5 pending.
 ```
