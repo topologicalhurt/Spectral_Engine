@@ -2,11 +2,11 @@
 #ifndef DAISY_SEED_SPECTRAL_H
 #define DAISY_SEED_SPECTRAL_H
 
-/* Public Daisy Seed (Cortex-M7) synthesis API. SemVer; a major of 0 means the
- * surface may still change between releases. */
+/* Public Daisy Seed (Cortex-M7) synthesis API. SemVer; this is the earliest WIP
+ * surface (0.0.x) — it is expected to change freely until deliberately frozen. */
 #define DAISY_SPECTRAL_API_VERSION_MAJOR 0
-#define DAISY_SPECTRAL_API_VERSION_MINOR 1
-#define DAISY_SPECTRAL_API_VERSION_PATCH 0
+#define DAISY_SPECTRAL_API_VERSION_MINOR 0
+#define DAISY_SPECTRAL_API_VERSION_PATCH 1
 
 #include "daisy_seed_config.h"
 #include "../../spectral_engine/arch/arm/spectral_synth_arm32.h"

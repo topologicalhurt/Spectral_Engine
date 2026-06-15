@@ -2,11 +2,11 @@
 #ifndef SPECTRAL_SYNTH_H
 #define SPECTRAL_SYNTH_H
 
-/* Public desktop synthesis API. SemVer; a major of 0 means the surface may
- * still change between releases. */
+/* Public desktop synthesis API. SemVer; this is the earliest WIP surface
+ * (0.0.x) — it is expected to change freely until it is deliberately frozen. */
 #define SPECTRAL_SYNTH_API_VERSION_MAJOR 0
-#define SPECTRAL_SYNTH_API_VERSION_MINOR 1
-#define SPECTRAL_SYNTH_API_VERSION_PATCH 0
+#define SPECTRAL_SYNTH_API_VERSION_MINOR 0
+#define SPECTRAL_SYNTH_API_VERSION_PATCH 1
 
 #include "spectral_common.h"
 #include "spectral_error.h"

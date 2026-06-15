@@ -47,6 +47,12 @@ Only academic/technical sources are used for this research plan. Vendor manuals 
 26. S. K. Mitra, *Digital Signal Processing: A Computer-Based Approach*, McGraw-Hill.
 27. R. Lyons, *Understanding Digital Signal Processing*, 3rd ed., Pearson, 2010.
 
+## Inverse-FFT and parallel/GPU additive synthesis
+
+28. X. Rodet and P. Depalle, “Spectral Envelopes and Inverse FFT Synthesis,” *Proc. AES 93rd Convention*, 1992. (The FFT⁻¹ additive-synthesis method — the basis of the F-stream IFFT path; ~15× over oscillator banks on CPU.)
+29. A. Freed, X. Rodet, and P. Depalle, “Synthesis and Control of Hundreds of Sinusoidal Partials on a Workstation without Custom Hardware,” *Proc. ICSPAT*, 1992. (First real-time transform-domain synthesizer.)
+30. L. Savioja, V. Välimäki, and J. O. Smith, “Real-Time Additive Synthesis with One Million Sinusoids Using a GPU,” *Proc. AES 128th Convention*, 2010; and “Audio Signal Processing Using Graphics Processing Units,” *J. Audio Eng. Soc.*, 2011. (Additive synthesis is embarrassingly data-parallel — the basis for the F6/F7 SIMDe/vDSP/GPU parallelization of the IFFT path.)
+
 ## How these sources constrain implementation
 
 - Window functions and interpolation must distinguish coherent gain, RMS gain, and leakage behavior; see Harris and Oppenheim/Schafer.

@@ -65,12 +65,43 @@ generator, committed artifact — resource-hash pattern).
   measured desktop speedup on a dense fixture.
 - **F3 — golden sign-off.** Maintainer listens/diffs a dense render;
   thresholds frozen into the golden set. Done-when: signed.
-- **F4 — ARM Q31 port.** `port/cmsis/` TU over `arm_rfft_q31`; Q-domain map
-  rows for the spectral frame (Q31 bins, motif Q15/Q31 — decide by measured
-  SNR); rig-measured cycles; m7-baseline scenarios extended with a dense-frame
-  STONE ceiling. Done-when: rig numbers + gate extended + oracle green.
+- **F4 — embedded (Cortex-M7) port + DEFAULT-ON for embedded (maintainer
+  directive 2026-06-15).** The compat audit (see "Embedded integration" below)
+  ruled **float-on-M7-FPU over Q31**: the M7 has a hardware single-precision FPU,
+  the CMSIS oscillator already uses `arm_sin_f32`, and a Q15 motif table would
+  lose ~12–15 dB SNR at dense densities. So F4 = a float embedded port of
+  `spectral_synth_ifft.c`, NOT a Q31 rewrite. Three sub-pieces:
+  - **F4a — static allocation.** `spectral_ifft_synth_create` mallocs 6×+callocs
+    2× (spectral_synth_ifft.c:39-79) and the ref backend computes twiddles at init
+    — all forbidden on the libc-free embedded build. Add a pre-sized/pool-backed
+    create + a portable no-libm FFT (CMSIS `arm_rfft_fast_f32` or a static-twiddle
+    ref) + LUT/`spectral_fast_math` trig instead of `cosf`/`sinf`/`fmod`.
+  - **F4b — STREAMING OLA.** The embedded render is block-by-block
+    (`spectral_arm32_process`, audio callback), but `spectral_ifft_synth_render`
+    renders a whole buffer with internal OLA. A streaming variant must carry the
+    half-frame OLA tail + frame phase across `process()` calls in the ctx.
+  - **F4c — route + default-on.** Eligibility gate in `spectral_arm32_process`
+    (num_active ≥ threshold, all sustain/no-fade-this-block, no chirp, in-domain),
+    an arm32 IFFT wrapper, and the m7 baseline REGENERATED (flipping the default
+    render path moves codegen + cycles — that IS the new gate). Density-gated +
+    K-chosen so the floor is inaudible (see the accuracy note). Skip dual-MAC
+    pair-eligible voices. Done-when: rig/qemu cycles show the speedup + gate
+    re-frozen + parity oracle green + maintainer golden (F3) for the embedded set.
 - **F5 — capacity republish.** Re-run the capacity table with the hybrid;
   update M7_PERF_MODEL_PLAN + the published guarantees.
+- **F6 — CPU parallelization (SIMDe host / vDSP / CMSIS-DSP).** The FFT⁻¹ pipeline
+  is data-parallel in all three stages (see "Parallelization" below): partial→bin
+  motif placement, the inverse FFT (already vDSP/cuFFT-class), and OLA. Host:
+  SIMDe-vectorize `place_partial`'s contiguous tap scatter + the OLA add (bit-
+  parity, build-agnostic SSE2→NEON); use vDSP vector ops for the OLA on Apple.
+  Embedded: the M7 has NO NEON — use CMSIS-DSP `arm_*_f32` + the dual-issue FPU.
+  Done-when: parity unchanged + measured per-backend speedup in the bench.
+- **F7 — GPU FFT⁻¹ synthesis (Metal / CUDA).** The big lever (Savioja et al. —
+  additive synthesis is "embarrassingly parallel", ~1000× CPU on GPU). Parallel
+  partial→bin scatter (one thread per partial or per bin), batched inverse FFT
+  (Metal Performance Shaders / cuFFT), parallel OLA across many frames. Reuses the
+  existing Metal/CUDA backend plumbing + the GPU-parity ctest pattern (#26).
+  Done-when: GPU↔CPU parity within the IFFT floor + measured GPU speedup.
 
 ## Status
 
@@ -203,3 +234,104 @@ both, for a given span). Default-on acceptance rides F3 (golden, maintainer).
   same buffer's faded/chirped/non-sine partials stay on the osc bank; (b) stretch/pitch
   support (apply the driver's param transform to the segment→partial map); (c) wire the
   fast path into the synth dispatch behind a runtime opt-in (rides F3 golden).
+
+## Architecture clarifications (maintainer Q&A, 2026-06-15)
+
+Recorded verbatim because they correct the mental model:
+
+1. **Is the IFFT under the "fast math" path only?** No. It is NOT tied to the
+   fast-math compile mode (`SPECTRAL_CUSTOM_FAST_MATH_MODE`). It is a separate
+   *synthesis algorithm* exposed as an opt-in entry (`spectral_synth_hybrid_try_render`)
+   with no production caller yet. It is opt-in because it is an APPROXIMATION whose
+   default-on flip needs a listening test (F3), not because of any fast-math flag.
+
+2. **Is the IFFT an optimization for the oscillator (synthesis) stage?** Yes,
+   exactly. Same input (partials/segments), same output (audio samples), a faster
+   *approximate* algorithm: instead of N per-partial oscillators, build the frame's
+   half-spectrum (place each partial's window main-lobe motif), ONE inverse FFT, then
+   overlap-add. It replaces the resynthesis inner loop. The ANALYSIS stage (STFT →
+   peaks → segments) is untouched.
+
+3. **Can it work on any build path?** The ALGORITHM is build-agnostic — that is the
+   point of the port contract (`spectral_synth_ifft.h`: one surface, one inverse-FFT
+   primitive implemented per backend). The current IMPLEMENTATION is desktop-float
+   only (host vDSP/ref FFT, `malloc`, `cosf`/`sinf`). Each path needs its FFT primitive
+   ported: desktop ✓; embedded = F4 (float-on-M7, static alloc, CMSIS/ref FFT);
+   GPU = F7 (a GPU FFT kernel). Designed for any path, realized so far only on desktop.
+
+4. **Does it need to work on streamed partials with no embedded control surface?**
+   The embedded render IS streaming — `spectral_arm32_process` renders block-by-block
+   from the audio callback into a Q63 accumulator. So the IFFT needs a STREAMING
+   variant (F4b): persistent half-frame OLA tail + frame phase carried in the ctx
+   across blocks (the current renderer is whole-buffer). The control surface DOES
+   exist — `spectral_arm32_process` + the ctx — we extend it with an eligibility gate
+   and OLA state. It is integration work, not a missing surface.
+
+**On "is the quality degradation really so bad it can't be default?"** — Likely not,
+and it is tunable. Measured floors at K=8 taps: −55 dBFS frame-peak / −83 dBFS stream
+RMS. −83 dB RMS is very quiet; the −55 dB frame PEAKS are the risk in sparse/quiet
+passages. On Q15 (16-bit, ~−90 dBFS quantization floor) the IFFT floor sits ABOVE the
+fixed-point floor, so the IFFT becomes the dominant error vs the exact oscillator. The
+dials that make on-by-default sound: **(i)** only engage at high partial density (the
+router already does — the speed win and the error-averaging both need density);
+**(ii)** raise K (~−8 dB per +4 taps, ~2K MACs/partial) until the floor drops below the
+Q15 floor for the target material; **(iii)** maintainer A/B golden listen (F3). So
+"opt-in until F3" is process caution + a tunable tradeoff, not a verdict that the
+quality is bad. The embedded default-on directive is the maintainer making the F3 call
+for embedded — it should still be density-gated + K-chosen, not a blanket flip.
+
+## Embedded integration (compat audit, 2026-06-15)
+
+- **Port decision: float-on-M7-FPU, not Q31.** The M7 has hardware single-precision
+  float; `arch/arm/spectral_oscillator_cmsis.c` already uses `arm_sin_f32`; a Q15
+  motif would lose ~12–15 dB SNR at dense densities (the motif interp is linear-float).
+- **Blockers to clear (F4a):** `spectral_ifft_synth_create` heap-allocates (6×
+  malloc + 2× calloc, spectral_synth_ifft.c:39-79); both FFT backends `calloc` state
+  and the ref backend computes twiddles at runtime; `cosf`/`sinf`/`fmod`/`floorf`
+  throughout. All forbidden libc-free. → static/pool buffers, a no-libm FFT
+  (`arm_rfft_fast_f32` or static-twiddle ref), LUT trig.
+- **Streaming (F4b):** persistent OLA tail + frame phase in the ctx across blocks.
+- **Perf gate:** flipping the default arm32 render path moves codegen + cycles;
+  regenerate the m7 baseline — the speedup BECOMES the gate. llvm-mca alone can't model
+  the OLA/cache; a qemu trace of the IFFT kernel is needed for honest M7 cycles.
+- **Accuracy gating (the accuracy reader's verdict — "conditional, not free"):**
+  require a density profile gate (>80% of frames with ≥7 eligible partials in target
+  material for the win to be real), K chosen so K-tap floor is inaudible in context,
+  and the F3 golden audition for the embedded set.
+
+## Parallelization — SIMDe / vDSP / GPU (F6/F7)
+
+**Yes, the FFT⁻¹ synthesis is highly parallelizable** — all three pipeline stages are
+data-parallel:
+
+1. **Spectral construction** (place each partial's motif into bins): parallel across
+   partials (scatter-add) or across bins (gather). Per partial the 16-tap write
+   (K=8) is *contiguous* in `re[]`/`im[]`, so it SIMD-vectorizes (load 16 motif taps,
+   ×(−1)^k sign vector, ×cr/ci broadcast, add to the contiguous bin slice). The
+   per-partial trig (`cr=½·amp·cosf φ`, `ci=½·amp·sinf φ`) vectorizes across partials
+   with a SIMD sincos.
+2. **Inverse FFT** — already the canonical parallel primitive (vDSP on Apple, a
+   batched FFT on GPU). O(N log N) per frame regardless of partial count.
+3. **Overlap-add** — per-sample independent; a pure vector add (`vDSP_vadd` / SIMD).
+
+**Literature.** Base method: **Rodet & Depalle (1992), "Spectral Envelopes and Inverse
+FFT Synthesis"** (AES 93rd) — the FFT⁻¹ additive method, ~15× over oscillators on CPU;
+**Freed, Rodet, Depalle (1992/93), "Synthesis and Control of Hundreds of Sinusoidal
+Partials on a Workstation"** — the first real-time transform-domain synthesizer.
+Parallel/GPU technique: **Savioja, Välimäki & Smith (2010), "Real-Time Additive
+Synthesis with One Million Sinusoids Using a GPU"** (AES 128th) + their **JAES 2011
+"Audio Signal Processing Using Graphics Processing Units"** — additive synthesis is
+"embarrassingly data parallel"; ~1000× CPU by computing many partials AND many adjacent
+output samples in parallel. For dense spectra the GPU FFT⁻¹ (parallel bin placement +
+batched FFT + parallel OLA) beats brute-force GPU oscillators because the FFT is
+O(N log N) independent of partial count. (Add these to `reference/ACADEMIC_SOURCES.md`.)
+
+**Bottleneck note (measured):** on desktop the inverse FFT is already vDSP, so the
+remaining CPU hot spot is the placement — specifically the per-partial `cosf`/`sinf` and
+the 16-tap scatter. F6 targets exactly those; F7 moves the whole pipeline to the GPU.
+
+**Sequencing:** F6a — SIMDe-vectorize the placement tap-scatter (bit-parity vs scalar;
+the existing parity ctest #24 pins it) + the OLA → bench the placement speedup. F6b —
+vectorized sincos across partials (the larger CPU lever). F6c — embedded uses CMSIS-DSP
+`arm_*_f32` (no NEON on M7). F7 — GPU Metal/CUDA FFT⁻¹ with a GPU↔CPU parity ctest in
+the #26 pattern.
