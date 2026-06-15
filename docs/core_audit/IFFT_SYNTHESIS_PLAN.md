@@ -89,20 +89,23 @@ generator, committed artifact — resource-hash pattern).
     re-frozen + parity oracle green + maintainer golden (F3) for the embedded set.
 - **F5 — capacity republish.** Re-run the capacity table with the hybrid;
   update M7_PERF_MODEL_PLAN + the published guarantees.
-- **F6 — CPU SIMD trig — LANDED (pass 259), measured ~1.3×.** Two declines then a win,
-  all measured: (1) tap-scatter SIMD = no win (~2%, declined); (2) scalar poly swap =
-  no win (the build's `-ffast-math` libm `sinf` is already ~2.4 ns/eval). The win came
-  from a microbench (`bench_ifft_synth`) showing a 4-wide minimax sin at **6.7× the
-  scalar sinf** — the renderer's trig was scalar AND interleaved with the scatter, so
-  the compiler could not vectorize it. Fix: `ifft_render_frame` now runs **Phase A**
-  (blocked: scalar+double phase reduction, then `ifft_fast_sin4` SIMD `cr/ci` across the
-  block) + **Phase B** (scatter via `place_partial_cri`). Result: **64 partials 24.0 →
-  18.5 ns/sample, IFFT-vs-osc 9.0× → 11.6×**, #24 parity unchanged (the SIMD minimax is
-  the SSOT poly, ~3 ULP, far below the floor). Host-only + `APPROX_TRIG`-gated (exact and
-  embedded builds take the scalar SSOT path; the M7 has no NEON → its share rides the F4
-  CMSIS-DSP port). The inverse FFT (3.7 ns, ~20%) and the **motif-scatter (`motif_eval`,
-  now the largest term ~10 ns)** are what remain — the next CPU lever is the scatter, not
-  the trig.
+- **F6 — CPU SIMD trig + fmod kill — LANDED (pass 259), measured ~1.8× (24.0 → 13.2
+  ns/sample; IFFT-vs-osc 9.0× → 16.3×).** All measured, two declines then two wins:
+  (1) tap-scatter SIMD = no win (~2%, declined); (2) scalar poly swap = no win (the
+  build's `-ffast-math` libm `sinf` is already ~2.4 ns/eval). **Win A — SIMD trig:** a
+  microbench showed a 4-wide minimax sin at **6.7× the scalar sinf** (the renderer's trig
+  was scalar AND interleaved with the scatter, so the compiler could not vectorize it).
+  `ifft_render_frame` now runs **Phase A** (blocked phase reduction, then `ifft_fast_sin4`
+  SIMD `cr/ci`) + **Phase B** (scatter via `place_partial_cri`). 24.0 → 18.5. **Win B —
+  fmod kill:** the per-partial double libm `fmod` was a HIDDEN ~5 ns/sample (not ~2);
+  replacing it with an inline round-subtract reduction to [−π,π] (libm-free, and tighter
+  than fmod's [0,2π) so the minimax sin stays in its 1.4-ULP range) gave 18.5 → 13.2.
+  #24 parity unchanged at −72.81/−87.46 (SIMD minimax ~3 ULP, far below the floor).
+  Host-only + `APPROX_TRIG`-gated (exact/embedded take the scalar SSOT path; the inline
+  reduction is libm-free so it serves F4 too). What remains: the **motif-scatter
+  (`motif_eval` gather, now ~9 ns, the largest term)** — gather-bound, hard on CPU (the
+  SIMD-add was already declined); it is the GPU's domain (F7). The inverse FFT (~3.7 ns)
+  is the next-largest and already vDSP.
 - **F7 — GPU FFT⁻¹ synthesis (Metal / CUDA).** The big lever (Savioja et al. —
   additive synthesis is "embarrassingly parallel", ~1000× CPU on GPU). Parallel
   partial→bin scatter (one thread per partial or per bin), batched inverse FFT

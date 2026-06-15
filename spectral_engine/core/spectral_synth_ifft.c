@@ -191,10 +191,15 @@ static void ifft_render_frame(SpectralIfftSynth* s,
     float phi[IFFT_TRIG_BLK], cr[IFFT_TRIG_BLK], ci[IFFT_TRIG_BLK];
     for (size_t b0 = 0; b0 < n; b0 += IFFT_TRIG_BLK) {
         size_t bn = (n - b0 < IFFT_TRIG_BLK) ? (n - b0) : (size_t)IFFT_TRIG_BLK;
+        const double tau = 2.0 * SPECTRAL_PI_D;
         for (size_t j = 0; j < bn; j++) {
-            double omega = 2.0 * SPECTRAL_PI_D * (double)partials[b0 + j].bin / (double)s->n_fft;
-            phi[j] = (float)fmod(omega * center + (double)partials[b0 + j].phase0,
-                                 2.0 * SPECTRAL_PI_D);
+            double omega = tau * (double)partials[b0 + j].bin / (double)s->n_fft;
+            double x = omega * center + (double)partials[b0 + j].phase0;
+            /* Reduce to [-pi, pi] by round-subtract (libm-free, and tighter than the
+             * old fmod's [0, 2pi) so the minimax sin stays in its 1.4-ULP range).
+             * |x/tau| < ~4000 here, so the long long round is exact. */
+            double q = (double)(long long)(x / tau + (x >= 0.0 ? 0.5 : -0.5));
+            phi[j] = (float)(x - tau * q);
         }
         size_t j = 0;
 #if SPECTRAL_IFFT_TRIG_SIMD
