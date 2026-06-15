@@ -30,7 +30,7 @@
 >
 > **Executed 2026-06-06 (PASS225):** Phase 4 (vDSP math-accel audit) ✅ — measured every production host
 > vector op in `spectral_vector_ops.c` against its vDSP/vForce equivalent under production host flags
-> (`docs/core_audit/VDSP_MATH_ACCEL_AUDIT.md`, harness `tests/core_contracts/bench_vdsp_audit.c`, not in
+> (`docs/core_audit/archive/VDSP_MATH_ACCEL_AUDIT.md`, harness `tests/core_contracts/bench_vdsp_audit.c`, not in
 > CMake). **ONE genuine high-value win: vForce `vvatan2f` for the phase path** — 3.3×–11.5× over the EXACT
 > scalar `atan2f` loop (production runs exact, `SPECTRAL_ENABLE_APPROX_ATAN2=0`) at ~1 ULP; it is the only
 > compute-bound op and feeds the per-frame STFT phase path (`spectral_analysis_fft.c:365`). **Surfaced as a
@@ -275,7 +275,7 @@ accumulate/scale reduction, envelope ramps (`vDSP_vramp`), peak scans (`vDSP_max
 measure vs the current SIMDe path, **keep only measured wins**, decline-and-document the rest. Host/Apple
 only.
 
-> **Audit complete — full results + recommendation in `docs/core_audit/VDSP_MATH_ACCEL_AUDIT.md`;
+> **Audit complete — full results + recommendation in `docs/core_audit/archive/VDSP_MATH_ACCEL_AUDIT.md`;
 > harness `tests/core_contracts/bench_vdsp_audit.c` (host/Apple, not in CMake — links Accelerate);
 > patch notes PASS225. NO production code wired; promotion is a maintainer decision.**
 > - **ONE genuine high-value win: vForce `vvatan2f` for the phase path** (`spectral_vatan2` + the

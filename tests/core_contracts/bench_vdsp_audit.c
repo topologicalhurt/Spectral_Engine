@@ -1,8 +1,9 @@
 /* Phase 4 vDSP math-acceleration audit bench (host/Apple only; NOT wired into CMake).
  *
- * Reproduction harness for docs/core_audit/VDSP_MATH_ACCEL_AUDIT.md. Intentionally
- * has NO CMake target — it links the Accelerate framework, which the production host
- * build does not, and is Apple-exclusive. Build + run it by hand:
+ * Reproduction harness for docs/core_audit/archive/VDSP_MATH_ACCEL_AUDIT.md
+ * (the completed audit). Intentionally has NO CMake target — it links the Accelerate
+ * framework, which the production host build does not, and is Apple-exclusive. By
+ * design, not limbo: this is the documented manual reproduction recipe. Build + run:
  *
  *   clang -O3 -ffast-math -ffp-contract=fast -march=native -std=c11 \
  *     -Ispectral_engine/core -Ispectral_engine/arch/simd -Ithird_party/simde \
