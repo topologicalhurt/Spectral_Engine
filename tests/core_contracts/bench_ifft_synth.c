@@ -18,6 +18,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #include "spectral_consts.h"
@@ -98,7 +99,40 @@ int main(void) {
                osc_per / ifft_per, (osc_per > ifft_per) ? "" : "   <- osc wins");
     }
 
-    printf("\n(speedup > 1 = IFFT faster; sink=%.3e)\n", sink);
+    /* Cost breakdown: isolate the inverse FFT (data-independent, so a random
+     * spectrum times the same as a real one). full_render - fft = the placement
+     * (trig + scatter + per-frame clear) + OLA. This ceilings any CPU placement
+     * optimization: if the FFT dominates, vectorizing the trig can't help much. */
+    {
+        const size_t hop = N_FFT / 2u;
+        const long frames = (long)((TOTAL - 1) / hop) + 2;   /* m = -1 .. (TOTAL-1)/hop */
+        SpectralIfftBackend* b = spectral_ifft_backend_create(N_FFT);
+        static float re0[N_FFT / 2], im0[N_FFT / 2], re[N_FFT / 2], im[N_FFT / 2], frame[N_FFT];
+        unsigned rng = 0x13572468u;
+        for (size_t k = 0; k < N_FFT / 2; k++) {
+            re0[k] = (float)(xorshift32_unit(&rng) - 0.5);
+            im0[k] = (float)(xorshift32_unit(&rng) - 0.5);
+        }
+        for (int w = 0; w < 16; w++) {
+            memcpy(re, re0, sizeof re); memcpy(im, im0, sizeof im);
+            spectral_ifft_backend_inverse(b, re, im, frame);
+        }
+        uint64_t t0 = now_ns();
+        for (int it = 0; it < ITERS; it++) {
+            for (long f = 0; f < frames; f++) {
+                memcpy(re, re0, sizeof re); memcpy(im, im0, sizeof im);   /* refill (inverse mutates) */
+                spectral_ifft_backend_inverse(b, re, im, frame);
+            }
+            sink += frame[it % N_FFT];
+        }
+        uint64_t fft_ns = now_ns() - t0;
+        double fft_per = (double)fft_ns / ((double)ITERS * (double)TOTAL);
+        printf("\n  cost breakdown: inverse FFT = %.3f ns/sample (%ld frames/render); "
+               "placement+OLA = full - this.\n", fft_per, frames);
+        spectral_ifft_backend_destroy(b);
+    }
+
+    printf("(speedup > 1 = IFFT faster; sink=%.3e)\n", sink);
     spectral_ifft_synth_destroy(s);
     return 0;
 }

@@ -326,14 +326,19 @@ output samples in parallel. For dense spectra the GPU FFT⁻¹ (parallel bin pla
 batched FFT + parallel OLA) beats brute-force GPU oscillators because the FFT is
 O(N log N) independent of partial count. (Add these to `reference/ACADEMIC_SOURCES.md`.)
 
-**Bottleneck note (MEASURED, pass 259).** On desktop the inverse FFT is already vDSP.
-I then SIMDe-vectorized the placement 16-tap scatter (`place_partial`) as F6a — it was
-**bit-identical** (#24 held at −72.81/−87.46) but gave **no measurable speedup** (64
-partials 24.0→23.9 ns/sample, within noise). The scatter is only ~2% of the IFFT cost:
-2 FMAs/sample at 64 partials, below the bench floor even at 4× SIMD. **So F6a (scatter
-SIMD) is DECLINED on data** (measure-first; don't ship no-win machinery) and the bench's
-`bench_ifft_synth` confirms it. The real CPU hot spot is the **per-partial `cosf`/`sinf`
-in `place_partial`** (2 trig × partials × frames) plus the FFT — that is where F6 must go.
+**Bottleneck note (MEASURED, pass 259 — `bench_ifft_synth` cost breakdown).** Hard
+numbers at 64 partials, N_FFT=512, desktop host port (the FFT is data-independent, so it
+was isolated by timing the backend on a random spectrum):
+- full IFFT render: **23.9 ns/sample**
+- inverse FFT alone: **3.76 ns/sample → only ~16%**
+- ⇒ placement + per-frame spectrum clear + OLA = **~84%**, and the per-partial
+  `cosf`/`sinf` is the bulk of that: 64·33·2 ≈ 0.52 trig/sample × ~35 ns ≈ **~71%**.
+This INVERTS the naive "the FFT dominates" intuition — the FFT is already vDSP-parallel
+and is the *small* part. Two corollaries: (i) SIMDe-vectorizing the 16-tap scatter was
+bit-identical but gave **zero speedup** (it is ~2% of cost) — **F6a scatter SIMD DECLINED
+on data**; (ii) the **per-partial trig is the whole CPU game**, with a ~71% ceiling — a
+real ~2–3× IFFT speedup is on the table if it is vectorized or recursed away. That is
+where F6 must go.
 
 **Sequencing (revised by the measurement):**
 - **F6a — per-partial trig (the real lever).** Either a SIMD `sincos` evaluating 4
