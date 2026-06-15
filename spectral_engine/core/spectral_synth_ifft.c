@@ -104,7 +104,11 @@ static inline float motif_eval(const float* t, float d) {
     return t[i0] * (1.0f - f) + t[i0 + 1] * f;
 }
 
-/* Place one partial into the packed half-spectrum (Hermitian implicit). */
+/* Place one partial into the packed half-spectrum (Hermitian implicit).
+ * NB (F6a, measured pass-259): SIMDe-vectorizing this contiguous 2K-tap scatter
+ * was bit-identical but gave NO measurable speedup — the scatter is ~2% of the
+ * IFFT cost; the per-partial cosf/sinf and the FFT dominate. Declined per
+ * measure-first; F6 is redirected to the trig (see the plan). */
 static void place_partial(SpectralIfftSynth* s, float bin, float amp, float phi_c) {
     float cr = 0.5f * amp * cosf(phi_c);
     float ci = 0.5f * amp * sinf(phi_c);

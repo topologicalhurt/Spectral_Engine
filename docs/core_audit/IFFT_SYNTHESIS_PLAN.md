@@ -90,12 +90,12 @@ generator, committed artifact — resource-hash pattern).
 - **F5 — capacity republish.** Re-run the capacity table with the hybrid;
   update M7_PERF_MODEL_PLAN + the published guarantees.
 - **F6 — CPU parallelization (SIMDe host / vDSP / CMSIS-DSP).** The FFT⁻¹ pipeline
-  is data-parallel in all three stages (see "Parallelization" below): partial→bin
-  motif placement, the inverse FFT (already vDSP/cuFFT-class), and OLA. Host:
-  SIMDe-vectorize `place_partial`'s contiguous tap scatter + the OLA add (bit-
-  parity, build-agnostic SSE2→NEON); use vDSP vector ops for the OLA on Apple.
-  Embedded: the M7 has NO NEON — use CMSIS-DSP `arm_*_f32` + the dual-issue FPU.
-  Done-when: parity unchanged + measured per-backend speedup in the bench.
+  is data-parallel in all three stages, but a MEASUREMENT (pass 259) reshaped this:
+  the inverse FFT is already vDSP, and SIMDe-vectorizing the tap scatter gave no win
+  (it is ~2% of cost — declined). The live target is the **per-partial `cosf`/`sinf`**
+  (SIMD sincos across partials, or phase recursion) + the FFT. Embedded: the M7 has
+  NO NEON — CMSIS-DSP `arm_*_f32` + the dual-issue FPU. Done-when: a measured
+  per-backend ns/sample drop in `bench_ifft_synth` (or a recorded decline-on-data).
 - **F7 — GPU FFT⁻¹ synthesis (Metal / CUDA).** The big lever (Savioja et al. —
   additive synthesis is "embarrassingly parallel", ~1000× CPU on GPU). Parallel
   partial→bin scatter (one thread per partial or per bin), batched inverse FFT
@@ -326,12 +326,24 @@ output samples in parallel. For dense spectra the GPU FFT⁻¹ (parallel bin pla
 batched FFT + parallel OLA) beats brute-force GPU oscillators because the FFT is
 O(N log N) independent of partial count. (Add these to `reference/ACADEMIC_SOURCES.md`.)
 
-**Bottleneck note (measured):** on desktop the inverse FFT is already vDSP, so the
-remaining CPU hot spot is the placement — specifically the per-partial `cosf`/`sinf` and
-the 16-tap scatter. F6 targets exactly those; F7 moves the whole pipeline to the GPU.
+**Bottleneck note (MEASURED, pass 259).** On desktop the inverse FFT is already vDSP.
+I then SIMDe-vectorized the placement 16-tap scatter (`place_partial`) as F6a — it was
+**bit-identical** (#24 held at −72.81/−87.46) but gave **no measurable speedup** (64
+partials 24.0→23.9 ns/sample, within noise). The scatter is only ~2% of the IFFT cost:
+2 FMAs/sample at 64 partials, below the bench floor even at 4× SIMD. **So F6a (scatter
+SIMD) is DECLINED on data** (measure-first; don't ship no-win machinery) and the bench's
+`bench_ifft_synth` confirms it. The real CPU hot spot is the **per-partial `cosf`/`sinf`
+in `place_partial`** (2 trig × partials × frames) plus the FFT — that is where F6 must go.
 
-**Sequencing:** F6a — SIMDe-vectorize the placement tap-scatter (bit-parity vs scalar;
-the existing parity ctest #24 pins it) + the OLA → bench the placement speedup. F6b —
-vectorized sincos across partials (the larger CPU lever). F6c — embedded uses CMSIS-DSP
-`arm_*_f32` (no NEON on M7). F7 — GPU Metal/CUDA FFT⁻¹ with a GPU↔CPU parity ctest in
-the #26 pattern.
+**Sequencing (revised by the measurement):**
+- **F6a — per-partial trig (the real lever).** Either a SIMD `sincos` evaluating 4
+  partials' `cr/ci` per call (needs a vectorizable poly — check `spectral_fast_math`),
+  or per-partial phase recursion (rotate `(cr,ci)` by `ω·hop` across frames instead of
+  recomputing — removes the per-frame trig; tolerance-tested, not bit-exact, drift ≪
+  the IFFT floor over ~16 frames). Restructures the frame loop to process partials in
+  groups. Bench-gated: must show a real ns/sample drop or it is declined too.
+- **F6b — embedded** uses CMSIS-DSP `arm_*_f32` + the dual-issue FPU (no NEON on M7).
+- **F7 — GPU Metal/CUDA FFT⁻¹** (the big lever, Savioja): parallel bin scatter +
+  batched FFT + parallel OLA, with a GPU↔CPU parity ctest in the #26 pattern.
+- (The contiguous-scatter SIMD + OLA-vadd remain available but unmotivated until a
+  profile shows them mattering — recorded here so they are not re-attempted blind.)
