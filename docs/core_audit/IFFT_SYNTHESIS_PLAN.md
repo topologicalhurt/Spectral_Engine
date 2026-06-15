@@ -93,9 +93,10 @@ generator, committed artifact — resource-hash pattern).
 - F2b IN PROGRESS — the hybrid density router into the engine dispatch (segment
   semantics: stationary sine interiors → IFFT, fades/chirps/non-sine →
   oscillator bank; opt-in flag, no default change), then F3 golden. **Step 1
-  LANDED** (renderer per-frame-activity foundation + ctest rung 4); Step 2 (the
-  synth_cpu router) characterized — its boundary DSP (COLA-coverage vs per-segment
-  fade) is the focused work remaining. See the F2b build log below.
+  LANDED** (renderer per-frame-activity foundation + ctest rung 4); **Step 2 v1
+  LANDED** (opt-in `spectral_synth_hybrid_try_render` fast path for the all-eligible
+  dense case + ctest #25). Remaining: the mixed-case seam correction, stretch/pitch,
+  and the dispatch wiring (rides F3 golden). See the F2b build log below.
 
 ## F2b — implementation design (characterized 2026-06-15, NOT yet built)
 
@@ -185,3 +186,20 @@ both, for a given span). Default-on acceptance rides F3 (golden, maintainer).
   window(t − m·hop) — exact and computable, but it MUST match or the seam steps
   audibly. The tolerance test must assert seam continuity, not just bulk parity. This
   boundary DSP is why Step 2 is its own focused unit.
+
+- **Step 2 v1 LANDED (pass 259).** `core/spectral_synth_hybrid.{c,h}` —
+  `spectral_synth_hybrid_try_render()` as an opt-in FAST PATH (returns RENDERED or
+  DECLINED-untouched; the caller keeps synth_cpu as the fallback, so the default path
+  is byte-for-byte unchanged). The boundary problem is sidestepped for v1 by the
+  COLA-as-fade insight: the activity-boundary ramp IS a smooth fade, so requiring
+  `length ≥ 4·n_fft` makes it a negligible fraction of the partial life and no seam
+  correction is needed. Classifier `spectral_synth_hybrid_segment_eligible` (no chirp /
+  no cubic / ~const amp / in-domain bin / long enough); global gates reject non-sine
+  timbre + non-identity stretch/pitch; map `phase0 = phase − omega·start`. ctest
+  `synth_hybrid_parity` (#25): deep-interior parity −66.6/−79.5 dBFS at 16 partials,
+  eligibility + decline-untouched contracts. Test-target-only (no production caller; F3
+  wires it). **Step-2 sequel (NOT built):** (a) the mixed case — additive seam
+  correction `(fade − COLA_coverage)·steady` so dense interiors route to IFFT while the
+  same buffer's faded/chirped/non-sine partials stay on the osc bank; (b) stretch/pitch
+  support (apply the driver's param transform to the segment→partial map); (c) wire the
+  fast path into the synth dispatch behind a runtime opt-in (rides F3 golden).
