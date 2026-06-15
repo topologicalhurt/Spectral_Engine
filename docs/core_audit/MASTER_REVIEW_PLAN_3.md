@@ -41,9 +41,21 @@ review-2 close at `2838a92`):
 REJECT confirmed by hand: **arch-cmsis-osc-02** (the `test_dormant_cmsis_oscillator_still_compiles`
 pin compiles it `-DARM_MATH_CM7=1 -Werror`, so the `_Static_assert` fires — already-handled).
 
-Remaining = the **DEFER** set below (perf-gate-risk / firmware-only / structural decisions),
-unchanged except rdc-perf-02 (now landed). Lowest-value untouched: IF-1 bench_vdsp wiring and
-xcut-dup-04 bench-clock DRY (host-only dev benches; wire-or-delete, no gate impact).
+Then three more landed from the DEFER set after the status block:
+- **core-infra-01** — `SPECTRAL_CACHE_ALIGN` now derives from the `SPECTRAL_CACHE_LINE` SSOT (mem.h
+  is `#include`d above the block); host-only, fixes the simulate 32-vs-64 disagreement.
+- **analysis-track-01** — deleted the orphaned chunked-streaming tracker API (`update_threshold` +
+  the always-NULL `overlap_magsq_row` param + its unreachable branch); core_math tracker suite
+  17/17 confirms byte-identical output.
+- **IF-1 reclassified REJECT** — `bench_vdsp_audit.c` is *intentionally* unwired (links Accelerate,
+  absent from the production build) with a documented manual recipe and compiles clean; not limbo.
+  Investigating it surfaced a real stale ref: its (and the oscillator-backend plan's) pointer to
+  `VDSP_MATH_ACCEL_AUDIT.md` was pre-archive — fixed to `archive/`.
+
+Still DEFERRED (genuinely perf-gate-risk / firmware-only / structural — see below):
+rdc-daisy-01 (firmware, background task filed), arch-arm32-04, xcut-knr-01, analysis-track-03,
+arch-out-kernels-03/E2-D2, xcut-dup-03. Untouched low-value: xcut-dup-04 bench-clock DRY.
+ctest 26 → **28**; perf gate green across all ~16 commits.
 
 ---
 
