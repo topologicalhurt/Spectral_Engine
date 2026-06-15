@@ -52,10 +52,53 @@ Then three more landed from the DEFER set after the status block:
   Investigating it surfaced a real stale ref: its (and the oscillator-backend plan's) pointer to
   `VDSP_MATH_ACCEL_AUDIT.md` was pre-archive — fixed to `archive/`.
 
-Still DEFERRED (genuinely perf-gate-risk / firmware-only / structural — see below):
-rdc-daisy-01 (firmware, background task filed), arch-arm32-04, xcut-knr-01, analysis-track-03,
-arch-out-kernels-03/E2-D2, xcut-dup-03. Untouched low-value: xcut-dup-04 bench-clock DRY.
-ctest 26 → **28**; perf gate green across all ~16 commits.
+### Autonomous follow-up pass — the DEFER set, resolved
+
+Under a "fix everything safely fixable, decide the rest" mandate, the remaining set was driven to
+fixed-or-decided. Every finding now has a fix or an explicit written decision (AI.md's completion bar).
+
+LANDED (verified):
+- **rdc-daisy-01 [HIGH]** — the untrusted SD-card `.spq` loader now routes through a new
+  `spectral_arm32_load_in_place()` (same validate-overflow/monotonic/MAX_ACTIVE contract as the copy
+  loader, plus the SDRAM barrier) instead of `f_read`-into-pool + hand-set state. New
+  `test_arm32_process` cases pin valid-loads and reject out-of-order / out-of-bounds in-place pools.
+  Verified on host (the validation function is host-compiled + tested; arm-none-eabi-gcc 15.2 present).
+  Perf: `spectral_arm32_load` kept byte-identical; adding the function renumbered GCC's `.L` loop
+  labels +40, so the m7 baseline was **regenerated** (`benchmark_workflow m7-baseline --generate`) — the
+  diff is ONLY the four label keys; cycles/insns/process_insns/digest are byte-identical, proving the
+  synth codegen is unchanged. SAMPLES_PER_ITER tracks the relabel. (Background task dismissed.)
+- **xcut-knr-01 [MED, maintainer complaint #3]** — the non-fused candidate chain now threads
+  `const SpectralFrameContext*` (built once per frame, as the fused path does) + reads the freq-step/hop
+  scalars off `tracker`, instead of the 10-value clump through 5 helpers. **−87 lines.** Force-inlined,
+  so codegen-identical; `full_fused_parity` (byte-for-byte) + core_math 17/17 confirm identical output.
+- **xcut-dup-03 [LOW]** — phase `[-pi,pi)` wrap: added the parity-tested leaf `spectral_wrap_phase_pi`
+  (fast_math.h), routed the peak estimator through it (deleting the analysis hand-copy). It cannot be
+  merged with `spectral_normalize_phase` (the Metal generator requires that function's exact form; the
+  analysis layer can't include the synthesis header), so `osc_parity`'s new `test_phase_wrap_parity`
+  pins them bit-equal over an 800k-point sweep — AI.md #1's parity-test for unavoidable duplication.
+  Fail-on-bug verified.
+- (+ core-infra-01, analysis-track-01 above.)
+
+DECIDED (accepted / tracked, with rationale — a finding need not be coded to be resolved):
+- **analysis-track-03 [LOW, fix_safe=false]** — TRACKED follow-up. The 4× SIMD local-max pre-scan is
+  real duplication, but it's a hot SIMD loop and peak_track.c already took two refactors this pass
+  (track-01, knr-01); a third is best as its own focused, separately-verified unit. Recommend: one
+  `static SPECTRAL_FORCEINLINE` scan helper parameterized by the early-gate flag, proven byte-identical
+  via `full_fused_parity`.
+- **arch-out-kernels-03 [MED] (review-2 E2/D2)** — TRACKED. Resolving it is a maintainer architectural
+  call — delete the dead `arch/ref/spectral_out_kernels.c` (loses the deliberately-kept CMSIS scalar
+  scaffolding) vs. the D2 hoist (a shared `core/spectral_out_kernels_q15.h` consumed by both port TUs).
+  Review-2 itself left it. Recommend the D2 hoist when a bare-metal target is stood up.
+- **xcut-dup-04 [LOW]** — ACCEPTED. The three benches open-code a standard 2-line CLOCK_MONOTONIC→ns
+  idiom; they are not gated and have three divergent build recipes (one Apple-only). Hoisting reduces no
+  real complexity and risks none — accepted in place per AI.md's "explicit written decision".
+- **arch-arm32-04 [LOW]** — ACCEPTED. The M7 `!ctx->osc_lut` early-return is a defensive precondition,
+  not a live bug: every caller (daisy, tests, CLI) supplies a LUT, so the silent-zero path is
+  unreachable in practice. Relaxing it would change the m7-pinned `spectral_arm32_process` prologue
+  (a real perf-contract shift, not a label relabel) for zero behavioral benefit — not justified.
+
+ctest 26 → **28**; m7-baseline perf gate green across all ~21 review-3 commits (one sanctioned
+baseline regeneration for the rdc-daisy-01 label relabel, diff = labels only).
 
 ---
 
