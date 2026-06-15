@@ -93,3 +93,59 @@ generator, committed artifact — resource-hash pattern).
 - Next: F2b — the hybrid density router into the engine dispatch (segment
   semantics: stationary sine interiors → IFFT, fades/chirps/non-sine →
   oscillator bank; opt-in flag, no default change), then F3 golden.
+
+## F2b — implementation design (characterized 2026-06-15, NOT yet built)
+
+Characterized against the current code so the build is mechanical, not exploratory.
+F2b is correctness-critical (a mis-routed fade is an audible click), so it is its
+own focused unit, not a tack-on.
+
+**The two facts the router must respect (verified in code):**
+1. `spectral_ifft_synth_render(s, partials, n, out, total)` (spectral_synth_ifft.c:118)
+   renders a *stationary* partial set over the WHOLE `total`: every frame evaluates
+   ALL `n` partials at frame center (`phi = omega*center + phase0`, :154). It has no
+   notion of a partial starting/ending. Real segments are time-localized (start,
+   length).
+2. The fade envelope is applied at RENDER time by the oscillator path (per-segment
+   fade-in/out over `fade_len`), not stored in the Segment. The IFFT renders a
+   partial as steady → routing a faded span to IFFT DROPS the fade (click). So a
+   segment must be split: stationary interior → IFFT, fade edges → osc bank.
+
+**Design:**
+- **Renderer extension (per-frame activity).** Add a dynamic entry beside
+  `spectral_ifft_synth_render` that drives the same frame loop + OLA (:141-167) but
+  pulls the active partials PER FRAME from a caller callback
+  `(frame_center_sample) -> {SpectralIfftPartial[], count}`. The framing/OLA/motif
+  stay owned by the renderer (the subtle part); the engine owns "which partials are
+  live this frame". Keep the existing static API (its parity test #20 stays the
+  oracle for the dynamic path on a stationary fixture: dynamic-with-constant-set ==
+  static).
+- **Segment classifier** `is_stationary_sine_segment(seg)`: sine timbre AND
+  |da|·length below the F1 intra-frame-stationarity threshold (38-40) AND |df|≈0.
+  Non-sine / chirped / amplitude-ramped → never IFFT.
+- **Interior/edge split.** For an eligible segment, only `[start+fade_len,
+  end-fade_len]` is IFFT-routed; `[start, start+fade_len]` and `[end-fade_len, end]`
+  go to the osc bank (which already applies the fade ramp). The per-frame callback
+  emits a partial for a segment only when the frame center lies in its interior;
+  `bin = omega·n_fft/2π`, `amp = seg.amp`, `phase0 = seg.phase − omega·seg.start`
+  (so the renderer's `omega·center + phase0` reproduces the segment phase model).
+- **Sum.** IFFT interiors OLA into the output buffer; the osc bank renders edges +
+  all non-eligible segments into the SAME buffer (additive). One shared output.
+- **Crossover gate.** Only engage IFFT for frames with ≳7 simultaneous eligible
+  partials (the F1/P6 measured crossover); below that the osc bank is cheaper — so
+  the router counts per-frame eligible density and falls back when sparse.
+- **Opt-in.** A compile gate (default 0) at the synth_cpu seam (around
+  `synth_cpu_driver`, spectral_synth_cpu.c:431): default OFF → the IFFT code is not
+  compiled, the default render path is byte-identical, m7 perf gate untouched.
+
+**Test (done-when):** a tolerance stream-parity ctest — IFFT-routed engine render vs
+pure osc-bank render — within the F1-frozen floor (≈ −72 dBFS max / −87 dBFS RMS at
+64 dense partials, +3 dB headroom), on a dense stationary fixture AND a mixed fixture
+(dense interiors + faded/chirped segments) that exercises the split seam (assert no
+discontinuity at the interior↔edge handoff). Plus an informational desktop speedup.
+
+**Risks to verify during build:** (a) phase continuity at the interior↔edge seam
+(IFFT and osc must agree on the partial's phase at the boundary sample); (b) OLA
+coverage at interior boundaries (the renderer needs frames overlapping the interior
+edges); (c) the crossover fallback must not double-count a partial (IFFT or osc, never
+both, for a given span). Default-on acceptance rides F3 (golden, maintainer).
