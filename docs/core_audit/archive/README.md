@@ -1,8 +1,8 @@
 # Archived planning docs — completed campaigns
 
 These plans/audits are **done**; kept for history (git also has full history). The forward
-mandate and the actively-worked plans live one level up in `../` (`../REVIEWER_HANDOFF.md`,
-`../M7_PERF_MODEL_PLAN.md`, `../IFFT_SYNTHESIS_PLAN.md`); the canon, reference docs, and
+mandate and the actively-worked plan(s) live one level up in `../` (`../REVIEWER_HANDOFF.md`,
+`../IFFT_SYNTHESIS_PLAN.md`); the canon, reference docs, and
 not-currently-executing plans (AI_CANON, CORE_CONTRACTS, CHANGELOG, OPTIMISATION_PLAN, ULTRAPLAN,
 OSCILLATOR_BACKEND_CONTRACT_PLAN, QTYPE_REFACTOR_PLAN, REVIEWER_HANDOFF_2, …) live in
 `../reference/` (see its README).

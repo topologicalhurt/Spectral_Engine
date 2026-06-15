@@ -45,7 +45,7 @@ plans live in `docs/core_audit/reference/`, completed campaigns in `docs/core_au
   in ADR-0002); they are for state inspection only.
 - Embedded numbers carry provenance: QEMU counts are `[measured]` and never cycles;
   llvm-mca numbers are `[modeled]`; the two are never blended. Fidelity contract:
-  docs/core_audit/M7_PERF_MODEL_PLAN.md.
+  docs/core_audit/reference/M7_PERF_MODEL_PLAN.md.
 - C-truth rule: Python derives facts from C/CMake artifacts (parse options.cmake for
   flags, nm for symbols, binaries for counts) — never restates constants or logic.
   Python-originated data the C side needs is GENERATED into C with a content digest
@@ -200,9 +200,10 @@ Each completed instance's findings ledger + execution waves are archived under
 instance opens a fresh ledger in `docs/core_audit/`.
 
 ## Reference docs
-`docs/core_audit/` (top): only the actively-worked plans — `REVIEWER_HANDOFF.md` (mandate)
-and the live workstreams (`M7_PERF_MODEL_PLAN.md`, `IFFT_SYNTHESIS_PLAN.md`).
-`docs/core_audit/reference/`: the canon + reference + paused plans — `AI_CANON.md` (rules),
-`CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md` (paper-backed methods), `CHANGELOG.md`,
-`DISCIPLINE_FINDINGS.md`, `REVIEWER_HANDOFF_2.md`, and the `*_PLAN.md` campaign plans not
-currently in execution. `docs/core_audit/archive/`: completed/superseded campaigns.
+`docs/core_audit/` (top): only the actively-worked plan(s) — `REVIEWER_HANDOFF.md` (mandate)
+and the live workstream `IFFT_SYNTHESIS_PLAN.md`.
+`docs/core_audit/reference/`: the canon + reference + paused/done-but-referenced plans —
+`AI_CANON.md` (rules), `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md` (paper-backed methods),
+`CHANGELOG.md`, `DISCIPLINE_FINDINGS.md`, `REVIEWER_HANDOFF_2.md`, `M7_PERF_MODEL_PLAN.md`
+(the perf-model fidelity contract, campaign complete), and the `*_PLAN.md` plans not currently
+in execution. `docs/core_audit/archive/`: completed/superseded campaigns.
