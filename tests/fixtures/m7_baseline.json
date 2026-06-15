@@ -20,22 +20,22 @@
     "writeback": 40.0
   },
   "kernels": {
-    "synth_core_m7/.L452": {
+    "synth_core_m7/.L492": {
       "cycles_per_iter": 340.02,
       "insns_per_iter": 430,
       "samples_per_iter": 16.0
     },
-    "synth_core_m7/.L454": {
+    "synth_core_m7/.L494": {
       "cycles_per_iter": 18.02,
       "insns_per_iter": 25,
       "samples_per_iter": 1.0
     },
-    "synth_core_pair_m7/.L534": {
+    "synth_core_pair_m7/.L574": {
       "cycles_per_iter": 40.02,
       "insns_per_iter": 54,
       "samples_per_iter": 2.0
     },
-    "synth_fade_m7/.L624": {
+    "synth_fade_m7/.L664": {
       "cycles_per_iter": 22.01,
       "insns_per_iter": 27,
       "samples_per_iter": 1.0

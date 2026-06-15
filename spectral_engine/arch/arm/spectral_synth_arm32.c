@@ -598,6 +598,31 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
     return SPECTRAL_OK;
 }
 
+/* Same segment boundary as spectral_arm32_load, but for a payload already resident
+ * in ctx->segments — e.g. read in place off an SD card to avoid a second
+ * pool-sized staging buffer. Validates the loaded pool, then commits (set state,
+ * SDRAM barrier, reset). An untrusted-file loader MUST route through here so a
+ * malformed payload (non-monotonic / >MAX_ACTIVE / out-of-bounds) is rejected
+ * before synthesis, rather than overrunning the fixed-size active[] array at
+ * render. The commit tail mirrors spectral_arm32_load's (a 4-line parallel kept
+ * inline so that function's m7-pinned codegen is byte-for-byte untouched). */
+SpectralError spectral_arm32_load_in_place(SpectralArm32Ctx* ctx,
+                                           uint32_t num_segments,
+                                           uint32_t output_len) {
+    if (!ctx) return SPECTRAL_ERR_PARAM;
+    if (num_segments > ctx->segments_capacity) return SPECTRAL_ERR_OVERFLOW;
+    if (num_segments > 0u && !ctx->segments) return SPECTRAL_ERR_PARAM;
+
+    SpectralError verr = spectral_arm32_validate_segment_data(ctx->segments, num_segments, output_len);
+    if (verr != SPECTRAL_OK) return verr;
+
+    ctx->num_segments = num_segments;
+    ctx->output_length = output_len;
+    spectral_data_sync_barrier();
+    spectral_arm32_reset(ctx);
+    return SPECTRAL_OK;
+}
+
 /* Parameters */
 
 void spectral_arm32_set_amplitude(SpectralArm32Ctx* ctx, float amplitude) {
@@ -1271,10 +1296,10 @@ uint32_t spectral_arm32_process_interleaved(SpectralArm32Ctx* ctx,
     if (num_samples > SPECTRAL_ARM32_MAX_BLOCK) num_samples = SPECTRAL_ARM32_MAX_BLOCK;
     
     uint32_t written = spectral_arm32_process(ctx, temp, NULL, num_samples);
-    
+
     /* Use shared stereo interleaving function */
     spectral_mono_to_stereo_q15(temp, out_interleaved, written);
-    
+
     return written;
 }
 

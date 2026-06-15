@@ -194,6 +194,43 @@ static void test_invalid_rejected(const q15_t* lut, uint32_t sr) {
           "out-of-order segments should be rejected");
 }
 
+/* The in-place loader is the trust boundary for untrusted payloads read directly
+ * into the segment pool (the SD-card path). It must apply the SAME validation as
+ * the copy loader: a malformed pool is rejected, not rendered into the fixed
+ * active[] array. Writes go straight into the pool, as an SD read would. */
+static void test_in_place_load(const q15_t* lut, uint32_t sr) {
+    printf("test_in_place_load:\n");
+    static SpectralSegmentQ15 pool[8];
+    SpectralArm32Ctx ctx;
+    spectral_arm32_init(&ctx, pool, 8, lut, sr);
+
+    /* Valid payload in the pool -> loads, and publishes num_segments. */
+    memset(pool, 0, sizeof pool);
+    pool[0].start = 0;   pool[0].length = 100;
+    pool[0].freq_q88 = OMEGA_TO_Q88(0.1); pool[0].amp_q15 = FLOAT_TO_Q15(0.5f);
+    pool[1].start = 100; pool[1].length = 100;
+    pool[1].freq_q88 = OMEGA_TO_Q88(0.1); pool[1].amp_q15 = FLOAT_TO_Q15(0.5f);
+    CHECK(spectral_arm32_load_in_place(&ctx, 2, 1000) == SPECTRAL_OK,
+          "valid in-place payload should load");
+    CHECK(ctx.num_segments == 2u, "in-place load should publish num_segments");
+
+    /* Out-of-order payload in the pool -> rejected. */
+    memset(pool, 0, sizeof pool);
+    pool[0].start = 500; pool[0].length = 100;
+    pool[0].freq_q88 = OMEGA_TO_Q88(0.1); pool[0].amp_q15 = FLOAT_TO_Q15(0.5f);
+    pool[1].start = 100; pool[1].length = 100;
+    pool[1].freq_q88 = OMEGA_TO_Q88(0.1); pool[1].amp_q15 = FLOAT_TO_Q15(0.5f);
+    CHECK(spectral_arm32_load_in_place(&ctx, 2, 1000) != SPECTRAL_OK,
+          "out-of-order in-place payload must be rejected (SD-card trust boundary)");
+
+    /* Out-of-bounds payload (start beyond output_len) in the pool -> rejected. */
+    memset(pool, 0, sizeof pool);
+    pool[0].start = 2000; pool[0].length = 100;
+    pool[0].freq_q88 = OMEGA_TO_Q88(0.1); pool[0].amp_q15 = FLOAT_TO_Q15(0.5f);
+    CHECK(spectral_arm32_load_in_place(&ctx, 1, 1000) != SPECTRAL_OK,
+          "out-of-bounds in-place payload must be rejected");
+}
+
 int main(void) {
     const uint32_t sr = 44100;
     static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
@@ -203,6 +240,7 @@ int main(void) {
     test_single_tone(lut, sr);
     test_short_segment_fade(lut, sr);
     test_invalid_rejected(lut, sr);
+    test_in_place_load(lut, sr);
 
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;

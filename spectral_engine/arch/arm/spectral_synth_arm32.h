@@ -98,6 +98,13 @@ SpectralError spectral_arm32_load(SpectralArm32Ctx* ctx,
                                   uint32_t num_segments,
                                   uint32_t output_len);
 
+/* Validate + commit a payload already loaded into ctx->segments (no copy), for
+ * in-place loaders such as the SD-card reader. Same validation contract as
+ * spectral_arm32_load; returns SPECTRAL_ERR_* on a malformed payload. */
+SpectralError spectral_arm32_load_in_place(SpectralArm32Ctx* ctx,
+                                           uint32_t num_segments,
+                                           uint32_t output_len);
+
 uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
                                 q15_t* out_left,
                                 q15_t* out_right,

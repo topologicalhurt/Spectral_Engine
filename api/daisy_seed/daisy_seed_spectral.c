@@ -134,15 +134,19 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
     }
     
     f_close(&file);
-    
-    /* Update context state */
-    ctx->synth.num_segments = header.num_segments;
-    ctx->synth.output_length = header.output_length;
+
+    /* The .spq file is an untrusted input. Validate the in-place-loaded pool
+     * (per-segment bounds, monotonic ordering, simultaneous-active cap) and fence
+     * the SDRAM writes before the payload can reach synthesis — a malformed file
+     * must be rejected here, not overrun the fixed-size active[] array at render. */
+    SpectralError verr = spectral_arm32_load_in_place(&ctx->synth, header.num_segments,
+                                                      header.output_length);
+    if (verr != SPECTRAL_OK) {
+        return (verr == SPECTRAL_ERR_OVERFLOW || verr == SPECTRAL_ERR_MEMORY)
+                   ? DAISY_ERR_MEMORY : DAISY_ERR_FORMAT;
+    }
     ctx->total_memory_used = daisy_base_memory_used() + seg_bytes;
-    
-    /* Reset playback position */
-    spectral_arm32_reset(&ctx->synth);
-    
+
     return DAISY_OK;
 }
 
