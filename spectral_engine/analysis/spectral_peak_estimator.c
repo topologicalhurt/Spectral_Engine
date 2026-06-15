@@ -448,12 +448,6 @@ static int spectral_peak_offset_quinn_second(const SpectralPeakEstimateInput* in
     return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
 }
 
-
-static float spectral_peak_wrap_phase_pi(float x) {
-    if (!isfinite(x)) return 0.0f;
-    return x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
-}
-
 static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput* input,
                                                 float model_omega,
                                                 float* out_phase_bin_offset,
@@ -518,7 +512,7 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
         return 0;
     }
 
-    residual = spectral_peak_wrap_phase_pi((float)residual_arg_d);
+    residual = spectral_wrap_phase_pi((float)residual_arg_d);
     phase_bin_offset = residual / (float)denom_d;
     if (!isfinite(phase_bin_offset)) {
         return 0;
@@ -537,7 +531,7 @@ static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput*
     }
 
     phase_omega = (float)phase_omega_d;
-    phase_error = spectral_peak_wrap_phase_pi((float)phase_error_arg_d);
+    phase_error = spectral_wrap_phase_pi((float)phase_error_arg_d);
     if (!isfinite(phase_omega) || !isfinite(phase_error)) {
         return 0;
     }

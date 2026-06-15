@@ -51,6 +51,18 @@ static inline float spectral_atan2_poly(float y, float x) {
     return r;
 }
 
+/* Wrap a phase to [-pi, pi): the analysis layer's shared copy of the canonical
+ * synthesis wrap spectral_normalize_phase() (spectral_osc_formulas.h). The two
+ * cannot be a single function -- normalize_phase's exact `float norm = ...; return
+ * ...;` form is consumed verbatim by the Metal codegen (metal_osc.py), and the
+ * analysis layer must not include the synthesis header. The osc_parity CTest
+ * (test_phase_wrap_parity) pins this leaf bit-equal to the canonical over a sweep
+ * so they cannot drift. The isfinite guard maps NaN/Inf to 0 (peak-estimator domain). */
+static inline float spectral_wrap_phase_pi(float x) {
+    if (!isfinite(x)) return 0.0f;
+    return x - SPECTRAL_TWO_PI * floorf(x * SPECTRAL_INV_TWO_PI + 0.5f);
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -29,6 +29,7 @@
 #include "spectral_oscillator.h"
 #include "spectral_synth_internal.h"
 #include "spectral_common.h"
+#include "spectral_fast_math.h"   /* spectral_wrap_phase_pi (analysis-layer leaf) */
 
 #include "../support/check.h"
 
@@ -201,10 +202,34 @@ static void test_quantized_int_max_boundary(void) {
           "quantized SIMD emits out-of-[-1,1] value %.3e at the INT_MAX boundary", max_simd_abs);
 }
 
+/* The analysis-layer phase wrap (spectral_wrap_phase_pi, spectral_fast_math.h)
+ * must stay bit-exact to the synthesis canonical (spectral_normalize_phase,
+ * spectral_osc_formulas.h) over the finite domain. They are deliberately two
+ * functions -- normalize_phase's exact form is consumed by the Metal codegen and
+ * the analysis layer must not include the synthesis header -- so this pins them
+ * against drift (the AI.md #1 parity-test for an unavoidable duplication). */
+static void test_phase_wrap_parity(void) {
+    int mismatches = 0;
+    for (long i = -400000; i <= 400000; i++) {
+        float x = (float)i * 1e-3f;   /* ~+/-400 rad, 0.001 rad step */
+        if (spectral_wrap_phase_pi(x) != spectral_normalize_phase(x)) mismatches++;
+    }
+    const float edge[] = { 0.0f, SPECTRAL_PI_F, -SPECTRAL_PI_F, SPECTRAL_TWO_PI,
+                           -SPECTRAL_TWO_PI, 1000.0f * SPECTRAL_TWO_PI,
+                           -1000.0f * SPECTRAL_TWO_PI };
+    for (size_t k = 0; k < sizeof(edge) / sizeof(edge[0]); k++) {
+        if (spectral_wrap_phase_pi(edge[k]) != spectral_normalize_phase(edge[k])) mismatches++;
+    }
+    CHECK(mismatches == 0,
+          "spectral_wrap_phase_pi drifted from spectral_normalize_phase (%d mismatches)",
+          mismatches);
+}
+
 int main(void) {
     printf("== SIMD-vs-scalar oscillator parity (drift + RMS-dBFS) ==\n");
     test_parity();
     test_quantized_int_max_boundary();
+    test_phase_wrap_parity();
     printf("RESULT: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }
