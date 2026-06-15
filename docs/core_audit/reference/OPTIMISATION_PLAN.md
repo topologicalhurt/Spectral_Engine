@@ -195,10 +195,20 @@ INPUT → [1] window → [2] STFT(FFT) → [3] peak scan → [4] peak estimate �
                                        SPECTRAL_STFT_CHUNK_THRESHOLD
                                        (spectral_analysis.c:152-160). The fused path is
                                        strictly more memory-minimal (no F×bins matrix).
-                                       MIN: evaluate unifying on the fused path and
-                                       retiring full_matrix (one stage, less code) unless
-                                       full_matrix's random-access is needed by a
-                                       multi-pass estimator. Investigate, don't assume.
+                                       INVESTIGATED -> DECLINED: full_matrix is accessed
+                                       sequentially (posix_madvise SEQUENTIAL) so no
+                                       estimator needs random access -- BUT it is both the
+                                       small-input production path AND the independent
+                                       parity oracle the fused path is validated against
+                                       (spectral_analysis_fused.c:17-18 + full_fused_parity,
+                                       ctest #18). Retiring it deletes that oracle (the
+                                       chunk-boundary handling is exactly what could break)
+                                       and adds chunking overhead to small inputs for zero
+                                       benefit. The two already share the leaf logic
+                                       (spectral_fft_frames, the tracker); only the
+                                       all-at-once vs chunked driver differs. KEEP as the
+                                       AI.md-sanctioned parity-tested independent-verification
+                                       pair.
 [3]+[4] scan+estimate     necessary    SIMD scan + SOTA estimators. KEEP (A2).
 [5] peak match            necessary    MQ matching; already present. KEEP.
 [6] TRACK FORMATION       MISSING      the #1 gap (A3). Must become first-class — tracks
@@ -305,6 +315,15 @@ O2-B  Native 32B Segment packing (finish SPECTRAL_COMPACT_SEG)  Tier2  regime: b
       bandwidth is padding; SegmentArray is hard-typed Segment* (:89). Measure-gated; if
       synth is segment-stream bandwidth-bound, pack to 32B (the SegmentGpu shape) and the
       GPU repack stage vanishes. Bit-identical. Risk: low-med (alignment).
+      CLOSED — DECLINED (structural conflict, plan predates the feature): the MQ cubic-phase
+      annotation (c2/c3 + flag) now lives in the 64B Segment's former pad words
+      (spectral_common.h:43-48, spectral_segment_set_cubic), so a uniform 32B pack would DROP
+      cubic-phase synthesis (used when SPECTRAL_PRECISE_PHASE links partials across frames). The
+      32B premise no longer holds without either dropping cubic or widening the compact layout to
+      carry c2/c3 (which defeats the 32B goal). And the prerequisite — synth proven
+      segment-stream bandwidth-bound — was never measured. Revisit only as a mixed-layout
+      (32B non-cubic / 64B cubic) variant if a measured bandwidth bound justifies it; that is new
+      scope, not this item.
 
 O3-A  Recurrence oscillator (+ cubic forward-diff for F3)       Tier3  regime: osc-bank
       Per-sample phase via incremental accumulator (2 adds const-freq; 3 adds chirp; 3 adds
@@ -362,7 +381,9 @@ O5-B  Processing-chain: adaptive_track_density → implemented by F1; hybrid_ren
       maintainer wants them as a documented roadmap. Removing no-ops keeps goldens
       unchanged; update the parse-rejection test for dropped tokens.
 O5-C  STFT path: investigate unifying on the fused path and retiring full_matrix
-      (Part B [2]); only if full_matrix's random access is not required. Behaviour-neutral.
+      (Part B [2]). CLOSED — DECLINED: access is sequential, but full_matrix is the
+      sanctioned parity oracle for the fused path (full_fused_parity #18) + the simpler
+      small-input path; unifying loses the independent verification. See Part B [2].
 ```
 
 ---
