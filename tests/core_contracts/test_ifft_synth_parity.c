@@ -315,11 +315,51 @@ static void test_integer_bins(void) {
     spectral_ifft_synth_destroy(s);
 }
 
+/* Rung 6: static-allocation init (the embedded F4 path) — a caller-pool synth renders
+ * BIT-IDENTICALLY to a malloc'd create() synth; undersized pool + null backend are
+ * rejected; destroy() on an init pool is a no-op (the caller owns + frees it). */
+static void test_init_inplace(void) {
+    printf("test_init_inplace:\n");
+    size_t bytes = spectral_ifft_synth_pool_bytes(N_FFT);
+    CHECK(bytes > 0, "pool_bytes > 0");
+    CHECK(spectral_ifft_synth_pool_bytes(63) == 0, "non-pow2 -> 0 bytes");
+
+    void* pool = malloc(bytes);
+    SpectralIfftBackend* b = spectral_ifft_backend_create(N_FFT);
+    CHECK(pool && b, "pool + backend alloc");
+    if (!pool || !b) return;
+
+    CHECK(spectral_ifft_synth_init(pool, bytes - 1, N_FFT, b) == NULL, "undersized pool rejected");
+    CHECK(spectral_ifft_synth_init(pool, bytes, N_FFT, NULL) == NULL, "null backend rejected");
+
+    SpectralIfftSynth* si = spectral_ifft_synth_init(pool, bytes, N_FFT, b);
+    SpectralIfftSynth* sc = spectral_ifft_synth_create(N_FFT);
+    CHECK(si && sc, "init + create");
+    if (si && sc) {
+        static SpectralIfftPartial parts[N_PARTIALS];
+        rng_state = 0xc0ffee11u;
+        for (size_t p = 0; p < N_PARTIALS; p++) {
+            parts[p].bin = (float)(10.0 + 230.0 * xorshift32_unit(&rng_state));
+            parts[p].amp = (float)((0.05 + 0.95 * xorshift32_unit(&rng_state)) / N_PARTIALS);
+            parts[p].phase0 = (float)(2.0 * SPECTRAL_PI_D * xorshift32_unit(&rng_state) - SPECTRAL_PI_D);
+        }
+        static float oi[TOTAL], oc[TOTAL];
+        CHECK(spectral_ifft_synth_render(si, parts, N_PARTIALS, oi, TOTAL) == 0, "init render rc");
+        CHECK(spectral_ifft_synth_render(sc, parts, N_PARTIALS, oc, TOTAL) == 0, "create render rc");
+        CHECK(memcmp(oi, oc, sizeof oi) == 0, "init pool render == create render (bit-identical)");
+    }
+    spectral_ifft_synth_destroy(sc);
+    spectral_ifft_synth_destroy(si);   /* no-op: init pool is caller-owned */
+    spectral_ifft_backend_destroy(b);
+    free(pool);
+}
+
 int main(void) {
     test_backend_contract();
     test_stream_parity();
     test_dynamic_render();
     test_integer_bins();
+    test_init_inplace();
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;
 }

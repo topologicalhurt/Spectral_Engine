@@ -71,11 +71,19 @@ generator, committed artifact — resource-hash pattern).
   the CMSIS oscillator already uses `arm_sin_f32`, and a Q15 motif table would
   lose ~12–15 dB SNR at dense densities. So F4 = a float embedded port of
   `spectral_synth_ifft.c`, NOT a Q31 rewrite. Three sub-pieces:
-  - **F4a — static allocation.** `spectral_ifft_synth_create` mallocs 6×+callocs
-    2× (spectral_synth_ifft.c:39-79) and the ref backend computes twiddles at init
-    — all forbidden on the libc-free embedded build. Add a pre-sized/pool-backed
-    create + a portable no-libm FFT (CMSIS `arm_rfft_fast_f32` or a static-twiddle
-    ref) + LUT/`spectral_fast_math` trig instead of `cosf`/`sinf`/`fmod`.
+  - **F4a — static allocation: SYNTH STRUCT done (pass 259); 3 blockers remain.**
+    LANDED: `spectral_ifft_synth_pool_bytes(n_fft)` + `spectral_ifft_synth_init(pool,
+    bytes, n_fft, backend)` carve the struct + all scratch from a caller pool (16-byte
+    aligned, no malloc); `create()` refactored to ONE pool malloc + `#if !SPECTRAL_EMBEDDED`
+    (embedded uses init); `destroy()` is a no-op on init pools. ctest rung 6: init render
+    == create render BIT-IDENTICAL + undersized/null rejects. The F6 trig/fmod work already
+    made the hot path libm-free. REMAINING F4a blockers (each its own step): (i) the motif/
+    window build calls double `cos` (libm) at init — needs a COMMITTED precomputed table
+    (the plan's "generated motif", resource-hash pattern) or the no-libm poly; (ii) the
+    render's `memset(re/im)` → `spectral_mem_zero`; (iii) the FFT BACKEND — the ref backend
+    still mallocs + runtime-computes twiddles, so a static-alloc backend init (CMSIS
+    `arm_rfft_fast_f32` or static-twiddle ref) is needed (the init() already takes a
+    caller-made backend, so this is a per-port `backend_pool_bytes`/`backend_init`).
   - **F4b — STREAMING OLA.** The embedded render is block-by-block
     (`spectral_arm32_process`, audio callback), but `spectral_ifft_synth_render`
     renders a whole buffer with internal OLA. A streaming variant must carry the

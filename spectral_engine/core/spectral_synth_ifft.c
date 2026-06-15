@@ -59,6 +59,7 @@ static inline simde__m128 ifft_fast_sin4(simde__m128 x) {
 struct SpectralIfftSynth {
     size_t n_fft;
     size_t hop;
+    int owns_pool;    /* create() owns + frees the pool/backend; init() does not */
     SpectralIfftBackend* backend;
     float* motif;     /* 2*K*O+1 samples of the centered window spectrum */
     float* window;    /* periodic Hann, n_fft (kept for tests/inspection) */
@@ -71,32 +72,51 @@ struct SpectralIfftSynth {
 
 static int is_pow2(size_t v) { return v && (v & (v - 1)) == 0; }
 
-SpectralIfftSynth* spectral_ifft_synth_create(size_t n_fft) {
-    if (!is_pow2(n_fft) || n_fft < 64) return NULL;
+/* Pool carving, 16-byte aligned so the re/im/frame SIMD loads stay aligned. */
+#define IFFT_POOL_ALIGN 16u
+static size_t ifft_align(size_t x) {
+    return (x + (IFFT_POOL_ALIGN - 1u)) & ~(size_t)(IFFT_POOL_ALIGN - 1u);
+}
 
-    SpectralIfftSynth* s = (SpectralIfftSynth*)calloc(1, sizeof(*s));
-    if (!s) return NULL;
-    s->n_fft = n_fft;
-    s->hop = n_fft / 2;
-
+size_t spectral_ifft_synth_pool_bytes(size_t n_fft) {
+    if (!is_pow2(n_fft) || n_fft < 64) return 0;
     size_t mlen = 2u * IFFT_MOTIF_K * IFFT_MOTIF_O + 1u;
-    s->backend = spectral_ifft_backend_create(n_fft);
-    s->motif = (float*)malloc(mlen * sizeof(float));
-    s->window = (float*)malloc(n_fft * sizeof(float));
-    s->re = (float*)calloc(n_fft / 2, sizeof(float));
-    s->im = (float*)calloc(n_fft / 2, sizeof(float));
-    s->frame = (float*)malloc(n_fft * sizeof(float));
-    s->frame_partials = (SpectralIfftPartial*)malloc((n_fft / 2) * sizeof(SpectralIfftPartial));
-    if (!s->backend || !s->motif || !s->window || !s->re || !s->im || !s->frame ||
-        !s->frame_partials) {
-        spectral_ifft_synth_destroy(s);
-        return NULL;
-    }
+    size_t half = n_fft / 2u;
+    return ifft_align(sizeof(struct SpectralIfftSynth))
+         + ifft_align(mlen * sizeof(float))                 /* motif */
+         + ifft_align(n_fft * sizeof(float))                /* window */
+         + ifft_align(half * sizeof(float))                 /* re */
+         + ifft_align(half * sizeof(float))                 /* im */
+         + ifft_align(n_fft * sizeof(float))                /* frame */
+         + ifft_align(half * sizeof(SpectralIfftPartial));  /* frame_partials */
+}
 
+/* Carve the struct + scratch pointers from a contiguous pool (no compute). */
+static void ifft_synth_place(SpectralIfftSynth* s, char* pool, size_t n_fft) {
+    size_t mlen = 2u * IFFT_MOTIF_K * IFFT_MOTIF_O + 1u;
+    size_t half = n_fft / 2u;
+    char* p = pool + ifft_align(sizeof(*s));
+    s->n_fft = n_fft;
+    s->hop = half;
+    s->motif = (float*)p;   p += ifft_align(mlen * sizeof(float));
+    s->window = (float*)p;  p += ifft_align(n_fft * sizeof(float));
+    s->re = (float*)p;      p += ifft_align(half * sizeof(float));
+    s->im = (float*)p;      p += ifft_align(half * sizeof(float));
+    s->frame = (float*)p;   p += ifft_align(n_fft * sizeof(float));
+    s->frame_partials = (SpectralIfftPartial*)p;
+}
+
+/* Compute the build-constant window + motif tables into the placed scratch. Double
+ * cos at INIT only; the embedded F4 port commits this table so the libc-free runtime
+ * never calls libm (and the memsets here become spectral_mem_zero). */
+static void ifft_synth_compute_tables(SpectralIfftSynth* s) {
+    size_t n_fft = s->n_fft;
+    size_t mlen = 2u * IFFT_MOTIF_K * IFFT_MOTIF_O + 1u;
+    memset(s->re, 0, (n_fft / 2u) * sizeof(float));
+    memset(s->im, 0, (n_fft / 2u) * sizeof(float));
     for (size_t n = 0; n < n_fft; n++) {
         s->window[n] = (float)(0.5 - 0.5 * cos(2.0 * SPECTRAL_PI_D * (double)n / (double)n_fft));
     }
-
     /* M(d) = sum_m v[m] cos(2 pi d m / N), v = window circularly centered at 0.
      * Double accumulation; the table is tiny (257 floats at K=8/O=16). */
     for (size_t i = 0; i < mlen; i++) {
@@ -110,19 +130,45 @@ SpectralIfftSynth* spectral_ifft_synth_create(size_t n_fft) {
         }
         s->motif[i] = (float)acc;
     }
+}
+
+/* Static-allocation init (the embedded path: no malloc). Places the synth in a
+ * caller pool (>= pool_bytes, 16-byte aligned) with a caller-owned backend. The
+ * caller owns the pool + backend for the synth's lifetime; destroy() is a no-op. */
+SpectralIfftSynth* spectral_ifft_synth_init(void* pool, size_t pool_bytes,
+                                            size_t n_fft, SpectralIfftBackend* backend) {
+    if (!pool || !backend || !is_pow2(n_fft) || n_fft < 64) return NULL;
+    if (pool_bytes < spectral_ifft_synth_pool_bytes(n_fft)) return NULL;
+    SpectralIfftSynth* s = (SpectralIfftSynth*)pool;
+    ifft_synth_place(s, (char*)pool, n_fft);
+    s->backend = backend;
+    s->owns_pool = 0;
+    ifft_synth_compute_tables(s);
     return s;
 }
 
+#if !SPECTRAL_EMBEDDED
+SpectralIfftSynth* spectral_ifft_synth_create(size_t n_fft) {
+    if (!is_pow2(n_fft) || n_fft < 64) return NULL;
+    void* pool = malloc(spectral_ifft_synth_pool_bytes(n_fft));
+    if (!pool) return NULL;
+    SpectralIfftBackend* backend = spectral_ifft_backend_create(n_fft);
+    if (!backend) { free(pool); return NULL; }
+    SpectralIfftSynth* s = (SpectralIfftSynth*)pool;
+    ifft_synth_place(s, (char*)pool, n_fft);
+    s->backend = backend;
+    s->owns_pool = 1;
+    ifft_synth_compute_tables(s);
+    return s;
+}
+#endif
+
 void spectral_ifft_synth_destroy(SpectralIfftSynth* s) {
-    if (!s) return;
+    if (!s || !s->owns_pool) return;   /* init() pools are caller-owned (no-op) */
+#if !SPECTRAL_EMBEDDED
     spectral_ifft_backend_destroy(s->backend);
-    free(s->motif);
-    free(s->window);
-    free(s->re);
-    free(s->im);
-    free(s->frame);
-    free(s->frame_partials);
-    free(s);
+    free(s);   /* s == the malloc'd pool start; scratch is carved from it */
+#endif
 }
 
 size_t spectral_ifft_synth_n_fft(const SpectralIfftSynth* s) {

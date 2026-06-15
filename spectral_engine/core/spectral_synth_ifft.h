@@ -32,10 +32,20 @@ typedef struct {
 } SpectralIfftPartial;
 
 typedef struct SpectralIfftSynth SpectralIfftSynth;
+typedef struct SpectralIfftBackend SpectralIfftBackend;   /* port contract, defined below */
 
-/* n_fft: power of two >= 64 (frame length; hop = n_fft/2). NULL on failure. */
+/* n_fft: power of two >= 64 (frame length; hop = n_fft/2). NULL on failure.
+ * create() malloc-allocates (host only); the embedded build uses init() below. */
 SpectralIfftSynth* spectral_ifft_synth_create(size_t n_fft);
 void spectral_ifft_synth_destroy(SpectralIfftSynth* s);
+
+/* Static-allocation init for the libc-free embedded build (no malloc). Bytes needed
+ * for the struct + all scratch (NOT the FFT backend — pass that in, statically made
+ * by the per-port backend). pool must be >= pool_bytes and 16-byte aligned; the
+ * caller owns the pool + backend for the synth's lifetime and destroy() is a no-op. */
+size_t spectral_ifft_synth_pool_bytes(size_t n_fft);
+SpectralIfftSynth* spectral_ifft_synth_init(void* pool, size_t pool_bytes,
+                                            size_t n_fft, SpectralIfftBackend* backend);
 
 size_t spectral_ifft_synth_n_fft(const SpectralIfftSynth* s);
 
@@ -63,8 +73,6 @@ int spectral_ifft_synth_render_dynamic(SpectralIfftSynth* s,
                                        float* out, size_t total);
 
 /* --- port contract (implemented by exactly one host TU per build) -------- */
-
-typedef struct SpectralIfftBackend SpectralIfftBackend;
 
 SpectralIfftBackend* spectral_ifft_backend_create(size_t n_fft);
 void spectral_ifft_backend_destroy(SpectralIfftBackend* b);
