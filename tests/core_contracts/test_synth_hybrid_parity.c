@@ -65,6 +65,10 @@ static void test_eligibility(void) {
     CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "out-of-domain bin rejected");
     bad = segs[0]; spectral_segment_set_cubic(&bad, 1.0e-2f, 0.0f);
     CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "cubic phase rejected");
+    bad = segs[0]; bad.amp = NAN;
+    CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "non-finite amp rejected");
+    bad = segs[0]; bad.phase = INFINITY;
+    CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "non-finite phase rejected");
 }
 
 static void test_fast_path_parity(void) {

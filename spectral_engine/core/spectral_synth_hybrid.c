@@ -24,6 +24,10 @@
 
 int spectral_synth_hybrid_segment_eligible(const Segment* seg, size_t n_fft) {
     if (!seg) return 0;
+    /* Reject malformed fields the later gates don't cover (amp/phase/start feed the
+     * extraction, not a comparison) so a bad segment DECLINES to the osc path
+     * rather than getting silently dropped by the renderer's finite-bin skip. */
+    if (!isfinite(seg->amp) || !isfinite(seg->phase) || !isfinite(seg->start)) return 0;
     if (!(fabsf(seg->df) <= HYBRID_DF_EPS)) return 0;             /* no chirp (also rejects NaN) */
     if (spectral_segment_has_cubic(seg) &&
         (fabsf(spectral_segment_cubic_c2(seg)) > HYBRID_C_EPS ||
