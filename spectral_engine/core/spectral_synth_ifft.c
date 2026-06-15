@@ -30,6 +30,8 @@ struct SpectralIfftSynth {
     float* re;        /* half-spectrum scratch, n_fft/2 */
     float* im;
     float* frame;     /* time-domain frame scratch, n_fft */
+    SpectralIfftPartial* frame_partials;  /* per-frame partial scratch (cap n_fft/2)
+                                             for the dynamic render path */
 };
 
 static int is_pow2(size_t v) { return v && (v & (v - 1)) == 0; }
@@ -49,7 +51,9 @@ SpectralIfftSynth* spectral_ifft_synth_create(size_t n_fft) {
     s->re = (float*)calloc(n_fft / 2, sizeof(float));
     s->im = (float*)calloc(n_fft / 2, sizeof(float));
     s->frame = (float*)malloc(n_fft * sizeof(float));
-    if (!s->backend || !s->motif || !s->window || !s->re || !s->im || !s->frame) {
+    s->frame_partials = (SpectralIfftPartial*)malloc((n_fft / 2) * sizeof(SpectralIfftPartial));
+    if (!s->backend || !s->motif || !s->window || !s->re || !s->im || !s->frame ||
+        !s->frame_partials) {
         spectral_ifft_synth_destroy(s);
         return NULL;
     }
@@ -82,6 +86,7 @@ void spectral_ifft_synth_destroy(SpectralIfftSynth* s) {
     free(s->re);
     free(s->im);
     free(s->frame);
+    free(s->frame_partials);
     free(s);
 }
 
@@ -115,55 +120,98 @@ static void place_partial(SpectralIfftSynth* s, float bin, float amp, float phi_
     }
 }
 
+/* Domain check for one partial: the header's bin in (1, n_fft/2 - 1) plus finite
+ * amp/phase. place_partial's float->int floor is int-conversion UB on a garbage
+ * bin, so every partial is checked before it reaches the spectrum; the negated
+ * comparisons also reject NaN. */
+static int ifft_partial_valid(const SpectralIfftSynth* s, const SpectralIfftPartial* p) {
+    const size_t half = s->n_fft / 2;
+    const float bin_max = (float)half - 1.0f;
+    return (p->bin > 1.0f) && (p->bin < bin_max) &&
+           isfinite(p->amp) && isfinite(p->phase0);
+}
+
+/* Build frame m (center = m*hop + n_fft/2) from pre-validated partials, each
+ * placed at its frame-center phase; inverse-FFT and overlap-add into out. The
+ * single home for the framing/OLA/motif math, shared by the static and dynamic
+ * render paths so they cannot drift. */
+static void ifft_render_frame(SpectralIfftSynth* s,
+                              const SpectralIfftPartial* partials, size_t n,
+                              long m, float* out, size_t total) {
+    double center = (double)m * (double)s->hop + (double)s->n_fft / 2.0;
+
+    /* Full half-spectrum clear per frame, though only the K-bin neighborhood of
+     * each partial gets written: at N=512 this is 2 KB per frame against ~2K-tap
+     * placement work per partial, and the path still measured 7.5x over the
+     * oscillator loop — not the bottleneck. Revisit with a dirty-region clear in
+     * the ARM port, where the memory system is the constraint. */
+    memset(s->re, 0, (s->n_fft / 2) * sizeof(float));
+    memset(s->im, 0, (s->n_fft / 2) * sizeof(float));
+    for (size_t p = 0; p < n; p++) {
+        double omega = 2.0 * SPECTRAL_PI_D * (double)partials[p].bin / (double)s->n_fft;
+        double phi = fmod(omega * center + (double)partials[p].phase0, 2.0 * SPECTRAL_PI_D);
+        place_partial(s, partials[p].bin, partials[p].amp, (float)phi);
+    }
+
+    spectral_ifft_backend_inverse(s->backend, s->re, s->im, s->frame);
+
+    long base = m * (long)s->hop;
+    size_t n0 = (base < 0) ? (size_t)(-base) : 0u;
+    for (size_t i = n0; i < s->n_fft; i++) {
+        size_t t = (size_t)(base + (long)i);
+        if (t >= total) break;
+        out[t] += s->frame[i];
+    }
+}
+
 int spectral_ifft_synth_render(SpectralIfftSynth* s,
                                const SpectralIfftPartial* partials, size_t n,
                                float* out, size_t total) {
     if (!s || (!partials && n > 0) || !out || total == 0) return 1;
 
-    /* Validate at the boundary, ONCE: the float->int floor in place_partial
-     * is int-conversion UB on garbage bins (the defect class the Segment
-     * width bound closes elsewhere), and the contract domain is the header's
-     * bin in (1, n_fft/2 - 1). The negated comparisons also reject NaN. */
-    const size_t half = s->n_fft / 2;
-    const float bin_max = (float)half - 1.0f;
+    /* Validate the whole (stationary) set at the boundary, ONCE — the static
+     * contract rejects any out-of-domain partial outright. */
     for (size_t p = 0; p < n; p++) {
-        if (!(partials[p].bin > 1.0f) || !(partials[p].bin < bin_max) ||
-            !isfinite(partials[p].amp) || !isfinite(partials[p].phase0)) {
-            return 1;
-        }
+        if (!ifft_partial_valid(s, &partials[p])) return 1;
     }
     memset(out, 0, total * sizeof(float));
 
     /* Frames at m*hop for m = -1.. so every output sample has full COLA
      * coverage (frame m covers [m*hop, m*hop + n_fft)). */
-    long m_first = -1;
     long m_last = (long)((total - 1) / s->hop);
-    for (long m = m_first; m <= m_last; m++) {
+    for (long m = -1; m <= m_last; m++) {
+        ifft_render_frame(s, partials, n, m, out, total);
+    }
+    return 0;
+}
+
+int spectral_ifft_synth_render_dynamic(SpectralIfftSynth* s,
+                                       SpectralIfftFramePartialsFn fn, void* ctx,
+                                       float* out, size_t total) {
+    if (!s || !fn || !out || total == 0) return 1;
+
+    /* Per-frame-activity path for time-localized sources (the F2b hybrid
+     * router): `fn` supplies the partials live in each frame — the engine maps
+     * the active stationary-sine segment interiors to partials at frame center.
+     * The framing/OLA/motif stay renderer-owned (ifft_render_frame); only WHICH
+     * partials are present changes per frame. Partials a frame returns that fall
+     * outside the domain are skipped here (UB-safety), so a caller bug degrades
+     * to a dropped partial, never an out-of-bounds spectrum write. */
+    const size_t cap = s->n_fft / 2;
+    memset(out, 0, total * sizeof(float));
+    long m_last = (long)((total - 1) / s->hop);
+    for (long m = -1; m <= m_last; m++) {
         double center = (double)m * (double)s->hop + (double)s->n_fft / 2.0;
-
-        /* Full half-spectrum clear per frame, though only the K-bin
-         * neighborhood of each partial gets written: at N=512 this is 2 KB
-         * per frame against ~2K-tap placement work per partial, and the path
-         * still measured 7.5x over the oscillator loop — not the bottleneck.
-         * Revisit with a dirty-region clear in the ARM port, where the
-         * memory system is the constraint. */
-        memset(s->re, 0, (s->n_fft / 2) * sizeof(float));
-        memset(s->im, 0, (s->n_fft / 2) * sizeof(float));
-        for (size_t p = 0; p < n; p++) {
-            double omega = 2.0 * SPECTRAL_PI_D * (double)partials[p].bin / (double)s->n_fft;
-            double phi = fmod(omega * center + (double)partials[p].phase0, 2.0 * SPECTRAL_PI_D);
-            place_partial(s, partials[p].bin, partials[p].amp, (float)phi);
+        size_t got = fn(ctx, center, s->frame_partials, cap);
+        if (got > cap) got = cap;
+        size_t valid = 0;
+        for (size_t p = 0; p < got; p++) {
+            if (ifft_partial_valid(s, &s->frame_partials[p])) {
+                if (valid != p) s->frame_partials[valid] = s->frame_partials[p];
+                valid++;
+            }
         }
-
-        spectral_ifft_backend_inverse(s->backend, s->re, s->im, s->frame);
-
-        long base = m * (long)s->hop;
-        size_t n0 = (base < 0) ? (size_t)(-base) : 0u;
-        for (size_t i = n0; i < s->n_fft; i++) {
-            size_t t = (size_t)(base + (long)i);
-            if (t >= total) break;
-            out[t] += s->frame[i];
-        }
+        ifft_render_frame(s, s->frame_partials, valid, m, out, total);
     }
     return 0;
 }

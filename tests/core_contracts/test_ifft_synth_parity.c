@@ -12,6 +12,10 @@
  *      float headroom: max <= -60 dBFS... see asserts (F1 floors -68 max /
  *      -83 RMS in double; float port budgeted ~8 dB).
  *   3. Determinism: two renders are byte-identical.
+ *   4. Dynamic path (the F2b router foundation): a constant per-frame set
+ *      reproduces the static render BIT-EXACT; time-localized activity keeps
+ *      energy to the active frames; out-of-domain partials a frame returns are
+ *      skipped, not rendered.
  * Also prints a MEASURED throughput comparison vs a plain float oscillator
  * loop (informational; perf gating lives in the S4 bench world, not ctest).
  *
@@ -183,9 +187,104 @@ static void test_stream_parity(void) {
     spectral_ifft_synth_destroy(s);
 }
 
+/* --- dynamic (per-frame-activity) render path, the F2b router foundation --- */
+
+typedef struct { const SpectralIfftPartial* parts; size_t n; } ConstSetCtx;
+static size_t const_set_fn(void* vctx, double center, SpectralIfftPartial* out, size_t cap) {
+    (void)center;
+    const ConstSetCtx* c = (const ConstSetCtx*)vctx;
+    size_t n = c->n < cap ? c->n : cap;
+    for (size_t i = 0; i < n; i++) out[i] = c->parts[i];
+    return n;
+}
+
+typedef struct { SpectralIfftPartial part; double t_lo, t_hi; } GatedCtx;
+static size_t gated_fn(void* vctx, double center, SpectralIfftPartial* out, size_t cap) {
+    const GatedCtx* c = (const GatedCtx*)vctx;
+    if (cap == 0 || center < c->t_lo || center > c->t_hi) return 0;
+    out[0] = c->part;
+    return 1;
+}
+
+typedef struct { SpectralIfftPartial good; } SkipCtx;
+static size_t skip_fn(void* vctx, double center, SpectralIfftPartial* out, size_t cap) {
+    (void)center;
+    const SkipCtx* c = (const SkipCtx*)vctx;
+    if (cap < 2) return 0;
+    out[0] = c->good;
+    out[1] = c->good;
+    out[1].bin = 1.0e9f;   /* out of (1, n_fft/2-1) domain -> must be skipped */
+    return 2;
+}
+
+/* Rung 4: the dynamic path equals the static path on a constant set (bit-exact),
+ * localizes energy to active frames, and skips out-of-domain partials. */
+static void test_dynamic_render(void) {
+    printf("test_dynamic_render:\n");
+    SpectralIfftSynth* s = spectral_ifft_synth_create(N_FFT);
+    CHECK(s != NULL, "synth create (dynamic)");
+    if (!s) return;
+
+    static SpectralIfftPartial parts[N_PARTIALS];
+    rng_state = 0xc0ffee11u;   /* same seed/params as the static stream test */
+    for (size_t p = 0; p < N_PARTIALS; p++) {
+        parts[p].bin = (float)(10.0 + 230.0 * xorshift32_unit(&rng_state));
+        parts[p].amp = (float)((0.05 + 0.95 * xorshift32_unit(&rng_state)) / N_PARTIALS);
+        parts[p].phase0 = (float)(2.0 * SPECTRAL_PI_D * xorshift32_unit(&rng_state) - SPECTRAL_PI_D);
+    }
+
+    static float ds[TOTAL], st[TOTAL];
+
+    /* 1. Constant per-frame set == static render, BIT-EXACT: the dynamic path
+     *    shares the framing/OLA/phase math; only the partial source differs. */
+    ConstSetCtx cc = { parts, N_PARTIALS };
+    CHECK(spectral_ifft_synth_render_dynamic(s, const_set_fn, &cc, ds, TOTAL) == 0, "dynamic rc");
+    CHECK(spectral_ifft_synth_render(s, parts, N_PARTIALS, st, TOTAL) == 0, "static rc");
+    CHECK(memcmp(ds, st, sizeof ds) == 0,
+          "dynamic w/ constant set must equal static render bit-for-bit");
+
+    /* 2. Time-localized: one partial live only in the middle third. Frames whose
+     *    center lands in [t_lo, t_hi] place it; the rest place nothing, so energy
+     *    concentrates in the middle and the far edges (beyond a frame of OLA
+     *    spill) stay exactly silent. */
+    GatedCtx gc;
+    gc.part = parts[0];
+    gc.part.amp = 0.5f;
+    gc.t_lo = (double)TOTAL / 3.0;
+    gc.t_hi = 2.0 * (double)TOTAL / 3.0;
+    CHECK(spectral_ifft_synth_render_dynamic(s, gated_fn, &gc, ds, TOTAL) == 0, "gated rc");
+
+    double mid_sumsq = 0.0, edge_max = 0.0;
+    const size_t guard = N_FFT;   /* one frame of OLA spill past the gate */
+    for (size_t t = 0; t < TOTAL; t++) {
+        if (t >= (size_t)gc.t_lo + guard && t < (size_t)gc.t_hi - guard) {
+            mid_sumsq += (double)ds[t] * (double)ds[t];
+        } else if (t + guard < (size_t)gc.t_lo || t > (size_t)gc.t_hi + guard) {
+            double a = fabs((double)ds[t]);
+            if (a > edge_max) edge_max = a;
+        }
+    }
+    double mid_rms = sqrt(mid_sumsq / TOTAL);
+    printf("  gated: mid rms=%.2f dBFS far-edge max=%.3e\n", dbfs(mid_rms), edge_max);
+    CHECK(mid_rms > 1.0e-3, "active middle must carry energy (rms %.3e)", mid_rms);
+    CHECK(edge_max < 1.0e-4, "inactive far edges must stay silent (max %.3e)", edge_max);
+
+    /* 3. A frame returning an out-of-domain partial: it must be SKIPPED, never
+     *    rendered or fatal. [good, bad] every frame == static render of [good]. */
+    SkipCtx sc;
+    sc.good = parts[3];
+    CHECK(spectral_ifft_synth_render_dynamic(s, skip_fn, &sc, ds, TOTAL) == 0, "skip rc");
+    CHECK(spectral_ifft_synth_render(s, &sc.good, 1, st, TOTAL) == 0, "static single rc");
+    CHECK(memcmp(ds, st, sizeof ds) == 0,
+          "dynamic must skip out-of-domain partials (== static of the valid one)");
+
+    spectral_ifft_synth_destroy(s);
+}
+
 int main(void) {
     test_backend_contract();
     test_stream_parity();
+    test_dynamic_render();
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;
 }

@@ -46,6 +46,22 @@ int spectral_ifft_synth_render(SpectralIfftSynth* s,
                                const SpectralIfftPartial* partials, size_t n,
                                float* out, size_t total);
 
+/* Per-frame partial provider for the dynamic render path: fill `out` (capacity
+ * `out_cap`) with the partials live in the frame centered at `frame_center`
+ * (output samples), returning the count. Partials outside the bin domain are
+ * dropped by the renderer, so the callback may emit optimistically. */
+typedef size_t (*SpectralIfftFramePartialsFn)(void* ctx, double frame_center,
+                                              SpectralIfftPartial* out, size_t out_cap);
+
+/* Render `total` samples from a TIME-VARYING partial set: `fn` is queried once
+ * per frame for the partials live in that frame (the F2b hybrid router maps the
+ * active stationary-sine segment interiors to partials at frame center). OLA and
+ * edge coverage identical to the static path; a constant `fn` reproduces it
+ * exactly. Returns 0 on success, nonzero on bad args. */
+int spectral_ifft_synth_render_dynamic(SpectralIfftSynth* s,
+                                       SpectralIfftFramePartialsFn fn, void* ctx,
+                                       float* out, size_t total);
+
 /* --- port contract (implemented by exactly one host TU per build) -------- */
 
 typedef struct SpectralIfftBackend SpectralIfftBackend;
