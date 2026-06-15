@@ -2,8 +2,11 @@
 
 Real-time spectral analysis + resynthesis engine in C. Analyze audio into
 sinusoidal segments; resynthesize with stretch/pitch/timbre on desktop (float,
-Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed). `AI_CANON.md` holds
-the full correctness rules; this file is the orientation.
+Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed).
+`docs/core_audit/reference/AI_CANON.md` holds the full correctness rules; this file
+is the orientation. `docs/core_audit/` holds only the actively-worked plans
+(REVIEWER_HANDOFF + the live workstreams); the canon, reference docs, and paused
+plans live in `docs/core_audit/reference/`, completed campaigns in `docs/core_audit/archive/`.
 **Forward mandate (what to work on next):** `docs/core_audit/REVIEWER_HANDOFF.md`.
 
 ## Layout (Linux-kernel-style: kernel / arch / drivers; see archive/KERNEL_LAYOUT_PLAN.md)
@@ -65,7 +68,7 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDE
 - A formula duplicated across scalar C / SIMD / CUDA / Metal-string code needs a parity test
   and (where a C function can't reach, e.g. GPU strings) a version pin.
 
-## Hard rules (see AI_CANON.md for the full set)
+## Hard rules (see reference/AI_CANON.md for the full set)
 - Correctness before performance. A faster wrong oscillator/phase/fade/estimator is worse
   than a slower reference.
 - Approximations (fast atan2/trig/inv-sqrt) are opt-in behind a named gate; exact is the
@@ -80,7 +83,7 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDE
 ## Tests & docs discipline
 - Tests assert **behavior**, never source text or doc prose. No test/audit/doc may be
   load-bearing on a string in the codebase.
-- Change record = git log + `docs/core_audit/CHANGELOG.md` (one terse line per change). No
+- Change record = git log + `docs/core_audit/reference/CHANGELOG.md` (one terse line per change). No
   per-change markdown files. No AI/prompt/planning-referential text in code, commits, or docs.
 
 ## Third-party dependencies
@@ -197,5 +200,9 @@ Each completed instance's findings ledger + execution waves are archived under
 instance opens a fresh ledger in `docs/core_audit/`.
 
 ## Reference docs
-`docs/core_audit/`: `AI_CANON.md` (rules), `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md`
-(paper-backed methods), `CHANGELOG.md`, and the `*_PLAN.md` campaign plans.
+`docs/core_audit/` (top): only the actively-worked plans — `REVIEWER_HANDOFF.md` (mandate)
+and the live workstreams (`M7_PERF_MODEL_PLAN.md`, `IFFT_SYNTHESIS_PLAN.md`).
+`docs/core_audit/reference/`: the canon + reference + paused plans — `AI_CANON.md` (rules),
+`CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md` (paper-backed methods), `CHANGELOG.md`,
+`DISCIPLINE_FINDINGS.md`, `REVIEWER_HANDOFF_2.md`, and the `*_PLAN.md` campaign plans not
+currently in execution. `docs/core_audit/archive/`: completed/superseded campaigns.

@@ -1,11 +1,11 @@
 # Archived planning docs — completed campaigns
 
 These plans/audits are **done**; kept for history (git also has full history). The forward
-mandate and current open work live in `../REVIEWER_HANDOFF.md` (+ its `../REVIEWER_HANDOFF_2.md`
-status companion) and the still-active plans: `../M7_PERF_MODEL_PLAN.md`, `../OPTIMISATION_PLAN.md`,
-`../OSCILLATOR_BACKEND_CONTRACT_PLAN.md`, `../QTYPE_REFACTOR_PLAN.md`, `../IFFT_SYNTHESIS_PLAN.md`,
-and `../ULTRAPLAN.md` (Campaign-2 master, partly stale but still cited by OPTIMISATION_PLAN)
-(+ the reference docs `../DISCIPLINE_FINDINGS.md`, `../CORE_CONTRACTS.md`, `../AI_CANON.md`).
+mandate and the actively-worked plans live one level up in `../` (`../REVIEWER_HANDOFF.md`,
+`../M7_PERF_MODEL_PLAN.md`, `../IFFT_SYNTHESIS_PLAN.md`); the canon, reference docs, and
+not-currently-executing plans (AI_CANON, CORE_CONTRACTS, CHANGELOG, OPTIMISATION_PLAN, ULTRAPLAN,
+OSCILLATOR_BACKEND_CONTRACT_PLAN, QTYPE_REFACTOR_PLAN, REVIEWER_HANDOFF_2, …) live in
+`../reference/` (see its README).
 
 - `MASTER_PLAN_CLOSURE_CRITERIA.md` — Campaign-2 stop criteria (met).
 - `CLEANUP_HARDENING_PLAN.md` — Macro-1 cleanup campaign C1–C8 (done). Its Macro-2 logical

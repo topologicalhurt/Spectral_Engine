@@ -18,7 +18,7 @@ contract/guarantee, adversarial-correctness, and tooling-feedback workstreams.
 ## Governance (applies to every pass)
 
 ```text
-- One focused change per commit, recorded as a terse line in docs/core_audit/CHANGELOG.md.
+- One focused change per commit, recorded as a terse line in docs/core_audit/reference/CHANGELOG.md.
 - Every change must justify itself as one of: real bug, real ownership cleanup,
   real API-surface reduction, real test/harness improvement, real perf-path
   simplification (KERNEL_PATCHING_GUIDELINES.md §7).
@@ -263,7 +263,7 @@ Objective: a single place that records which kernel guarantees currently hold,
 which are relaxed by a flag or runtime path, and how a caller/test can discover
 the active set. Generalizes the maintainer's WOLA/COLA concern to all invariants
 "hidden behind obfuscations or branches". Home: `core/spectral_contracts.h` +
-`docs/core_audit/CORE_CONTRACTS.md`.
+`docs/core_audit/reference/CORE_CONTRACTS.md`.
 
 ### B0 — Establish the COLA/WOLA invariant (prerequisite)
 
@@ -279,7 +279,7 @@ the active set. Generalizes the maintainer's WOLA/COLA concern to all invariants
 
 **B0 status (pass 159) — LANDED.** COLA/WOLA invariant defined as header-only
 predicates `spectral_overlap_add_envelope_stats` / `_is_constant` in
-`core/spectral_contracts.h`, documented in `docs/core_audit/CORE_CONTRACTS.md`
+`core/spectral_contracts.h`, documented in `docs/core_audit/reference/CORE_CONTRACTS.md`
 (Griffin-Lim / Allen-Rabiner / Harris cited), and tested by the compiled CTest
 `core_contracts` (`tests/core_contracts/test_cola.c`). The test records the key
 finding: the engine's *symmetric* (`N-1`) windows do NOT strictly satisfy COLA
@@ -319,7 +319,7 @@ defined+tested invariant the B1 manifest can mark as held/relaxed.
 - B1 manifest + B2 self-report shipped as core/spectral_guarantees.h: a 7-bit
   SPECTRAL_ACTIVE_GUARANTEES set (preprocessor-evaluable) + runtime query API
   (spectral_active_guarantees / _guarantee_holds / _guarantees_satisfy fail-closed /
-  _guarantee_table). Manifest table in docs/core_audit/CORE_CONTRACTS.md.
+  _guarantee_table). Manifest table in docs/core_audit/reference/CORE_CONTRACTS.md.
 - Pinned by CTests core_guarantees (default: exact bits active) and
   core_guarantees_drift (APPROX_* forced on: those bits cleared + each approximation
   asserted within its measured error budget — sin 5e-6, atan2 5e-4 rad, inv_sqrt 1e-5
@@ -1098,7 +1098,7 @@ oracle.
 ```
 
 > Cross-reference (additive, non-conflicting): the optimisation track in
-> `docs/core_audit/OPTIMISATION_PLAN.md` consumes this phase's harness + golden
+> `docs/core_audit/reference/OPTIMISATION_PLAN.md` consumes this phase's harness + golden
 > oracle as its verification gate. It introduces no new test philosophy and does
 > not alter Phase D scope, ordering, or closure criteria — the goldens here freeze
 > the current numerical contract that the optimisation work is verified against.

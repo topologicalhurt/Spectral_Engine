@@ -190,7 +190,7 @@ specific platform or ABI reason.
 ## 18. Change record: terse per-commit notes, not per-pass files
 
 The change record is the git log plus one rolling digest at
-`docs/core_audit/CHANGELOG.md`. Do not create a markdown file per change. (The
+`docs/core_audit/reference/CHANGELOG.md`. Do not create a markdown file per change. (The
 former one-file-per-pass scheme produced ~218 `PATCH_NOTES_PASS<N>.md` files
 and the static tests that policed them; both were consolidated into the
 changelog and deleted.)

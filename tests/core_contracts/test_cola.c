@@ -11,7 +11,7 @@
  * This is the prerequisite for the Phase-B guarantee registry: the registry
  * cannot record "we relaxed COLA" until COLA is first defined and tested.
  * References: Allen (1977); Allen & Rabiner (1977); Griffin & Lim (1984);
- * Harris (1978) for window shapes. See docs/core_audit/CORE_CONTRACTS.md.
+ * Harris (1978) for window shapes. See docs/core_audit/reference/CORE_CONTRACTS.md.
  */
 #include <math.h>
 #include <stddef.h>

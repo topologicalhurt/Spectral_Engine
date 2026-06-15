@@ -9,7 +9,7 @@
  * when handed a descriptor that assumes a guarantee this build does not provide.
  *
  * The gates are the ones the source code actually branches on (verified by grep,
- * not an aspirational list): see docs/core_audit/CORE_CONTRACTS.md for
+ * not an aspirational list): see docs/core_audit/reference/CORE_CONTRACTS.md for
  * the per-gate manifest (invariant, default, cost, error budget, drift test).
  * The companion drift test (tests/core_contracts/test_guarantees.c) pins the
  * measured error budget for each approximation so a flip of the documented

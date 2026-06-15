@@ -17,7 +17,7 @@
  *   core_guarantees_drift_test  - APPROX_* forced on; asserts those bits cleared
  *                                  AND the approximations stay within budget.
  *
- * See docs/core_audit/CORE_CONTRACTS.md (Guarantee registry).
+ * See docs/core_audit/reference/CORE_CONTRACTS.md (Guarantee registry).
  */
 #include <math.h>
 #include <stddef.h>

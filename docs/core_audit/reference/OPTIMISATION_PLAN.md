@@ -4,7 +4,7 @@ Status: **PARTLY LANDED.** F1/F3 infra, O1-B output tiling, O2-A SIMD sine, and 
 coupled-form oscillator are in; the big OPEN decision is **F2 — synthesis method (oscillator-bank
 vs inverse-FFT)** — engaged measure-first in [`REVIEWER_HANDOFF.md`](REVIEWER_HANDOFF.md) (the "F"
 fork). Original plan text follows.
-Owner track: optimisation. Companion to `docs/core_audit/ULTRAPLAN.md` (master plan).
+Owner track: optimisation. Companion to `docs/core_audit/reference/ULTRAPLAN.md` (master plan).
 Audit date: 2026-06-01. Evidence cited as `file:line` against the current tree.
 Revision: **v2** — adds the SOTA survey (Part A) and an architectural-minimality stage
 inventory (Part B), and re-orders the work so the two *foundational algorithm* decisions

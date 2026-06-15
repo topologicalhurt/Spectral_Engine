@@ -2,7 +2,7 @@
  *
  * D1 (ULTRAPLAN Phase D) — compiled full/fused analysis parity harness.
  *
- * Implements docs/core_audit/FULL_FUSED_PARITY_HARNESS.md as a real CTest
+ * Implements docs/core_audit/reference/FULL_FUSED_PARITY_HARNESS.md as a real CTest
  * (not a string-grep): deterministic fixtures are run through the production
  * analyze_audio_with_path_mode() under SPECTRAL_ANALYSIS_PATH_FULL and
  * SPECTRAL_ANALYSIS_PATH_FUSED, the two segment arrays are sorted by

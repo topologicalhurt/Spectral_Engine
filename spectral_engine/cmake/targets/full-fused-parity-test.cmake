@@ -1,6 +1,6 @@
 # Full/fused analysis parity harness (CTest) — ULTRAPLAN Phase D, item D1.
 #
-# Compiled (not string-grep) realization of docs/core_audit/FULL_FUSED_PARITY_HARNESS.md.
+# Compiled (not string-grep) realization of docs/core_audit/reference/FULL_FUSED_PARITY_HARNESS.md.
 # Drives the REAL production analysis entry point analyze_audio_with_path_mode()
 # under PATH_FULL and PATH_FUSED over deterministic fixtures and asserts the two
 # segment arrays agree within documented tolerances.

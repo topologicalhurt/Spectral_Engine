@@ -157,7 +157,7 @@ descriptor is invalid.
 
 ### Audit docs
 
-The durable review record is the git log plus `docs/core_audit/CHANGELOG.md`.
+The durable review record is the git log plus `docs/core_audit/reference/CHANGELOG.md`.
 Validation matrices and contract explanations live in the relevant canon doc
 (`CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md`), not in per-change sidecar files
 that tests or audits could come to depend on.
