@@ -91,18 +91,12 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,
                                           float db_thresh, float max_magsq);
 
-/* Update threshold when a new global max is discovered across chunks.
- * Call before spectral_tracker_process() for each chunk with an updated max. */
-void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq);
-
-/* Process one chunk of STFT data.
- * overlap_magsq_row: pointer to the first magsq row of the NEXT chunk
- *                    (n_freqs floats) for look-ahead on the last frame pair.
- *                    Pass NULL for the final chunk (skips last frame pair). */
+/* Process the full STFT matrix in one shot: pairs each frame t with t+1 and links
+ * partials across the (chunk_n_frames - 1) pairs. global_frame_offset is the index
+ * of the first frame (0 for a single-shot run). */
 void spectral_tracker_process(SpectralTracker* tracker,
                                const float* chunk_magsq, const float* chunk_phases,
-                               size_t chunk_n_frames, size_t global_frame_offset,
-                               const float* overlap_magsq_row);
+                               size_t chunk_n_frames, size_t global_frame_offset);
 
 /* Finalize tracking: merges all per-thread segment arrays into a contiguous
  * SegmentArray. Frees internal arrays but does NOT free the tracker itself.

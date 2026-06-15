@@ -821,29 +821,9 @@ fail:
     return NULL;
 }
 
-void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq) {
-    double threshsq_d = 0.0;
-
-    if (!tracker) return;
-    if (!isfinite(new_max_magsq) || new_max_magsq < 0.0f ||
-        !isfinite(tracker->thresh_linear_sq) || tracker->thresh_linear_sq < 0.0f) {
-        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
-        return;
-    }
-
-    threshsq_d = (double)tracker->thresh_linear_sq * (double)new_max_magsq;
-    if (!isfinite(threshsq_d) || threshsq_d < 0.0 || threshsq_d > (double)FLT_MAX) {
-        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
-        return;
-    }
-
-    tracker->threshsq = (float)threshsq_d;
-}
-
 void spectral_tracker_process(SpectralTracker* tracker,
                                const float* chunk_magsq, const float* chunk_phases,
-                               size_t chunk_n_frames, size_t global_frame_offset,
-                               const float* overlap_magsq_row) {
+                               size_t chunk_n_frames, size_t global_frame_offset) {
     if (!tracker || chunk_n_frames < 1 || !chunk_magsq || !chunk_phases) return;
     if (atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK) return;
 
@@ -865,12 +845,8 @@ void spectral_tracker_process(SpectralTracker* tracker,
         return;
     }
     (void)chunk_bins;
-    /* Number of frame-pairs we can process:
-     * - All internal pairs within this chunk (chunk_n_frames - 1)
-     * - Plus one extra pair if overlap_magsq_row is provided
-     *   (last chunk frame paired with first frame of next chunk) */
+    /* One pair per internal frame boundary: pair t with t+1 over chunk_n_frames-1. */
     size_t n_pairs = chunk_n_frames - 1;
-    if (overlap_magsq_row) n_pairs = chunk_n_frames;
 
     if (n_pairs == 0) return;
     if (global_frame_offset > SIZE_MAX - (n_pairs - 1u)) {
@@ -921,16 +897,9 @@ void spectral_tracker_process(SpectralTracker* tracker,
 
             const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
-            const float* __restrict__ next_row;
-            const float* __restrict__ next_phase_row = NULL;
-
-            if (t + 1 < chunk_n_frames) {
-                next_row = chunk_magsq + (t + 1) * n_freqs;
-                next_phase_row = chunk_phases + (t + 1) * n_freqs;
-            } else {
-                /* Last frame: use overlap row from next chunk */
-                next_row = overlap_magsq_row;
-            }
+            /* t < n_pairs == chunk_n_frames - 1, so t+1 is always a valid frame. */
+            const float* __restrict__ next_row = chunk_magsq + (t + 1) * n_freqs;
+            const float* __restrict__ next_phase_row = chunk_phases + (t + 1) * n_freqs;
 
             float frame_start_sample = 0.0f;
             if (spectral_tracker_frame_time_from_index(global_frame_offset + t, hop_float, &frame_start_sample) != SPECTRAL_OK) {
@@ -1382,9 +1351,8 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
         return peak_track_return_empty(t_track);
     }
 
-    /* Process all frames in one shot — no overlap row (NULL for final chunk) */
-    spectral_tracker_process(tracker, magsq, phases,
-                              n_frames, 0, NULL);
+    /* Process all frames in one shot. */
+    spectral_tracker_process(tracker, magsq, phases, n_frames, 0);
 
     SegmentArray result = spectral_tracker_finalize(tracker, t_track, 0.0);
     spectral_tracker_destroy(tracker);
