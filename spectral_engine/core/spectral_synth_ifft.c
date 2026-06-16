@@ -9,6 +9,7 @@
 #include "spectral_synth_ifft.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,7 +27,17 @@
 #  include "simde/x86/sse2.h"
 #  include "simde/x86/sse4.1.h"        /* floor_ps */
 #  define SPECTRAL_IFFT_TRIG_SIMD 1
-/* 4-wide minimax sin, SSOT coefficients (mirrors osc_vfastsin: q=round(x/pi) fold). */
+/* 4-wide minimax sin: the SSOT degree-9 fold (q=round(x/pi); xr=x-q*pi; Horner over
+ * x2; sign=(-1)^q) from spectral_fast_sin_inline, using the SSOT coefficients. It is
+ * a THIRD copy of that eval (scalar = spectral_fast_sin_inline; SIMD-templated =
+ * osc_vfastsin) because osc_vfastsin is a TU-local static inside the width-templated
+ * spectral_oscillator_simd_kernel.inc and is not header-exposed, so it cannot be
+ * reused here without re-instantiating the whole oscillator kernel. The static_assert
+ * pins this copy to the formula version (a fast_sin change fails the build and forces
+ * re-validation, matching how SPECTRAL_OSC_*_VERSION gates the other copies); the
+ * render parity ctest (#24) exercises it at runtime. (AI_CANON #7/#17.) */
+_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 6,
+               "fast_sin formula changed — re-validate ifft_fast_sin4 against the SSOT");
 static inline simde__m128 ifft_fast_sin4(simde__m128 x) {
     const simde__m128 inv_pi = simde_mm_set1_ps(SPECTRAL_INV_PI);
     const simde__m128 pi     = simde_mm_set1_ps(SPECTRAL_PI);
@@ -72,7 +83,8 @@ struct SpectralIfftSynth {
 
 static int is_pow2(size_t v) { return v && (v & (v - 1)) == 0; }
 
-/* Pool carving, 16-byte aligned so the re/im/frame SIMD loads stay aligned. */
+/* Pool carving padded to 16 bytes so the FFT backend (e.g. vDSP) sees aligned
+ * re/im/frame; the in-file trig SIMD uses unaligned loadu/storeu on stack scratch. */
 #define IFFT_POOL_ALIGN 16u
 static size_t ifft_align(size_t x) {
     return (x + (IFFT_POOL_ALIGN - 1u)) & ~(size_t)(IFFT_POOL_ALIGN - 1u);
@@ -138,6 +150,11 @@ static void ifft_synth_compute_tables(SpectralIfftSynth* s) {
 SpectralIfftSynth* spectral_ifft_synth_init(void* pool, size_t pool_bytes,
                                             size_t n_fft, SpectralIfftBackend* backend) {
     if (!pool || !backend || !is_pow2(n_fft) || n_fft < 64) return NULL;
+    /* The carve assumes 16-byte pool alignment; reject a mis-aligned pool fail-loud
+     * rather than corrupt it. And the backend drives the FFT over ITS n_fft — a
+     * size mismatch would read/write past the synth's re/im/frame scratch. */
+    if (((uintptr_t)pool & (IFFT_POOL_ALIGN - 1u)) != 0u) return NULL;
+    if (spectral_ifft_backend_n_fft(backend) != n_fft) return NULL;
     if (pool_bytes < spectral_ifft_synth_pool_bytes(n_fft)) return NULL;
     SpectralIfftSynth* s = (SpectralIfftSynth*)pool;
     ifft_synth_place(s, (char*)pool, n_fft);
@@ -196,10 +213,12 @@ static void place_partial_cri(SpectralIfftSynth* s, float bin, float cr, float c
 
     /* Interior fast path: the motif index advances by exactly O per tap and the lerp
      * weight f = x - i0 is tap-INDEPENDENT, so hoist the lookup setup out of the loop.
-     * Bit-identical to the per-tap motif_eval (i0_j = i0_0 + j*O, same f) with no
-     * DC/Nyquist skip (window interior) and no table-edge clamp — the latter needs
-     * frac > 0: an exact-integer bin (frac=0, measure-zero) would push the last tap to
-     * the table end, so it falls to the per-tap path which clamps the edge correctly. */
+     * Equal to the per-tap motif_eval in EXACT arithmetic (x_j = (1-frac+j)*O = x_0 +
+     * j*O, same f); in IEEE float the two can pick (i0,f) differing by one slot only
+     * for bins so near integer they are sub-floor — and frac>0 keeps the table-edge
+     * case (an exact-integer bin would push the last tap past the table) on the per-tap
+     * path. No DC/Nyquist skip (window interior). The fractional-interior path is the
+     * one #24's stream parity exercises. */
     const float frac = bin - (float)k0;
     if (klo >= 1 && klo + n_tap - 1 <= half - 1 && frac > 0.0f) {
         const float* t = s->motif;
@@ -232,12 +251,15 @@ static void place_partial_cri(SpectralIfftSynth* s, float bin, float cr, float c
 /* Domain check for one partial: the header's bin in (1, n_fft/2 - 1) plus finite
  * amp/phase. place_partial's float->int floor is int-conversion UB on a garbage
  * bin, so every partial is checked before it reaches the spectrum; the negated
- * comparisons also reject NaN. */
+ * comparisons also reject NaN. The phase0 magnitude bound keeps the Phase-A
+ * `(long long)(x/tau + ...)` reduction in range and exact (|x/tau| stays well below
+ * 2^53), since omega*center + phase0 is dominated by a wild phase0. */
+#define IFFT_PHASE0_MAX 1.0e15f
 static int ifft_partial_valid(const SpectralIfftSynth* s, const SpectralIfftPartial* p) {
     const size_t half = s->n_fft / 2;
     const float bin_max = (float)half - 1.0f;
     return (p->bin > 1.0f) && (p->bin < bin_max) &&
-           isfinite(p->amp) && isfinite(p->phase0);
+           isfinite(p->amp) && isfinite(p->phase0) && (fabsf(p->phase0) < IFFT_PHASE0_MAX);
 }
 
 /* Build frame m (center = m*hop + n_fft/2) from pre-validated partials, each
@@ -269,9 +291,9 @@ static void ifft_render_frame(SpectralIfftSynth* s,
         for (size_t j = 0; j < bn; j++) {
             double omega = tau * (double)partials[b0 + j].bin / (double)s->n_fft;
             double x = omega * center + (double)partials[b0 + j].phase0;
-            /* Reduce to [-pi, pi] by round-subtract (libm-free, and tighter than the
-             * old fmod's [0, 2pi) so the minimax sin stays in its 1.4-ULP range).
-             * |x/tau| < ~4000 here, so the long long round is exact. */
+            /* Reduce to [-pi, pi] by round-subtract (libm-free) so the minimax sin
+             * stays in its 1.4-ULP range. ifft_partial_valid bounds phase0, so |x/tau|
+             * stays well below 2^53 and the long long round is exact + in range. */
             double q = (double)(long long)(x / tau + (x >= 0.0 ? 0.5 : -0.5));
             phi[j] = (float)(x - tau * q);
         }

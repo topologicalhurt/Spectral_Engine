@@ -69,6 +69,10 @@ void spectral_ifft_backend_destroy(SpectralIfftBackend* b) {
     free(b);
 }
 
+size_t spectral_ifft_backend_n_fft(const SpectralIfftBackend* b) {
+    return b ? b->n_fft : 0u;
+}
+
 void spectral_ifft_backend_inverse(SpectralIfftBackend* b,
                                    float* re, float* im, float* out) {
     size_t n = b->n_fft;

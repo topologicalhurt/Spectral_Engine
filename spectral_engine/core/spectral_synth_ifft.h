@@ -77,6 +77,11 @@ int spectral_ifft_synth_render_dynamic(SpectralIfftSynth* s,
 SpectralIfftBackend* spectral_ifft_backend_create(size_t n_fft);
 void spectral_ifft_backend_destroy(SpectralIfftBackend* b);
 
+/* The n_fft the backend was built for (0 if NULL). spectral_ifft_synth_init uses it
+ * to reject a backend/synth size mismatch that would otherwise read/write past the
+ * synth's re/im/frame scratch. */
+size_t spectral_ifft_backend_n_fft(const SpectralIfftBackend* b);
+
 /* Textbook inverse real DFT of the packed half-spectrum:
  *   re/im[k] = F[k] for k = 1..n_fft/2-1; re[0] = F[0] (DC, real);
  *   im[0] = F[n_fft/2] (Nyquist, real).

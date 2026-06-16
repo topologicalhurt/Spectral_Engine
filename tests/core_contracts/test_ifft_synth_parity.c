@@ -127,6 +127,10 @@ static void test_stream_parity(void) {
         bad.amp = INFINITY;
         CHECK(spectral_ifft_synth_render(s, &bad, 1, out, TOTAL) != 0,
               "render must reject non-finite amp");
+        bad = parts[0];
+        bad.phase0 = 1.0e20f;   /* finite but huge -> the (long long) reduction would overflow */
+        CHECK(spectral_ifft_synth_render(s, &bad, 1, out, TOTAL) != 0,
+              "render must reject out-of-range phase0 (cast-UB guard)");
     }
 
     uint64_t t0 = now_ns();
@@ -331,6 +335,13 @@ static void test_init_inplace(void) {
 
     CHECK(spectral_ifft_synth_init(pool, bytes - 1, N_FFT, b) == NULL, "undersized pool rejected");
     CHECK(spectral_ifft_synth_init(pool, bytes, N_FFT, NULL) == NULL, "null backend rejected");
+
+    /* A backend built for a different n_fft must be rejected (else the FFT reads/writes
+     * past the synth's re/im/frame scratch). */
+    SpectralIfftBackend* bmis = spectral_ifft_backend_create(N_FFT * 2u);
+    CHECK(bmis != NULL, "mismatch backend alloc");
+    CHECK(spectral_ifft_synth_init(pool, bytes, N_FFT, bmis) == NULL, "backend n_fft mismatch rejected");
+    spectral_ifft_backend_destroy(bmis);
 
     SpectralIfftSynth* si = spectral_ifft_synth_init(pool, bytes, N_FFT, b);
     SpectralIfftSynth* sc = spectral_ifft_synth_create(N_FFT);
