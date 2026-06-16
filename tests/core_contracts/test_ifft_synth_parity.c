@@ -30,6 +30,7 @@
 #include <time.h>
 
 #include "spectral_consts.h"
+#include "spectral_osc_formulas.h"   /* spectral_fast_sin_inline — the scalar sin SSOT */
 #include "spectral_synth_ifft.h"
 
 #define N_FFT 512u
@@ -377,12 +378,35 @@ static void test_init_inplace(void) {
     free(pool);
 }
 
+/* Rung 7: SSOT pin for the internal SIMD sin. ifft_fast_sin4 is a third copy of the
+ * minimax-fold sin (scalar = spectral_fast_sin_inline; SIMD-templated = osc_vfastsin);
+ * AI_CANON #7 requires a parity test that fails if the copies drift. Bit-exact-except-FMA,
+ * so a tight ULP-scale tolerance catches a structural drift while passing rounding. */
+static void test_simd_sin_ssot(void) {
+    printf("test_simd_sin_ssot:\n");
+    double worst = 0.0;
+    unsigned rng = 0x1bad1deau;
+    for (int g = 0; g < 8192; g++) {
+        float in[4], out[4];
+        for (int i = 0; i < 4; i++)
+            in[i] = (float)((xorshift32_unit(&rng) - 0.5) * 8.0 * SPECTRAL_PI_D);   /* [-4pi,4pi] */
+        spectral_ifft_fast_sin4_probe(in, out);
+        for (int i = 0; i < 4; i++) {
+            double diff = fabs((double)out[i] - (double)spectral_fast_sin_inline(in[i]));
+            if (diff > worst) worst = diff;
+        }
+    }
+    printf("  ifft_fast_sin4 vs scalar SSOT: max diff %.3e\n", worst);
+    CHECK(worst < 1.0e-5, "ifft_fast_sin4 must track the scalar fast_sin SSOT (max diff %.3e)", worst);
+}
+
 int main(void) {
     test_backend_contract();
     test_stream_parity();
     test_dynamic_render();
     test_integer_bins();
     test_init_inplace();
+    test_simd_sin_ssot();
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;
 }

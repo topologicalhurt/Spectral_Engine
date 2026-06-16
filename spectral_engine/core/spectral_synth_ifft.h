@@ -14,8 +14,8 @@
  *     one TU per build: drivers/vdsp/spectral_ifft_vdsp.c (Apple) or
  *     arch/ref/spectral_ifft_ref.c (portable radix-2 fallback).
  *     The CMSIS embedded port lands at F4 — a FLOAT-on-M7-FPU port
- *     (arm_rfft_fast_f32), NOT a Q31 rewrite (maintainer directive 2026-06-15;
- *     see IFFT_SYNTHESIS_PLAN.md F4 + the embedded-integration audit).
+ *     (arm_rfft_fast_f32), NOT a Q31 rewrite (see IFFT_SYNTHESIS_PLAN.md F4 +
+ *     the embedded-integration audit).
  */
 #ifndef SPECTRAL_SYNTH_IFFT_H
 #define SPECTRAL_SYNTH_IFFT_H
@@ -73,6 +73,11 @@ typedef size_t (*SpectralIfftFramePartialsFn)(void* ctx, double frame_center,
 int spectral_ifft_synth_render_dynamic(SpectralIfftSynth* s,
                                        SpectralIfftFramePartialsFn fn, void* ctx,
                                        float* out, size_t total);
+
+/* Test hook: evaluate the internal SIMD minimax sin (the third copy of the fast_sin
+ * SSOT) lane-by-lane, so a ctest can pin it to spectral_fast_sin_inline within ULP.
+ * Plain-float interface keeps simde types out of this header. (AI_CANON #7.) */
+void spectral_ifft_fast_sin4_probe(const float in[4], float out[4]);
 
 /* --- port contract (implemented by exactly one host TU per build) -------- */
 

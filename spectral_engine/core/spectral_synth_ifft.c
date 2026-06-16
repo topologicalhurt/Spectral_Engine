@@ -60,6 +60,19 @@ static inline simde__m128 ifft_fast_sin4(simde__m128 x) {
 #  define SPECTRAL_IFFT_TRIG_SIMD 0
 #endif
 
+/* Test hook (plain-float interface so no simde type leaks through the header): the
+ * SSOT parity ctest pins this third minimax-sin copy to the scalar SSOT
+ * spectral_fast_sin_inline. On host it runs the live ifft_fast_sin4; in the exact/
+ * embedded build (SIMD off) it is the scalar SSOT itself (a tautology there, the real
+ * drift check on host). Pairs with the SPECTRAL_OSC_FORMULAS_VERSION static_assert. */
+void spectral_ifft_fast_sin4_probe(const float in[4], float out[4]) {
+#if SPECTRAL_IFFT_TRIG_SIMD
+    simde_mm_storeu_ps(out, ifft_fast_sin4(simde_mm_loadu_ps(in)));
+#else
+    for (int i = 0; i < 4; i++) out[i] = spectral_fast_sin_inline(in[i]);
+#endif
+}
+
 /* F1-measured operating point (IFFT_SYNTHESIS_PLAN error budget): K=8 taps
  * per side -> -55 dBFS frame / -83 dBFS stream RMS floor; O=16 oversampling
  * is within 1 dB of O=64. K is an explicit F2/F3 knob: raising it buys
