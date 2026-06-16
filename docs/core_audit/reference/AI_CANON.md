@@ -172,8 +172,21 @@ locality. In particular:
   accepting the approximation;
 - update the audit when a helper is intentionally centralized.
 
-If a duplicate formula is unavoidable, document why a shared utility is not
-usable and add a parity test that would fail if the copies drift.
+Reachability is not unavoidability — extract before you copy
+(EXIST → REUSE → EXTRACT → only-then-copy). When the utility already exists but is
+not *reachable* from the new caller (a TU-local `static`, an un-exposed `inline`, a
+body buried in a width-templated `.inc`), that is a fixable packaging problem, not a
+reason to copy: hoist the one definition into a shared header/`.inc` so both sites
+include it and there is still exactly ONE definition. A parity-tested duplicate is the
+fallback ONLY when a single C definition genuinely cannot reach both sites — e.g. a
+cross-language mirror (GPU MSL/CUDA strings). The `ifft_fast_sin4` failure is the
+cautionary case: a third copy of the minimax sin was rolled because `osc_vfastsin` was
+a private static inside the oscillator kernel; the right move (taken) was to extract the
+SIMD sin into `arch/simd/spectral_fast_sin_simd.inc` and have both the oscillator and the
+IFFT include it.
+
+If a duplicate formula is genuinely unavoidable, document why a shared definition cannot
+reach both sites and add a parity test that would fail if the copies drift.
 
 The same rule applies to ownership and conversion plumbing. If success,
 failure, and destroy paths free the same resource set, use one cleanup helper.
