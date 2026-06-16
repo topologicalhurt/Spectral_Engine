@@ -65,6 +65,15 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDE
 - Fast math (`fast_sqrt`, `fast_inv_sqrt`, `spectral_atan2_poly`): `core/spectral_fast_math.h`
 - Float waveforms: `core/spectral_osc_formulas.h` · Q15 waveforms: `core/spectral_osc_q15.h`
 - Array allocation: `spectral_size_add` / `spectral_malloc_array` / `spectral_calloc_array`
+- **Extract, don't copy (EXIST→REUSE→EXTRACT→only-then-copy).** When a kernel already exists
+  but is not *reachable* from a new caller (a TU-local `static`, an un-exposed `inline`, a
+  function buried in a width-templated `.inc`), the fix is to HOIST it into a shared
+  header/`.inc` so there is still exactly ONE definition — never a fresh copy "because the
+  original wasn't callable." A parity-tested duplicate is the fallback ONLY when a single C
+  definition genuinely cannot reach both sites (cross-language: GPU MSL/CUDA strings). The
+  `ifft_fast_sin4` failure is the cautionary case: a 3rd copy of the minimax sin was rolled
+  because `osc_vfastsin` was a TU-local static inside the oscillator kernel — the right move
+  was to extract the SIMD sin to a shared unit and have both the oscillator and the IFFT use it.
 - A formula duplicated across scalar C / SIMD / CUDA / Metal-string code needs a parity test
   and (where a C function can't reach, e.g. GPU strings) a version pin.
 

@@ -22,52 +22,51 @@
  * vectorize it. A microbench (bench_ifft_synth) measured a 4-wide minimax sin at
  * ~6.7× the scalar sinf, so the frame loop batches the trig into a SIMD Phase A.
  * Host only (SIMDe → SSE2/NEON) AND only when the poly is the active trig; exact
- * (APPROX_TRIG=0) and embedded builds take the scalar SSOT path. */
+ * (APPROX_TRIG=0) and embedded builds take the scalar SSOT path.
+ *
+ * The SIMD sin itself is NOT rolled here: we instantiate the shared vector SSOT
+ * (arch/simd/spectral_fast_sin_simd.inc — the same source the oscillator kernel
+ * includes at 4/8 wide) at 4 wide by supplying the vector-op vocabulary, then drop
+ * the macros so they don't leak into the renderer. One definition, two consumers. */
 #if !SPECTRAL_EMBEDDED && SPECTRAL_ENABLE_APPROX_TRIG
 #  include "simde/x86/sse2.h"
 #  include "simde/x86/sse4.1.h"        /* floor_ps */
 #  define SPECTRAL_IFFT_TRIG_SIMD 1
-/* 4-wide minimax sin: the SSOT degree-9 fold (q=round(x/pi); xr=x-q*pi; Horner over
- * x2; sign=(-1)^q) from spectral_fast_sin_inline, using the SSOT coefficients. It is
- * a THIRD copy of that eval (scalar = spectral_fast_sin_inline; SIMD-templated =
- * osc_vfastsin) because osc_vfastsin is a TU-local static inside the width-templated
- * spectral_oscillator_simd_kernel.inc and is not header-exposed, so it cannot be
- * reused here without re-instantiating the whole oscillator kernel. The static_assert
- * pins this copy to the formula version (a fast_sin change fails the build and forces
- * re-validation, matching how SPECTRAL_OSC_*_VERSION gates the other copies); the
- * render parity ctest (ifft_synth_parity) exercises it at runtime. (AI_CANON #7/#17.) */
-_Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 6,
-               "fast_sin formula changed — re-validate ifft_fast_sin4 against the SSOT");
-static inline simde__m128 ifft_fast_sin4(simde__m128 x) {
-    const simde__m128 inv_pi = simde_mm_set1_ps(SPECTRAL_INV_PI);
-    const simde__m128 pi     = simde_mm_set1_ps(SPECTRAL_PI);
-    const simde__m128 half   = simde_mm_set1_ps(0.5f);
-    const simde__m128 two    = simde_mm_set1_ps(2.0f);
-    const simde__m128 one    = simde_mm_set1_ps(1.0f);
-    simde__m128 q  = simde_mm_floor_ps(simde_mm_add_ps(simde_mm_mul_ps(x, inv_pi), half));
-    simde__m128 xr = simde_mm_sub_ps(x, simde_mm_mul_ps(q, pi));
-    simde__m128 x2 = simde_mm_mul_ps(xr, xr);
-    simde__m128 p  = simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C9);
-    p = simde_mm_add_ps(simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C7), simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C5), simde_mm_mul_ps(x2, p));
-    p = simde_mm_add_ps(simde_mm_set1_ps(SPECTRAL_MINIMAX_SIN_C3), simde_mm_mul_ps(x2, p));
-    p = simde_mm_mul_ps(xr, simde_mm_add_ps(one, simde_mm_mul_ps(x2, p)));
-    simde__m128 frac = simde_mm_sub_ps(q, simde_mm_mul_ps(two, simde_mm_floor_ps(simde_mm_mul_ps(q, half))));
-    simde__m128 sign = simde_mm_sub_ps(one, simde_mm_mul_ps(two, frac));
-    return simde_mm_mul_ps(p, sign);
-}
+#  define OSC_VW            4
+#  define OSC_VF            simde__m128
+#  define OSC_VSET1(x)      simde_mm_set1_ps(x)
+#  define OSC_VADD(a, b)    simde_mm_add_ps((a), (b))
+#  define OSC_VSUB(a, b)    simde_mm_sub_ps((a), (b))
+#  define OSC_VMUL(a, b)    simde_mm_mul_ps((a), (b))
+#  define OSC_VLOADU(p)     simde_mm_loadu_ps(p)
+#  define OSC_VSTOREU(p, v) simde_mm_storeu_ps((p), (v))
+#  define OSC_PASTE_(a, b)  a##b
+#  define OSC_PASTE(a, b)   OSC_PASTE_(a, b)
+#  define OSC_FN(base)      OSC_PASTE(base, _ifft)
+#  include "../arch/simd/spectral_fast_sin_simd.inc"  /* -> osc_vfloor_ifft, osc_vfastsin_ifft */
+#  undef OSC_VW
+#  undef OSC_VF
+#  undef OSC_VSET1
+#  undef OSC_VADD
+#  undef OSC_VSUB
+#  undef OSC_VMUL
+#  undef OSC_VLOADU
+#  undef OSC_VSTOREU
+#  undef OSC_PASTE_
+#  undef OSC_PASTE
+#  undef OSC_FN
 #else
 #  define SPECTRAL_IFFT_TRIG_SIMD 0
 #endif
 
 /* Test hook (plain-float interface so no simde type leaks through the header): the
- * SSOT parity ctest pins this third minimax-sin copy to the scalar SSOT
- * spectral_fast_sin_inline. On host it runs the live ifft_fast_sin4; in the exact/
- * embedded build (SIMD off) it is the scalar SSOT itself (a tautology there, the real
- * drift check on host). Pairs with the SPECTRAL_OSC_FORMULAS_VERSION static_assert. */
+ * SSOT parity ctest pins the IFFT's 4-wide instantiation of the shared SIMD sin to the
+ * scalar SSOT spectral_fast_sin_inline. On host it runs the live osc_vfastsin_ifft; in
+ * the exact/embedded build (SIMD off) it is the scalar SSOT itself (a tautology there,
+ * the real drift check is on host). The version pin lives in the shared .inc. */
 void spectral_ifft_fast_sin4_probe(const float in[4], float out[4]) {
 #if SPECTRAL_IFFT_TRIG_SIMD
-    simde_mm_storeu_ps(out, ifft_fast_sin4(simde_mm_loadu_ps(in)));
+    simde_mm_storeu_ps(out, osc_vfastsin_ifft(simde_mm_loadu_ps(in)));
 #else
     for (int i = 0; i < 4; i++) out[i] = spectral_fast_sin_inline(in[i]);
 #endif
@@ -325,8 +324,8 @@ static void ifft_render_frame(SpectralIfftSynth* s,
                                               0.5f * partials[b0 + j + 1].amp,
                                               0.5f * partials[b0 + j + 2].amp,
                                               0.5f * partials[b0 + j + 3].amp);
-            simde_mm_storeu_ps(&cr[j], simde_mm_mul_ps(ha, ifft_fast_sin4(simde_mm_add_ps(ph, hpi))));
-            simde_mm_storeu_ps(&ci[j], simde_mm_mul_ps(ha, ifft_fast_sin4(ph)));
+            simde_mm_storeu_ps(&cr[j], simde_mm_mul_ps(ha, osc_vfastsin_ifft(simde_mm_add_ps(ph, hpi))));
+            simde_mm_storeu_ps(&ci[j], simde_mm_mul_ps(ha, osc_vfastsin_ifft(ph)));
         }
 #endif
         for (; j < bn; j++) {   /* SIMD tail + the scalar/exact/embedded path */

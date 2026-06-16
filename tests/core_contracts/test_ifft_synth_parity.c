@@ -378,10 +378,12 @@ static void test_init_inplace(void) {
     free(pool);
 }
 
-/* Rung 7: SSOT pin for the internal SIMD sin. ifft_fast_sin4 is a third copy of the
- * minimax-fold sin (scalar = spectral_fast_sin_inline; SIMD-templated = osc_vfastsin);
- * AI_CANON #7 requires a parity test that fails if the copies drift. Bit-exact-except-FMA,
- * so a tight ULP-scale tolerance catches a structural drift while passing rounding. */
+/* Rung 7: SSOT pin for the SIMD sin. The minimax-fold sin has TWO definitions by design:
+ * the scalar spectral_fast_sin_inline and its vector mirror osc_vfastsin (the shared
+ * arch/simd/spectral_fast_sin_simd.inc, instantiated 4-wide here and 4/8-wide by the
+ * oscillator). AI_CANON #7 requires a parity test that fails if the scalar and the vector
+ * mirror drift. Bit-exact-except-FMA, so a tight ULP-scale tolerance catches a structural
+ * drift while passing rounding. */
 static void test_simd_sin_ssot(void) {
     printf("test_simd_sin_ssot:\n");
     double worst = 0.0;
@@ -396,8 +398,8 @@ static void test_simd_sin_ssot(void) {
             if (diff > worst) worst = diff;
         }
     }
-    printf("  ifft_fast_sin4 vs scalar SSOT: max diff %.3e\n", worst);
-    CHECK(worst < 1.0e-5, "ifft_fast_sin4 must track the scalar fast_sin SSOT (max diff %.3e)", worst);
+    printf("  SIMD osc_vfastsin vs scalar SSOT: max diff %.3e\n", worst);
+    CHECK(worst < 1.0e-5, "SIMD sin must track the scalar fast_sin SSOT (max diff %.3e)", worst);
 }
 
 int main(void) {

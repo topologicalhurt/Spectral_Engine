@@ -74,9 +74,10 @@ int spectral_ifft_synth_render_dynamic(SpectralIfftSynth* s,
                                        SpectralIfftFramePartialsFn fn, void* ctx,
                                        float* out, size_t total);
 
-/* Test hook: evaluate the internal SIMD minimax sin (the third copy of the fast_sin
- * SSOT) lane-by-lane, so a ctest can pin it to spectral_fast_sin_inline within ULP.
- * Plain-float interface keeps simde types out of this header. (AI_CANON #7.) */
+/* Test hook: evaluate the IFFT's 4-wide instantiation of the shared SIMD minimax sin
+ * (arch/simd/spectral_fast_sin_simd.inc — the vector SSOT, not a copy) lane-by-lane, so
+ * a ctest can pin it to spectral_fast_sin_inline within ULP. Plain-float interface keeps
+ * simde types out of this header. (AI_CANON #7.) */
 void spectral_ifft_fast_sin4_probe(const float in[4], float out[4]);
 
 /* --- port contract (implemented by exactly one host TU per build) -------- */
