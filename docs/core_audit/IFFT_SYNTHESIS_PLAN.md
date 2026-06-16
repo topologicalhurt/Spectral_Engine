@@ -144,7 +144,7 @@ resource-hash pattern). [Earlier drafts named `synth/`, `port/host/`, `port/cmsi
   formulation, K=8/O=16 measured operating point) + two iFFT ports
   (`drivers/vdsp/spectral_ifft_vdsp.c`, `arch/ref/spectral_ifft_ref.c` — exactly
   one live per build, selected on SPECTRAL_USE_VDSP). ctest
-  `ifft_synth_parity` (#20): port-vs-reference-iDFT 5.6e-9; stream parity
+  `ifft_synth_parity`: port-vs-reference-iDFT 5.6e-9; stream parity
   vs the exact oscillator sum **−72.8 dBFS max / −87.5 dBFS RMS** at 64
   dense partials; deterministic; **MEASURED 7.5× over the naive oscillator
   loop on desktop** (matches the embedded pricing's ~8× at 64 partials).
@@ -179,7 +179,7 @@ own focused unit, not a tack-on.
   pulls the active partials PER FRAME from a caller callback
   `(frame_center_sample) -> {SpectralIfftPartial[], count}`. The framing/OLA/motif
   stay owned by the renderer (the subtle part); the engine owns "which partials are
-  live this frame". Keep the existing static API (its parity test #20 stays the
+  live this frame". Keep the existing static API (its parity test ifft_synth_parity stays the
   oracle for the dynamic path on a stationary fixture: dynamic-with-constant-set ==
   static).
 - **Segment classifier** `is_stationary_sine_segment(seg)`: sine timbre AND
@@ -353,7 +353,11 @@ output samples in parallel. For dense spectra the GPU FFT⁻¹ (parallel bin pla
 batched FFT + parallel OLA) beats brute-force GPU oscillators because the FFT is
 O(N log N) independent of partial count. (Add these to `reference/ACADEMIC_SOURCES.md`.)
 
-**Bottleneck note (MEASURED, pass 259 — `bench_ifft_synth` cost breakdown).** Hard
+**Bottleneck note (MEASURED, pass 259 — `bench_ifft_synth` cost breakdown).**
+[This is the PRE-F6 deep-research snapshot. F6 (Win A/B/C) subsequently landed the full
+24.0 → 9.1 ns/sample cascade — SIMD trig, fmod kill, AND the motif-scatter arithmetic
+hoist (Win C); see the F6 phase. The ~9 ns residual below is the motif GATHER (table
+loads), which remains the largest term and is the GPU's domain (F7).] Hard
 numbers at 64 partials, N_FFT=512, desktop host port (the FFT is data-independent, so it
 was isolated by timing the backend on a random spectrum):
 - full IFFT render: **23.9 ns/sample**
