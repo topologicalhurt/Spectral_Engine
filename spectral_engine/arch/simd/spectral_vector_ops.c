@@ -20,6 +20,18 @@ static int spectral_complex_interleaved_count_valid(size_t count) {
     return count <= SIZE_MAX / 2u;
 }
 
+/* Horizontal max of v's 4 lanes, folded into the running scalar max m. The SSE2
+ * store-and-compare reduction shared by the abs-max and magsq vmax tails. */
+static inline float spectral_hmax4_fold(simde__m128 v, float m) {
+    float tmp[4];
+    simde_mm_storeu_ps(tmp, v);
+    if (tmp[0] > m) m = tmp[0];
+    if (tmp[1] > m) m = tmp[1];
+    if (tmp[2] > m) m = tmp[2];
+    if (tmp[3] > m) m = tmp[3];
+    return m;
+}
+
 void spectral_vmul(const float* a, const float* b, float* dst, size_t len) {
     if (!a || !b || !dst || len == 0) return;
     size_t i = 0;
@@ -145,12 +157,7 @@ void spectral_vmaxmgv(const float* src, float* out, size_t len) {
         simde__m128 va = simde_mm_and_ps(v, abs_mask);
         vmax = simde_mm_max_ps(vmax, va);
     }
-    float tmp[4];
-    simde_mm_storeu_ps(tmp, vmax);
-    if (tmp[0] > m) m = tmp[0];
-    if (tmp[1] > m) m = tmp[1];
-    if (tmp[2] > m) m = tmp[2];
-    if (tmp[3] > m) m = tmp[3];
+    m = spectral_hmax4_fold(vmax, m);
     for (; i < len; i++) {
         float a = fabsf(src[i]);
         if (a > m) m = a;
@@ -482,12 +489,7 @@ void spectral_magsq_phase(const float* interleaved,
         simde_mm_storeu_ps(&phase[i], r);
     }
 
-    float tmp[4];
-    simde_mm_storeu_ps(tmp, vmax);
-    if (tmp[0] > m) m = tmp[0];
-    if (tmp[1] > m) m = tmp[1];
-    if (tmp[2] > m) m = tmp[2];
-    if (tmp[3] > m) m = tmp[3];
+    m = spectral_hmax4_fold(vmax, m);
 
     for (; i < count; i++) {
         float re = interleaved[i * 2];
@@ -565,12 +567,7 @@ void spectral_magsq_only(const float* interleaved,
         vmax = simde_mm_max_ps(vmax, msq);
     }
 
-    float tmp[4];
-    simde_mm_storeu_ps(tmp, vmax);
-    if (tmp[0] > m) m = tmp[0];
-    if (tmp[1] > m) m = tmp[1];
-    if (tmp[2] > m) m = tmp[2];
-    if (tmp[3] > m) m = tmp[3];
+    m = spectral_hmax4_fold(vmax, m);
 
     for (; i < count; i++) {
         float re = interleaved[i * 2];
