@@ -42,14 +42,16 @@ Parity ladder: (a) frame-level — built spectrum iFFT'd vs time-domain
 windowed cosine; (b) stream-level — OLA output vs the exact oscillator sum
 over stationary partials; (c) golden — full pipeline render, maintainer signs.
 
-## File organization (pass-256 maintainer ruling)
+## File organization (pass-256 ruling; paths trued to the post-KERNEL-LAYOUT tree)
 
-One contract header `synth/spectral_synth_ifft.h` in OUR types; per-backend
-TUs in port dirs, never macro mono-files: `port/host/spectral_ifft_vdsp.c`
-(+ FFTW variant), `port/cmsis/spectral_ifft_cmsis.c` (Q31). Third-party
-headers do not leak through the contract; every port pair gets a parity test
-(`window_backend_parity` pattern). The motif table is generated (SSOT
-generator, committed artifact — resource-hash pattern).
+One contract header `core/spectral_synth_ifft.h` in OUR types; per-backend TUs
+in their layer, never macro mono-files: `drivers/vdsp/spectral_ifft_vdsp.c`
+(+ FFTW variant), the portable radix-2 `arch/ref/spectral_ifft_ref.c`, and the
+F4 CMSIS embedded port (float-on-M7, NOT Q31). Third-party headers do not leak
+through the contract; every port pair gets a parity test (`window_backend_parity`
+pattern). The motif table is generated (SSOT generator, committed artifact —
+resource-hash pattern). [Earlier drafts named `synth/`, `port/host/`, `port/cmsis/`
+— those dirs were dissolved by the L2/L3 kernel-layout refactor (CHANGELOG pass 262).]
 
 ## Phases
 
@@ -77,7 +79,8 @@ generator, committed artifact — resource-hash pattern).
     aligned, no malloc); `create()` refactored to ONE pool malloc + `#if !SPECTRAL_EMBEDDED`
     (embedded uses init); `destroy()` is a no-op on init pools. ctest rung 6: init render
     == create render BIT-IDENTICAL + undersized/null rejects. The F6 trig/fmod work already
-    made the hot path libm-free. REMAINING F4a blockers (each its own step): (i) the motif/
+    removed the hot path's `sinf`/`fmod` libm calls (`floorf` remains but lowers to a single
+    round intrinsic, no libc call). REMAINING F4a blockers (each its own step): (i) the motif/
     window build calls double `cos` (libm) at init — needs a COMMITTED precomputed table
     (the plan's "generated motif", resource-hash pattern) or the no-libm poly; (ii) the
     render's `memset(re/im)` → `spectral_mem_zero`; (iii) the FFT BACKEND — the ref backend
@@ -136,10 +139,10 @@ generator, committed artifact — resource-hash pattern).
   headroom). The frame-builder construction (centered motif, (−1)^k
   twiddle, Hermitian placement) is validated and is the SSOT formulation
   for F2.
-- F2 core CLOSED (pass 258): contract `synth/spectral_synth_ifft.h` +
-  frame renderer `synth/spectral_synth_ifft.c` (float port of the F1
-  formulation, K=8/O=16 measured operating point) + two host iFFT ports
-  (`core/port/host/spectral_ifft_vdsp.c`, `spectral_ifft_ref.c` — exactly
+- F2 core CLOSED (pass 258): contract `core/spectral_synth_ifft.h` +
+  frame renderer `core/spectral_synth_ifft.c` (float port of the F1
+  formulation, K=8/O=16 measured operating point) + two iFFT ports
+  (`drivers/vdsp/spectral_ifft_vdsp.c`, `arch/ref/spectral_ifft_ref.c` — exactly
   one live per build, selected on SPECTRAL_USE_VDSP). ctest
   `ifft_synth_parity` (#20): port-vs-reference-iDFT 5.6e-9; stream parity
   vs the exact oscillator sum **−72.8 dBFS max / −87.5 dBFS RMS** at 64
@@ -153,7 +156,7 @@ generator, committed artifact — resource-hash pattern).
   dense case + ctest #25). Remaining: the mixed-case seam correction, stretch/pitch,
   and the dispatch wiring (rides F3 golden). See the F2b build log below.
 
-## F2b — implementation design (characterized 2026-06-15, NOT yet built)
+## F2b — implementation design (characterized 2026-06-15; Step 1 + Step 2 v1 LANDED, mixed case NOT yet built — see the build log below)
 
 Characterized against the current code so the build is mechanical, not exploratory.
 F2b is correctness-critical (a mis-routed fade is an audible click), so it is its
