@@ -152,8 +152,10 @@ static void test_stream_parity(void) {
     double rms = sqrt(sumsq / TOTAL);
     printf("  stream parity: max=%.2f dBFS rms=%.2f dBFS (%u partials)\n",
            dbfs(worst), dbfs(rms), (unsigned)N_PARTIALS);
-    CHECK(dbfs(worst) < -60.0, "stream max err must beat -60 dBFS (got %.2f)", dbfs(worst));
-    CHECK(dbfs(rms) < -75.0, "stream rms err must beat -75 dBFS (got %.2f)", dbfs(rms));
+    /* Floors ~5 dB above the measured operating point (-72.8 max / -87.5 rms) so a ~2x
+     * regression fails rather than slipping through a loose budget. */
+    CHECK(dbfs(worst) < -68.0, "stream max err must beat -68 dBFS (got %.2f)", dbfs(worst));
+    CHECK(dbfs(rms) < -82.0, "stream rms err must beat -82 dBFS (got %.2f)", dbfs(rms));
 
     /* Determinism. */
     CHECK(spectral_ifft_synth_render(s, parts, N_PARTIALS, out2, TOTAL) == 0, "render rc 2");
@@ -270,7 +272,14 @@ static void test_dynamic_render(void) {
     }
     double mid_rms = sqrt(mid_sumsq / TOTAL);
     printf("  gated: mid rms=%.2f dBFS far-edge max=%.3e\n", dbfs(mid_rms), edge_max);
-    CHECK(mid_rms > 1.0e-3, "active middle must carry energy (rms %.3e)", mid_rms);
+    /* Analytic target: a unit-COLA amp-0.5 cosine over [lo,hi) -> rms (over TOTAL) of
+     * (0.5/sqrt2)*sqrt((hi-lo)/TOTAL). Assert a +/-50% band so a level regression fails,
+     * not just a silent-output one. */
+    double mid_lo = (double)(size_t)(gc.t_lo + (double)guard);
+    double mid_hi = (double)(size_t)(gc.t_hi - (double)guard);
+    double expect = (0.5 / sqrt(2.0)) * sqrt((mid_hi - mid_lo) / (double)TOTAL);
+    CHECK(mid_rms > 0.5 * expect && mid_rms < 1.5 * expect,
+          "active middle rms must match analytic ~%.3f (got %.3f)", expect, mid_rms);
     CHECK(edge_max < 1.0e-4, "inactive far edges must stay silent (max %.3e)", edge_max);
 
     /* 3. A frame returning an out-of-domain partial: it must be SKIPPED, never
@@ -315,7 +324,10 @@ static void test_integer_bins(void) {
         if (err > worst) worst = err;
     }
     printf("  integer-bin max err: %.2f dBFS\n", dbfs(worst));
-    CHECK(dbfs(worst) < -55.0, "integer-bin render must beat -55 dBFS (got %.2f)", dbfs(worst));
+    /* Integer bins sit exactly on a motif sample -> near-exact (achieves ~-143 dBFS);
+     * the floor is tight enough to catch a real placement/precision regression, not just
+     * a crash guard. */
+    CHECK(dbfs(worst) < -120.0, "integer-bin render must beat -120 dBFS (got %.2f)", dbfs(worst));
     spectral_ifft_synth_destroy(s);
 }
 

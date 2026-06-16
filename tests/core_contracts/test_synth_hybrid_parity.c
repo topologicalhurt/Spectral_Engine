@@ -113,8 +113,9 @@ static void test_fast_path_parity(void) {
     double rms = sqrt(sumsq / (double)cnt);
     printf("  deep-interior parity: max=%.2f dBFS rms=%.2f dBFS (%u partials)\n",
            dbfs(worst), dbfs(rms), (unsigned)N_SEG);
-    CHECK(dbfs(worst) < -55.0, "fast-path max err must beat -55 dBFS (got %.2f)", dbfs(worst));
-    CHECK(dbfs(rms) < -70.0, "fast-path rms err must beat -70 dBFS (got %.2f)", dbfs(rms));
+    /* Floors ~5 dB above the measured -66.6/-79.5 so a real regression fails. */
+    CHECK(dbfs(worst) < -62.0, "fast-path max err must beat -62 dBFS (got %.2f)", dbfs(worst));
+    CHECK(dbfs(rms) < -74.0, "fast-path rms err must beat -74 dBFS (got %.2f)", dbfs(rms));
 }
 
 /* out[] must be left untouched on every decline so the caller's fallback owns it. */
@@ -151,6 +152,10 @@ static void test_decline_contract(void) {
 
 /* Late onset in a long render: omega*start is large, so without the double mod-2pi
  * wrap of phase0 the float cast loses ~ULP(omega*start) rad (a gross phase error). */
+/* A MODERATE late onset: large enough that the un-wrapped float phase0 cast loses
+ * ~3.6e-3 rad (~-49 dBFS, failing the -60 floor), but not so large that the float-bin
+ * round-trip (the renderer re-derives omega from the float-stored bin) dominates — that
+ * contract-inherent limit grows with onset and would mask the wrap this rung targets. */
 #define LO_TOTAL  20000u
 #define LO_START  10000u
 static void test_late_onset_precision(void) {
@@ -185,7 +190,9 @@ static void test_late_onset_precision(void) {
         if (err > worst) worst = err;
     }
     printf("  late-onset(start=%u) max err: %.2f dBFS\n", LO_START, dbfs(worst));
-    CHECK(dbfs(worst) < -55.0, "late-onset render must beat -55 dBFS (phase0 wrap; got %.2f)", dbfs(worst));
+    /* Wrapped: ~-69 dBFS. Without the mod-2pi phase0 wrap the float cast loses ~3.6e-3 rad
+     * (~-49 dBFS), so the -60 floor fails by ~11 dB if the wrap regresses. */
+    CHECK(dbfs(worst) < -60.0, "late-onset render must beat -60 dBFS (phase0 wrap; got %.2f)", dbfs(worst));
 }
 
 int main(void) {

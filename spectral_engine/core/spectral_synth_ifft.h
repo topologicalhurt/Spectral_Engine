@@ -13,7 +13,9 @@
  *   - The inverse-FFT primitive is a port contract implemented by exactly
  *     one TU per build: drivers/vdsp/spectral_ifft_vdsp.c (Apple) or
  *     arch/ref/spectral_ifft_ref.c (portable radix-2 fallback).
- *     The ARM Q31 port (port/cmsis/) lands at F4.
+ *     The CMSIS embedded port lands at F4 — a FLOAT-on-M7-FPU port
+ *     (arm_rfft_fast_f32), NOT a Q31 rewrite (maintainer directive 2026-06-15;
+ *     see IFFT_SYNTHESIS_PLAN.md F4 + the embedded-integration audit).
  */
 #ifndef SPECTRAL_SYNTH_IFFT_H
 #define SPECTRAL_SYNTH_IFFT_H
@@ -87,7 +89,8 @@ size_t spectral_ifft_backend_n_fft(const SpectralIfftBackend* b);
  *   im[0] = F[n_fft/2] (Nyquist, real).
  * out[n] = (1/N) * sum_k F[k] e^{+j 2 pi k n / N}  (real, length n_fft).
  * Each port owns its library's scaling so the contract stays textbook.
- * MUTATES re/im (scratch). */
+ * MAY mutate re/im (treat as scratch; vDSP clobbers them, the ref port does not —
+ * the renderer re-clears them each frame, so callers must not rely on either). */
 void spectral_ifft_backend_inverse(SpectralIfftBackend* b,
                                    float* re, float* im, float* out);
 
