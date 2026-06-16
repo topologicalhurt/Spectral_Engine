@@ -35,7 +35,7 @@
  * reused here without re-instantiating the whole oscillator kernel. The static_assert
  * pins this copy to the formula version (a fast_sin change fails the build and forces
  * re-validation, matching how SPECTRAL_OSC_*_VERSION gates the other copies); the
- * render parity ctest (#24) exercises it at runtime. (AI_CANON #7/#17.) */
+ * render parity ctest (ifft_synth_parity) exercises it at runtime. (AI_CANON #7/#17.) */
 _Static_assert(SPECTRAL_OSC_FORMULAS_VERSION == 6,
                "fast_sin formula changed — re-validate ifft_fast_sin4 against the SSOT");
 static inline simde__m128 ifft_fast_sin4(simde__m128 x) {
@@ -118,6 +118,11 @@ static void ifft_synth_place(SpectralIfftSynth* s, char* pool, size_t n_fft) {
     s->frame_partials = (SpectralIfftPartial*)p;
 }
 
+/* Periodic Hann sample at integer index idx over period n_fft (the OLA window). */
+static double ifft_periodic_hann(long idx, size_t n_fft) {
+    return 0.5 - 0.5 * cos(2.0 * SPECTRAL_PI_D * (double)idx / (double)n_fft);
+}
+
 /* Compute the build-constant window + motif tables into the placed scratch. Double
  * cos at INIT only; the embedded F4 port commits this table so the libc-free runtime
  * never calls libm (and the memsets here become spectral_mem_zero). */
@@ -127,7 +132,7 @@ static void ifft_synth_compute_tables(SpectralIfftSynth* s) {
     memset(s->re, 0, (n_fft / 2u) * sizeof(float));
     memset(s->im, 0, (n_fft / 2u) * sizeof(float));
     for (size_t n = 0; n < n_fft; n++) {
-        s->window[n] = (float)(0.5 - 0.5 * cos(2.0 * SPECTRAL_PI_D * (double)n / (double)n_fft));
+        s->window[n] = (float)ifft_periodic_hann((long)n, n_fft);
     }
     /* M(d) = sum_m v[m] cos(2 pi d m / N), v = window circularly centered at 0.
      * Double accumulation; the table is tiny (257 floats at K=8/O=16). */
@@ -135,9 +140,7 @@ static void ifft_synth_compute_tables(SpectralIfftSynth* s) {
         double d = ((double)i - (double)(IFFT_MOTIF_K * IFFT_MOTIF_O)) / IFFT_MOTIF_O;
         double acc = 0.0;
         for (long m = -(long)n_fft / 2; m < (long)n_fft / 2; m++) {
-            double v = 0.5 - 0.5 * cos(2.0 * SPECTRAL_PI_D
-                                       * (double)((m + (long)n_fft + (long)n_fft / 2) % (long)n_fft)
-                                       / (double)n_fft);
+            double v = ifft_periodic_hann((m + (long)n_fft + (long)n_fft / 2) % (long)n_fft, n_fft);
             acc += v * cos(2.0 * SPECTRAL_PI_D * d * (double)m / (double)n_fft);
         }
         s->motif[i] = (float)acc;
@@ -218,7 +221,7 @@ static void place_partial_cri(SpectralIfftSynth* s, float bin, float cr, float c
      * for bins so near integer they are sub-floor — and frac>0 keeps the table-edge
      * case (an exact-integer bin would push the last tap past the table) on the per-tap
      * path. No DC/Nyquist skip (window interior). The fractional-interior path is the
-     * one #24's stream parity exercises. */
+     * one the ifft_synth_parity stream test exercises. */
     const float frac = bin - (float)k0;
     if (klo >= 1 && klo + n_tap - 1 <= half - 1 && frac > 0.0f) {
         const float* t = s->motif;

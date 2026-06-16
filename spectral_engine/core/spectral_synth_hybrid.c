@@ -69,7 +69,13 @@ static size_t hybrid_frame_partials(void* vctx, double center,
         double omega = (double)s->omega;
         out[k].bin = (float)(omega * (double)h->n_fft / (2.0 * SPECTRAL_PI_D));
         out[k].amp = s->amp;
-        out[k].phase0 = (float)((double)s->phase - omega * start);
+        /* Wrap the absolute t=0 phase to [-pi, pi] in DOUBLE before the float cast:
+         * omega*start grows with a late onset, so a raw float cast of phase - omega*start
+         * would lose up to ~1 rad. The renderer reduces mod 2pi anyway, so wrapping here
+         * is exact and keeps the float phase0 to ~1e-7 rad regardless of onset. */
+        double p0 = (double)s->phase - omega * start;
+        p0 -= (2.0 * SPECTRAL_PI_D) * floor(p0 / (2.0 * SPECTRAL_PI_D) + 0.5);
+        out[k].phase0 = (float)p0;
         k++;
     }
     return k;
@@ -91,6 +97,11 @@ SpectralHybridResult spectral_synth_hybrid_try_render(
         }
     }
 
+    /* v1 builds the synth per call (a malloc + the ~132k-cos motif/window table). The
+     * tables are n_fft-constant, so before F3 wires this into the dispatch the synth
+     * must be hoisted to setup and reused — via the static-pool spectral_ifft_synth_init
+     * path (caller-owned, no malloc) — rather than rebuilt every render. Acceptable for
+     * the opt-in v1 (no production caller); a real perf bug once dense renders stream. */
     SpectralIfftSynth* s = spectral_ifft_synth_create(HYBRID_NFFT);
     if (!s) return SPECTRAL_HYBRID_DECLINED;
 

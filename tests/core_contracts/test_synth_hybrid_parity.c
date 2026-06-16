@@ -149,10 +149,50 @@ static void test_decline_contract(void) {
     check_declines(few, out, "sub-crossover count", 1.0f, 1.0f, TIMBRE_SINE);
 }
 
+/* Late onset in a long render: omega*start is large, so without the double mod-2pi
+ * wrap of phase0 the float cast loses ~ULP(omega*start) rad (a gross phase error). */
+#define LO_TOTAL  20000u
+#define LO_START  10000u
+static void test_late_onset_precision(void) {
+    printf("test_late_onset_precision:\n");
+    static Segment seg[8];
+    memset(seg, 0, sizeof seg);
+    unsigned rng = 0x33ccaa55u;
+    for (int i = 0; i < 8; i++) {
+        double bin = 100.0 + 18.0 * (double)i;            /* high bins -> large omega */
+        seg[i].start = (float)LO_START + 0.6f;            /* large + fractional onset */
+        seg[i].length = (float)(LO_TOTAL - LO_START);
+        seg[i].omega = (float)(bin * 2.0 * SPECTRAL_PI_D / (double)N_FFT);
+        seg[i].phase = (float)(2.0 * SPECTRAL_PI_D * xorshift32_unit(&rng) - SPECTRAL_PI_D);
+        seg[i].amp = 0.1f;
+    }
+    SegmentArray sa = { seg, 8u, 8u };
+    static float out[LO_TOTAL];
+    SpectralHybridResult r =
+        spectral_synth_hybrid_try_render(sa, out, LO_TOTAL, 1.0f, 1.0f, TIMBRE_SINE);
+    CHECK(r == SPECTRAL_HYBRID_RENDERED, "late-onset dense set must render");
+    if (r != SPECTRAL_HYBRID_RENDERED) return;
+
+    double worst = 0.0;
+    for (size_t t = LO_START + N_FFT; t < LO_TOTAL - N_FFT; t++) {
+        double want = 0.0;
+        for (int i = 0; i < 8; i++) {
+            double omega = (double)seg[i].omega;
+            double phi0 = (double)seg[i].phase - omega * floor((double)seg[i].start);
+            want += (double)seg[i].amp * cos(omega * (double)t + phi0);
+        }
+        double err = fabs((double)out[t] - want);
+        if (err > worst) worst = err;
+    }
+    printf("  late-onset(start=%u) max err: %.2f dBFS\n", LO_START, dbfs(worst));
+    CHECK(dbfs(worst) < -55.0, "late-onset render must beat -55 dBFS (phase0 wrap; got %.2f)", dbfs(worst));
+}
+
 int main(void) {
     test_eligibility();
     test_fast_path_parity();
     test_decline_contract();
+    test_late_onset_precision();
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;
 }
