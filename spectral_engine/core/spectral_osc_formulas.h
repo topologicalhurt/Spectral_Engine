@@ -56,8 +56,8 @@ OSC_FORMULA_FUNC float spectral_normalize_phase(float p) {
  * 3.0 ULP worst case over [-4pi,4pi]; the float32 evaluation noise dominates,
  * the polynomial's own residual is ~3e-9 (two orders below the float floor), so
  * the coefficients are minimax-equivalent in single precision. This is faster
- * than libm and SIMD-vectorizable (its twin lives in simde_fast_sin_ps), which
- * is why it is the default.
+ * than libm and SIMD-vectorizable (its width-templated twin is osc_vfastsin in
+ * arch/simd/spectral_oscillator_simd_kernel.inc), which is why it is the default.
  *
  * SPECTRAL_ENABLE_APPROX_TRIG == 0 restores the exact libm/CUDA sinf reference
  * (the EXACT_TRIG guarantee); used by reproducible/parity builds.

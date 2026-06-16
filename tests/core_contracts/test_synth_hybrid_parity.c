@@ -30,14 +30,16 @@
 
 static double dbfs(double x) { return 20.0 * log10(x > 1e-300 ? x : 1e-300); }
 
-/* Fill a stationary-sine fixture: distinct fractional bins, staggered onsets
- * (so phase0 = phase - omega*start is non-trivial), all spanning to the end. */
+/* Fill a stationary-sine fixture: distinct fractional bins, staggered FRACTIONAL
+ * onsets (so the floor(start) onset truncation that matches the oscillator is
+ * exercised — a regression to the un-floored start would phase-shift the partials),
+ * all spanning to the end. */
 static void make_fixture(Segment* segs) {
     unsigned rng = 0xa5a5f00du;
     memset(segs, 0, N_SEG * sizeof(Segment));
     for (uint32_t i = 0; i < N_SEG; i++) {
         double bin = 12.3 + 14.0 * (double)i;                 /* 12.3 .. 222.3, in (1,255) */
-        segs[i].start = (float)(i * 8);                       /* small staggered onsets */
+        segs[i].start = (float)(i * 8) + 0.37f;               /* fractional staggered onsets */
         segs[i].length = (float)TOTAL;                        /* active through the end */
         segs[i].omega = (float)(bin * 2.0 * SPECTRAL_PI_D / (double)N_FFT);
         segs[i].phase = (float)(2.0 * SPECTRAL_PI_D * xorshift32_unit(&rng) - SPECTRAL_PI_D);
@@ -69,6 +71,12 @@ static void test_eligibility(void) {
     CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "non-finite amp rejected");
     bad = segs[0]; bad.phase = INFINITY;
     CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "non-finite phase rejected");
+    /* The osc fallback drops these (valid_for_synth); the fast path must too, not
+     * IFFT-render a divergent partial. */
+    bad = segs[0]; bad.amp = -0.1f;
+    CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "negative amp rejected");
+    bad = segs[0]; bad.start = -8.0f;
+    CHECK(spectral_synth_hybrid_segment_eligible(&bad, N_FFT) == 0, "negative start rejected");
 }
 
 static void test_fast_path_parity(void) {
@@ -85,7 +93,7 @@ static void test_fast_path_parity(void) {
 
     /* Deep interior: every segment active (t >= max start + one frame) and full
      * COLA coverage (t <= total - one frame). Compare to the exact oscillator
-     * sum; phase0 = phase - omega*start. */
+     * sum; phase0 = phase - omega*floor(start) (the osc start_idx truncation). */
     size_t lo = (size_t)segs[N_SEG - 1].start + N_FFT;
     size_t hi = TOTAL - N_FFT;
     double worst = 0.0, sumsq = 0.0;
@@ -94,7 +102,7 @@ static void test_fast_path_parity(void) {
         double want = 0.0;
         for (uint32_t i = 0; i < N_SEG; i++) {
             double omega = (double)segs[i].omega;
-            double phi0 = (double)segs[i].phase - omega * (double)segs[i].start;
+            double phi0 = (double)segs[i].phase - omega * floor((double)segs[i].start);
             want += (double)segs[i].amp * cos(omega * (double)t + phi0);
         }
         double err = fabs((double)out[t] - want);

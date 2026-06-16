@@ -4,6 +4,7 @@
 #include <math.h>
 
 #include "spectral_consts.h"
+#include "spectral_contracts.h"      /* spectral_segment_valid_for_synth — the osc-path gate */
 #include "spectral_synth_ifft.h"
 
 /* v1 operating point. n_fft is the IFFT frame length (hop = n_fft/2); 512
@@ -24,10 +25,12 @@
 
 int spectral_synth_hybrid_segment_eligible(const Segment* seg, size_t n_fft) {
     if (!seg) return 0;
-    /* Reject malformed fields the later gates don't cover (amp/phase/start feed the
-     * extraction, not a comparison) so a bad segment DECLINES to the osc path
-     * rather than getting silently dropped by the renderer's finite-bin skip. */
-    if (!isfinite(seg->amp) || !isfinite(seg->phase) || !isfinite(seg->start)) return 0;
+    /* Gate on the SAME validity contract the oscillator fallback enforces, so an
+     * out-of-contract segment (amp<0, start<0, length<=0, omega<0, or any non-finite
+     * field) DECLINES to the osc path rather than being IFFT-rendered into a partial
+     * that diverges from the only sanctioned reference. Subsumes the per-field finite
+     * checks; the hybrid-specific stationarity/domain gates follow. */
+    if (!spectral_segment_valid_for_synth(seg)) return 0;
     if (!(fabsf(seg->df) <= HYBRID_DF_EPS)) return 0;             /* no chirp (also rejects NaN) */
     if (spectral_segment_has_cubic(seg) &&
         (fabsf(spectral_segment_cubic_c2(seg)) > HYBRID_C_EPS ||
@@ -47,8 +50,11 @@ int spectral_synth_hybrid_segment_eligible(const Segment* seg, size_t n_fft) {
 }
 
 /* Per-frame partial provider: emit every eligible segment active in the frame
- * centered at `center`. The segment phase model phase + omega*(t - start) maps
- * to the renderer's omega*center + phase0 via phase0 = phase - omega*start. */
+ * centered at `center`. The onset is FLOORED to match the oscillator fallback,
+ * which renders from start_idx = (size_t)start: the osc phase at output sample t is
+ * phase + omega*(t - floor(start)), so the renderer's omega*center + phase0 must use
+ * phase0 = phase - omega*floor(start) to agree (a fractional start would otherwise
+ * phase-shift the partial by up to ~pi). */
 typedef struct { const Segment* segs; size_t count; size_t n_fft; } HybridSource;
 
 static size_t hybrid_frame_partials(void* vctx, double center,
@@ -57,7 +63,7 @@ static size_t hybrid_frame_partials(void* vctx, double center,
     size_t k = 0;
     for (size_t i = 0; i < h->count && k < cap; i++) {
         const Segment* s = &h->segs[i];
-        double start = (double)s->start;
+        double start = floor((double)s->start);   /* osc start_idx = (size_t)start */
         double end = start + (double)s->length;
         if (center < start || center > end) continue;            /* not active this frame */
         double omega = (double)s->omega;

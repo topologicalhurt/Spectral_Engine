@@ -252,8 +252,9 @@ static void place_partial_cri(SpectralIfftSynth* s, float bin, float cr, float c
  * amp/phase. place_partial's float->int floor is int-conversion UB on a garbage
  * bin, so every partial is checked before it reaches the spectrum; the negated
  * comparisons also reject NaN. The phase0 magnitude bound keeps the Phase-A
- * `(long long)(x/tau + ...)` reduction in range and exact (|x/tau| stays well below
- * 2^53), since omega*center + phase0 is dominated by a wild phase0. */
+ * `(long long)(x/tau + ...)` reduction within long long range: |phase0| < 1e15 and a
+ * realistic `center` (bounded by the render length) keep |x/tau| below ~1.6e14, well
+ * under LLONG_MAX, so the cast cannot overflow (it stays exact below 2^53). */
 #define IFFT_PHASE0_MAX 1.0e15f
 static int ifft_partial_valid(const SpectralIfftSynth* s, const SpectralIfftPartial* p) {
     const size_t half = s->n_fft / 2;
@@ -282,7 +283,9 @@ static void ifft_render_frame(SpectralIfftSynth* s,
     /* Phase A: (cr, ci) for every partial. The phase reduction stays scalar+double
      * (phi can be thousands of rad → float would lose ~1e-3), but the sin/cos is
      * batched into a SIMD minimax pass (F6). Phase B scatters. Blocked so the
-     * per-block scratch is bounded regardless of n. cos(x)=sin(x+pi/2). */
+     * per-block scratch is bounded regardless of n. cos(x)=sin(x+pi/2). The block
+     * size is a SIMD-width (4) multiple chosen to keep the three stack scratch arrays
+     * small (64·4·3 = 768 B) with a minimal scalar tail; it is correctness-neutral. */
     enum { IFFT_TRIG_BLK = 64 };
     float phi[IFFT_TRIG_BLK], cr[IFFT_TRIG_BLK], ci[IFFT_TRIG_BLK];
     for (size_t b0 = 0; b0 < n; b0 += IFFT_TRIG_BLK) {
