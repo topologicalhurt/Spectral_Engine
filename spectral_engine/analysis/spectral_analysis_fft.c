@@ -86,20 +86,6 @@ void spectral_fft_resources_set_magsq_scales(SpectralFftResources* res,
     }
 }
 
-static float spectral_fft_trackable_magsq_max(const float* magsq, size_t n_freqs)
-{
-    float max_magsq = 0.0f;
-    if (!magsq || n_freqs <= 2u) return 0.0f;
-
-    for (size_t i = 1u; i + 1u < n_freqs; i++) {
-        if (isfinite(magsq[i]) && magsq[i] > max_magsq) {
-            max_magsq = magsq[i];
-        }
-    }
-    return max_magsq;
-}
-
-
 static void spectral_fft_apply_magsq_scales(const SpectralFftResources* res,
                                             float* magsq,
                                             size_t n_freqs,
@@ -127,12 +113,16 @@ static void spectral_fft_apply_magsq_scales(const SpectralFftResources* res,
     if (n_freqs > 1u) {
         magsq[n_freqs - 1u] = spectral_fft_scaled_magsq(magsq[n_freqs - 1u], endpoint_scale);
     }
+    /* Scale the interior bins and track the trackable frame max in the SAME pass:
+     * spectral_fft_scaled_magsq always returns a finite value in [0, FLT_MAX], so the
+     * running max needs no isfinite re-check and a separate max walk is redundant. */
+    float interior_max = 0.0f;
     for (size_t i = 1u; i + 1u < n_freqs; i++) {
-        magsq[i] = spectral_fft_scaled_magsq(magsq[i], positive_scale);
+        float scaled = spectral_fft_scaled_magsq(magsq[i], positive_scale);
+        magsq[i] = scaled;
+        if (scaled > interior_max) interior_max = scaled;
     }
-    if (frame_max) {
-        *frame_max = spectral_fft_trackable_magsq_max(magsq, n_freqs);
-    }
+    if (frame_max) *frame_max = interior_max;
 }
 
 int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
