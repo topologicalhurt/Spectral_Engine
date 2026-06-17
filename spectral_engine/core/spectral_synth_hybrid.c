@@ -69,11 +69,15 @@ static size_t hybrid_frame_partials(void* vctx, double center,
         double omega = (double)s->omega;
         out[k].bin = (float)(omega * (double)h->n_fft / (2.0 * SPECTRAL_PI_D));
         out[k].amp = s->amp;
-        /* Wrap the absolute t=0 phase to [-pi, pi] in DOUBLE before the float cast:
-         * omega*start grows with a late onset, so a raw float cast of phase - omega*start
-         * would lose up to ~1 rad. The renderer reduces mod 2pi anyway, so wrapping here
-         * is exact and keeps the float phase0 to ~1e-7 rad regardless of onset. */
-        double p0 = (double)s->phase - omega * start;
+        /* The IFFT renderer reconstructs a COSINE (amp*cos(omega*t + phase0)), but the
+         * oscillator default this path substitutes for (synth_cpu -> spectral_osc_sine)
+         * renders a SINE of the segment phase. Convert the sine phase to a cosine phase with
+         * -pi/2 so cos(omega*t + (phase - pi/2)) == sin(omega*t + phase), matching synth_cpu
+         * exactly instead of rotating every partial 90 degrees.
+         * Wrap the absolute t=0 phase to [-pi, pi] in DOUBLE before the float cast: omega*start
+         * grows with a late onset, so a raw float cast would lose up to ~1 rad; the renderer
+         * reduces mod 2pi anyway, so wrapping here is exact (~1e-7 rad regardless of onset). */
+        double p0 = (double)s->phase - omega * start - 0.5 * SPECTRAL_PI_D;
         p0 -= (2.0 * SPECTRAL_PI_D) * floor(p0 / (2.0 * SPECTRAL_PI_D) + 0.5);
         out[k].phase0 = (float)p0;
         k++;

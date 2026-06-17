@@ -95,7 +95,10 @@ static void test_fast_path_parity(void) {
 
     /* Deep interior: every segment active (t >= max start + one frame) and full
      * COLA coverage (t <= total - one frame). Compare to the exact oscillator
-     * sum; phase0 = phase - omega*floor(start) (the osc start_idx truncation). */
+     * sum. The oscillator default (synth_cpu -> spectral_osc_sine) renders a SINE, so the
+     * reference is amp*sin(omega*t + phi0), phi0 = phase - omega*floor(start) (the osc
+     * start_idx truncation) — NOT cos: the renderer is a cosine synth and the hybrid router
+     * applies the -pi/2 sine->cosine conversion, so a cos reference here would hide it. */
     size_t lo = (size_t)segs[N_SEG - 1].start + N_FFT;
     size_t hi = TOTAL - N_FFT;
     double worst = 0.0, sumsq = 0.0;
@@ -105,7 +108,7 @@ static void test_fast_path_parity(void) {
         for (uint32_t i = 0; i < N_SEG; i++) {
             double omega = (double)segs[i].omega;
             double phi0 = (double)segs[i].phase - omega * floor((double)segs[i].start);
-            want += (double)segs[i].amp * cos(omega * (double)t + phi0);
+            want += (double)segs[i].amp * sin(omega * (double)t + phi0);
         }
         double err = fabs((double)out[t] - want);
         if (err > worst) worst = err;
@@ -188,7 +191,7 @@ static void test_late_onset_precision(void) {
         for (int i = 0; i < 8; i++) {
             double omega = (double)seg[i].omega;
             double phi0 = (double)seg[i].phase - omega * floor((double)seg[i].start);
-            want += (double)seg[i].amp * cos(omega * (double)t + phi0);
+            want += (double)seg[i].amp * sin(omega * (double)t + phi0);
         }
         double err = fabs((double)out[t] - want);
         if (err > worst) worst = err;
