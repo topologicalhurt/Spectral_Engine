@@ -260,29 +260,32 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
         synth_cpu_fallback_invoke, NULL, out_continue_backend);
 }
 
-SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
+/* Cheap span-only init: the start_idx / length / valid that the span pre-pass needs, without
+ * the alpha/beta/cubic/endpoint derivations. segment_loop_params_init layers the full work on
+ * top (it calls this first), so the two agree on the span exactly. A segment that passes the
+ * span clamp here but is later rejected by an endpoint-finiteness check is over-included in the
+ * pre-pass span only — safe: the index-based partitioning is unchanged, the render loop skips
+ * the segment, and the unwritten thread-buffer region stays zero, so the reduced output is
+ * bit-identical. */
+SegmentLoopParams segment_span_init(const Segment* s, const SynthParams* p, size_t out_len) {
     SegmentLoopParams lp = {0};
-    float alpha = 0.0f;
-    float beta = 0.0f;
-    float d_amp = 0.0f;
+    double start_d = 0.0;
+    double length_d = 0.0;
     double last_offset_d = 0.0;
 
     if (!s || !p || out_len == 0) return lp;
 
     if (!spectral_segment_valid_for_synth(s)) {
-        lp.valid = 0;
         return lp;
     }
 
     /* Overflow-safe: clamp negative/huge float products before casting to size_t */
-    double start_d = (double)s->start * (double)p->stretch;
-    double length_d = (double)s->length * (double)p->stretch;
+    start_d = (double)s->start * (double)p->stretch;
+    length_d = (double)s->length * (double)p->stretch;
     if (!spectral_is_finite_f64(start_d) || start_d < 0.0 || start_d >= (double)out_len || start_d > (double)SIZE_MAX) {
-        lp.valid = 0;
         return lp;
     }
     if (!spectral_is_finite_f64(length_d) || length_d < 0.0 || length_d > (double)SIZE_MAX) {
-        lp.valid = 0;
         return lp;
     }
 
@@ -290,7 +293,6 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     lp.length = (size_t)length_d;
 
     if (lp.start_idx >= out_len || lp.length == 0) {
-        lp.valid = 0;
         return lp;
     }
     /* Overflow-safe comparison: rearranged to avoid size_t addition overflow */
@@ -298,18 +300,34 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
         lp.length = out_len - lp.start_idx;
     }
     if (lp.length == 0) {
-        lp.valid = 0;
         return lp;
     }
 
     /* Hot loops cast sample offsets to float.  Prove the final offset is
      * representable before later `(float)j` conversions in CPU/native callbacks
-     * and before endpoint validation below. */
+     * and before endpoint validation in segment_loop_params_init. */
     last_offset_d = (double)(lp.length - 1u);
     if (!spectral_is_finite_f64(last_offset_d) || last_offset_d > (double)FLT_MAX) {
-        lp.valid = 0;
         return lp;
     }
+
+    lp.valid = 1;
+    return lp;
+}
+
+/* Full init = span_init + the derived hot-loop scalars (alpha/beta/cubic) and the endpoint
+ * finiteness validation. The span pre-pass calls segment_span_init directly to skip this tail,
+ * which it does not consume. */
+SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
+    SegmentLoopParams lp = segment_span_init(s, p, out_len);
+    float alpha = 0.0f;
+    float beta = 0.0f;
+    float d_amp = 0.0f;
+    double last_offset_d = 0.0;
+
+    if (!lp.valid) return lp;
+    lp.valid = 0;   /* re-established only after the derived-scalar + endpoint checks pass */
+    last_offset_d = (double)(lp.length - 1u);   /* span_init proved this finite and <= FLT_MAX */
 
     alpha = spectral_segment_alpha_f32(s->omega, p->pitch_factor, p->inv_stretch);
     beta = spectral_segment_beta_f32(s->df, p->pitch_factor, p->inv_stretch_sq);

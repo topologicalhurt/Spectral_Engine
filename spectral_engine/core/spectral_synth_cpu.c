@@ -265,9 +265,10 @@ static SpectralError synth_cpu_driver(
         return SPECTRAL_ERR_MEMORY;
     }
 
-    /* Span pre-pass: same partitioning and same segment_loop_params_init as the
-     * synth loop below, so the window bounds it derives exactly contain every
-     * write that loop performs. */
+    /* Span pre-pass: same index-based partitioning as the synth loop below, using the
+     * cheap segment_span_init (start_idx/length/valid only — the loop below adds the
+     * alpha/endpoint work it consumes). The window bounds derived here contain every write
+     * that loop performs; an endpoint-rejected segment can only widen a span (safe). */
     #pragma omp parallel for schedule(static) num_threads(n_parts)
     for (int p = 0; p < n_parts; p++) {
         size_t seg_start = ((size_t)p * sa.count) / (size_t)n_parts;
@@ -276,7 +277,7 @@ static SpectralError synth_cpu_driver(
         size_t hi = 0;
 
         for (size_t i = seg_start; i < seg_end; i++) {
-            SegmentLoopParams lp = segment_loop_params_init(&sa.segs[i], &params, out_len);
+            SegmentLoopParams lp = segment_span_init(&sa.segs[i], &params, out_len);
             if (!lp.valid) continue;   /* valid => length>=1, start_idx<out_len */
             size_t s = lp.start_idx;
             size_t e = lp.start_idx + lp.length;   /* clamped so e <= out_len */

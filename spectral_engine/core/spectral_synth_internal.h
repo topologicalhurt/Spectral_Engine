@@ -30,6 +30,9 @@ typedef struct SegmentLoopParams {
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs);
 SpectralError synth_validate_params(float stretch, float pitch);
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len);
+/* Cheap span-only variant (valid/start_idx/length, no alpha/endpoint work) for the synth
+ * span pre-pass; segment_loop_params_init is span_init + the derived-scalar tail. */
+SegmentLoopParams segment_span_init(const Segment* s, const SynthParams* p, size_t out_len);
 
 /* Shared preflight: validate + params + timing in one call.
  * ok==0 means early exit was already handled (zero-filled or dummy timing). */
