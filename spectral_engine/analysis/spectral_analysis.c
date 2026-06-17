@@ -77,10 +77,9 @@ SpectralError spectral_analysis_stft_matrix_alloc(SpectralAnalysisStftMatrix* ma
     }
 
     matrix->magsq = (float*)spectral_aligned_alloc(total_bytes);
-    matrix->phases = (float*)spectral_aligned_alloc(total_bytes);
     matrix->re = (float*)spectral_aligned_alloc(total_bytes);
     matrix->im = (float*)spectral_aligned_alloc(total_bytes);
-    if (!matrix->magsq || !matrix->phases || !matrix->re || !matrix->im) {
+    if (!matrix->magsq || !matrix->re || !matrix->im) {
         spectral_analysis_stft_matrix_free(matrix);
         return SPECTRAL_ERR_MEMORY;
     }
@@ -94,7 +93,6 @@ void spectral_analysis_stft_matrix_free(SpectralAnalysisStftMatrix* matrix)
 {
     if (!matrix) return;
     free(matrix->magsq);
-    free(matrix->phases);
     free(matrix->re);
     free(matrix->im);
     *matrix = (SpectralAnalysisStftMatrix){0};

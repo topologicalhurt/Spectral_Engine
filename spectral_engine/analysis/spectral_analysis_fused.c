@@ -139,7 +139,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                 if (local_failed) continue;
                 float frame_max = 0.0f;
                 spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, t,
-                                          scratch_magsq, NULL, NULL, NULL, &frame_max);
+                                          scratch_magsq, NULL, NULL, &frame_max);
                 if (frame_max > pass1_max) pass1_max = frame_max;
             }
             free(scratch_magsq);
@@ -203,7 +203,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                     /* Prime the current row for this pair range. */
                     fft_start = omp_get_wtime();
                     spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, pair_start,
-                                              rows.row_curr, NULL, rows.re_curr, rows.im_curr, &frame_max);
+                                              rows.row_curr, rows.re_curr, rows.im_curr, &frame_max);
                     local_fft_time += (omp_get_wtime() - fft_start);
 
                     for (size_t pair = pair_start;
@@ -214,7 +214,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
                         fft_start = omp_get_wtime();
                         spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, pair + 1u,
-                                                  rows.row_next, NULL, rows.re_next, rows.im_next, &frame_max);
+                                                  rows.row_next, rows.re_next, rows.im_next, &frame_max);
                         local_fft_time += (omp_get_wtime() - fft_start);
 
                         if (spectral_tracker_frame_context_init(&fctx,

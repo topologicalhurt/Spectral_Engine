@@ -59,7 +59,8 @@ static int spectral_fft_single_frame_args_valid(const SpectralFftResources* res,
 }
 
 static void spectral_fft_single_frame_clear(float* out_magsq,
-                                            float* out_phases,
+                                            float* out_re,
+                                            float* out_im,
                                             size_t n_freqs,
                                             float* out_frame_max)
 {
@@ -69,7 +70,8 @@ static void spectral_fft_single_frame_clear(float* out_magsq,
         return;
     }
     if (out_magsq) memset(out_magsq, 0, bytes);
-    if (out_phases) memset(out_phases, 0, bytes);
+    if (out_re) memset(out_re, 0, bytes);
+    if (out_im) memset(out_im, 0, bytes);
 }
 
 
@@ -260,12 +262,11 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* audio, int hop,
                                const float* window_func,
                                size_t t,
-                               float* out_magsq, float* out_phases,
-                               float* out_re, float* out_im,
+                               float* out_magsq, float* out_re, float* out_im,
                                float* out_frame_max)
 {
     if (!spectral_fft_single_frame_args_valid(res, tid, audio, hop, window_func, out_magsq)) {
-        spectral_fft_single_frame_clear(out_magsq, out_phases, res ? res->n_freqs : 0u, out_frame_max);
+        spectral_fft_single_frame_clear(out_magsq, out_re, out_im, res ? res->n_freqs : 0u, out_frame_max);
         return;
     }
 
@@ -305,15 +306,6 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
         vDSP_vsq(split.imagp + 1, 1, imag_sq_tmp, 1, mid);
         vDSP_vadd(out_magsq + 1, 1, imag_sq_tmp, 1, out_magsq + 1, 1, mid);
 
-        if (out_phases) {
-            out_phases[0] = (split.realp[0] >= 0.0f) ? 0.0f : SPECTRAL_PI_F;
-            out_phases[n_freqs - 1] = (split.imagp[0] >= 0.0f) ? 0.0f : SPECTRAL_PI_F;
-            {
-                int mid_int = (int)mid;
-                vvatan2f(out_phases + 1, split.imagp + 1, split.realp + 1, &mid_int);
-            }
-        }
-
         if (out_re && out_im) {
             /* Store the (0.5-scaled) complex spectrum so the tracker can take
              * atan2f only at peak bins. DC/Nyquist carry zero imaginary part,
@@ -341,12 +333,11 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* audio, int hop,
                                const float* window_func,
                                size_t t,
-                               float* out_magsq, float* out_phases,
-                               float* out_re, float* out_im,
+                               float* out_magsq, float* out_re, float* out_im,
                                float* out_frame_max)
 {
     if (!spectral_fft_single_frame_args_valid(res, tid, audio, hop, window_func, out_magsq)) {
-        spectral_fft_single_frame_clear(out_magsq, out_phases, res ? res->n_freqs : 0u, out_frame_max);
+        spectral_fft_single_frame_clear(out_magsq, out_re, out_im, res ? res->n_freqs : 0u, out_frame_max);
         return;
     }
 
@@ -361,11 +352,9 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     fftwf_execute(plan);
 
     float frame_max = 0.0f;
-    if (!out_phases) {
-        spectral_magsq_only((float*)out_buf, out_magsq, &frame_max, n_freqs);
-    } else {
-        spectral_magsq_phase((float*)out_buf, out_magsq, out_phases, &frame_max, n_freqs);
-    }
+    /* Phase-at-peaks: the producer never computes dense phase; magsq drives the
+     * peak scan and re/im (below) feed the per-peak atan2f in the tracker. */
+    spectral_magsq_only((float*)out_buf, out_magsq, &frame_max, n_freqs);
 
     if (out_re && out_im) {
         /* fftwf r2c output is interleaved [re,im]; deinterleave so the tracker
@@ -390,8 +379,7 @@ float spectral_fft_frames(const SpectralFftResources* res,
                           const float* audio, int hop,
                           const float* window_func,
                           size_t frame_start, size_t frame_end,
-                          float* out_magsq, float* out_phases,
-                          float* out_re, float* out_im,
+                          float* out_magsq, float* out_re, float* out_im,
                           int magsq_only)
 {
     float max_magsq = 0.0f;
@@ -402,7 +390,7 @@ float spectral_fft_frames(const SpectralFftResources* res,
     if (!res || !audio || !window_func || !out_magsq || hop <= 0) return 0.0f;
     if (res->n_threads < 1 || res->n_freqs == 0u || res->n_fft == 0u) return 0.0f;
     if (frame_end < frame_start) return 0.0f;
-    if (!magsq_only && !out_phases) return 0.0f;
+    if (!magsq_only && (!out_re || !out_im)) return 0.0f;
 
     local_n_frames = frame_end - frame_start;
     n_freqs = res->n_freqs;
@@ -420,7 +408,6 @@ float spectral_fft_frames(const SpectralFftResources* res,
             float frame_max = 0.0f;
             spectral_fft_single_frame(res, tid, audio, hop, window_func, t,
                                       out_magsq + i * n_freqs,
-                                      magsq_only ? NULL : (out_phases + i * n_freqs),
                                       (!magsq_only && out_re) ? (out_re + i * n_freqs) : NULL,
                                       (!magsq_only && out_im) ? (out_im + i * n_freqs) : NULL,
                                       &frame_max);
