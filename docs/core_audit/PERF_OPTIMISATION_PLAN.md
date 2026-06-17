@@ -154,3 +154,63 @@ The profile says: at realistic settings the **STFT stage dominates**, and within
 Only once those are settled does hand-tuning the SIMD sine and Q15 MAC pay off; doing asm work on
 code that's about to be restructured (the atan2 path) or on a check that should just be inlined
 (isfinite) would have been the "house on sand."
+
+## Frontier verdict (2026-06-18, with a clean meter + adversarial verification)
+
+After cleaning the meter (Part 0), I re-profiled both targets and ran an adversarially-verified
+frontier scan (PGO A/B in an isolated worktree; ARM Q15 + desktop-SIMD-sine port-limit analysis via
+`llvm-mca`; ranked synthesis; a skeptic that independently re-derived the load-bearing numbers from
+ground truth). **The verdict, ruthlessly: for realistic desktop workloads the engine is at its
+efficient frontier — there is no do-now SPEED win.** Every ours-to-fix lever was measured or modeled
+and lost:
+
+- **FFT stage (~55–60% of the ~76 ms warm total) is the vDSP `fft_zrip` transform** — Apple-optimized
+  library code, not ours; FFTW would not beat it on Apple Silicon and would add a heavy vendored dep
+  + a delicate magnitude/phase-convention re-validation. **Decline (speculative).**
+- **All-bins `atan2` ≈ 4 ms / ~5% end-to-end @ −40** (A/B-confirmed: stub→memset dropped fft
+  42.9→38.8 ms; skeptic re-derived `vvatan2f` over 27.6 M bins = 33.9 ms single-thread ÷ 8 OMP
+  threads ≈ 4.2 ms — matches). This is the ONLY lever with a measured, positive, realistic-workload
+  delta. Peak ratio @ −40 = 0.67% (13.69 candidates/frame ÷ 2049 bins), so **phase-at-peaks** would
+  reclaim ~all of it AND save the ~110 MB dense-phase write. BUT: the realistic profile (27.6 M bins)
+  is **below** the 32 M `SPECTRAL_STFT_CHUNK_THRESHOLD`, so it runs the **single-pass dense
+  `full_matrix` path** — the 2-pass max-scan lives only in the chunked path, so phase-at-peaks must
+  *introduce* the emit-after-pick inversion here, not reuse it (effort is **higher** than the earlier
+  "~20-edit" estimate). A 5% gain behind a high-risk cross-API refactor + memory-layout change =
+  **user-decision**, correctly re-scoped to accuracy/memory, not speed.
+- **Desktop SIMD minimax-sine** (`spectral_osc_simd_segment_sine`, width-4 NEON): 4.52 cyc/sample,
+  **89% latency-bound on the `osc_parity`-pinned sine dependency chain** (vector ports only ~36%
+  utilized; 22/32 NEON regs already live). The only chain-shortening transforms (reorder/Estrin) are
+  parity-forbidden; unrolling spills (the prior 1.8× regression, corroborated by the live-reg census).
+  **Decline (at the latency limit).**
+- **PGO is already fully wired** (`options.cmake` `SPECTRAL_PGO`, `host-config.cmake`,
+  `targets/utilities.cmake` — the earlier "not wired" premise was wrong; and the `pgo_merge` target
+  degrades gracefully when `llvm-profdata` is absent, it does **not** fatal). But it leaves the hot
+  SIMD sustain loop unchanged and FFT (vDSP) is PGO-inert, so the steady-state delta sits **below the
+  noise floor** (the box was contended at load ~8 during the A/B; no sub-noise verdict is possible
+  here without core pinning). The structural codegen win is real and safe (TEXT 163840→147456 B,
+  cold-timbre `fmla` copies dropped, output byte-identical) — adopt it for **binary-size/cold-path
+  hygiene** if desired, but **not for speed**.
+- **ARM Q15 `synth_core_m7/.L492`** (340 cyc/16 samp = 21.25 cyc/sample): **recurrence-latency-bound**
+  on the `osc_parity`-pinned coupled-oscillator step (MAC only 24% utilized; not port-bound).
+  unroll-8 = −2.94% in the model, but it **does not move the headline 24.01 cyc/voice-sample gate
+  ceiling** — that is bound by `synth_fade_m7/.L664`, and WCET prices *every* voice-sample at the
+  fade kernel's rate (`wcet.py` T1 = active·block·worst_cyc_per_voice_sample). Bigger body grows
+  I-cache cold-fill the perfect-memory model under-counts → plausibly net-negative on real flash.
+  **Decline.**
+- **ARM `synth_fade_m7/.L664`** (the actual gate binder, 22.0 cyc/iter, the one loose thread the scan
+  flagged): censused read-only — **also recurrence-latency-bound** (Block RThroughput 13.5 vs actual
+  22.0; bottleneck = register data dependencies, **0% resource pressure**) on the serial saturating
+  fade accumulator (`qadd16 → sxth → smlalbb` carried chain). Realizing the model's RThroughput slack
+  needs a closed-form fade — an algorithm change that breaks parity + re-pins the baseline. **No
+  clean, gate-respecting, parity-safe win.**
+- **x86/AVX-256/512 tiers + Daisy/CUDA/Metal-runtime items: gated off-host** (this dev Mac is
+  NEON=128; un-measurable). Not actionable locally.
+- **The −85 dB track+synth blow-up (~170 ms each) is a parameter artifact** (4.25 M segments the
+  threshold *requests*), not an algorithmic inefficiency. **Not a bug.**
+
+**Conclusion:** the big algorithmic win (`isfinite`, Part 2 item 1) already landed; the meter is now
+clean; and every remaining ours-to-fix micro-lever is measured/modeled as a no-win or a marginal win
+gated behind a parity-pinned recurrence, a memory-layout refactor, or off-host CI. The project
+doctrine (measure-first, decline+document, no speculative machinery) is satisfied. **The perf
+campaign is closed for speed.** Open items are explicitly *not* speed: phase-at-peaks as an
+accuracy/memory item (user-decision) and PGO-for-binary-size (optional hygiene).
