@@ -758,7 +758,11 @@ static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
         !spectral_peak_finite_nonnegative(input->next_max_magsq) ||
         !isfinite(input->freq_step_omega) ||
         !isfinite(input->freq_step_df) ||
-        !isfinite(input->inv_hop)) {
+        !isfinite(input->inv_hop) || input->inv_hop <= 0.0f) {
+        /* inv_hop is 1/hop and must be strictly positive: it scales the amplitude slope
+         * da = (next_amp - amp) * inv_hop, so a non-positive value would emit a
+         * wrong-signed or zeroed (but finite, so otherwise-"valid") slope. The tracker
+         * path always passes inv_hop > 0; this guards the public standalone API. */
         return 0;
     }
 
