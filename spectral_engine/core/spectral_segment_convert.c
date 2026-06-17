@@ -29,7 +29,16 @@ int spectral_segment_to_q15_runtime(const Segment* src, SpectralSegmentQ15* dst,
         length_d <= 0.0) {
         return 0;
     }
-    if (length_d > 65535.0) length_d = 65535.0;
+    /* SpectralSegmentQ15.length is uint16 (<= 65535 output samples). A stretched grain
+     * longer than that cannot be faithfully represented, so REJECT it rather than silently
+     * truncate the partial mid-note into a lying "success" — the converter's contract is a
+     * faithful conversion or a drop, and the caller already drops + counts unconvertible
+     * segments. (Full-duration support under extreme stretch needs upstream continuation-
+     * grain splitting: emit start += 65535, phase += alpha*65535, amp += da*65535 grains.
+     * That is a separate enhancement, not this faithfulness fix.) */
+    if (length_d > 65535.0) {
+        return 0;
+    }
 
     dst->start = (uint32_t)start_d;
     dst->length = (uint16_t)length_d;

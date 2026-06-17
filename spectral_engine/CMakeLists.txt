@@ -187,6 +187,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/ifft-synth-parity-test.cmake"
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/synth-hybrid-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/wavetable-q15-load-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-bandlimited-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-q15-convert-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/simulate-smoke-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/gpu-backend-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy-config-layout-test.cmake")
@@ -240,6 +241,7 @@ add_dependencies(tests_all
     synth_hybrid_parity_test
     wavetable_q15_load_test
     osc_bandlimited_parity_test
+    segment_q15_convert_test
     daisy_config_layout_test
     convert_segments)
 
