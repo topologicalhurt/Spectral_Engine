@@ -81,7 +81,10 @@ SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t
 }
 
 
-static double g_synth_timing_dummy = 0;
+/* Discard sink for callers that pass a NULL t_synth (preflight/driver redirect *t_synth
+ * here). Thread-local to match the sibling synth globals so concurrent NULL-timing calls
+ * don't race on it, even though nothing reads it back. */
+static SPECTRAL_THREAD_LOCAL double g_synth_timing_dummy = 0;
 static SPECTRAL_THREAD_LOCAL int g_effective_timbre_tls = TIMBRE_SINE;
 
 void synth_effective_timbre_reset(SpectralTimbre requested_timbre) {

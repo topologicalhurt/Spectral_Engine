@@ -357,6 +357,15 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
 #include "spectral_analysis.h"
 #endif
 
+/* Guarded (double)n*stretch -> size_t. Returns 0 (caller skips/rejects) when the product
+ * is non-finite, <= 0, or > SIZE_MAX, avoiding the UB of an out-of-range float->integer
+ * cast (C11 6.3.1.4). One conversion shared by the render path and the cache-mode sites. */
+static size_t pipeline_stretched_len(size_t n_samples, float stretch) {
+    double v = (double)n_samples * (double)stretch;
+    if (!(v > 0.0) || v > (double)SIZE_MAX) return 0;
+    return (size_t)v;
+}
+
 static PipelineError pipeline_render_and_write(
     const SpectralCliOptions* opts,
     PipelineRunResources* resources,
@@ -365,7 +374,6 @@ static PipelineError pipeline_render_and_write(
     SpectralWavetableBank* wt_bank,
     SpectralTimingResults* timing)
 {
-    double out_len_f = 0.0;
     size_t out_len = 0;
     size_t out_bytes = 0;
 
@@ -373,11 +381,7 @@ static PipelineError pipeline_render_and_write(
         return PIPELINE_ERR_INPUT;
     }
 
-    out_len_f = (double)n_samples * (double)opts->stretch;
-    if (out_len_f <= 0.0 || out_len_f > (double)SIZE_MAX) {
-        return PIPELINE_ERR_INPUT;
-    }
-    out_len = (size_t)out_len_f;
+    out_len = pipeline_stretched_len(n_samples, opts->stretch);
     if (out_len == 0 || !spectral_size_mul(out_len, sizeof(float), &out_bytes)) {
         return PIPELINE_ERR_INPUT;
     }
@@ -937,7 +941,7 @@ static PipelineError pipeline_execute_cache_mode(
             /* Pre-compute GPU tile data for cache storage + this-run synth. */
 #if !SPECTRAL_EMBEDDED
             {
-                size_t out_len = (size_t)((double)*out_n_samples * (double)opts->stretch);
+                size_t out_len = pipeline_stretched_len(*out_n_samples, opts->stretch);
                 if (out_len > 0) {
                     SpectralError te = gpu_tile_preprocess(
                         resources->segments, opts->stretch,
@@ -974,7 +978,7 @@ static PipelineError pipeline_execute_cache_mode(
          * Processing stages may mutate segments before synth, which would
          * invalidate pre-packed/tiled cache payloads. */
         if (can_reuse_gpu_aux) {
-            size_t out_len = (size_t)((double)*out_n_samples * (double)opts->stretch);
+            size_t out_len = pipeline_stretched_len(*out_n_samples, opts->stretch);
 
             /* Set the global GPU tile cache so GPU backends (CUDA / Metal)
              * skip tile preprocessing.  Prefer mmap'd tile data (cache hit)

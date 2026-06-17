@@ -708,9 +708,8 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->freq_step_df = freq_step_df;
     tracker->hop_float = hop_float;
     tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);
-    tracker->interp_magsq = spectral_window_interp_magsq_parabolic;
-    tracker->peak_magsq = spectral_window_peak_magsq_center;
-    tracker->peak_estimator = SPECTRAL_PEAK_ESTIMATOR_DEFAULT;
+    /* interp_magsq / peak_magsq / peak_estimator are set below by set_peak_model(default)
+     * via cache_resolved_peak_model — no manual pre-seed (it would be a dead, second source). */
     {
         SpectralPeakModel default_peak_model = spectral_peak_model_default();
         if (spectral_tracker_set_peak_model(tracker, &default_peak_model) != SPECTRAL_OK) {

@@ -122,7 +122,8 @@ static inline uint32_t spectral_debug_sdram_max_bandwidth_bytes_per_sec(void) {
 
 void spectral_debug_init(SpectralDebugCtx* ctx, uint32_t sample_rate, uint32_t block_size) {
     SPECTRAL_RETURN_IF(!ctx);
-    
+    SPECTRAL_RETURN_IF(sample_rate == 0u);   /* deadline_cycles divides by sample_rate (integer) */
+
     /* Clear context */
     memset(ctx, 0, sizeof(SpectralDebugCtx));
     
