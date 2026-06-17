@@ -86,8 +86,10 @@ static void test_fast_path_parity(void) {
     SegmentArray sa = { segs, N_SEG, N_SEG };
 
     static float out[TOTAL];
+    /* pitch is in SEMITONES; the transparent-substitute identity is 0.0 (not 1.0), so the
+     * pitch-neutral reference below is exact only at pitch==0.0. */
     SpectralHybridResult r =
-        spectral_synth_hybrid_try_render(sa, out, TOTAL, 1.0f, 1.0f, TIMBRE_SINE);
+        spectral_synth_hybrid_try_render(sa, out, TOTAL, 1.0f, 0.0f, TIMBRE_SINE);
     CHECK(r == SPECTRAL_HYBRID_RENDERED, "dense eligible set must take the fast path");
     if (r != SPECTRAL_HYBRID_RENDERED) return;
 
@@ -137,17 +139,19 @@ static void test_decline_contract(void) {
 
     make_fixture(segs);
     SegmentArray sa = { segs, N_SEG, N_SEG };
-    check_declines(sa, out, "non-sine timbre", 1.0f, 1.0f, TIMBRE_SAW);
-    check_declines(sa, out, "stretch != 1", 2.0f, 1.0f, TIMBRE_SINE);
-    check_declines(sa, out, "pitch != 1", 1.0f, 2.0f, TIMBRE_SINE);
+    /* Each decline case uses the identity pitch=0.0 (and stretch=1.0 unless the case under
+     * test is the stretch guard) so it isolates exactly its named reason. */
+    check_declines(sa, out, "non-sine timbre", 1.0f, 0.0f, TIMBRE_SAW);
+    check_declines(sa, out, "stretch != 1", 2.0f, 0.0f, TIMBRE_SINE);
+    check_declines(sa, out, "pitch != 0 (semitones)", 1.0f, 2.0f, TIMBRE_SINE);
 
     make_fixture(segs);
     segs[5].df = 1.0e-3f;   /* one chirped segment -> all-or-decline */
-    check_declines(sa, out, "one ineligible segment", 1.0f, 1.0f, TIMBRE_SINE);
+    check_declines(sa, out, "one ineligible segment", 1.0f, 0.0f, TIMBRE_SINE);
 
     make_fixture(segs);
     SegmentArray few = { segs, 4u, N_SEG };   /* below the crossover */
-    check_declines(few, out, "sub-crossover count", 1.0f, 1.0f, TIMBRE_SINE);
+    check_declines(few, out, "sub-crossover count", 1.0f, 0.0f, TIMBRE_SINE);
 }
 
 /* Late onset in a long render: omega*start is large, so without the double mod-2pi
@@ -174,7 +178,7 @@ static void test_late_onset_precision(void) {
     SegmentArray sa = { seg, 8u, 8u };
     static float out[LO_TOTAL];
     SpectralHybridResult r =
-        spectral_synth_hybrid_try_render(sa, out, LO_TOTAL, 1.0f, 1.0f, TIMBRE_SINE);
+        spectral_synth_hybrid_try_render(sa, out, LO_TOTAL, 1.0f, 0.0f, TIMBRE_SINE);
     CHECK(r == SPECTRAL_HYBRID_RENDERED, "late-onset dense set must render");
     if (r != SPECTRAL_HYBRID_RENDERED) return;
 

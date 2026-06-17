@@ -87,7 +87,11 @@ SpectralHybridResult spectral_synth_hybrid_try_render(
 
     if (!out || out_len == 0) return SPECTRAL_HYBRID_DECLINED;
     if (timbre != TIMBRE_SINE) return SPECTRAL_HYBRID_DECLINED;   /* motif is one cosine bin */
-    if (stretch != 1.0f || pitch != 1.0f) return SPECTRAL_HYBRID_DECLINED;  /* v1: identity only */
+    /* v1: identity transform only. pitch is in SEMITONES (spectral_pitch_factor = 2^(p/12)),
+     * so the identity is pitch==0.0, NOT 1.0; stretch is a ratio whose identity is 1.0.
+     * hybrid_frame_partials renders every partial at its unshifted bin, so this gate is the
+     * sole pitch guard — at any non-zero pitch it must decline to stay equivalent to synth_cpu. */
+    if (stretch != 1.0f || pitch != 0.0f) return SPECTRAL_HYBRID_DECLINED;
     if (sa.count < HYBRID_MIN_PARTIALS) return SPECTRAL_HYBRID_DECLINED;    /* below crossover */
     if (sa.count > HYBRID_NFFT / 2u) return SPECTRAL_HYBRID_DECLINED;       /* would exceed frame cap */
 
