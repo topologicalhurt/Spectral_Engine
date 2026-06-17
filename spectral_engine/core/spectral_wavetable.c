@@ -18,6 +18,7 @@
 #include "spectral_wavetable.h"
 #include "spectral_utils.h"
 #include "spectral_contracts.h"
+#include "spectral_q.h"               /* Q15_TO_FLOAT boundary macro */
 #include "spectral_osc_formulas.h"
 #include <stdlib.h>
 #include <string.h>
@@ -251,7 +252,11 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
             return WAVETABLE_ERR_SIZE;
         }
         for (size_t i = 0; i < hdr.size; i++) {
-            float sample_f = spectral_sample_to_float(temp[i]);
+            /* temp[i] is a raw stored Q15 int16; de-quantize via the boundary macro (the
+             * mirror of the float->Q15 branch's FLOAT_TO_Q15). This branch is float-runtime,
+             * so float_to_spectral_sample is the identity — spectral_sample_to_float(int16)
+             * would only widen the int16 to float with no /32768 scale. */
+            float sample_f = Q15_TO_FLOAT(temp[i]);
             table->samples[i] = float_to_spectral_sample(sample_f);
         }
         free(temp);

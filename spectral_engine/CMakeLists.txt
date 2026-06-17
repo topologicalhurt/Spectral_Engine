@@ -185,6 +185,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-endian-roundtrip-test
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-payload-bounds-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/ifft-synth-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/synth-hybrid-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/wavetable-q15-load-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/simulate-smoke-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/gpu-backend-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy-config-layout-test.cmake")
@@ -236,6 +237,7 @@ add_dependencies(tests_all
     segment_payload_bounds_test
     ifft_synth_parity_test
     synth_hybrid_parity_test
+    wavetable_q15_load_test
     daisy_config_layout_test
     convert_segments)
 
