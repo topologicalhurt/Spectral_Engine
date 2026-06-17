@@ -80,8 +80,12 @@ branches is live. Emulator guard: `#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDE
 ## Hard rules (see reference/AI_CANON.md for the full set)
 - Correctness before performance. A faster wrong oscillator/phase/fade/estimator is worse
   than a slower reference.
-- Approximations (fast atan2/trig/inv-sqrt) are opt-in behind a named gate; exact is the
-  default and the test reference. No "fast"/"near exact" claims without a measured bound.
+- Approximations (fast atan2/trig/inv-sqrt) sit behind named compile gates with measured drift
+  budgets (asserted by core_guarantees_drift_test); exact remains available and is the reference.
+  Two default to their gated approximation because it is the only SIMD-vectorizable option with no
+  exact vectorized alternative: trig (the minimax sine, always) and atan2 (the phase poly, on
+  non-vDSP hosts only — Apple keeps exact vvatan2f). No "fast"/"near exact" claims without a
+  measured bound.
 - Keep units explicit: phase=rad, omega=rad/sample, df=rad/sample², amp=linear.
 - Hot kernels carry no policy/logging/CLI decisions — keep them small and deterministic.
 - Embedded is first-class: deterministic allocation, bounded active segments, saturating

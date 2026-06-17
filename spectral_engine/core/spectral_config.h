@@ -39,8 +39,11 @@
 #endif
 
 /* Correctness-first approximation gates.
- * Keep these disabled by default. Enable them only with dedicated error-bound
- * and perceptual-regression tests for the target backend.
+ * Disabled by default, EXCEPT where a gated, error-bounded approximation is both faster
+ * and the only SIMD-vectorizable option AND there is no exact vectorized alternative:
+ * TRIG (always, the minimax sine) and ATAN2 (on non-vDSP hosts only — Apple keeps exact
+ * vvatan2f). Both carry an error budget asserted by core_guarantees_drift_test. The rest
+ * stay off; enable them only with dedicated error-bound + perceptual-regression tests.
  */
 /* TRIG is the exception: the canonical sine is a degree-9 odd minimax fold
  * (spectral_fast_sin_inline), default-ON because it is both faster and
@@ -51,9 +54,12 @@
 #ifndef SPECTRAL_ENABLE_APPROX_TRIG
 #define SPECTRAL_ENABLE_APPROX_TRIG 1
 #endif
-#ifndef SPECTRAL_ENABLE_APPROX_ATAN2
-#define SPECTRAL_ENABLE_APPROX_ATAN2 0
-#endif
+/* SPECTRAL_ENABLE_APPROX_ATAN2's default is backend-dependent and is resolved AFTER
+ * SPECTRAL_USE_VDSP is known (see below): Apple's analysis phase path uses Accelerate
+ * vvatan2f (exact + vectorized) so it stays exact, whereas a non-Apple build's only exact
+ * option is scalar libm atan2f — ~5x slower and the dominant cost of x86/Linux STFT phase
+ * extraction — so it defaults to the gated 2e-4 rad poly, mirroring TRIG above. A -D override
+ * is still honored. */
 #ifndef SPECTRAL_ENABLE_APPROX_INV_SQRT
 #define SPECTRAL_ENABLE_APPROX_INV_SQRT 0
 #endif
@@ -623,6 +629,20 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_USE_VDSP       1
 #else
 #define SPECTRAL_USE_VDSP       0
+#endif
+#endif
+
+/* Backend-dependent default for the analysis-phase atan2 (see the note near the other
+ * APPROX gates above). When vDSP is live the STFT phase is Accelerate vvatan2f (exact +
+ * vectorized), so keep the exact-atan2 guarantee. Otherwise the live phase path is the
+ * polynomial spectral_magsq_phase, whose exact alternative is scalar libm atan2f at ~5x
+ * the cost (the dominant non-FFT cost of x86/Linux analysis); default to the SIMD-vectorized
+ * ~2e-4 rad poly (drift-budgeted by core_guarantees_drift_test), as TRIG does for the sine. */
+#ifndef SPECTRAL_ENABLE_APPROX_ATAN2
+#if SPECTRAL_USE_VDSP
+#define SPECTRAL_ENABLE_APPROX_ATAN2 0
+#else
+#define SPECTRAL_ENABLE_APPROX_ATAN2 1
 #endif
 #endif
 /* CMSIS-DSP availability (arm_math.h expected when enabled). */
