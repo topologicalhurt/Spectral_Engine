@@ -94,12 +94,21 @@ int         spectral_getenv_bool(const char* key, int* out);
 int         spectral_getenv_f64(const char* key, double* out);
 int         spectral_getenv_f64_positive(const char* key, double* out);
 
+/* Inlined finiteness via the exponent bits (all-ones exponent == Inf or NaN). This is a real
+ * check that READS the bit pattern, so unlike isfinite() it (a) inlines to a couple of integer
+ * ops instead of a libm __isfinitef/__isfinited call — the hottest single cost in the analysis
+ * profile — and (b) is not elided to `true` under -ffinite-math-only (-ffast-math), so the
+ * validation guards keep working. */
 static inline int spectral_is_finite_f32(float v) {
-    return isfinite(v) != 0;
+    uint32_t u;
+    __builtin_memcpy(&u, &v, sizeof u);
+    return (u & 0x7F800000u) != 0x7F800000u;
 }
 
 static inline int spectral_is_finite_f64(double v) {
-    return isfinite(v) != 0;
+    uint64_t u;
+    __builtin_memcpy(&u, &v, sizeof u);
+    return (u & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL;
 }
 
 static inline int spectral_is_finite_positive_f32(float v) {

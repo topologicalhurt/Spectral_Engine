@@ -8,19 +8,19 @@
 
 static int spectral_fft_magsq_scale_valid(float scale)
 {
-    return isfinite(scale) && scale > 0.0f;
+    return spectral_is_finite_f32(scale) && scale > 0.0f;
 }
 
 static float spectral_fft_scaled_magsq(float value, float scale)
 {
     double scaled = 0.0;
 
-    if (!isfinite(value) || value < 0.0f || !spectral_fft_magsq_scale_valid(scale)) {
+    if (!spectral_is_finite_f32(value) || value < 0.0f || !spectral_fft_magsq_scale_valid(scale)) {
         return 0.0f;
     }
 
     scaled = (double)value * (double)scale;
-    if (!isfinite(scaled) || scaled < 0.0 || scaled > (double)FLT_MAX) {
+    if (!spectral_is_finite_f64(scaled) || scaled < 0.0 || scaled > (double)FLT_MAX) {
         return 0.0f;
     }
 

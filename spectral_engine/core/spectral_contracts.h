@@ -15,7 +15,7 @@ static inline int spectral_f32_span_finite(const float* values, size_t count)
 {
     if (count > 0u && !values) return 0;
     for (size_t i = 0; i < count; i++) {
-        if (!isfinite(values[i])) return 0;
+        if (!spectral_is_finite_f32(values[i])) return 0;
     }
     return 1;
 }
@@ -24,7 +24,7 @@ static inline int spectral_f32_span_finite_nonnegative(const float* values, size
 {
     if (count > 0u && !values) return 0;
     for (size_t i = 0; i < count; i++) {
-        if (!isfinite(values[i]) || values[i] < 0.0f) return 0;
+        if (!spectral_is_finite_f32(values[i]) || values[i] < 0.0f) return 0;
     }
     return 1;
 }
@@ -32,14 +32,14 @@ static inline int spectral_f32_span_finite_nonnegative(const float* values, size
 static inline int spectral_segment_payload_valid(const Segment* s)
 {
     if (!s) return 0;
-    if (!isfinite(s->start) || s->start < 0.0f) return 0;
-    if (!isfinite(s->length) || s->length < 0.0f) return 0;
-    if (!isfinite(s->phase)) return 0;
-    if (!isfinite(s->omega) || s->omega < 0.0f) return 0;
-    if (!isfinite(s->df)) return 0;
-    if (!isfinite(s->amp)) return 0;
-    if (!isfinite(s->da)) return 0;
-    if (!isfinite(s->width) || fabsf(s->width) > SPECTRAL_SEGMENT_WIDTH_MAX) return 0;
+    if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->length) || s->length < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->phase)) return 0;
+    if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->df)) return 0;
+    if (!spectral_is_finite_f32(s->amp)) return 0;
+    if (!spectral_is_finite_f32(s->da)) return 0;
+    if (!spectral_is_finite_f32(s->width) || fabsf(s->width) > SPECTRAL_SEGMENT_WIDTH_MAX) return 0;
     return 1;
 }
 
@@ -78,13 +78,13 @@ static inline int spectral_segment_array_valid_for_synth(const SegmentArray* sa)
 static inline int spectral_segment_gpu_payload_valid(const SegmentGpu* s)
 {
     if (!s) return 0;
-    if (!isfinite(s->start) || s->start < 0.0f) return 0;
-    if (!isfinite(s->length) || s->length < 0.0f) return 0;
-    if (!isfinite(s->phase)) return 0;
-    if (!isfinite(s->omega) || s->omega < 0.0f) return 0;
-    if (!isfinite(s->df)) return 0;
-    if (!isfinite(s->amp)) return 0;
-    if (!isfinite(s->da)) return 0;
+    if (!spectral_is_finite_f32(s->start) || s->start < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->length) || s->length < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->phase)) return 0;
+    if (!spectral_is_finite_f32(s->omega) || s->omega < 0.0f) return 0;
+    if (!spectral_is_finite_f32(s->df)) return 0;
+    if (!spectral_is_finite_f32(s->amp)) return 0;
+    if (!spectral_is_finite_f32(s->da)) return 0;
     return 1;
 }
 
@@ -169,13 +169,13 @@ static inline int spectral_double_accumulate_nonnegative_checked(double current,
 {
     double next = 0.0;
 
-    if (!out || !isfinite(current) || current < 0.0 ||
-        !isfinite(delta) || delta < 0.0) {
+    if (!out || !spectral_is_finite_f32(current) || current < 0.0 ||
+        !spectral_is_finite_f32(delta) || delta < 0.0) {
         return 0;
     }
 
     next = current + delta;
-    if (!isfinite(next) || next < current) return 0;
+    if (!spectral_is_finite_f32(next) || next < current) return 0;
     *out = next;
     return 1;
 }
@@ -214,10 +214,10 @@ static inline int spectral_overlap_add_envelope_stats(const float* analysis,
         for (size_t idx = n; idx < length; idx += hop) {
             double a = (double)analysis[idx];
             double s = synthesis ? (double)synthesis[idx] : 1.0;
-            if (!isfinite(a) || !isfinite(s)) return 0;
+            if (!spectral_is_finite_f32(a) || !spectral_is_finite_f32(s)) return 0;
             e += a * s;
         }
-        if (!isfinite(e)) return 0;
+        if (!spectral_is_finite_f32(e)) return 0;
         if (n == 0u) {
             env_min = e;
             env_max = e;
@@ -253,8 +253,8 @@ static inline int spectral_overlap_add_is_constant(const float* analysis,
                                              &env_min, &env_max, &env_mean)) {
         return 0;
     }
-    if (!isfinite(env_mean) || env_mean <= 0.0) return 0;
-    if (!isfinite(rel_tol) || rel_tol < 0.0) rel_tol = 0.0;
+    if (!spectral_is_finite_f32(env_mean) || env_mean <= 0.0) return 0;
+    if (!spectral_is_finite_f32(rel_tol) || rel_tol < 0.0) rel_tol = 0.0;
     if ((env_max - env_min) > rel_tol * env_mean) return 0;
     if (out_gain) *out_gain = env_mean;
     return 1;
