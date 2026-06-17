@@ -94,6 +94,26 @@ inner loop `synth_core_m7` (scalar Q15, unrolled ×4) and the dual-16-bit-MAC su
 5. **Tooling:** add an `llvm-mca` / instruction-level harness to `benchmark_workflow` for the
    hand-tuned kernels, so asm-level changes are measured against a port-model prediction, not vibes.
 
+## Measured outcomes (update)
+
+- **isfinite (item 1): DONE — the headline win.** Inlined bit-trick + `_Generic` sweep across the
+  FFT-stage per-bin path, the estimator, the tracker, and the contracts. `sample` shows the
+  analysis-side leaves collapsed (`spectral_fft_single_frame` 974→14, `isfinite` stubs gone). The
+  profile is now synth-dominated.
+- **Synth-sine asm-tune (item 3): DECLINED on data (M-series).** `llvm-mca` calls the inner loop
+  latency-bound (18.8 cyc/iter vs 10.7 throughput, IPC 1.92/6) and the compiler doesn't unroll it.
+  But forcing `#pragma clang loop unroll_count(2)` **regressed synth ~1.8×** (18–24ms → 32–55ms):
+  doubling the minimax-sine's live vector temps spills registers, and the M-series' deep OoO window
+  already overlaps the independent iterations. The math is `osc_parity`-pinned (no Estrin/reorder).
+  Conclusion: the kernel is near-optimal on this target. **Re-try the unroll on x86/AVX2** (16 ymm
+  regs may absorb the pressure) — un-measurable on this ARM box, so a CI item, not a local change.
+- **Phase-at-peaks (item 2): re-scoped DOWN.** After the isfinite win the FFT stage shrank, so the
+  all-bins `atan2` is a much smaller share than when first scoped. Remaining value is accuracy
+  (exact phase on every platform; drops the per-peak reconstruct round-trip), not speed. It is a
+  ~20-edit atomic refactor at +50% full-path memory. Worth doing only if the accuracy/cleanliness is
+  wanted; gate it on a real before/after measurement, and if landed make it the unconditional
+  default (analysis is host-only, so there is no memory-constrained target to flag it off for).
+
 ## Why this order
 
 The profile says: at realistic settings the **STFT stage dominates**, and within it the biggest
