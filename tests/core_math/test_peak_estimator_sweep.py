@@ -99,10 +99,24 @@ def test_peak_estimator_sweep_harness_compiles_and_reports_ground_truth_error() 
                 assert row["valid_rate"] > 0.90
                 assert row["avg_ns"] >= 0.0
 
-    # This is the one hard correctness guard: the default estimator must remain
-    # accurate on the engine's current Hann-windowed, high-SNR signal model.
+    # Hard correctness guard: the default estimator must remain accurate on the
+    # engine's current Hann-windowed, high-SNR signal model.
     hann_log = rows[("hann", "log-parabolic", 120.0)]
     assert hann_log["max"] <= 0.035
     assert hann_log["fallback"] == 0.0
+
+    # Per-estimator accuracy gates (AI.md tests-fail-on-bug). The complex-exponential
+    # estimators are mathematically exact on a rectangular window, so a tight bound there
+    # pins their formulas: a sign/denominator regression blows max_abs_err past ~0.5 while
+    # valid_rate stays 1.0 (which the loop guard above would still pass). Bounds carry
+    # margin over the measured rectangular/120 dB max errors (jacobsen 7.6e-5, candan
+    # 7.0e-5, quinn 3.5e-3); the harness compares to the known synthetic tone location, a
+    # true ground-truth oracle (not a code clone), so this catches a shared formula error.
+    assert rows[("rectangular", "jacobsen-complex", 120.0)]["max"] <= 1.0e-3
+    assert rows[("rectangular", "candan-complex", 120.0)]["max"] <= 1.0e-3
+    assert rows[("rectangular", "quinn-second", 120.0)]["max"] <= 6.0e-3
+    # mag-parabolic is a coarse magnitude-domain parabola with no exact window (best is
+    # Blackman/Hann ~0.05); a loose Hann bound still catches a gross formula breakage.
+    assert rows[("hann", "mag-parabolic", 120.0)]["max"] <= 0.08
 
 
