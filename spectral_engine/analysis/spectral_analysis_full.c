@@ -28,6 +28,8 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
 #if defined(POSIX_MADV_SEQUENTIAL)
     posix_madvise(stft.magsq, stft.total_bytes, POSIX_MADV_SEQUENTIAL);
     posix_madvise(stft.phases, stft.total_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.re, stft.total_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.im, stft.total_bytes, POSIX_MADV_SEQUENTIAL);
 #endif
 
     if (!spectral_fft_resources_alloc(&res, n_threads, (size_t)n_fft, n_freqs)) {
@@ -41,7 +43,8 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     {
         double fft_start = omp_get_wtime();
         max_magsq = spectral_fft_frames(&res, audio, hop, window_ctx.samples,
-                                        0, n_frames, stft.magsq, stft.phases, 0);
+                                        0, n_frames, stft.magsq, stft.phases,
+                                        stft.re, stft.im, 0);
         *t_fft = omp_get_wtime() - fft_start;
 
         {

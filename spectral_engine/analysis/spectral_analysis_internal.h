@@ -98,6 +98,13 @@ const char* spectral_analysis_path_name(int use_fused_path);
 typedef struct SpectralAnalysisStftMatrix {
     float* magsq;
     float* phases;
+    /* re/im hold the (0.5-scaled, on vDSP) complex spectrum so phase can be
+     * computed lazily via atan2f at the tracked peak bins only, instead of an
+     * all-bins atan2 in the producer. magsq stays the double-scaled peak-scan
+     * key (parity), so this is +50% on the full-matrix path. See
+     * docs/core_audit/ANALYSIS_PHASE_AT_PEAKS_PLAN.md. */
+    float* re;
+    float* im;
     size_t total_bins;
     size_t total_bytes;
 } SpectralAnalysisStftMatrix;
@@ -123,6 +130,7 @@ float spectral_fft_frames(const SpectralFftResources* res,
                           const float* window_func,
                           size_t frame_start, size_t frame_end,
                           float* out_magsq, float* out_phases,
+                          float* out_re, float* out_im,
                           int magsq_only);
 
 void spectral_fft_single_frame(const SpectralFftResources* res,
@@ -131,6 +139,7 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* window_func,
                                size_t t,
                                float* out_magsq, float* out_phases,
+                               float* out_re, float* out_im,
                                float* out_frame_max);
 
 SegmentArray analyze_audio_with_path_mode(const float* audio, size_t n_samples, int sr,

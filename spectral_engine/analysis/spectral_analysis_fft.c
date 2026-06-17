@@ -261,6 +261,7 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* window_func,
                                size_t t,
                                float* out_magsq, float* out_phases,
+                               float* out_re, float* out_im,
                                float* out_frame_max)
 {
     if (!spectral_fft_single_frame_args_valid(res, tid, audio, hop, window_func, out_magsq)) {
@@ -312,6 +313,16 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                 vvatan2f(out_phases + 1, split.imagp + 1, split.realp + 1, &mid_int);
             }
         }
+
+        if (out_re && out_im) {
+            /* Store the (0.5-scaled) complex spectrum so the tracker can take
+             * atan2f only at peak bins. DC/Nyquist carry zero imaginary part,
+             * so atan2f(0, re) reproduces the 0/PI phase sign special-case exactly. */
+            out_re[0] = split.realp[0];           out_im[0] = 0.0f;
+            out_re[n_freqs - 1] = split.imagp[0]; out_im[n_freqs - 1] = 0.0f;
+            memcpy(out_re + 1, split.realp + 1, mid * sizeof(float));
+            memcpy(out_im + 1, split.imagp + 1, mid * sizeof(float));
+        }
     }
 
     {
@@ -331,6 +342,7 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* window_func,
                                size_t t,
                                float* out_magsq, float* out_phases,
+                               float* out_re, float* out_im,
                                float* out_frame_max)
 {
     if (!spectral_fft_single_frame_args_valid(res, tid, audio, hop, window_func, out_magsq)) {
@@ -354,7 +366,17 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     } else {
         spectral_magsq_phase((float*)out_buf, out_magsq, out_phases, &frame_max, n_freqs);
     }
-    
+
+    if (out_re && out_im) {
+        /* fftwf r2c output is interleaved [re,im]; deinterleave so the tracker
+         * can take atan2f at peak bins only. DC/Nyquist already carry im==0. */
+        const float* cpx = (const float*)out_buf;
+        for (size_t k = 0; k < n_freqs; k++) {
+            out_re[k] = cpx[2u * k];
+            out_im[k] = cpx[2u * k + 1u];
+        }
+    }
+
     spectral_fft_apply_magsq_scales(res, out_magsq, n_freqs, &frame_max);
 
     if (out_frame_max) {
@@ -369,6 +391,7 @@ float spectral_fft_frames(const SpectralFftResources* res,
                           const float* window_func,
                           size_t frame_start, size_t frame_end,
                           float* out_magsq, float* out_phases,
+                          float* out_re, float* out_im,
                           int magsq_only)
 {
     float max_magsq = 0.0f;
@@ -398,6 +421,8 @@ float spectral_fft_frames(const SpectralFftResources* res,
             spectral_fft_single_frame(res, tid, audio, hop, window_func, t,
                                       out_magsq + i * n_freqs,
                                       magsq_only ? NULL : (out_phases + i * n_freqs),
+                                      (!magsq_only && out_re) ? (out_re + i * n_freqs) : NULL,
+                                      (!magsq_only && out_im) ? (out_im + i * n_freqs) : NULL,
                                       &frame_max);
             if (frame_max > max_magsq) max_magsq = frame_max;
         }
