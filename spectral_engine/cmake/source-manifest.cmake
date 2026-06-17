@@ -1,10 +1,11 @@
 # Canonical source manifest for Spectral engine modules.
 #
 # Path-selection mechanism (when to add a _HOST/_EMBEDDED file pair here vs. a whole-file #if vs.
-# an in-body capability #if): see docs/core_audit/reference/ARCH_PATH_SELECTION.md. Rule of thumb —
-# mutually-exclusive port bodies chosen by a PROFILE decision (host vs embedded) belong here as a
-# CMake file-selected pair with zero in-body profile #if; a platform-resolved capability that must
-# co-link for a parity test (e.g. the iFFT vDSP/ref pair) stays a whole-file self-#if instead.
+# an in-body capability #if): see AI_CANON #20 (docs/core_audit/reference/AI_CANON.md), with the full
+# verified census in docs/core_audit/archive/ARCH_PATH_SELECTION.md. Rule of thumb — mutually-exclusive
+# port bodies chosen by a PROFILE decision (host vs embedded) belong here as a CMake file-selected pair
+# with zero in-body profile #if; a platform-resolved capability that must co-link for a parity test
+# (e.g. the iFFT vDSP/ref pair) stays a whole-file self-#if instead.
 #
 # Required input:
 #   SPECTRAL_ENGINE_ROOT - absolute or relative path to spectral_engine/

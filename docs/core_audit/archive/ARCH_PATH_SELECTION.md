@@ -77,11 +77,92 @@ a working radix-2 iFFT) and a 12-line presence/absence **stub** (`spectral_gpu_t
 reader expects `arch/ref/` = "the portable fallback algorithm," not "the GPU-absent no-op." Fix is
 documentary or a relocation of the stub; pure taxonomy hygiene, not worth production-wiring churn.
 
+## Complete census — every path-selection site, classified and verified
+
+Every divergent-path site in `arch/`, `drivers/`, and the synth/analysis core, checked against the
+rule. **Result: the tree is fully conformant** — every apparent exception is principled or a
+recorded decision; no site needs a mechanism change.
+
+**Case 1 — CMake file-selection (mutually-exclusive port body, profile decision CMake owns):**
+
+| Surface | host/desktop TU | embedded/other TU | manifest selector |
+|---|---|---|---|
+| Oscillator SIMD | `arch/simd/spectral_oscillator_simd.c` | `arch/arm/spectral_oscillator_cmsis.c` | `OSC_SIMD_HOST` / `_EMBEDDED` |
+| Out kernels | `arch/simd/spectral_out_kernels.c` | `arch/ref/spectral_out_kernels.c` | `OUT_KERNELS_HOST` / `_EMBEDDED` |
+| GPU tile | `arch/simd/spectral_gpu_tile.c` (real) | `arch/ref/spectral_gpu_tile.c` (BACKEND_UNAVAIL stub) | `GPU_TILE_HOST` / `_EMBEDDED` |
+| Synth backend | `core/spectral_synth_cpu.c` | `arch/arm/spectral_synth_arm32.c` (embedded), `…_simulation.c` (sim), `drivers/metal`, `drivers/cuda` | `SYNTH_CPU` / `_EMBEDDED` / `_SIMULATION` / `_METAL` / `_CUDA` |
+
+Each selected body has **zero in-body *profile* `#if`**. Conformant. Two annotations: (a) `vector_ops`
+has only a HOST TU (`arch/simd/spectral_vector_ops.c`); embedded takes the scalar fallback behind the
+`spectral_vector_ops.h` interface guard — a future bare-metal counterpart would land in `arch/ref/`
+(manifest comments). (b) GPU tile is a *capability* split (desktop-has-GPU vs stub), not an ISA port —
+see the cosmetic blemish above; the manifest already annotates it.
+
+**Case 2 — whole-file self-`#if` (platform capability that must co-link):**
+
+| File | guard |
+|---|---|
+| `arch/ref/spectral_ifft_ref.c` | `#if !SPECTRAL_USE_VDSP` |
+| `drivers/vdsp/spectral_ifft_vdsp.c` | `#if SPECTRAL_USE_VDSP` |
+
+The canonical, verified-principled case (see above). Conformant. Note: `arch/arm/spectral_synth_arm32.c`
+and `spectral_synth_simulation.c` ALSO carry a whole-file `#if SPECTRAL_EMBEDDED` / sim guard, but those
+are **belt-and-suspenders on top of CMake selection** (the file is already CMake-selected for
+embedded/sim; the guard makes it a defensive no-op if pulled into the wrong link) — intentional, not a
+pure case-2.
+
+**Case 3 — in-body capability `#if` (orthogonal hardware flags on one ISA):**
+
+| File | `#…` directives | axes |
+|---|---|---|
+| `arch/arm/spectral_synth_arm32.c` | 124 | EMBEDDED / M7 / CMSIS / DMA / DTCM / RESTRICTED — **frozen by the m7 baseline** |
+| `arch/arm/spectral_debug_embedded_arm.c` | 23 | embedded debug instrumentation |
+| `arch/simd/spectral_vector_ops.c` | 24 | `__AVX2__` width (hand-written 256+128) |
+| `arch/simd/spectral_oscillator_simd.c` | 16 | `__AVX2__` width tier (drives the `.inc`) + Q15 |
+| `arch/ref/spectral_out_kernels.c` | 11 | CMSIS / M7 (the embedded out-kernel) |
+
+Orthogonal capability axes correctly in-body. Conformant.
+
+**Case 4 — width-templated re-includable `.inc`:**
+
+| `.inc` | instantiated by |
+|---|---|
+| `arch/simd/spectral_oscillator_simd_kernel.inc` | `spectral_oscillator_simd.c` at `OSC_VW = OSC_KERNEL_W (4|8)` |
+| `arch/simd/spectral_fast_sin_simd.inc` | the kernel `.inc` (and `core/spectral_synth_ifft.c` at 4-wide) |
+
+Conformant. **Recorded exception:** `vector_ops.c` hand-writes the 128+256 widths with in-body
+`#ifdef __AVX2__` rather than a `.inc`. This is a *deliberately declined* unification (the un-256'd ops
+were found to be dead code; recorded in `OPTIMISATION_PLAN`/QTYPE work), not a defect — case-4-via-in-body
+is acceptable when the `.inc` extraction was measured not worth it.
+
+**Case 5 — runtime vtable (user-selectable backend):**
+
+| Surface | vtable |
+|---|---|
+| Synth backend (CPU / Metal / CUDA / Export) | `core/spectral_backend.h` `SpectralBackendVTable`, chosen at runtime by `spectral_backend_vtable()` |
+| Oscillator timbre / quality | `spectral_oscillator` dispatch |
+
+Conformant — cold/host backend selection, correctly **not** extended to the embedded hot path.
+
+## Resolved items (closure)
+
+- **gpu_tile-as-capability blemish** → DECIDED: document-only. The manifest already annotates the
+  host-capability nature; relocating the stub is churn for cosmetics. No action.
+- **`vector_ops` hand-written widths vs the `.inc`** → DECIDED: a recorded measure-first decline, not a
+  defect. No action.
+- **arm32 / simulation belt-and-suspenders `#if SPECTRAL_EMBEDDED`** → intentional defensive double-guard.
+  No action.
+- **iFFT self-`#if`** → verified principled (not a CMake-selectable profile decision; co-link required).
+  No action.
+
+No genuine inconsistency was found that warrants a code change. The census is complete.
+
 ## Bottom line
 
-The architecture is ~80% already consistent with this rule. The maintainer's unease is real but
-the diagnosis "we use macros where we should use files" is mostly **not** the situation: the five
-mechanisms map to five genuinely-different fork types. The high-value, near-zero-risk move is to
-**make the rule predictable (this doc)** — not to migrate code. Every concrete migration the design
-study proposed (iFFT→CMake, a unified capability header, the gpu_tile move, a `RESTRICTED_*` rename)
-was shown to be either wrong-on-the-facts or churn-for-cosmetics on a perf-pinned, parity-gated tree.
+The architecture is fully consistent with this rule once it is *stated*: the five mechanisms map to five
+genuinely-different fork types, and every site conforms. The maintainer's unease pointed at
+*unpredictability* (no written rule), not at wrong mechanism choice. The durable rule now lives in
+**AI_CANON #20**; this document is the complete verified census + the iFFT-exception rationale behind it.
+Every concrete migration the design study proposed (iFFT→CMake, a unified capability header, the gpu_tile
+move, a `RESTRICTED_*` rename) was shown to be wrong-on-the-facts or churn-for-cosmetics on a perf-pinned,
+parity-gated tree. **Status: COMPLETE — archived.**

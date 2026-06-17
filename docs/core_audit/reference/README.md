@@ -14,9 +14,6 @@ current focus** lives here.
 - `CHANGELOG.md` — the rolling change digest (one terse line per change).
 
 ## Guidelines / reference
-- `ARCH_PATH_SELECTION.md` — which path-selection mechanism (new file + CMake select / whole-file
-  self-`#if` / in-body capability `#if` / width `.inc` / runtime vtable) to use for a given fork,
-  and why the parts that look inconsistent (the iFFT self-guard) are principled.
 - `KERNEL_PATCHING_GUIDELINES.md` — how to patch the kernel safely.
 - `VALIDATION_OWNERSHIP.md` — who/what validates each surface.
 - `FULL_FUSED_PARITY_HARNESS.md` — the full-vs-fused parity harness spec (realized by

@@ -236,3 +236,26 @@ Acceptable wrappers must do at least one real job:
 For internal kernel code, prefer calling the canonical helper directly. If a
 semantic predicate is needed for multiple capability bits, expose one generic
 predicate instead of one alias per bit.
+
+## 20. Path-selection mechanism is keyed to the fork type, not habit
+
+"Macro-gate vs. new file" is not a global preference — pick the mechanism by what the
+fork actually is:
+
+- **Two mutually-exclusive port bodies** fulfilling one contract header, chosen by a
+  **profile decision CMake owns** (host vs embedded) → new file + CMake file-selection,
+  with **zero in-body profile `#if`** (e.g. `out_kernels`, `osc_simd`, `gpu_tile`).
+- **Two port bodies gated by a platform capability** (resolved in C, not CMake) that must
+  **co-link** in one test/parity binary → **whole-file self-`#if`** (e.g. the iFFT
+  `SPECTRAL_USE_VDSP` pair). Do NOT convert this to CMake file-selection: it would duplicate
+  a C-resolved fact into CMake (violates the C-truth rule), desync the `-D` override, and
+  fail to link two same-symbol bodies.
+- **Orthogonal hardware-capability flags** stacking within one ISA (DMA/DTCM/CMSIS/M7) →
+  in-body `#if` on named predicates. Do not split into files — they co-occur, and on the
+  byte-pinned arm32 hot path any restructure moves the m7 baseline.
+- **Width/lane parametricity** → re-includable width-templated `.inc`.
+- **Runtime user-selectable backend** (CPU/Metal/CUDA) → function-pointer vtable chosen at
+  init; never on the embedded hot path (indirect calls defeat inlining).
+
+The full verified census + the iFFT-exception rationale is in
+`archive/ARCH_PATH_SELECTION.md`.
