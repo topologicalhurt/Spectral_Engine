@@ -71,7 +71,7 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
          * here would otherwise always take the fallback and silently substitute the
          * HANN descriptor for whatever window was actually used. */
         SegmentArray result = spectral_track_peaks_with_window_descriptor(
-            stft.magsq, stft.phases, max_magsq,
+            stft.magsq, stft.re, stft.im, max_magsq,
             n_frames, n_freqs,
             sr, n_fft, hop,
             db_thresh,

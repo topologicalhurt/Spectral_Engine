@@ -55,6 +55,12 @@ struct SpectralTracker {
     TrackSegment** seg_arrays;
     size_t* seg_counts;
     size_t* seg_capacities;
+    /* Per-thread phase scratch (n_freqs floats each). Phase-at-peaks fills only
+     * the tracked peak bins via atan2f(im,re) here, then hands these to
+     * emit_segment exactly like the old dense phase rows — so the estimator and
+     * its tests stay byte-identical while the all-bins producer atan2 is gone. */
+    float** thread_phase_scratch;
+    float** thread_next_phase_scratch;
     int n_threads;
     _Atomic SpectralError last_error;
 
@@ -121,8 +127,10 @@ static inline SpectralError spectral_tracker_frame_context_init(
     SpectralFrameContext* ctx,
     const float* row,
     const float* next_row,
-    const float* phase_row,
-    const float* next_phase_row,
+    const float* re_row,
+    const float* im_row,
+    const float* next_re_row,
+    const float* next_im_row,
     size_t frame_index,
     float hop_float,
     float threshsq,
@@ -131,7 +139,7 @@ static inline SpectralError spectral_tracker_frame_context_init(
     float frame_start_sample = 0.0f;
     SpectralError err = SPECTRAL_OK;
 
-    if (!ctx || !row || !next_row || !phase_row) {
+    if (!ctx || !row || !next_row || !re_row || !im_row) {
         return SPECTRAL_ERR_PARAM;
     }
 
@@ -140,8 +148,10 @@ static inline SpectralError spectral_tracker_frame_context_init(
 
     ctx->row = row;
     ctx->next_row = next_row;
-    ctx->phase_row = phase_row;
-    ctx->next_phase_row = next_phase_row;
+    ctx->re_row = re_row;
+    ctx->im_row = im_row;
+    ctx->next_re_row = next_re_row;
+    ctx->next_im_row = next_im_row;
     ctx->frame_start_sample = frame_start_sample;
     ctx->threshsq = threshsq;
     ctx->can_start_new = can_start_new;

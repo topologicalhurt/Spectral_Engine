@@ -281,11 +281,25 @@ static void spectral_tracker_free_segment_storage(SpectralTracker* tracker) {
         }
         free(tracker->seg_arrays);
     }
+    if (tracker->thread_phase_scratch) {
+        for (int t = 0; t < tracker->n_threads; t++) {
+            free(tracker->thread_phase_scratch[t]);
+        }
+        free(tracker->thread_phase_scratch);
+    }
+    if (tracker->thread_next_phase_scratch) {
+        for (int t = 0; t < tracker->n_threads; t++) {
+            free(tracker->thread_next_phase_scratch[t]);
+        }
+        free(tracker->thread_next_phase_scratch);
+    }
     free(tracker->seg_counts);
     free(tracker->seg_capacities);
     tracker->seg_arrays = NULL;
     tracker->seg_counts = NULL;
     tracker->seg_capacities = NULL;
+    tracker->thread_phase_scratch = NULL;
+    tracker->thread_next_phase_scratch = NULL;
 }
 
 /* ── End accessors ─────────────────────────────────────────────────── */
@@ -316,6 +330,12 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
     float max_vsq = 0.0f;
     int best_next = 0;
     int validated = 0;
+
+    /* cf is a strict interior local max from the scan (1..n_freqs-2), so the
+     * cf-1/cf+1 phase reads below stay in range; guard defensively to mirror
+     * emit_segment's own boundary reject. */
+    if (cf == 0u || cf + 1u >= tracker->n_freqs) return 1;
+
 #if SPECTRAL_TRACK_DEBUG_TIMING
     double phase_start = omp_get_wtime();
 #endif
@@ -330,7 +350,19 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
 #if SPECTRAL_TRACK_DEBUG_TIMING
     phase_start = omp_get_wtime();
 #endif
-    if (!spectral_tracker_emit_segment(tracker, tid, ctx->row, ctx->next_row, ctx->phase_row, ctx->next_phase_row, cf, ctx->frame_start_sample,
+    /* Phase-at-peaks: one atan2f(im,re) per bin at this validated peak, into this
+     * thread's scratch (cf-1..cf+1 on the current frame, cf on the next). The
+     * single ps[cf] feeds all three downstream reads — emit_segment's validity
+     * gate, seg->phase, and the estimator input — so it is one atan2, not three,
+     * and bit-for-bit consistent across them. Replaces the all-bins producer atan2. */
+    float* __restrict__ ps = tracker->thread_phase_scratch[tid];
+    float* __restrict__ nps = tracker->thread_next_phase_scratch[tid];
+    ps[cf - 1u] = atan2f(ctx->im_row[cf - 1u], ctx->re_row[cf - 1u]);
+    ps[cf]      = atan2f(ctx->im_row[cf],      ctx->re_row[cf]);
+    ps[cf + 1u] = atan2f(ctx->im_row[cf + 1u], ctx->re_row[cf + 1u]);
+    nps[cf]     = atan2f(ctx->next_im_row[cf], ctx->next_re_row[cf]);
+
+    if (!spectral_tracker_emit_segment(tracker, tid, ctx->row, ctx->next_row, ps, nps, cf, ctx->frame_start_sample,
                                        tracker->freq_step_omega, tracker->freq_step_df,
                                        tracker->inv_hop, tracker->hop_float,
                                        curr, max_vsq, best_next,
@@ -376,7 +408,8 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
             SPECTRAL_PREFETCH_READ_LOCALITY(ctx->next_row + pf - 1u, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
             SPECTRAL_PREFETCH_READ_LOCALITY(ctx->row + pf - 1u, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
 #if SPECTRAL_TRACK_PREFETCH_PHASE
-            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->phase_row + pf, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
+            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->re_row + pf, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
+            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->im_row + pf, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
 #endif
         }
 
@@ -418,7 +451,7 @@ static int spectral_tracker_flush_candidate_batch(
         return 0;
     }
     if (*candidate_batch_count == 0) return 1;
-    if (!candidate_batch || !ctx || !ctx->row || !ctx->next_row || !ctx->phase_row) {
+    if (!candidate_batch || !ctx || !ctx->row || !ctx->next_row || !ctx->re_row || !ctx->im_row) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
         return 0;
     }
@@ -724,11 +757,13 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     size_t thread_slots = 0;
     size_t thread_slots_bytes = 0;
     size_t init_seg_bytes = 0;
+    size_t phase_scratch_bytes = 0;
 
     if (init_cap == 0u ||
         !spectral_size_mul((size_t)n_threads, (size_t)SPECTRAL_CACHE_LINE_STRIDE, &thread_slots) ||
         !spectral_size_mul(thread_slots, sizeof(size_t), &thread_slots_bytes) ||
-        !spectral_size_mul(init_cap, sizeof(TrackSegment), &init_seg_bytes)) {
+        !spectral_size_mul(init_cap, sizeof(TrackSegment), &init_seg_bytes) ||
+        !spectral_array_bytes(n_freqs, sizeof(float), &phase_scratch_bytes)) {
         goto fail;
     }
 
@@ -737,7 +772,10 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
      * is live, but the full padded allocation must be overflow-checked. */
     tracker->seg_counts = (size_t*)spectral_aligned_alloc(thread_slots_bytes);
     tracker->seg_capacities = (size_t*)spectral_aligned_alloc(thread_slots_bytes);
-    if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities) {
+    tracker->thread_phase_scratch = (float**)spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    tracker->thread_next_phase_scratch = (float**)spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities ||
+        !tracker->thread_phase_scratch || !tracker->thread_next_phase_scratch) {
         goto fail;
     }
     memset(tracker->seg_counts, 0, thread_slots_bytes);
@@ -745,7 +783,13 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     for (t = 0; t < n_threads; t++) {
         tracker->seg_capacities[t * SPECTRAL_CACHE_LINE_STRIDE] = init_cap;
         tracker->seg_arrays[t] = (TrackSegment*)spectral_aligned_alloc(init_seg_bytes);
-        if (!tracker->seg_arrays[t]) {
+        /* Phase scratch: only the ~4 bins around each peak are ever written/read,
+         * but a full n_freqs row lets emit_segment index phase_row[cf-1..cf+1]
+         * and next_phase_row[cf] directly. */
+        tracker->thread_phase_scratch[t] = (float*)spectral_aligned_alloc(phase_scratch_bytes);
+        tracker->thread_next_phase_scratch[t] = (float*)spectral_aligned_alloc(phase_scratch_bytes);
+        if (!tracker->seg_arrays[t] || !tracker->thread_phase_scratch[t] ||
+            !tracker->thread_next_phase_scratch[t]) {
             goto fail;
         }
     }
@@ -759,9 +803,10 @@ fail:
 }
 
 void spectral_tracker_process(SpectralTracker* tracker,
-                               const float* chunk_magsq, const float* chunk_phases,
+                               const float* chunk_magsq,
+                               const float* chunk_re, const float* chunk_im,
                                size_t chunk_n_frames, size_t global_frame_offset) {
-    if (!tracker || chunk_n_frames < 1 || !chunk_magsq || !chunk_phases) return;
+    if (!tracker || chunk_n_frames < 1 || !chunk_magsq || !chunk_re || !chunk_im) return;
     if (atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK) return;
 
     const size_t n_freqs = tracker->n_freqs;
@@ -832,11 +877,13 @@ void spectral_tracker_process(SpectralTracker* tracker,
             }
             local_pairs++;
 
-            const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
             /* t < n_pairs == chunk_n_frames - 1, so t+1 is always a valid frame. */
             const float* __restrict__ next_row = chunk_magsq + (t + 1) * n_freqs;
-            const float* __restrict__ next_phase_row = chunk_phases + (t + 1) * n_freqs;
+            const float* __restrict__ re_row = chunk_re + t * n_freqs;
+            const float* __restrict__ im_row = chunk_im + t * n_freqs;
+            const float* __restrict__ next_re_row = chunk_re + (t + 1) * n_freqs;
+            const float* __restrict__ next_im_row = chunk_im + (t + 1) * n_freqs;
 
             float frame_start_sample = 0.0f;
             if (spectral_tracker_frame_time_from_index(global_frame_offset + t, hop_float, &frame_start_sample) != SPECTRAL_OK) {
@@ -857,7 +904,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
              * SpectralFrameContext. can_start_new is unused by this non-fused chain
              * (the queued handle/emit path never reads it). */
             const SpectralFrameContext frame_ctx = {
-                row, next_row, phase_row, next_phase_row, frame_start_sample, threshsq, 1
+                row, next_row, re_row, im_row, next_re_row, next_im_row, frame_start_sample, threshsq, 1
             };
 
             size_t f = 1;
@@ -1240,7 +1287,7 @@ void spectral_tracker_destroy(SpectralTracker* tracker) {
  * SpectralTracker with an explicit analysis-window/estimator contract. */
 
 SegmentArray spectral_track_peaks_with_window_descriptor(
-    const float* magsq, const float* phases,
+    const float* magsq, const float* re, const float* im,
     float max_magsq,
     size_t n_frames, size_t n_freqs,
     int sr, int n_fft, int hop,
@@ -1248,7 +1295,7 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
     const SpectralWindowDescriptor* window_desc,
     SpectralPeakEstimatorType estimator,
     double* t_track) {
-    if (!magsq || !phases || !t_track || n_frames < 2 || n_freqs < 3) {
+    if (!magsq || !re || !im || !t_track || n_frames < 2 || n_freqs < 3) {
         return peak_track_return_empty(t_track);
     }
     /* Guard against NaN/Inf in float parameters at the public API boundary */
@@ -1276,7 +1323,7 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
     }
 
     /* Process all frames in one shot. */
-    spectral_tracker_process(tracker, magsq, phases, n_frames, 0);
+    spectral_tracker_process(tracker, magsq, re, im, n_frames, 0);
 
     SegmentArray result = spectral_tracker_finalize(tracker, t_track, 0.0);
     spectral_tracker_destroy(tracker);
@@ -1286,13 +1333,14 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
 /* spectral_track_peaks — compatibility wrapper for the engine default
  * Hann-windowed analysis path and AUTO estimator policy. */
 
-SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
+SegmentArray spectral_track_peaks(const float* magsq,
+                                  const float* re, const float* im,
                                   float max_magsq,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,
                                   float db_thresh, double* t_track) {
     return spectral_track_peaks_with_window_descriptor(
-        magsq, phases, max_magsq,
+        magsq, re, im, max_magsq,
         n_frames, n_freqs,
         sr, n_fft, hop,
         db_thresh,

@@ -199,12 +199,18 @@ static float quarter_offset(float left, float center, float right) {
 
 int main(void) {
     float magsq[N_FREQS * 2] = {0};
-    float phase[N_FREQS * 2] = {0};
+    /* Real-valued spectrum (im = 0): atan2f(im, re) == 0 at every bin, so the
+     * tracked peaks carry phase 0 exactly as the old dense phase=0 array did.
+     * re magnitude is irrelevant to the estimator (it takes |X| from magsq);
+     * mirroring sqrt(magsq) just keeps the complex value physically consistent. */
+    float re[N_FREQS * 2] = {0};
+    float im[N_FREQS * 2] = {0};
     for (unsigned f = 0; f < N_FRAMES; f++) {
         float* row = magsq + (size_t)f * N_FREQS;
-        row[PEAK_BIN - 1] = 1.0f;
-        row[PEAK_BIN]     = 4.0f;   /* local max -> the tracked peak */
-        row[PEAK_BIN + 1] = 1.0f;
+        float* rerow = re + (size_t)f * N_FREQS;
+        row[PEAK_BIN - 1] = 1.0f;  rerow[PEAK_BIN - 1] = 1.0f;
+        row[PEAK_BIN]     = 4.0f;  rerow[PEAK_BIN]     = 2.0f;   /* local max -> the tracked peak */
+        row[PEAK_BIN + 1] = 1.0f;  rerow[PEAK_BIN + 1] = 1.0f;
     }
     const float bin_step = SPECTRAL_TWO_PI / (float)N_FFT;   /* omega per bin = 2*pi/n_fft */
     double t_default = 0.0, t_custom = 0.0, t_bad = 0.0;
@@ -217,12 +223,12 @@ int main(void) {
     };
 
     SegmentArray default_segments = spectral_track_peaks(
-        magsq, phase, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f, &t_default);
+        magsq, re, im, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f, &t_default);
     SegmentArray custom_segments = spectral_track_peaks_with_window_descriptor(
-        magsq, phase, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
+        magsq, re, im, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
         &desc, SPECTRAL_PEAK_ESTIMATOR_AUTO, &t_custom);
     SegmentArray bad_segments = spectral_track_peaks_with_window_descriptor(
-        magsq, phase, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
+        magsq, re, im, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
         &bad_desc, SPECTRAL_PEAK_ESTIMATOR_AUTO, &t_bad);
 
     if (default_segments.count != 1u || !default_segments.segs) return 1;

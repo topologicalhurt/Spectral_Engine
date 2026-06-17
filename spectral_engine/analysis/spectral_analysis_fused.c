@@ -25,8 +25,12 @@
 typedef struct SpectralFusedScratchRows {
     float* row_curr;
     float* row_next;
-    float* phase_curr;
-    float* phase_next;
+    /* Complex spectrum rows: phase is taken via atan2f(im,re) at peaks in the
+     * tracker, not densely here (phase-at-peaks). Two extra scratch rows/thread. */
+    float* re_curr;
+    float* im_curr;
+    float* re_next;
+    float* im_next;
 } SpectralFusedScratchRows;
 
 static int spectral_fused_scratch_rows_alloc(SpectralFusedScratchRows* rows, size_t row_bytes)
@@ -36,14 +40,19 @@ static int spectral_fused_scratch_rows_alloc(SpectralFusedScratchRows* rows, siz
 
     rows->row_curr = (float*)spectral_aligned_alloc(row_bytes);
     rows->row_next = (float*)spectral_aligned_alloc(row_bytes);
-    rows->phase_curr = (float*)spectral_aligned_alloc(row_bytes);
-    rows->phase_next = (float*)spectral_aligned_alloc(row_bytes);
+    rows->re_curr = (float*)spectral_aligned_alloc(row_bytes);
+    rows->im_curr = (float*)spectral_aligned_alloc(row_bytes);
+    rows->re_next = (float*)spectral_aligned_alloc(row_bytes);
+    rows->im_next = (float*)spectral_aligned_alloc(row_bytes);
 
-    if (!rows->row_curr || !rows->row_next || !rows->phase_curr || !rows->phase_next) {
+    if (!rows->row_curr || !rows->row_next || !rows->re_curr || !rows->im_curr ||
+        !rows->re_next || !rows->im_next) {
         free(rows->row_curr);
         free(rows->row_next);
-        free(rows->phase_curr);
-        free(rows->phase_next);
+        free(rows->re_curr);
+        free(rows->im_curr);
+        free(rows->re_next);
+        free(rows->im_next);
         *rows = (SpectralFusedScratchRows){0};
         return 0;
     }
@@ -56,8 +65,10 @@ static void spectral_fused_scratch_rows_free(SpectralFusedScratchRows* rows)
     if (!rows) return;
     free(rows->row_curr);
     free(rows->row_next);
-    free(rows->phase_curr);
-    free(rows->phase_next);
+    free(rows->re_curr);
+    free(rows->im_curr);
+    free(rows->re_next);
+    free(rows->im_next);
     *rows = (SpectralFusedScratchRows){0};
 }
 
@@ -70,9 +81,13 @@ static void spectral_fused_scratch_rows_rotate(SpectralFusedScratchRows* rows)
     rows->row_curr = rows->row_next;
     rows->row_next = tmp;
 
-    tmp = rows->phase_curr;
-    rows->phase_curr = rows->phase_next;
-    rows->phase_next = tmp;
+    tmp = rows->re_curr;
+    rows->re_curr = rows->re_next;
+    rows->re_next = tmp;
+
+    tmp = rows->im_curr;
+    rows->im_curr = rows->im_next;
+    rows->im_next = tmp;
 }
 
 SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
@@ -188,7 +203,7 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
                     /* Prime the current row for this pair range. */
                     fft_start = omp_get_wtime();
                     spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, pair_start,
-                                              rows.row_curr, rows.phase_curr, NULL, NULL, &frame_max);
+                                              rows.row_curr, NULL, rows.re_curr, rows.im_curr, &frame_max);
                     local_fft_time += (omp_get_wtime() - fft_start);
 
                     for (size_t pair = pair_start;
@@ -199,14 +214,16 @@ SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,
 
                         fft_start = omp_get_wtime();
                         spectral_fft_single_frame(&res, tid, audio, hop, window_ctx.samples, pair + 1u,
-                                                  rows.row_next, rows.phase_next, NULL, NULL, &frame_max);
+                                                  rows.row_next, NULL, rows.re_next, rows.im_next, &frame_max);
                         local_fft_time += (omp_get_wtime() - fft_start);
 
                         if (spectral_tracker_frame_context_init(&fctx,
                                                                rows.row_curr,
                                                                rows.row_next,
-                                                               rows.phase_curr,
-                                                               rows.phase_next,
+                                                               rows.re_curr,
+                                                               rows.im_curr,
+                                                               rows.re_next,
+                                                               rows.im_next,
                                                                pair,
                                                                (float)hop,
                                                                threshsq,
