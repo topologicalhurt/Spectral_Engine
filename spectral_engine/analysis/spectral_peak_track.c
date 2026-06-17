@@ -211,7 +211,7 @@ static void spectral_tracker_accumulate_time_checked(SpectralTracker* tracker,
     double next = 0.0;
 
     if (!tracker || !field) return;
-    if (!isfinite(delta) || delta < 0.0) {
+    if (!SPECTRAL_ISFINITE(delta) || delta < 0.0) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
         return;
     }
@@ -232,17 +232,17 @@ void spectral_tracker_accumulate_stats(
 #endif
 ) {
     if (!tracker) return;
-    if (!isfinite(local_track_time) || local_track_time < 0.0) {
+    if (!SPECTRAL_ISFINITE(local_track_time) || local_track_time < 0.0) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
         return;
     }
 #if SPECTRAL_TRACK_DEBUG_TIMING
-    if (!isfinite(local_scan_time) || local_scan_time < 0.0 ||
-        !isfinite(local_validate_time) || local_validate_time < 0.0 ||
-        !isfinite(local_emit_time) || local_emit_time < 0.0 ||
-        !isfinite(local_emit_alloc_time) || local_emit_alloc_time < 0.0 ||
-        !isfinite(local_emit_interp_time) || local_emit_interp_time < 0.0 ||
-        !isfinite(local_emit_amp_time) || local_emit_amp_time < 0.0) {
+    if (!SPECTRAL_ISFINITE(local_scan_time) || local_scan_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_validate_time) || local_validate_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_time) || local_emit_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_alloc_time) || local_emit_alloc_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_interp_time) || local_emit_interp_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_amp_time) || local_emit_amp_time < 0.0) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
         return;
     }
@@ -614,20 +614,20 @@ static int spectral_tracker_derive_create_scalars(size_t n_freqs,
         ((size_t)n_fft & ((size_t)n_fft - 1u)) != 0u ||
         n_freqs != ((size_t)n_fft / 2u + 1u) ||
         hop <= 0 ||
-        !isfinite(db_thresh) ||
-        !isfinite(max_magsq) || max_magsq < 0.0f) {
+        !SPECTRAL_ISFINITE(db_thresh) ||
+        !SPECTRAL_ISFINITE(max_magsq) || max_magsq < 0.0f) {
         return 0;
     }
 
     thresh_linear_sq_d = pow(10.0, (double)db_thresh / 10.0);
-    if (!isfinite(thresh_linear_sq_d) ||
+    if (!SPECTRAL_ISFINITE(thresh_linear_sq_d) ||
         thresh_linear_sq_d < 0.0 ||
         thresh_linear_sq_d > (double)FLT_MAX) {
         return 0;
     }
 
     threshsq_d = thresh_linear_sq_d * (double)max_magsq;
-    if (!isfinite(threshsq_d) ||
+    if (!SPECTRAL_ISFINITE(threshsq_d) ||
         threshsq_d < 0.0 ||
         threshsq_d > (double)FLT_MAX) {
         return 0;
@@ -639,11 +639,11 @@ static int spectral_tracker_derive_create_scalars(size_t n_freqs,
     freq_step_omega_d = freq_step_d * two_pi_ts_d;
     freq_step_df_d = 0.5 * freq_step_d * inv_hop_d * two_pi_ts_d;
 
-    if (!isfinite(freq_step_omega_d) || freq_step_omega_d <= 0.0 ||
+    if (!SPECTRAL_ISFINITE(freq_step_omega_d) || freq_step_omega_d <= 0.0 ||
         freq_step_omega_d > (double)FLT_MAX ||
-        !isfinite(freq_step_df_d) || freq_step_df_d <= 0.0 ||
+        !SPECTRAL_ISFINITE(freq_step_df_d) || freq_step_df_d <= 0.0 ||
         freq_step_df_d > (double)FLT_MAX ||
-        !isfinite(inv_hop_d) || inv_hop_d <= 0.0 ||
+        !SPECTRAL_ISFINITE(inv_hop_d) || inv_hop_d <= 0.0 ||
         inv_hop_d > (double)FLT_MAX ||
         (double)hop > (double)FLT_MAX) {
         return 0;
@@ -772,11 +772,11 @@ void spectral_tracker_process(SpectralTracker* tracker,
     const float inv_hop = tracker->inv_hop;
     const float hop_float = tracker->hop_float;
 
-    if (!isfinite(threshsq) || threshsq < 0.0f ||
-        !isfinite(freq_step_omega) || freq_step_omega <= 0.0f ||
-        !isfinite(freq_step_df) || freq_step_df <= 0.0f ||
-        !isfinite(inv_hop) || inv_hop <= 0.0f ||
-        !isfinite(hop_float) || hop_float <= 0.0f ||
+    if (!SPECTRAL_ISFINITE(threshsq) || threshsq < 0.0f ||
+        !SPECTRAL_ISFINITE(freq_step_omega) || freq_step_omega <= 0.0f ||
+        !SPECTRAL_ISFINITE(freq_step_df) || freq_step_df <= 0.0f ||
+        !SPECTRAL_ISFINITE(inv_hop) || inv_hop <= 0.0f ||
+        !SPECTRAL_ISFINITE(hop_float) || hop_float <= 0.0f ||
         !spectral_size_mul(chunk_n_frames, n_freqs, &chunk_bins)) {
         spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
         return;

@@ -34,7 +34,7 @@ int spectral_tracker_validate_candidate(
 
     if (!row || !next_row || !out_curr || !out_max_vsq || !out_best_next ||
         cf == 0u || cf > (size_t)INT_MAX ||
-        !isfinite(threshsq) || threshsq < 0.0f) {
+        !SPECTRAL_ISFINITE(threshsq) || threshsq < 0.0f) {
         return 0;
     }
 
@@ -46,15 +46,15 @@ int spectral_tracker_validate_candidate(
     m2 = next_row[cf + 1u];
     max_vsq = (m0 > m1) ? m0 : m1;
 
-    if (!isfinite(left) || !isfinite(curr) || !isfinite(right) ||
-        !isfinite(m0) || !isfinite(m1) || !isfinite(m2) ||
+    if (!SPECTRAL_ISFINITE(left) || !SPECTRAL_ISFINITE(curr) || !SPECTRAL_ISFINITE(right) ||
+        !SPECTRAL_ISFINITE(m0) || !SPECTRAL_ISFINITE(m1) || !SPECTRAL_ISFINITE(m2) ||
         left < 0.0f || curr < 0.0f || right < 0.0f ||
         m0 < 0.0f || m1 < 0.0f || m2 < 0.0f) {
         return 0;
     }
 
     max_vsq = (max_vsq > m2) ? max_vsq : m2;
-    if (!isfinite(max_vsq) || max_vsq < threshsq) return 0;
+    if (!SPECTRAL_ISFINITE(max_vsq) || max_vsq < threshsq) return 0;
 
     best_idx = (m0 >= m1) ? 0 : 1;
     best_idx = (m2 > ((best_idx == 0) ? m0 : m1)) ? 2 : best_idx;
@@ -77,16 +77,16 @@ static int spectral_tracker_emitted_segment_valid(const SpectralTracker* tracker
     if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities) {
         return 0;
     }
-    if (!isfinite(frame_start_sample) || frame_start_sample < 0.0f ||
-        !isfinite(hop_float) || hop_float <= 0.0f ||
-        !isfinite(phase) ||
-        !isfinite(SPECTRAL_TRACK_DEFAULT_WIDTH) || SPECTRAL_TRACK_DEFAULT_WIDTH <= 0.0f) {
+    if (!SPECTRAL_ISFINITE(frame_start_sample) || frame_start_sample < 0.0f ||
+        !SPECTRAL_ISFINITE(hop_float) || hop_float <= 0.0f ||
+        !SPECTRAL_ISFINITE(phase) ||
+        !SPECTRAL_ISFINITE(SPECTRAL_TRACK_DEFAULT_WIDTH) || SPECTRAL_TRACK_DEFAULT_WIDTH <= 0.0f) {
         return 0;
     }
-    if (!isfinite(estimate->amp) || estimate->amp < 0.0f ||
-        !isfinite(estimate->da) ||
-        !isfinite(estimate->omega) || estimate->omega < 0.0f ||
-        !isfinite(estimate->df)) {
+    if (!SPECTRAL_ISFINITE(estimate->amp) || estimate->amp < 0.0f ||
+        !SPECTRAL_ISFINITE(estimate->da) ||
+        !SPECTRAL_ISFINITE(estimate->omega) || estimate->omega < 0.0f ||
+        !SPECTRAL_ISFINITE(estimate->df)) {
         return 0;
     }
     return 1;

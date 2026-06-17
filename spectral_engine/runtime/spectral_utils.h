@@ -119,6 +119,15 @@ static inline int spectral_is_finite_positive_f64(double v) {
     return spectral_is_finite_f64(v) && v > 0.0;
 }
 
+/* Type-dispatched, inlined drop-in for libm isfinite() in hot paths: routes float/double to
+ * the bit-trick helpers above so the validation-heavy estimator/tracker never emit a libm
+ * __isfinitef/__isfinited call. The _Generic controlling expression is unevaluated, so x is
+ * evaluated exactly once. */
+#define SPECTRAL_ISFINITE(x) (_Generic((x), \
+    float:   spectral_is_finite_f32, \
+    double:  spectral_is_finite_f64, \
+    default: spectral_is_finite_f64)(x))
+
 static inline float spectral_clamp_f32(float v, float lo, float hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
