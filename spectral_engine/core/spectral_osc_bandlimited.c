@@ -230,6 +230,10 @@ static int osc_bl_additive(float* dst, const SegmentLoopParams* lp, SpectralTimb
             float c_prev = 1.0f, c_k = ct;
             float sign = -1.0f;            /* (-1)^k starting at k=1 */
             float series = 0.0f;
+            /* SAW/SQUARE read only the sin recurrence (s_k); TRIANGLE/PARABOLA read only the
+             * cos recurrence (c_k). The two chains are fully decoupled, so advance only the
+             * one this timbre consumes — half the recurrence arithmetic, bit-identical out. */
+            const int use_cos = (timbre == TIMBRE_TRIANGLE || timbre == TIMBRE_PARABOLA);
 
             for (int k = 1; k <= n_harm; k++) {
                 const float fk = (float)k;
@@ -240,10 +244,13 @@ static int osc_bl_additive(float* dst, const SegmentLoopParams* lp, SpectralTimb
                 case TIMBRE_PARABOLA: series += (sign / (fk * fk)) * c_k; break;  /* 2/3 - (4/pi^2) sum ((-1)^k/k^2) cos(k.) */
                 default: break;
                 }
-                const float s_next = 2.0f * ct * s_k - s_prev;
-                const float c_next = 2.0f * ct * c_k - c_prev;
-                s_prev = s_k; s_k = s_next;
-                c_prev = c_k; c_k = c_next;
+                if (use_cos) {
+                    const float c_next = 2.0f * ct * c_k - c_prev;
+                    c_prev = c_k; c_k = c_next;
+                } else {
+                    const float s_next = 2.0f * ct * s_k - s_prev;
+                    s_prev = s_k; s_k = s_next;
+                }
                 sign = -sign;
             }
 
