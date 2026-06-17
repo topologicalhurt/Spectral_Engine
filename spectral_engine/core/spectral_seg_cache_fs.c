@@ -136,6 +136,19 @@ SpectralError spectral_seg_cache_fs_index_load(const char* cache_dir,
         seg_cache_entry_swap(&entries[i]);
     }
 
+    /* The index must be strictly increasing by key: both lookup and store binary-search it.
+     * A corrupt or externally-tampered file that is unsorted or has duplicate keys would
+     * silently miss hits and let store re-persist the disorder. Reject it like any other
+     * corruption (the format already enforces magic/version/exact-length). */
+    for (uint32_t i = 1; i < hdr.count; i++) {
+        if (!(entries[i - 1].key < entries[i].key)) {
+            free(entries);
+            entries = NULL;
+            err = SPECTRAL_ERR_FILE_CORRUPT;
+            goto cleanup;
+        }
+    }
+
     *out_entries = entries;
     *out_count   = hdr.count;
     err = SPECTRAL_OK;

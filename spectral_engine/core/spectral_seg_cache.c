@@ -313,6 +313,16 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
                 cache_dir, e->data_offset, total_data_bytes, &mv);
             if (map_err == SPECTRAL_OK) {
                 char* data_ptr = (char*)mv.base + mv.page_offset;
+                /* The data file is appended with no inter-entry padding, so data_ptr can
+                 * land off the 64-byte Segment alignment; forming a Segment* there is UB.
+                 * On a misaligned offset, unmap and fall through to the heap-copy path
+                 * below (it re-reads the region into a naturally-aligned buffer). The
+                 * common aligned case (first entry, or a 64-multiple offset) keeps the
+                 * zero-copy mmap. */
+                if (((uintptr_t)data_ptr % _Alignof(Segment)) != 0u) {
+                    spectral_seg_cache_fs_data_unmap(&mv);
+                    goto seg_cache_heap_fallback;
+                }
                 Segment* mapped_segments = (Segment*)data_ptr;
                 const SegmentGpu* mapped_gpu_segs = (const SegmentGpu*)(data_ptr + seg_bytes);
                 uint32_t bad_payload_idx = 0;
@@ -352,7 +362,9 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
             /* mmap unavailable/failed — fall through to heap path. */
         }
 
-        /* Fallback: heap allocation + read (big-endian or mmap unavailable). */
+        /* Fallback: heap allocation + read (big-endian, mmap unavailable, or a misaligned
+         * mmap offset for the over-aligned Segment type). */
+    seg_cache_heap_fallback:
         {
             Segment* segs = (Segment*)spectral_malloc_array((size_t)e->seg_count, sizeof(Segment));
             if (!segs) {
