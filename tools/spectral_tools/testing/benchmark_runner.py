@@ -26,7 +26,7 @@ TIME_CANDIDATES = (Path("/usr/bin/time"), Path("/bin/time"))
 BSD_TIME_RSS_RE = re.compile(r"^\s*(\d+)\s+maximum resident set size", re.MULTILINE)
 CACHE_FLAG = "--cache"
 CACHE_FILES = ("seg_cache_index.bin", "seg_cache_data.bin")
-METRIC_SECTION_KEYS = ("summary", "stage_medians", "bandwidth_medians", "memory", "track_series")
+METRIC_SECTION_KEYS = ("summary", "stage_medians", "stage_spread", "bandwidth_medians", "memory", "track_series")
 
 
 @dataclass(slots=True)
@@ -112,6 +112,25 @@ class BenchmarkRunner:
     @staticmethod
     def _fmt_ms_cell(value: float | None) -> str:
         return f"{(value if value is not None else float('nan')):8.2f}"
+
+    @staticmethod
+    def _warm(values: list[float]) -> list[float]:
+        """Steady-state view: drop the cold first run when there is more than
+        one sample. The first run pays one-off costs the steady state never
+        repeats — first-touch paging, the FFT/vDSP plan build, dyld bind — so
+        folding it into a per-stage median misreports the kernel under test.
+        The headline Total/RSS already report their warm_* statistics this way;
+        this makes the per-stage breakdown reconcile with them instead of
+        silently including the outlier. A single run has nothing to warm."""
+        return values[1:] if len(values) > 1 else values
+
+    @staticmethod
+    def _fmt_spread(values: list[float]) -> str:
+        """min..max band so a median's run-to-run jitter is legible (a lone
+        median hides whether 7ms is steady or the midpoint of 6..11)."""
+        if not values:
+            return "nan..nan"
+        return f"{min(values):.2f}..{max(values):.2f}"
 
     @staticmethod
     def _kb_to_mb(kb: float | None) -> str:
@@ -509,30 +528,45 @@ class BenchmarkRunner:
         )
 
         if mode == BenchMode.CACHE.value:
-            seg_median = self.parser.median(data.segbin_totals)
-            synth_kernel_median = self.parser.median(data.synth_kernels)
-            synth_wall_median = self.parser.median(data.synth_walls)
-            norm_median = self.parser.median(data.norms)
+            warm_segbin = self._warm(data.segbin_totals)
+            warm_synth_kernels = self._warm(data.synth_kernels)
+            warm_synth_walls = self._warm(data.synth_walls)
+            warm_norms = self._warm(data.norms)
             lines.append(
-                "Segment-binary ms: "
-                f"total_median={self._fmt_stat(seg_median)} "
-                f"synth_kernel_median={self._fmt_stat(synth_kernel_median)} "
-                f"synth_wall_median={self._fmt_stat(synth_wall_median)} "
-                f"norm_median={self._fmt_stat(norm_median)}"
+                "Segment-binary warm medians ms: "
+                f"total_median={self._fmt_stat(self.parser.median(warm_segbin))} "
+                f"synth_kernel_median={self._fmt_stat(self.parser.median(warm_synth_kernels))} "
+                f"synth_wall_median={self._fmt_stat(self.parser.median(warm_synth_walls))} "
+                f"norm_median={self._fmt_stat(self.parser.median(warm_norms))}"
+            )
+            lines.append(
+                "Segment-binary warm spread ms (min..max): "
+                f"total={self._fmt_spread(warm_segbin)} "
+                f"synth_kernel={self._fmt_spread(warm_synth_kernels)} "
+                f"synth_wall={self._fmt_spread(warm_synth_walls)} "
+                f"norm={self._fmt_spread(warm_norms)}"
             )
         else:
-            fft_median = self.parser.median(data.ffts)
-            track_median = self.parser.median(data.tracks)
-            synth_kernel_median = self.parser.median(data.synth_kernels)
-            synth_wall_median = self.parser.median(data.synth_walls)
-            norm_median = self.parser.median(data.norms)
+            warm_ffts = self._warm(data.ffts)
+            warm_tracks = self._warm(data.tracks)
+            warm_synth_kernels = self._warm(data.synth_kernels)
+            warm_synth_walls = self._warm(data.synth_walls)
+            warm_norms = self._warm(data.norms)
             lines.append(
-                "Stage medians ms: "
-                f"fft={self._fmt_stat(fft_median)} "
-                f"track={self._fmt_stat(track_median)} "
-                f"synth_kernel={self._fmt_stat(synth_kernel_median)} "
-                f"synth_wall={self._fmt_stat(synth_wall_median)} "
-                f"norm={self._fmt_stat(norm_median)}"
+                "Stage warm medians ms: "
+                f"fft={self._fmt_stat(self.parser.median(warm_ffts))} "
+                f"track={self._fmt_stat(self.parser.median(warm_tracks))} "
+                f"synth_kernel={self._fmt_stat(self.parser.median(warm_synth_kernels))} "
+                f"synth_wall={self._fmt_stat(self.parser.median(warm_synth_walls))} "
+                f"norm={self._fmt_stat(self.parser.median(warm_norms))}"
+            )
+            lines.append(
+                "Stage warm spread ms (min..max): "
+                f"fft={self._fmt_spread(warm_ffts)} "
+                f"track={self._fmt_spread(warm_tracks)} "
+                f"synth_kernel={self._fmt_spread(warm_synth_kernels)} "
+                f"synth_wall={self._fmt_spread(warm_synth_walls)} "
+                f"norm={self._fmt_spread(warm_norms)}"
             )
 
             if (
@@ -541,16 +575,12 @@ class BenchmarkRunner:
                 and data.fft_bandwidth_rel_pcts
                 and data.track_bandwidth_rel_pcts
             ):
-                fft_bw_median = self.parser.median(data.fft_bandwidths)
-                fft_bw_rel_pct_median = self.parser.median(data.fft_bandwidth_rel_pcts)
-                track_bw_median = self.parser.median(data.track_bandwidths)
-                track_bw_rel_pct_median = self.parser.median(data.track_bandwidth_rel_pcts)
                 lines.append(
-                    "Stage bandwidth medians: "
-                    f"fft={self._fmt_stat(fft_bw_median)}GiB/s "
-                    f"({self._fmt_stat(fft_bw_rel_pct_median)}% of faster stage) "
-                    f"track={self._fmt_stat(track_bw_median)}GiB/s "
-                    f"({self._fmt_stat(track_bw_rel_pct_median)}% of faster stage)"
+                    "Stage bandwidth warm medians: "
+                    f"fft={self._fmt_stat(self.parser.median(self._warm(data.fft_bandwidths)))}GiB/s "
+                    f"({self._fmt_stat(self.parser.median(self._warm(data.fft_bandwidth_rel_pcts)))}% of faster stage) "
+                    f"track={self._fmt_stat(self.parser.median(self._warm(data.track_bandwidths)))}GiB/s "
+                    f"({self._fmt_stat(self.parser.median(self._warm(data.track_bandwidth_rel_pcts)))}% of faster stage)"
                 )
                 lines.append(
                     "Bandwidth percentages are relative between FFT and track "

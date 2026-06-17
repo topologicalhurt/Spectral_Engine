@@ -13,21 +13,28 @@ from ..core.constants import STAGE_MARKER_LINE_RE
 RUN_TRACK_RE = re.compile(r"^run\s+\d+.*?track=\s*([0-9]+(?:\.[0-9]+)?)ms", re.MULTILINE)
 RUN_TRACK_BW_RE = re.compile(r"^run\s+\d+.*?track_bw=\s*([0-9]+(?:\.[0-9]+)?)GiB/s", re.MULTILINE)
 TOTAL_RE = re.compile(
-    r"^Total ms: first=([^ ]+) median=([^ ]+) mean=([^ ]+) warm_median=([^ ]+) warm_mean=([^ ]+)",
+    r"^Total ms: first=(\S+) median=(\S+) mean=(\S+) warm_median=(\S+) warm_mean=(\S+)",
     re.MULTILINE,
 )
+# "Stage medians ms:" is the legacy (cold-run-inclusive) label; "Stage warm
+# medians ms:" is the current steady-state label. The optional "(?:warm )?"
+# accepts both so a freshly-emitted log and an archived report both parse.
 STAGE_RE_V2 = re.compile(
-    r"^Stage medians ms: fft=([^ ]+) track=([^ ]+) synth_kernel=([^ ]+) synth_wall=([^ ]+) norm=([^ ]+)",
+    r"^Stage (?:warm )?medians ms: fft=(\S+) track=(\S+) synth_kernel=(\S+) synth_wall=(\S+) norm=(\S+)",
     re.MULTILINE,
 )
-STAGE_RE_V1 = re.compile(r"^Stage medians ms: fft=([^ ]+) track=([^ ]+) synth=([^ ]+) norm=([^ ]+)", re.MULTILINE)
+STAGE_RE_V1 = re.compile(
+    r"^Stage (?:warm )?medians ms: fft=(\S+) track=(\S+) synth=(\S+) norm=(\S+)", re.MULTILINE
+)
+STAGE_SPREAD_RE = re.compile(r"^Stage warm spread ms \(min\.\.max\): (.+)$", re.MULTILINE)
+SPREAD_TOKEN_RE = re.compile(r"\b(fft|track|synth_kernel|synth_wall|norm)=([0-9.]+|nan)\.\.([0-9.]+|nan)")
 BW_RE = re.compile(
-    r"^Stage bandwidth medians: fft=([^ ]+)GiB/s \(([^)]+)% of faster stage\) "
-    r"track=([^ ]+)GiB/s \(([^)]+)% of faster stage\)",
+    r"^Stage bandwidth (?:warm )?medians: fft=(\S+)GiB/s \(([^)]+)% of faster stage\) "
+    r"track=(\S+)GiB/s \(([^)]+)% of faster stage\)",
     re.MULTILINE,
 )
 RSS_RE = re.compile(
-    r"^Memory max RSS \(MB\): median=([^ ]+) mean=([^ ]+) warm_median=([^ ]+) warm_mean=([^ ]+)",
+    r"^Memory max RSS \(MB\): median=(\S+) mean=(\S+) warm_median=(\S+) warm_mean=(\S+)",
     re.MULTILINE,
 )
 CACHE_SEG_TIMING_RE = re.compile(
@@ -217,6 +224,7 @@ class BenchmarkOutputParser:
         metrics: dict[str, Any] = {
             "summary": {},
             "stage_medians": {},
+            "stage_spread": {},
             "bandwidth_medians": {},
             "memory": {},
             "track_series": {},
@@ -255,6 +263,14 @@ class BenchmarkOutputParser:
                     "synth_ms": self.to_float(synth),
                     "norm_ms": self.to_float(norm),
                 }
+
+        spread_match = STAGE_SPREAD_RE.search(output)
+        if spread_match:
+            spread: dict[str, float | None] = {}
+            for key, lo, hi in SPREAD_TOKEN_RE.findall(spread_match.group(1)):
+                spread[f"{key}_min_ms"] = self.to_float(lo)
+                spread[f"{key}_max_ms"] = self.to_float(hi)
+            metrics["stage_spread"] = spread
 
         bw_match = BW_RE.search(output)
         if bw_match:

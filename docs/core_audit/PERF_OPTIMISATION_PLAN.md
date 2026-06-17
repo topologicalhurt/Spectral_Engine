@@ -3,6 +3,39 @@
 Goal: optimise toward the assembly level, but only where the algorithm is already the right one
 (no "house on sand"). This plan is grounded in real profiles on both targets, not guesses.
 
+## Part 0 — Perf-system audit (measure clean before you optimise)
+
+You can't profile-drive optimisation off a noisy or inconsistent meter. Audited the desktop
+benchmark harness (`tools/spectral_tools/testing/benchmark_runner.py`, `benchmark_parsing.py`)
+and the ARM/M7 model (`benchmark_workflow m7-*`, `tests/tools/test_perf_gate.py`). Findings + fixes:
+
+- **Cold-run contamination of the per-stage breakdown (fixed).** The headline `Total ms` and
+  `Memory max RSS` lines reported `warm_*` (cold first run discarded), but the per-stage medians,
+  bandwidth medians, and cache medians folded the cold run *in*. The cold run is a real ~2× outlier
+  on the FFT stage (measured: fft run-01 ≈ 77 ms vs warm ≈ 40 ms; track 17→11; norm 4.3→1.5 — the
+  one-off FFT/vDSP plan build, first-touch paging, dyld bind). Now every per-stage aggregate is
+  reported over the **warm set** (`_warm()` drops run 1 when runs>1), so the breakdown reconciles
+  with the headline `warm_median` instead of silently including the outlier. Lines relabelled
+  `Stage warm medians ms:` / `Stage bandwidth warm medians:` / `Segment-binary warm medians ms:`.
+- **Run-to-run jitter was invisible (fixed).** Only `track` exposed spread; real jitter on synth
+  (measured 6.7→15.7 ms within one sweep) and norm (1.0→4.3 ms) hid behind a bare median, so you
+  couldn't tell a trustworthy number from the midpoint of a 2× swing. Added a
+  `Stage warm spread ms (min..max):` line + a parsed `stage_spread` metrics section.
+- **Parser overrun bug (fixed).** The summary regexes captured the last token on each line with
+  `([^ ]+)`; `[^ ]` matches newlines, so the trailing group swallowed `norm=1.6\nStage…` and
+  failed the float parse — `norm_ms` and `warm_mean_ms` silently came back `null`. Latent only
+  because nothing consumed those keys. Switched the captures to `\S+`. Pinned by
+  `tests/tools/test_benchmark_parsing.py` (overrun regression + warm/spread/legacy parsing).
+- **RSS path verified correct.** macOS `/usr/bin/time -l -o <file>` supports `-o` and emits
+  `maximum resident set size` in bytes; the BSD branch divides by 1024 correctly. No change.
+- **ARM/M7 model verified.** `test_perf_gate.py` + `test_embedded_perf.py` = 39/39 green, nothing
+  skipped: the live qemu-counts / mca-validation / WCET stack runs and sits within the frozen
+  `m7_baseline.json` contract. No change needed.
+
+Pre-existing, out of scope (flagged separately): `test_layering.py` include-direction violation
+`spectral_synth_ifft.c [kernel] -> spectral_fast_sin_simd.inc [arch/simd]` (from the IFFT
+shared-SSOT extraction, commit 42bc3c2baf) — an IFFT-workstream layering decision, not perf tooling.
+
 ## Part 1 — Assembly as string / generated code → files
 
 **Finding: there is essentially no CPU-assembly-as-string to extract.** Exhaustive sweep:
