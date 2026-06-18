@@ -108,6 +108,21 @@ registry fails). I.4/I.3 — AI_CANON #28 codifies the rules + reserves `asm/`. 
 per the recommendations: files stay in place; registry is a human doc + behavioral test (not
 cmake-readable — a future refinement); `spectral_lut_data.h` stays committed + now guarded.
 
+**Code-review fixes (post-Phase-C, same campaign):** an xhigh review of the four phases caught
+two HIGH bugs, both fixed + re-verified: (a) the profiles SSOT move REGRESSED the Daisy firmware
+flags — the firmware is a *separate* cmake sub-configure (`api/daisy_seed/CMakeLists.txt`) that
+never included `profiles.cmake`, so the `SPECTRAL_FLAGS_*` groups expanded empty there, dropping
+section-GC + no-unwind + warnings + fast-math from the STM32H750 build; fixed by including
+profiles.cmake from `options.cmake` (the one module both configures load). (b) the verify-on-build
+guards MASKED drift — `verify_*` depended on `generate_*`, which rewrote the committed file in
+place *before* verify ran, so a hand-edit was silently auto-corrected and verify always passed on
+fresh builds; fixed by decoupling `verify_*` from `generate_*` in all three generators (lut +
+resource + metal) so verify reads the as-committed file and FATALs on drift (re-verified: a
+sentinel edit now fails the build, `rc=2`). Also keyed the LUT generate/verify to the C config's
+`SPECTRAL_OSC_LUT_BITS` (parsed from `spectral_lut.h`, passed as `--bits`, added to DEPENDS), and
+hardened the two test files (the §VIII gate now *fails* — not skips — if the harness TU vanishes;
+the registry scan now covers any location/extension via a banner-in-header match).
+
 **Phases (for reference — all closed except the noted refinement):**
 - **I.1** Bring `spectral_lut_data.h` under the stamp+verify pattern: a `run_lut.cmake.in`
   runner, build-tree `generate_lut.stamp` OUTPUT, `DEPENDS` on the script + the config

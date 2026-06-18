@@ -25,9 +25,9 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
 
 set(SPECTRAL_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 get_filename_component(SPECTRAL_REPO_ROOT "${SPECTRAL_ENGINE_ROOT}/.." ABSOLUTE)
-# profiles.cmake (build-flag SSOT) is included first so its flag groups are available
-# to options.cmake -> daisy-config.cmake and to host-config.cmake.
-include("${SPECTRAL_ENGINE_ROOT}/cmake/profiles.cmake")
+# options.cmake includes profiles.cmake (the build-flag SSOT) first, so the
+# SPECTRAL_FLAGS_* groups are available to host-config.cmake and daisy-config.cmake
+# in BOTH this host configure and the Daisy-firmware sub-configure.
 include("${SPECTRAL_ENGINE_ROOT}/cmake/options.cmake")
 
 if(SPECTRAL_DEBUG_LOGGING)

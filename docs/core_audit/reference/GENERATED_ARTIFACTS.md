@@ -25,8 +25,15 @@ drift unguarded for a long time.
    delete a git-tracked source (the footgun fixed in commit `0f647138`). The generator
    rewrites the committed file in place as a clean-invisible side effect.
 3. A `verify_<x>` target runs `--mode verify` and is `add_dependencies`'d onto every target
-   that compiles the artifact, so drift FATALs the build.
-4. Add a row above + a `REGISTRY` entry in `test_generated_artifacts.py`.
+   that compiles the artifact, so drift FATALs the build. **`verify_<x>` must NOT depend on
+   `generate_<x>`** — if it did, generate would rewrite the committed file in place before
+   verify ran, silently auto-correcting a hand-edit so verify always passes (the masking
+   defect a build review caught). verify reads the AS-COMMITTED file; regenerating is the
+   explicit `generate_<x>` target (a deliberate re-sign), never a build side effect.
+4. The banner sits in the file's **header (line 1)** — the registry-completeness test
+   identifies generated artifacts by a banner match at line ≤ 3, so a file that merely
+   mentions the banner string in its body (a generator, this test, this doc) is not mistaken
+   for one. Add a row above + a `REGISTRY` entry in `test_generated_artifacts.py`.
 
 ## Generated **build inputs** vs generated **measurement intermediates**
 

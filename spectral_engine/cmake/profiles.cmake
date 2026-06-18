@@ -34,6 +34,13 @@
 # engine always compiles at its profile -O level (Debug adds -g / drops NDEBUG but
 # stays optimized). See BUILD_PROFILES §CMAKE_BUILD_TYPE.
 
+# Idempotent: this module is included by options.cmake (so it reaches BOTH the host
+# configure and the separate Daisy-firmware sub-configure that consume the flag groups).
+if(DEFINED SPECTRAL_PROFILES_INCLUDED)
+    return()
+endif()
+set(SPECTRAL_PROFILES_INCLUDED TRUE)
+
 # --- shared groups (used by more than one profile) ----------------------------------
 set(SPECTRAL_FLAGS_O3                 -O3)
 set(SPECTRAL_FLAGS_WALL_WEXTRA        -Wall -Wextra)

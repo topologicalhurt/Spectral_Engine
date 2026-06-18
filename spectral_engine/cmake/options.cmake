@@ -11,6 +11,12 @@ if(NOT DEFINED SPECTRAL_ENGINE_ROOT OR NOT DEFINED SPECTRAL_REPO_ROOT)
         "and SPECTRAL_REPO_ROOT to be defined before inclusion.")
 endif()
 
+# Build-flag SSOT. Included HERE (not only from the host CMakeLists) because options.cmake
+# is the one module both the host configure AND the separate Daisy-firmware sub-configure
+# (api/daisy_seed/CMakeLists.txt) include — daisy-config.cmake's flag assembly references
+# the SPECTRAL_FLAGS_* groups, which would otherwise be EMPTY in the firmware configure.
+include("${SPECTRAL_ENGINE_ROOT}/cmake/profiles.cmake")
+
 option(SPECTRAL_SKIP_VERSION_CHECK "Skip minimum compiler version checks" OFF)
 option(SPECTRAL_PRODUCTION_BUILD
     "Enable production build defaults (release-oriented + reproducible profile)"

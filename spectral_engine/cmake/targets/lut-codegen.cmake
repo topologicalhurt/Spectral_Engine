@@ -7,6 +7,15 @@
 
 set(SPECTRAL_LUT_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/spectral_tools/generators/lut_generator.py")
 set(SPECTRAL_LUT_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_lut_data.h")
+# Key the LUT to the C SSOT: spectral_lut.h #defines SPECTRAL_OSC_LUT_BITS, which sets the
+# table size. Parse it so generate/verify use the SAME bit-depth the C compiles with, and so
+# a change to the config re-triggers generation (the C _Static_assert is only a backstop).
+set(SPECTRAL_LUT_HEADER "${SPECTRAL_CORE_DIR}/spectral_lut.h")
+file(STRINGS "${SPECTRAL_LUT_HEADER}" _lut_bits_line REGEX "define[ \t]+SPECTRAL_OSC_LUT_BITS")
+string(REGEX MATCH "[0-9]+" SPECTRAL_LUT_BITS "${_lut_bits_line}")
+if(NOT SPECTRAL_LUT_BITS)
+    message(FATAL_ERROR "could not parse SPECTRAL_OSC_LUT_BITS from ${SPECTRAL_LUT_HEADER}")
+endif()
 # OUTPUT is a build-tree stamp, NOT the committed header: a custom-command OUTPUT is added
 # to the `clean` list, so making the committed file the OUTPUT would let `--target clean`
 # delete a git-tracked source. The generator still rewrites the committed header in place.
@@ -27,7 +36,8 @@ add_custom_command(
         "${SPECTRAL_PYTHON_ENV_STAMP}"
         "${SPECTRAL_LUT_SCRIPT}"
         "${SPECTRAL_LUT_RUNNER}"
-    COMMENT "Generating committed Q15 sine LUT (${SPECTRAL_LUT_OUTPUT})"
+        "${SPECTRAL_LUT_HEADER}"
+    COMMENT "Generating committed Q15 sine LUT (${SPECTRAL_LUT_OUTPUT}, ${SPECTRAL_LUT_BITS}-bit)"
     VERBATIM)
 
 add_custom_target(generate_lut
@@ -38,13 +48,18 @@ set_source_files_properties(
     "${SPECTRAL_LUT_OUTPUT}"
     PROPERTIES GENERATED TRUE)
 
+# verify_lut deliberately does NOT depend on generate_lut. If it did, generate would
+# rewrite the committed header in place BEFORE verify ran, so a drifted/hand-edited
+# header would be silently auto-corrected and verify would always pass — the masking
+# defect the build review caught. verify reads the AS-COMMITTED header and FATALs on
+# drift (the documented "drift becomes impossible" contract). Regenerating is the
+# explicit `generate_lut` target (a deliberate re-sign), never a build side effect.
 add_custom_target(verify_lut
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_LUT_MODE=verify
             -P "${SPECTRAL_LUT_RUNNER}"
     DEPENDS
         prepare_python_tools
-        generate_lut
         "${SPECTRAL_LUT_SCRIPT}"
         "${SPECTRAL_LUT_RUNNER}"
     VERBATIM)

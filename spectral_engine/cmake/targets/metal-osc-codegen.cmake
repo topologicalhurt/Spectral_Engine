@@ -47,13 +47,16 @@ set_source_files_properties(
     "${SPECTRAL_METAL_OSC_OUTPUT}"
     PROPERTIES GENERATED TRUE)
 
+# verify deliberately does NOT depend on generate_metal_osc: generate would rewrite the
+# committed header in place before verify ran, masking drift (verify would always pass).
+# verify reads the AS-COMMITTED header and FATALs on drift ("drift becomes impossible");
+# regenerating is the explicit generate_metal_osc target.
 add_custom_target(verify_metal_osc
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_METAL_OSC_MODE=verify
             -P "${SPECTRAL_METAL_OSC_RUNNER}"
     DEPENDS
         prepare_python_tools
-        generate_metal_osc
         "${SPECTRAL_METAL_OSC_SCRIPT}"
         "${SPECTRAL_METAL_OSC_RUNNER}"
         ${SPECTRAL_METAL_OSC_INPUTS}

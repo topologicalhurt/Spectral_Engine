@@ -41,6 +41,10 @@ set_source_files_properties(
     "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
     PROPERTIES GENERATED TRUE)
 
+# verify deliberately does NOT depend on generate_resource_hashes: generate would rewrite
+# the committed table in place before verify ran, masking drift (verify would always pass).
+# verify reads the AS-COMMITTED table and FATALs on drift ("drift becomes impossible");
+# regenerating is the explicit generate_resource_hashes target.
 add_custom_target(verify_resource_hashes
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_HASH_MODE=verify
@@ -48,7 +52,6 @@ add_custom_target(verify_resource_hashes
     DEPENDS
         prepare_python_tools
         spectral_resource_bridge
-        generate_resource_hashes
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
         "${SPECTRAL_RESOURCE_HASH_RUNNER}"
         ${SPECTRAL_FIRMWARE_RESOURCE_FILES}

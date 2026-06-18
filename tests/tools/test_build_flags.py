@@ -67,11 +67,15 @@ def _all_args(entries: list[dict]) -> list[str]:
 
 
 def _tu_args(entries: list[dict], output_substr: str, file_suffix: str) -> list[str]:
-    """The compiler arguments for one TU (matched by output dir + source suffix)."""
+    """The compiler arguments for one TU (matched by output dir + source suffix). FAILS
+    (not skips) when the project configured but the TU is absent — a renamed/removed harness
+    target would otherwise let the §VIII guard pass vacuously. The cc_entries fixture has
+    already skipped if configure itself was unavailable."""
     for entry in entries:
         if output_substr in entry.get("output", "") and entry["file"].endswith(file_suffix):
             return _entry_args(entry)
-    pytest.skip(f"TU not found: {output_substr} / {file_suffix}")
+    pytest.fail(f"TU not found in a configured build: {output_substr} / {file_suffix} "
+                "(harness target renamed/removed? the firmware-faithful gate cannot run)")
     return []
 
 

@@ -6,6 +6,7 @@ set(_python "@SPECTRAL_PYTHON@")
 set(_lut_module "spectral_tools.generators.lut_generator")
 set(_tools_pythonpath "@SPECTRAL_TOOLS_PYTHONPATH@")
 set(_lut_output "@SPECTRAL_LUT_OUTPUT@")
+set(_lut_bits "@SPECTRAL_LUT_BITS@")
 
 if(NOT EXISTS "${_python}")
     message(FATAL_ERROR
@@ -18,6 +19,7 @@ execute_process(
             "PYTHONPATH=${_tools_pythonpath}"
             "${_python}" -m "${_lut_module}"
             --mode "${SPECTRAL_LUT_MODE}"
+            --bits "${_lut_bits}"
             --output "${_lut_output}"
     RESULT_VARIABLE _lut_result)
 
