@@ -12,6 +12,22 @@
 extern "C" {
 #endif
 
+/* Half-precision storage for the STFT complex spectrum (phase-at-peaks). re/im
+ * are consumed only as atan2f(im,re) at tracked peak bins, where fp16's ~3e-4
+ * rad angle error is ~-99.6 dBFS (inaudible, parity-passing). Storing them as
+ * fp16 makes the magsq+re+im layout memory- AND bandwidth-neutral vs the old
+ * magsq+phase (8 bytes/bin either way), so phase-at-peaks costs no extra RAM or
+ * store traffic while still retiring the all-bins producer atan2. Falls back to
+ * float on compilers without _Float16 (correct, but +50% on the full-matrix
+ * path there). */
+#if defined(__FLT16_MANT_DIG__)
+typedef _Float16 SpectralHalf;
+#define SPECTRAL_HALF_IS_FP16 1
+#else
+typedef float SpectralHalf;
+#define SPECTRAL_HALF_IS_FP16 0
+#endif
+
 /* Convert semitones to pitch multiplier: 2^(semitones/12) */
 static inline float spectral_pitch_factor(float semitones) {
     return powf(2.0f, semitones / 12.0f);

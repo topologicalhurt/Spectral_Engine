@@ -813,7 +813,7 @@ fail:
 
 void spectral_tracker_process(SpectralTracker* tracker,
                                const float* chunk_magsq,
-                               const float* chunk_re, const float* chunk_im,
+                               const SpectralHalf* chunk_re, const SpectralHalf* chunk_im,
                                size_t chunk_n_frames, size_t global_frame_offset) {
     if (!tracker || chunk_n_frames < 1 || !chunk_magsq || !chunk_re || !chunk_im) return;
     if (atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK) return;
@@ -889,10 +889,10 @@ void spectral_tracker_process(SpectralTracker* tracker,
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
             /* t < n_pairs == chunk_n_frames - 1, so t+1 is always a valid frame. */
             const float* __restrict__ next_row = chunk_magsq + (t + 1) * n_freqs;
-            const float* __restrict__ re_row = chunk_re + t * n_freqs;
-            const float* __restrict__ im_row = chunk_im + t * n_freqs;
-            const float* __restrict__ next_re_row = chunk_re + (t + 1) * n_freqs;
-            const float* __restrict__ next_im_row = chunk_im + (t + 1) * n_freqs;
+            const SpectralHalf* __restrict__ re_row = chunk_re + t * n_freqs;
+            const SpectralHalf* __restrict__ im_row = chunk_im + t * n_freqs;
+            const SpectralHalf* __restrict__ next_re_row = chunk_re + (t + 1) * n_freqs;
+            const SpectralHalf* __restrict__ next_im_row = chunk_im + (t + 1) * n_freqs;
 
             float frame_start_sample = 0.0f;
             if (spectral_tracker_frame_time_from_index(global_frame_offset + t, hop_float, &frame_start_sample) != SPECTRAL_OK) {
@@ -1296,7 +1296,7 @@ void spectral_tracker_destroy(SpectralTracker* tracker) {
  * SpectralTracker with an explicit analysis-window/estimator contract. */
 
 SegmentArray spectral_track_peaks_with_window_descriptor(
-    const float* magsq, const float* re, const float* im,
+    const float* magsq, const SpectralHalf* re, const SpectralHalf* im,
     float max_magsq,
     size_t n_frames, size_t n_freqs,
     int sr, int n_fft, int hop,
@@ -1343,7 +1343,7 @@ SegmentArray spectral_track_peaks_with_window_descriptor(
  * Hann-windowed analysis path and AUTO estimator policy. */
 
 SegmentArray spectral_track_peaks(const float* magsq,
-                                  const float* re, const float* im,
+                                  const SpectralHalf* re, const SpectralHalf* im,
                                   float max_magsq,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,

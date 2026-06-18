@@ -67,18 +67,22 @@ SpectralError spectral_analysis_stft_matrix_alloc(SpectralAnalysisStftMatrix* ma
 {
     size_t total_bins = 0;
     size_t total_bytes = 0;
+    size_t half_bytes = 0;
 
     if (!matrix || n_frames == 0u || n_freqs == 0u) return SPECTRAL_ERR_PARAM;
     *matrix = (SpectralAnalysisStftMatrix){0};
 
     if (!spectral_size_mul(n_frames, n_freqs, &total_bins) ||
-        !spectral_size_mul(total_bins, sizeof(float), &total_bytes)) {
+        !spectral_size_mul(total_bins, sizeof(float), &total_bytes) ||
+        !spectral_size_mul(total_bins, sizeof(SpectralHalf), &half_bytes)) {
         return SPECTRAL_ERR_OVERFLOW;
     }
 
+    /* magsq stays fp32 (the double-scaled peak-scan key); re/im are fp16 so the
+     * layout is memory-neutral vs the old magsq+phase (8 bytes/bin). */
     matrix->magsq = (float*)spectral_aligned_alloc(total_bytes);
-    matrix->re = (float*)spectral_aligned_alloc(total_bytes);
-    matrix->im = (float*)spectral_aligned_alloc(total_bytes);
+    matrix->re = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
+    matrix->im = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
     if (!matrix->magsq || !matrix->re || !matrix->im) {
         spectral_analysis_stft_matrix_free(matrix);
         return SPECTRAL_ERR_MEMORY;

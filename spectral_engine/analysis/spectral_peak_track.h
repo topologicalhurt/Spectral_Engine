@@ -28,7 +28,7 @@ extern "C" {
  * Call spectral_track_peaks_with_window_descriptor() for raw STFT matrices
  * produced with any other window or estimator policy. */
 SegmentArray spectral_track_peaks(const float* magsq,
-                                  const float* re, const float* im,
+                                  const SpectralHalf* re, const SpectralHalf* im,
                                   float max_magsq,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,
@@ -40,7 +40,7 @@ SegmentArray spectral_track_peaks(const float* magsq,
  * `estimator` selects the sub-bin estimator policy; AUTO resolves to the
  * conservative log-power parabolic baseline. */
 SegmentArray spectral_track_peaks_with_window_descriptor(
-    const float* magsq, const float* re, const float* im,
+    const float* magsq, const SpectralHalf* re, const SpectralHalf* im,
     float max_magsq,
     size_t n_frames, size_t n_freqs,
     int sr, int n_fft, int hop,
@@ -57,12 +57,12 @@ typedef struct SpectralTracker SpectralTracker;
 typedef struct {
     const float* __restrict__ row;
     const float* __restrict__ next_row;
-    /* Complex spectrum rows. Phase is taken via atan2f(im,re) at the tracked
-     * peak bins only (phase-at-peaks), not densely in the producer. */
-    const float* __restrict__ re_row;
-    const float* __restrict__ im_row;
-    const float* __restrict__ next_re_row;
-    const float* __restrict__ next_im_row;
+    /* fp16 complex spectrum rows. Phase is taken via atan2f((float)im,(float)re)
+     * at the tracked peak bins only (phase-at-peaks), not densely in the producer. */
+    const SpectralHalf* __restrict__ re_row;
+    const SpectralHalf* __restrict__ im_row;
+    const SpectralHalf* __restrict__ next_re_row;
+    const SpectralHalf* __restrict__ next_im_row;
     float frame_start_sample;
     float threshsq;
     int can_start_new;
@@ -101,7 +101,7 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
  * of the first frame (0 for a single-shot run). */
 void spectral_tracker_process(SpectralTracker* tracker,
                                const float* chunk_magsq,
-                               const float* chunk_re, const float* chunk_im,
+                               const SpectralHalf* chunk_re, const SpectralHalf* chunk_im,
                                size_t chunk_n_frames, size_t global_frame_offset);
 
 /* Finalize tracking: merges all per-thread segment arrays into a contiguous

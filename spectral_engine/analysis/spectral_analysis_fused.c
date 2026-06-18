@@ -25,12 +25,13 @@
 typedef struct SpectralFusedScratchRows {
     float* row_curr;
     float* row_next;
-    /* Complex spectrum rows: phase is taken via atan2f(im,re) at peaks in the
-     * tracker, not densely here (phase-at-peaks). Two extra scratch rows/thread. */
-    float* re_curr;
-    float* im_curr;
-    float* re_next;
-    float* im_next;
+    /* fp16 complex spectrum rows: phase is taken via atan2f(im,re) at peaks in
+     * the tracker, not densely here (phase-at-peaks). Two extra scratch rows/
+     * thread, half-precision so the per-thread footprint stays small. */
+    SpectralHalf* re_curr;
+    SpectralHalf* im_curr;
+    SpectralHalf* re_next;
+    SpectralHalf* im_next;
 } SpectralFusedScratchRows;
 
 static int spectral_fused_scratch_rows_alloc(SpectralFusedScratchRows* rows, size_t row_bytes)
@@ -38,12 +39,16 @@ static int spectral_fused_scratch_rows_alloc(SpectralFusedScratchRows* rows, siz
     if (!rows || row_bytes == 0u) return 0;
     *rows = (SpectralFusedScratchRows){0};
 
+    /* re/im are SpectralHalf: scale the fp32 row size by the element-size ratio
+     * (== row_bytes/2 with fp16, == row_bytes with the float fallback). */
+    size_t half_bytes = (row_bytes / sizeof(float)) * sizeof(SpectralHalf);
+
     rows->row_curr = (float*)spectral_aligned_alloc(row_bytes);
     rows->row_next = (float*)spectral_aligned_alloc(row_bytes);
-    rows->re_curr = (float*)spectral_aligned_alloc(row_bytes);
-    rows->im_curr = (float*)spectral_aligned_alloc(row_bytes);
-    rows->re_next = (float*)spectral_aligned_alloc(row_bytes);
-    rows->im_next = (float*)spectral_aligned_alloc(row_bytes);
+    rows->re_curr = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
+    rows->im_curr = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
+    rows->re_next = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
+    rows->im_next = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
 
     if (!rows->row_curr || !rows->row_next || !rows->re_curr || !rows->im_curr ||
         !rows->re_next || !rows->im_next) {
@@ -75,19 +80,20 @@ static void spectral_fused_scratch_rows_free(SpectralFusedScratchRows* rows)
 static void spectral_fused_scratch_rows_rotate(SpectralFusedScratchRows* rows)
 {
     float* tmp = NULL;
+    SpectralHalf* htmp = NULL;
     if (!rows) return;
 
     tmp = rows->row_curr;
     rows->row_curr = rows->row_next;
     rows->row_next = tmp;
 
-    tmp = rows->re_curr;
+    htmp = rows->re_curr;
     rows->re_curr = rows->re_next;
-    rows->re_next = tmp;
+    rows->re_next = htmp;
 
-    tmp = rows->im_curr;
+    htmp = rows->im_curr;
     rows->im_curr = rows->im_next;
-    rows->im_next = tmp;
+    rows->im_next = htmp;
 }
 
 SegmentArray spectral_analysis_run_fused(const float* audio, size_t n_samples,

@@ -59,19 +59,21 @@ static int spectral_fft_single_frame_args_valid(const SpectralFftResources* res,
 }
 
 static void spectral_fft_single_frame_clear(float* out_magsq,
-                                            float* out_re,
-                                            float* out_im,
+                                            SpectralHalf* out_re,
+                                            SpectralHalf* out_im,
                                             size_t n_freqs,
                                             float* out_frame_max)
 {
     size_t bytes = 0;
+    size_t half_bytes = 0;
     if (out_frame_max) *out_frame_max = 0.0f;
-    if (n_freqs == 0u || !spectral_array_bytes(n_freqs, sizeof(float), &bytes)) {
+    if (n_freqs == 0u || !spectral_array_bytes(n_freqs, sizeof(float), &bytes) ||
+        !spectral_array_bytes(n_freqs, sizeof(SpectralHalf), &half_bytes)) {
         return;
     }
     if (out_magsq) memset(out_magsq, 0, bytes);
-    if (out_re) memset(out_re, 0, bytes);
-    if (out_im) memset(out_im, 0, bytes);
+    if (out_re) memset(out_re, 0, half_bytes);   /* +0.0f16 == all-zero bits */
+    if (out_im) memset(out_im, 0, half_bytes);
 }
 
 
@@ -262,7 +264,7 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* audio, int hop,
                                const float* window_func,
                                size_t t,
-                               float* out_magsq, float* out_re, float* out_im,
+                               float* out_magsq, SpectralHalf* out_re, SpectralHalf* out_im,
                                float* out_frame_max)
 {
     if (!spectral_fft_single_frame_args_valid(res, tid, audio, hop, window_func, out_magsq)) {
@@ -307,13 +309,16 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
         vDSP_vadd(out_magsq + 1, 1, imag_sq_tmp, 1, out_magsq + 1, 1, mid);
 
         if (out_re && out_im) {
-            /* Store the (0.5-scaled) complex spectrum so the tracker can take
-             * atan2f only at peak bins. DC/Nyquist carry zero imaginary part,
-             * so atan2f(0, re) reproduces the 0/PI phase sign special-case exactly. */
-            out_re[0] = split.realp[0];           out_im[0] = 0.0f;
-            out_re[n_freqs - 1] = split.imagp[0]; out_im[n_freqs - 1] = 0.0f;
-            memcpy(out_re + 1, split.realp + 1, mid * sizeof(float));
-            memcpy(out_im + 1, split.imagp + 1, mid * sizeof(float));
+            /* Store the (0.5-scaled) complex spectrum as fp16 so the tracker can
+             * take atan2f only at peak bins. The fp32->fp16 narrowing vectorizes
+             * (fcvtn) and halves the store traffic vs an fp32 array. DC/Nyquist
+             * carry zero im, so atan2f(0,re) reproduces the 0/PI sign case exactly. */
+            out_re[0] = (SpectralHalf)split.realp[0];           out_im[0] = (SpectralHalf)0.0f;
+            out_re[n_freqs - 1] = (SpectralHalf)split.imagp[0]; out_im[n_freqs - 1] = (SpectralHalf)0.0f;
+            for (size_t i = 1; i <= mid; i++) {
+                out_re[i] = (SpectralHalf)split.realp[i];
+                out_im[i] = (SpectralHalf)split.imagp[i];
+            }
         }
     }
 
@@ -333,7 +338,7 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
                                const float* audio, int hop,
                                const float* window_func,
                                size_t t,
-                               float* out_magsq, float* out_re, float* out_im,
+                               float* out_magsq, SpectralHalf* out_re, SpectralHalf* out_im,
                                float* out_frame_max)
 {
     if (!spectral_fft_single_frame_args_valid(res, tid, audio, hop, window_func, out_magsq)) {
@@ -379,7 +384,7 @@ float spectral_fft_frames(const SpectralFftResources* res,
                           const float* audio, int hop,
                           const float* window_func,
                           size_t frame_start, size_t frame_end,
-                          float* out_magsq, float* out_re, float* out_im,
+                          float* out_magsq, SpectralHalf* out_re, SpectralHalf* out_im,
                           int magsq_only)
 {
     float max_magsq = 0.0f;
