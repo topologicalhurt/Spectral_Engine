@@ -4,6 +4,13 @@ include("${SPECTRAL_ENGINE_ROOT}/cmake/python_env.cmake")
 
 set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/spectral_tools/generators/resource_hashes.py")
 set(SPECTRAL_RESOURCE_HASH_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_hash_resources_xx32_xx3.c")
+# The generated table is COMMITTED in-source (a clean checkout builds without running
+# the generator). So the custom command's OUTPUT must NOT be the committed file itself:
+# CMake adds every custom-command OUTPUT to the `clean` file list, which would make
+# `cmake --build . --target clean` delete a git-tracked source. The OUTPUT is therefore
+# a build-tree stamp; the generator still rewrites the committed .c in place as a side
+# effect (invisible to clean), gated on the same DEPENDS for incremental rebuilds.
+set(SPECTRAL_RESOURCE_HASH_STAMP "${CMAKE_CURRENT_BINARY_DIR}/generate_resource_hashes.stamp")
 set(SPECTRAL_RESOURCE_HASH_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_resource_hashes.cmake")
 configure_file(
     "${SPECTRAL_ENGINE_ROOT}/cmake/scripts/run_resource_hashes.cmake.in"
@@ -13,19 +20,21 @@ file(GLOB_RECURSE SPECTRAL_FIRMWARE_RESOURCE_FILES CONFIGURE_DEPENDS
     "${SPECTRAL_REPO_ROOT}/resources/*")
 
 add_custom_command(
-    OUTPUT "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
+    OUTPUT "${SPECTRAL_RESOURCE_HASH_STAMP}"
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_HASH_MODE=generate
             -P "${SPECTRAL_RESOURCE_HASH_RUNNER}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${SPECTRAL_RESOURCE_HASH_STAMP}"
     DEPENDS
         "${SPECTRAL_PYTHON_ENV_STAMP}"
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
         "${SPECTRAL_RESOURCE_HASH_RUNNER}"
         ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
+    COMMENT "Generating committed resource-hash table (${SPECTRAL_RESOURCE_HASH_OUTPUT})"
     VERBATIM)
 
 add_custom_target(generate_resource_hashes
-    DEPENDS "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    DEPENDS "${SPECTRAL_RESOURCE_HASH_STAMP}")
 add_dependencies(generate_resource_hashes prepare_python_tools spectral_resource_bridge)
 
 set_source_files_properties(

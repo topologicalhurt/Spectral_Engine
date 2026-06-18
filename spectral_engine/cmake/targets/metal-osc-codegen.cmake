@@ -7,6 +7,12 @@
 
 set(SPECTRAL_METAL_OSC_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/spectral_tools/generators/metal_osc.py")
 set(SPECTRAL_METAL_OSC_OUTPUT "${SPECTRAL_ENGINE_ROOT}/drivers/metal/spectral_osc_metal_generated.h")
+# The generated header is COMMITTED in-source. Its custom command's OUTPUT must be a
+# build-tree stamp, not the committed header: CMake adds every custom-command OUTPUT to
+# the `clean` list, so `cmake --build . --target clean` would delete a git-tracked file.
+# The generator still rewrites the committed header in place (a side effect clean cannot
+# see), gated on the same DEPENDS for incremental rebuilds.
+set(SPECTRAL_METAL_OSC_STAMP "${CMAKE_CURRENT_BINARY_DIR}/generate_metal_osc.stamp")
 set(SPECTRAL_METAL_OSC_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_metal_osc.cmake")
 set(SPECTRAL_METAL_OSC_INPUTS
     "${SPECTRAL_CORE_DIR}/spectral_osc_formulas.h"
@@ -20,19 +26,21 @@ configure_file(
     @ONLY)
 
 add_custom_command(
-    OUTPUT "${SPECTRAL_METAL_OSC_OUTPUT}"
+    OUTPUT "${SPECTRAL_METAL_OSC_STAMP}"
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_METAL_OSC_MODE=generate
             -P "${SPECTRAL_METAL_OSC_RUNNER}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${SPECTRAL_METAL_OSC_STAMP}"
     DEPENDS
         "${SPECTRAL_PYTHON_ENV_STAMP}"
         "${SPECTRAL_METAL_OSC_SCRIPT}"
         "${SPECTRAL_METAL_OSC_RUNNER}"
         ${SPECTRAL_METAL_OSC_INPUTS}
+    COMMENT "Generating committed Metal MSL oscillator header (${SPECTRAL_METAL_OSC_OUTPUT})"
     VERBATIM)
 
 add_custom_target(generate_metal_osc
-    DEPENDS "${SPECTRAL_METAL_OSC_OUTPUT}")
+    DEPENDS "${SPECTRAL_METAL_OSC_STAMP}")
 add_dependencies(generate_metal_osc prepare_python_tools)
 
 set_source_files_properties(
