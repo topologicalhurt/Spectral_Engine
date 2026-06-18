@@ -27,11 +27,6 @@ spectral_apply_common_target(osc_width_parity_test)
 target_include_directories(osc_width_parity_test PRIVATE "${SPECTRAL_ARCH_SIMD_DIR}")
 target_link_libraries(osc_width_parity_test PRIVATE m)
 
-if(APPLE)
-    target_link_options(osc_width_parity_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(osc_width_parity_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(osc_width_parity_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(osc_width_parity_test)
 
 add_test(NAME osc_width_parity COMMAND osc_width_parity_test)

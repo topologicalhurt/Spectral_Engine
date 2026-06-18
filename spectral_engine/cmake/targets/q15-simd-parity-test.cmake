@@ -26,11 +26,6 @@ spectral_apply_common_target(q15_simd_parity_test)
 target_compile_definitions(q15_simd_parity_test PRIVATE SPECTRAL_EXPOSE_Q15_PACK8_FOR_TEST=1)
 target_link_libraries(q15_simd_parity_test PRIVATE m)
 
-if(APPLE)
-    target_link_options(q15_simd_parity_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(q15_simd_parity_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(q15_simd_parity_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(q15_simd_parity_test)
 
 add_test(NAME q15_simd_parity COMMAND q15_simd_parity_test)

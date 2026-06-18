@@ -22,12 +22,7 @@ function(spectral_add_guarantees_test target)
         "${SPECTRAL_CORE_DIR}/spectral_fast_math.c")
     spectral_apply_common_target(${target})
     target_link_libraries(${target} PRIVATE m)
-    if(APPLE)
-        target_link_options(${target} PRIVATE -Wl,-dead_strip)
-    else()
-        target_compile_options(${target} PRIVATE -ffunction-sections -fdata-sections)
-        target_link_options(${target} PRIVATE -Wl,--gc-sections)
-    endif()
+    spectral_apply_dead_strip(${target})
 endfunction()
 
 # Default build: all exact guarantees active.

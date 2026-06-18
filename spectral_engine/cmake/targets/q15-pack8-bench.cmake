@@ -21,9 +21,4 @@ add_executable(bench_q15_pack8 EXCLUDE_FROM_ALL
 spectral_apply_common_target(bench_q15_pack8)
 target_link_libraries(bench_q15_pack8 PRIVATE m)
 
-if(APPLE)
-    target_link_options(bench_q15_pack8 PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(bench_q15_pack8 PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(bench_q15_pack8 PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(bench_q15_pack8)

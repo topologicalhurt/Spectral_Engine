@@ -22,11 +22,6 @@ target_link_libraries(resource_path_canonical_test PRIVATE m)
 
 # The test calls only spectral_resource_path_canonical; dead-strip the unused
 # lookup functions so the generated resource table is not a link dependency.
-if(APPLE)
-    target_link_options(resource_path_canonical_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(resource_path_canonical_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(resource_path_canonical_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(resource_path_canonical_test)
 
 add_test(NAME resource_path_canonical COMMAND resource_path_canonical_test)

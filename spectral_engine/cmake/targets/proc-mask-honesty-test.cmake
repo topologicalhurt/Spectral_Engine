@@ -18,11 +18,6 @@ add_executable(proc_mask_honesty_test EXCLUDE_FROM_ALL
 spectral_apply_common_target(proc_mask_honesty_test)
 target_link_libraries(proc_mask_honesty_test PRIVATE m)
 
-if(APPLE)
-    target_link_options(proc_mask_honesty_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(proc_mask_honesty_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(proc_mask_honesty_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(proc_mask_honesty_test)
 
 add_test(NAME proc_mask_honesty COMMAND proc_mask_honesty_test)

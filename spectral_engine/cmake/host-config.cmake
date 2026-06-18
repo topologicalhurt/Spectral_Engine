@@ -1,34 +1,21 @@
 # Shared host build configuration and target helper functions.
 
+# HOST profile flag list, assembled from the groups in profiles.cmake (the SSOT).
+# The host-embedded-sim and CUDA lists below assemble the same way.
 set(SPECTRAL_COMMON_COMPILE_OPTIONS
-    -O3
-    -Wall
-    -Wextra
+    ${SPECTRAL_FLAGS_O3}
+    ${SPECTRAL_FLAGS_WALL_WEXTRA}
     -Wno-unknown-pragmas
-    -funroll-loops
-    -ftree-vectorize
-    -fomit-frame-pointer)
+    ${SPECTRAL_FLAGS_HOST_VECTORIZE}
+    ${SPECTRAL_FLAGS_OMIT_FP})
 
+# Math precision is ONE knob: SPECTRAL_REPRO_BUILD ON => bit-reproducible (no fast-math,
+# no native ISA); OFF => the host fast-math + native-ISA groups (the default speed path).
 if(NOT SPECTRAL_REPRO_BUILD)
+    spectral_profile_host_native_isa(_spectral_host_isa)
     list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-        -ffast-math
-        -fno-signed-zeros
-        -fno-trapping-math
-        -fassociative-math
-        -freciprocal-math
-        -ffp-contract=fast
-        -march=native
-        -mtune=native)
-    # x86-only SIMD-ISA flags. -mavx2 enables 256-bit AVX2; -mno-avx512f caps AVX-512
-    # OFF by default (a wider lane that down-clocks the core can net-lose — see the
-    # AVX-512 rationale in KERNEL_HARDENING_PLAN §VII; canon doc lands in Phase B).
-    # ARCH-GATE (kernel-hardening VI.1/VII.1): on arm64 these are -Wunused-command-line-
-    # argument noise (NEON is already on via -march=native) — emit them only on x86.
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|i[3-6]86)$")
-        list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-            -mavx2
-            -mno-avx512f)
-    endif()
+        ${SPECTRAL_FLAGS_HOST_FASTMATH}
+        ${_spectral_host_isa})
 endif()
 
 set(SPECTRAL_COMMON_LINK_OPTIONS)
@@ -56,12 +43,7 @@ if(APPLE)
         message(WARNING "libsndfile not found at ${SNDFILE_PREFIX}. Install with: brew install libsndfile")
     endif()
 
-    list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-        -flto=thin
-        -fvectorize
-        -fslp-vectorize
-        -Xpreprocessor
-        -fopenmp)
+    list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS ${SPECTRAL_FLAGS_APPLE_HOST_EXTRA})
     list(APPEND SPECTRAL_COMMON_LINK_OPTIONS -flto=thin)
     list(APPEND SPECTRAL_PLATFORM_INCLUDE_DIRS
         "${OMP_PREFIX}/include"
@@ -100,10 +82,7 @@ else()
     find_package(OpenMP REQUIRED)
 
     list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-        -flto=auto
-        -floop-nest-optimize
-        -fgraphite-identity
-        -fipa-pta
+        ${SPECTRAL_FLAGS_LINUX_HOST_EXTRA}
         ${OpenMP_C_FLAGS})
     list(APPEND SPECTRAL_COMMON_LINK_OPTIONS -flto=auto ${OpenMP_C_FLAGS})
 
@@ -142,25 +121,20 @@ elseif(SPECTRAL_PGO STREQUAL "use")
     endif()
 endif()
 
-set(SPECTRAL_CUDA_COMPILE_OPTIONS
-    -O3
-    --use_fast_math
-    --fmad=true
-    -Xcompiler=-fPIC
-    -Xcompiler=-ffast-math
-    -Xcompiler=-funroll-loops
-    -Xcompiler=-fno-lto)
+# CUDA profile (groups in profiles.cmake).
+set(SPECTRAL_CUDA_COMPILE_OPTIONS ${SPECTRAL_FLAGS_CUDA})
 
+# Host-embedded SIMULATION profile (the desktop mirror of the firmware): same EMBEDDED
+# philosophy (section GC + minimal) but built with the host toolchain. Shares the
+# SPECTRAL_REPRO_BUILD math knob with the host profile.
 set(SPECTRAL_EMBEDDED_COMPILE_OPTIONS
-    -O3
-    -Wall
-    -Wextra
+    ${SPECTRAL_FLAGS_O3}
+    ${SPECTRAL_FLAGS_WALL_WEXTRA}
     -Wno-unknown-pragmas
-    -fdata-sections
-    -ffunction-sections
-    -fomit-frame-pointer)
+    ${SPECTRAL_FLAGS_SECTION_GC}
+    ${SPECTRAL_FLAGS_OMIT_FP})
 if(NOT SPECTRAL_REPRO_BUILD)
-    list(APPEND SPECTRAL_EMBEDDED_COMPILE_OPTIONS -ffast-math -funsafe-math-optimizations)
+    list(APPEND SPECTRAL_EMBEDDED_COMPILE_OPTIONS ${SPECTRAL_FLAGS_EMBEDDED_FASTMATH})
 endif()
 
 function(spectral_apply_common_target target_name)

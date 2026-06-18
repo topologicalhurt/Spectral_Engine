@@ -21,11 +21,6 @@ target_link_libraries(core_contracts_test PRIVATE m)
 # Strip the unused window descriptor/interp/peak machinery (and its fast-math
 # dependency) so the harness links against only the window generators + the
 # header-only contract predicates it actually calls.
-if(APPLE)
-    target_link_options(core_contracts_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(core_contracts_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(core_contracts_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(core_contracts_test)
 
 add_test(NAME core_contracts COMMAND core_contracts_test)

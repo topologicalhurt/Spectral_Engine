@@ -17,11 +17,6 @@ spectral_apply_common_target(peak_interp_parabolic_test)
 target_compile_definitions(peak_interp_parabolic_test PRIVATE SPECTRAL_USE_VDSP=0)
 target_link_libraries(peak_interp_parabolic_test PRIVATE m)
 
-if(APPLE)
-    target_link_options(peak_interp_parabolic_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(peak_interp_parabolic_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(peak_interp_parabolic_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(peak_interp_parabolic_test)
 
 add_test(NAME peak_interp_parabolic COMMAND peak_interp_parabolic_test)

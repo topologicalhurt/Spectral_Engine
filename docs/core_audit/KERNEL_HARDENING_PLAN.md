@@ -441,6 +441,42 @@ target at all?** — this decides whether Threads C1/C3 are a priority or a late
 
 ---
 
+## VIII. Build reproducibility — ThinLTO + fast-math nondeterminism (CORRECTNESS, found during Phase B)
+
+**Discovered 2026-06-18 while validating Phase B** (byte-identical compiler inputs, so NOT
+caused by the profiles refactor). The default host build is `-flto=thin` + fast-math. On a
+rare draw (~1 build in 13, observed under `-j8` `tests_all` load), the
+`arm32_process_correctness` re-seed SINAD test produced **~28 dB vs a 70 dB floor** — a
+*gross* miscompile of the host-compiled arm32 Q15 synthesis (the per-block f64 coupled-osc
+re-seed path), not threshold jitter. HEAD passed 11/11, Phase B passed 12/13; the one failure
+had compile_commands + flags.make + link.txt all byte-identical to a passing build. So it is
+**ThinLTO's load-dependent, non-bit-reproducible parallel backend interacting with fast-math
+reassociation** (and possibly a latent UB the optimizer then exploits) on that numeric path.
+
+This is the single highest-priority finding to land (correctness-before-performance): the
+*default* build can nondeterministically emit grossly-wrong audio. It overlaps §IV-M7 and the
+`embedded-arch-audit` re-seed work.
+
+**Phases:**
+- **VIII.1** Root-cause: bisect whether it is (a) a real UB in the f64 re-seed under
+  `-ffast-math` (run that path under UBSan/ASan + `-fno-fast-math` and a fixed ThinLTO cache
+  `-Wl,-cache_path_lto`/`--thinlto-cache-dir`), or (b) pure ThinLTO codegen nondeterminism.
+  *[M / investigation — the bisect is the work]*
+- **VIII.2** Fix per the root cause: if UB, fix the re-seed math (likely the cheaper
+  carry-state renorm from §IV-m.2 sidesteps the f64 path entirely); if ThinLTO-only, pin a
+  reproducible-codegen flag for the affected TU or build the arm32 host-sim TUs without
+  fast-math (they exist to mirror firmware, where SAFE_MATH is already the default). *[M / med]*
+- **VIII.3** Make the test a **reproducibility gate**: run `arm32_process_correctness` over N
+  fresh builds (or a fixed-seed ThinLTO cache) in CI so a nondeterministic draw fails loudly
+  rather than ~1/13 of the time. *[S / low]*
+
+**Canon:** the default build must be numerically deterministic — a flag combination that can
+nondeterministically change *audible* output is a correctness defect, not a flake to retry.
+**Tests:** an N-build reproducibility harness for the arm32 re-seed SINAD; UBSan coverage of
+the f64 re-seed path.
+
+---
+
 ## Appendix A — consolidated new tests (all fail-on-bug)
 
 `verify_lut` · registry-completeness · clean-safety · wall-Total-honesty ·

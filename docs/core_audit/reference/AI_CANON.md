@@ -342,3 +342,15 @@ that returns an error, because the whole stack above it (knob, protocol, wrapper
 a capability the engine does not have. If a control is architecturally a build/synth-time
 parameter with no runtime path, the setter rejects a non-identity value (or is marked
 unimplemented at its surface), and the doc states where the parameter actually takes effect.
+
+## 26. Build flags have one source of truth, keyed to profile not CPU
+
+Every compiler/optimization/arch flag and its rationale lives in `cmake/profiles.cmake` (the
+flag-group SSOT); platform configs (`host-config`, `daisy-config`) assemble per-target lists
+from those groups and own only discovery (SDKs, libraries, MCU arch). No flag is invented in a
+target file. Two profile philosophies are a contract (see `BUILD_PROFILES.md`): host =
+quality-but-optimized; embedded/firmware = aggressively minimal/deterministic. ISA-specific
+flags (`-mavx2`, `-mno-avx512f`, `-mcpu=cortex-m7`) are **arch-gated** — emitted only on the
+ISA they name, never sprayed across all hosts. The optimization level is a profile property,
+not `CMAKE_BUILD_TYPE` (the engine stays optimized under `Debug`). A widening that down-clocks
+(AVX-512) is OFF by default and enabled only behind a measured net win, never speculatively.

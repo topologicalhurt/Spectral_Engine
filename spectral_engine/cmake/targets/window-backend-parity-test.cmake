@@ -18,11 +18,6 @@ spectral_apply_common_target(window_backend_parity_test)
 target_compile_definitions(window_backend_parity_test PRIVATE SPECTRAL_USE_VDSP=1)
 target_link_libraries(window_backend_parity_test PRIVATE m)
 
-if(APPLE)
-    target_link_options(window_backend_parity_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(window_backend_parity_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(window_backend_parity_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(window_backend_parity_test)
 
 add_test(NAME window_backend_parity COMMAND window_backend_parity_test)

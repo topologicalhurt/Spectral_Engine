@@ -26,11 +26,6 @@ target_link_libraries(arm_core_test PRIVATE m)
 # Drop the unused spectral_arm32_process_interleaved() (and its
 # spectral_mono_to_stereo_q15 dependency in spectral_out.c) so the harness links
 # against only arm32 + q15 + lut.
-if(APPLE)
-    target_link_options(arm_core_test PRIVATE -Wl,-dead_strip)
-else()
-    target_compile_options(arm_core_test PRIVATE -ffunction-sections -fdata-sections)
-    target_link_options(arm_core_test PRIVATE -Wl,--gc-sections)
-endif()
+spectral_apply_dead_strip(arm_core_test)
 
 add_test(NAME arm32_process_correctness COMMAND arm_core_test)
