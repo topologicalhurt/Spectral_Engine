@@ -61,7 +61,7 @@ to verify; **REFUTED** = candidate concern checked and dismissed (do not re-liti
 | bandwidth-01 dead LUT on M7 | bandwidth | med | **PERF-GATED** | M7 path never reads the 8 KB sine LUT yet `process()` requires it non-null and Daisy holds it resident. Gate the precondition on the LUT path; reclaim ~8 KB SRAM. |
 | kr-01 fade-partition dup | dup | med | **PERF-GATED** (or parity test) | Three-region fade boundary math is hand-duplicated across M7 / non-M7 / SIMD; already one clamp out of sync. Hoist to one `static inline` or pin with a parity test. |
 | fpu-02 48-sample WCET | fpu-alu | high | **MODEL/TEST** | m7 baseline prices the 256-sample buffer cap; the codec block is `DAISY_AUDIO_BLOCK_SIZE=48`, so the per-block seed is under-weighted ~5.3×. Add a 48-sample WCET scenario. |
-| arch-03 / kr-03 SNR gate | honesty | med | **MODEL/TEST** | The 72 dB SNR contract is validated under the *renorm* regime; production ships the *re-seed* regime with no SNR/THD gate. Add a production-regime SNR test (`arm_core_test` forces M7). |
+| arch-03 / kr-03 SNR gate | honesty | med | **MODEL/TEST ✅ landed** | The 72 dB SNR contract was validated only under the *renorm* regime; the shipped *re-seed* regime had no SNR/THD gate. `arm_core_test::test_single_tone` now measures coherent SINAD over the sustain region at the kernel's exact rendered frequency — **measured 80.7 dB, floor 70.0** (fail-on-bug: 2% 2nd-harmonic → 28 dB, gate trips). This is the safety net required before the Phase-A drift-regime change. |
 | cache-02 dormant SCB untested | cache | med | **MODEL/TEST** | The cacheable `SCB_InvalidateDCache_by_Addr` arm is compiled by no build/test (the dormancy test forces the DTCM sibling, which preprocesses it out). Extract the line-round arithmetic to a host unit test. |
 | arch-05 firmware purity | arch | low | **MODEL/TEST** | The layer law checks include direction, not OS-contract-freedom. Add a test over `SPECTRAL_SOURCES_DAISY_ENGINE` for denylisted symbols (`omp.h`, `mmap`, `sysconf`, `fopen`…). |
 | arch-02 sim renders other osc | arch | med | **MODEL/TEST** | `simulate`/`embedded_arm` host targets don't set `SPECTRAL_ARM_M7`, so they render the **LUT** oscillator while firmware renders the **coupled** one. Force M7 on the sim, or state the divergence at its surface. |
@@ -92,9 +92,14 @@ to verify; **REFUTED** = candidate concern checked and dismissed (do not re-liti
 
 ## 2. Work plan (measure-first; maintainer sequences the gated items)
 
-**Landed this pass (DOC, safe — no codegen change, m7 gate untouched):** the placement, oscillator,
+**Landed (DOC, safe — no codegen change, m7 gate untouched):** the placement, oscillator,
 unit-ownership, q63-width, stretch, and renorm doc-truth fixes above; `AI_CANON.md` rules 21–25 +
 the rule-6 clause.
+
+**Landed (TEST, arch-03 — the Phase-A safety net):** `arm_core_test::test_single_tone` now gates
+coherent SINAD of the shipped re-seed regime over the sustain region (measured 80.7 dB, floor 70;
+fail-on-bug verified). Build this BEFORE Phase A so the drift-regime change has an audio-quality
+gate to prove against. ctest 32/32 green.
 
 **Phase A — FPU/ALU separation (the core concern). PERF-GATED; needs an m7-baseline regen window.**
 1. Extend the active-voice record (SoA + AoS) with `cos_w/sin_w` and the running `(c,s)` (fpu-03).

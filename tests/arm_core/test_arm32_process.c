@@ -23,6 +23,16 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/* SINAD floor for the shipped single-partial render (sustain region). The production
+ * drift regime (per-block re-seed from the exact uint32 phase, no renorm — what
+ * synth_segment_m7 does) re-anchors phase every block so cross-block drift cannot
+ * accumulate; SINAD is then bounded by Q15 output quantization at amp 0.5 (~92 dB
+ * ceiling). [chosen: a floor well under the measured value with headroom for FP/Q15
+ * variance, but high enough that an oscillator drift/distortion regression — e.g. a
+ * future carry-state+renorm path that drifts — trips it where the freq/peak checks would
+ * not.] */
+#define SINAD_BUDGET_DB 70.0
+
 #include "../support/check.h"
 
 /* Goertzel power of a real signal at frequency f (Hz). */
@@ -36,6 +46,29 @@ static double goertzel_power(const float* x, uint32_t n, double f, double sr) {
         s1 = s0;
     }
     return s1 * s1 + s2 * s2 - c * s1 * s2;
+}
+
+/* Coherent SINAD (dB) of a real tone at known angular frequency w (rad/sample) over
+ * [s0,s1): least-squares-fit the fundamental as a cos/sin projection (phase-agnostic,
+ * so the absolute start phase and the output-then-step ordering need not be modeled),
+ * then ratio the fundamental power to the residual (noise + harmonic distortion). w must
+ * be the EXACT rendered frequency or spectral leakage inflates the residual — that errs
+ * conservative (SINAD under-reported), never optimistic. */
+static double sinad_db(const float* x, uint32_t s0, uint32_t s1, double w) {
+    double cc = 0, ss = 0, cs = 0, xc = 0, xs = 0, xx = 0;
+    for (uint32_t i = s0; i < s1; i++) {
+        double c = cos(w * (double)i), s = sin(w * (double)i), v = (double)x[i];
+        cc += c * c; ss += s * s; cs += c * s;
+        xc += v * c; xs += v * s; xx += v * v;
+    }
+    double det = cc * ss - cs * cs;
+    if (det <= 0.0 || xx <= 0.0) return 0.0;
+    double a = (xc * ss - xs * cs) / det;   /* fundamental cos amplitude */
+    double b = (xs * cc - xc * cs) / det;   /* fundamental sin amplitude */
+    double p_fund = a * xc + b * xs;        /* signal energy the fundamental explains */
+    double p_res = xx - p_fund;             /* residual: noise + harmonic distortion */
+    if (p_res <= 0.0) p_res = 1e-30;
+    return 10.0 * log10(p_fund / p_res);
 }
 
 /* Render the whole context block-by-block (<=256) through the real process(). */
@@ -111,6 +144,24 @@ static void test_single_tone(const q15_t* lut, uint32_t sr) {
     CHECK(peak > 0.45f && peak < 0.52f, "peak should be ~0.5 (amp), got %.4f", peak);
     /* Q8.8 omega quantization at 1 kHz is ~14 Hz/LSB; allow generous slack. */
     CHECK(fabs(best_f - nominal_f) < 25.0, "dominant freq should track nominal (got %.0f)", best_f);
+
+    /* Audio-quality gate for the SHIPPED drift regime. The freq/peak checks above pass
+     * through substantial harmonic distortion; SINAD bounds it. w_render is the kernel's
+     * EXACT per-sample frequency (freq_q88 * phase_inc_scale_q24 / 2^32 * 2pi — the same
+     * arithmetic spectral_arm32_init/process use), so the coherent fit does not leak.
+     * Measured over the sustain region only (the fade ramps are excluded). */
+    {
+        uint32_t scale_q24 = (uint32_t)((double)(1u << 24) / (2.0 * M_PI) + 0.5);
+        uint32_t phase_inc = (uint32_t)seg.freq_q88 * scale_q24;
+        double w_render = (double)phase_inc / 4294967296.0 * (2.0 * M_PI);
+        uint32_t fade = (uint32_t)SPECTRAL_FADE_SAMPLES_EMBEDDED;
+        double sinad = (got > 2u * fade) ? sinad_db(out, fade, got - fade, w_render) : 0.0;
+        printf("  SINAD (sustain, re-seed regime) = %.1f dB (floor %.1f)\n",
+               sinad, (double)SINAD_BUDGET_DB);
+        CHECK(sinad > SINAD_BUDGET_DB,
+              "shipped re-seed-regime SINAD %.1f dB < %.1f floor (drift/distortion?)",
+              sinad, (double)SINAD_BUDGET_DB);
+    }
     free(out);
 }
 
