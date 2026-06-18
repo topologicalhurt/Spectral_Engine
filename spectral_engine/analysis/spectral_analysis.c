@@ -90,6 +90,7 @@ SpectralError spectral_analysis_stft_matrix_alloc(SpectralAnalysisStftMatrix* ma
 
     matrix->total_bins = total_bins;
     matrix->total_bytes = total_bytes;
+    matrix->reim_bytes = half_bytes;
     return SPECTRAL_OK;
 }
 

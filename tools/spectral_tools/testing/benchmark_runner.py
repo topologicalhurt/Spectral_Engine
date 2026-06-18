@@ -114,15 +114,19 @@ class BenchmarkRunner:
         return f"{(value if value is not None else float('nan')):8.2f}"
 
     @staticmethod
-    def _warm(values: list[float]) -> list[float]:
+    def _warm(values: list[float], empty_on_single: bool = False) -> list[float]:
         """Steady-state view: drop the cold first run when there is more than
         one sample. The first run pays one-off costs the steady state never
         repeats — first-touch paging, the FFT/vDSP plan build, dyld bind — so
         folding it into a per-stage median misreports the kernel under test.
-        The headline Total/RSS already report their warm_* statistics this way;
-        this makes the per-stage breakdown reconcile with them instead of
-        silently including the outlier. A single run has nothing to warm."""
-        return values[1:] if len(values) > 1 else values
+
+        A single run has nothing to warm. The per-stage breakdown keeps that lone
+        sample (empty_on_single=False) so a 1-run bench still shows a value; the
+        headline Total/RSS use empty_on_single=True so their warm_* read 'nan'
+        rather than re-reporting the cold run as if it were the warm steady state."""
+        if len(values) > 1:
+            return values[1:]
+        return [] if empty_on_single else values
 
     @staticmethod
     def _fmt_spread(values: list[float]) -> str:
@@ -512,7 +516,7 @@ class BenchmarkRunner:
         all_median = self.parser.median(data.totals)
         all_mean = self.parser.mean(data.totals)
 
-        warm_totals = data.totals[1:] if len(data.totals) > 1 else []
+        warm_totals = self._warm(data.totals, empty_on_single=True)
         warm_median = self.parser.median(warm_totals)
         warm_mean = self.parser.mean(warm_totals)
 
@@ -590,7 +594,7 @@ class BenchmarkRunner:
         if data.rss_kb:
             rss_median_kb = self.parser.median(data.rss_kb)
             rss_mean_kb = self.parser.mean(data.rss_kb)
-            warm_rss = data.rss_kb[1:] if len(data.rss_kb) > 1 else []
+            warm_rss = self._warm(data.rss_kb, empty_on_single=True)
             warm_rss_median_kb = self.parser.median(warm_rss)
             warm_rss_mean_kb = self.parser.mean(warm_rss)
 

@@ -26,10 +26,9 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     }
 
 #if defined(POSIX_MADV_SEQUENTIAL)
-    /* re/im are fp16, so half the bytes of the fp32 magsq plane. */
     posix_madvise(stft.magsq, stft.total_bytes, POSIX_MADV_SEQUENTIAL);
-    posix_madvise(stft.re, stft.total_bins * sizeof(SpectralHalf), POSIX_MADV_SEQUENTIAL);
-    posix_madvise(stft.im, stft.total_bins * sizeof(SpectralHalf), POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.re, stft.reim_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.im, stft.reim_bytes, POSIX_MADV_SEQUENTIAL);
 #endif
 
     if (!spectral_fft_resources_alloc(&res, n_threads, (size_t)n_fft, n_freqs)) {

@@ -100,13 +100,15 @@ typedef struct SpectralAnalysisStftMatrix {
     /* re/im hold the (0.5-scaled, on vDSP) complex spectrum. Phase is computed
      * lazily via atan2f at the tracked peak bins only (in the tracker), not
      * densely here — retiring the all-bins producer atan2. magsq stays the
-     * double-scaled peak-scan key (parity), so this is +50% vs the old
-     * magsq+phase layout on the full-matrix path. See
+     * double-scaled peak-scan key (parity). With SpectralHalf=fp16, re+im are
+     * the same 4 bytes/bin the old single phase plane was, so the layout is
+     * memory-neutral vs the old magsq+phase (the float fallback is +50%). See
      * docs/core_audit/ANALYSIS_PHASE_AT_PEAKS_PLAN.md. */
     SpectralHalf* re;
     SpectralHalf* im;
     size_t total_bins;
-    size_t total_bytes;
+    size_t total_bytes;   /* the fp32 magsq plane */
+    size_t reim_bytes;    /* each of the re / im planes (fp16: total_bytes/2) */
 } SpectralAnalysisStftMatrix;
 
 SpectralError spectral_analysis_stft_matrix_alloc(SpectralAnalysisStftMatrix* matrix,
