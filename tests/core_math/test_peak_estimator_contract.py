@@ -203,11 +203,11 @@ int main(void) {
      * tracked peaks carry phase 0 exactly as the old dense phase=0 array did.
      * re magnitude is irrelevant to the estimator (it takes |X| from magsq);
      * mirroring sqrt(magsq) just keeps the complex value physically consistent. */
-    float re[N_FREQS * 2] = {0};
-    float im[N_FREQS * 2] = {0};
+    SpectralHalf re[N_FREQS * 2] = {0};
+    SpectralHalf im[N_FREQS * 2] = {0};
     for (unsigned f = 0; f < N_FRAMES; f++) {
         float* row = magsq + (size_t)f * N_FREQS;
-        float* rerow = re + (size_t)f * N_FREQS;
+        SpectralHalf* rerow = re + (size_t)f * N_FREQS;
         row[PEAK_BIN - 1] = 1.0f;  rerow[PEAK_BIN - 1] = 1.0f;
         row[PEAK_BIN]     = 4.0f;  rerow[PEAK_BIN]     = 2.0f;   /* local max -> the tracked peak */
         row[PEAK_BIN + 1] = 1.0f;  rerow[PEAK_BIN + 1] = 1.0f;
