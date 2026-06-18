@@ -103,8 +103,10 @@ public/internal headers exposing implementation-detail long-argument helpers
 new guard-only passes without boundary-defect evidence
 ```
 
-## Next recommended phase
+## Next recommended phase — LANDED (archived doc; left for history)
 
 ```text
 Phase G: implement compiled full/fused behavioral parity harness
+  → DONE (PASS221): ctest `full_fused_parity` (test_full_fused_parity.c). This was
+    the last open phase; the architectural-cleanup campaign is complete.
 ```

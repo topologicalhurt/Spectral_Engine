@@ -121,18 +121,24 @@ discipline**: a confirmed kernel defect without a fail-on-bug test is unfinished
 
 These are not in the original mandate and will not surface from the code alone.
 
-1. **Build-system fragility — two real footguns.**
-   - *Incremental staleness:* editing a header often does **not** trigger
-     recompilation of TUs that include it (auto-deps gap). When verifying a fix by
-     revert, force `--clean-first` or delete the object, or you will test a stale
-     binary and draw the wrong conclusion. (This bit the verification of several
-     pass-248/249 fixes.)
-   - *Clean deletes committed generated files:* `cmake --build … --clean-first`
-     and `make clean` delete `core/spectral_osc_metal_generated.h` and
-     `core/spectral_hash_resources_xx32_xx3.c` (both are `GENERATED` yet committed
-     in-source). Regenerate with `generate_metal_osc` / `generate_resource_hashes`.
-   - These are genuine S4 reliability items: CI should build from clean and the
-     generated-in-source-tree pattern is worth revisiting.
+1. **Build-system fragility — both footguns now resolved (2026-06-18).**
+   - *Incremental staleness (auto-deps gap):* **does NOT reproduce** on the current
+     CMake build — header edits are tracked via compiler depfiles (`-MMD -MP`).
+     Re-measured: touching `core/spectral_config.h` reschedules **82** dependent TUs.
+     The narrower residual hazard is a typedef **size/layout** change made
+     mid-experiment (e.g. flipping a `#if 0` fallback back and forth): that can leave
+     mixed-ABI objects from a prior partial build, so after such a change force
+     `--clean-first`. (This — not a depfile gap — is what bit the pass-248/249 reverts
+     and the phase-at-peaks `SpectralHalf` experiment.)
+   - *Clean deletes committed generated files:* **FIXED** (commit `0f647138`). The two
+     committed-yet-`GENERATED` files (`core/spectral_hash_resources_xx32_xx3.c`,
+     `drivers/metal/spectral_osc_metal_generated.h`) were `add_custom_command` OUTPUTs,
+     so CMake added them to the `clean` list and `--target clean` deleted them. Each
+     OUTPUT is now a build-tree **stamp**; the generator still rewrites the committed
+     file in place (gated on the same DEPENDS), so clean removes only the stamp.
+   - Remaining (maintainer-gated, S4): whether the generated-in-source-tree pattern
+     should be replaced by build-tree-only artifacts + a CI regen check is a policy
+     call, not a local fix.
 
 2. **`width` is validated only for finiteness, never upper-bounded**
    (`spectral_contracts.h:42`). Both INT_MAX boundary defects (scalar pass-248,
