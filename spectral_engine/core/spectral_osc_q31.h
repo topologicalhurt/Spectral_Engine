@@ -84,17 +84,32 @@ static inline q31_t spectral_double_to_q31_round(double f) {
     return (q31_t)(v + (v >= 0.0 ? 0.5 : -0.5));
 }
 
-/* Per-voice seed. omega = rad/sample, phi = initial phase rad. (The arm32 synth currently
- * calls this per block per voice -- a per-block FPU cost; see the plan.) Fills the
- * per-voice rotation constants (cos_w, sin_w) and the initial state (c, s) to Q31 precision
- * so the recurrence frequency is exact to the fixed-point floor. cos(x) = sin(x + pi/2). */
-static inline void spectral_coupled_init(SpectralCoupledOsc* o, double omega, double phi,
-                                         q31_t* cos_w, q31_t* sin_w) {
+/* Rotation constants from omega (rad/sample): cos_w = cos(omega), sin_w = sin(omega) in Q31.
+ * They depend ONLY on the frequency, which is constant over a non-chirp partial's life, so
+ * compute them ONCE at voice activation and reuse every block -- never recompute per block
+ * (that is two wasted f64 minimax evals per block per voice). cos(x) = sin(x + pi/2). */
+static inline void spectral_coupled_freq_constants(double omega, q31_t* cos_w, q31_t* sin_w) {
     const double HALF_PI = 1.57079632679489661923;
     *cos_w = spectral_double_to_q31_round(spectral_osc_sin_init_f64(omega + HALF_PI));
     *sin_w = spectral_double_to_q31_round(spectral_osc_sin_init_f64(omega));
-    o->c   = spectral_double_to_q31_round(spectral_osc_sin_init_f64(phi + HALF_PI));
-    o->s   = spectral_double_to_q31_round(spectral_osc_sin_init_f64(phi));
+}
+
+/* Seed the rotating state (c, s) from the initial phase phi (rad), to Q31 precision. This
+ * is the per-block resync: re-seeding (c, s) from the exact phase each block bounds the slow
+ * Q31 drift without a renorm. The rotation constants above do NOT change block-to-block. */
+static inline void spectral_coupled_seed_state(SpectralCoupledOsc* o, double phi) {
+    const double HALF_PI = 1.57079632679489661923;
+    o->c = spectral_double_to_q31_round(spectral_osc_sin_init_f64(phi + HALF_PI));
+    o->s = spectral_double_to_q31_round(spectral_osc_sin_init_f64(phi));
+}
+
+/* Full per-voice seed (constants + state). omega = rad/sample, phi = initial phase rad.
+ * Byte-identical to calling spectral_coupled_freq_constants(omega,...) then
+ * spectral_coupled_seed_state(o, phi); kept for callers that want both at once (tests). */
+static inline void spectral_coupled_init(SpectralCoupledOsc* o, double omega, double phi,
+                                         q31_t* cos_w, q31_t* sin_w) {
+    spectral_coupled_freq_constants(omega, cos_w, sin_w);
+    spectral_coupled_seed_state(o, phi);
 }
 
 #ifdef __cplusplus

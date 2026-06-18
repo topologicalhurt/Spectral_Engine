@@ -357,6 +357,13 @@ typedef struct __attribute__((aligned(4))) {
 #if SPECTRAL_HAS_CHIRP
     q31_t    freq_delta;
 #endif
+#if SPECTRAL_ARM_M7
+    /* Coupled-oscillator rotation constants cos(omega)/sin(omega) in Q31, computed once at
+     * activation from the (constant) phase_inc so the M7 render reuses them every block
+     * instead of recomputing two f64 minimax sines per block. */
+    q31_t    cos_w;
+    q31_t    sin_w;
+#endif
     uint32_t seg_start;
     uint32_t seg_end;
     uint32_t seg_idx;

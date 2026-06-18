@@ -43,6 +43,12 @@ typedef SpectralActiveSegQ15 SpectralActiveSegment;
 typedef struct {
     uq32_t   phase_acc[SPECTRAL_ARM32_MAX_ACTIVE];
     q31_t    phase_inc[SPECTRAL_ARM32_MAX_ACTIVE];
+#if SPECTRAL_ARM_M7
+    /* Per-voice coupled-oscillator rotation constants, computed once at activation from the
+     * (constant) phase_inc and reused every block (see SpectralActiveSegQ15). */
+    q31_t    cos_w[SPECTRAL_ARM32_MAX_ACTIVE];
+    q31_t    sin_w[SPECTRAL_ARM32_MAX_ACTIVE];
+#endif
     q15_t    amp_current[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_delta[SPECTRAL_ARM32_MAX_ACTIVE];
     uint32_t seg_start[SPECTRAL_ARM32_MAX_ACTIVE];

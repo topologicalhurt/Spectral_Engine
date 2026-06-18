@@ -44,15 +44,16 @@ from .toolchain import Toolchain
 # tail and fade are 1 sample/iter. Re-verify on a toolchain change: a drift
 # makes cycles/iter jump far outside the guard band below.]
 # Loops are keyed by their GCC-emitted .L label. These labels are a function of the
-# whole TU's layout, so adding any out-of-line function to spectral_synth_arm32.c
-# renumbers them uniformly even when the synth codegen is byte-identical. They last
-# shifted +40 when spectral_arm32_load_in_place was added (the SD-card trust-boundary
-# loader): same kernels, same cycles/voice-sample (verified in-band), labels only.
+# whole TU's layout, so any change to spectral_synth_arm32.c renumbers them uniformly
+# even when the per-iteration loop codegen (cycles/voice-sample) is byte-identical. They
+# last shifted when the coupled-oscillator rotation constants were hoisted to voice
+# activation (per-block FPU re-seed removed from the render): the loop bodies and their
+# cycles/iter are UNCHANGED (verified in-band), labels only.
 SAMPLES_PER_ITER = {
-    "synth_core_m7/.L492": 16.0,   # main sustain loop
-    "synth_core_pair_m7/.L574": 2.0,
-    "synth_core_m7/.L494": 1.0,    # scalar tail
-    "synth_fade_m7/.L664": 1.0,
+    "synth_core_m7/.L422": 16.0,   # main sustain loop
+    "synth_core_pair_m7/.L504": 2.0,
+    "synth_core_m7/.L424": 1.0,    # scalar tail
+    "synth_fade_m7/.L594": 1.0,
 }
 # Guard band for cycles/voice-sample: if a kernel falls outside, the unroll
 # map has drifted and the WCET must not be trusted silently.
