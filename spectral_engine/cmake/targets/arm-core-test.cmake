@@ -23,6 +23,17 @@ target_compile_definitions(arm_core_test PRIVATE
     SPECTRAL_HAS_DUAL_MAC=1)
 target_link_libraries(arm_core_test PRIVATE m)
 
+# Build-reproducibility + firmware fidelity (kernel-hardening plan §VIII). This harness
+# exercises the real FIRMWARE synth, which ships deterministic + precise: SAFE_MATH is the
+# Daisy default (no -ffast-math) and arm-none-eabi-gcc does no ThinLTO. The host harness
+# inherited -ffast-math + -flto=thin from the common (desktop) profile, which is BOTH
+# unfaithful to the firmware it tests AND the source of a rare, load-dependent ThinLTO
+# nondeterministic miscompile that collapsed the re-seed SINAD (~28 dB vs 70 dB floor on
+# ~1 build in 13+; ASan/UBSan-clean, so not a source UB). Force firmware-faithful precise,
+# non-LTO codegen so the harness is deterministic and matches what actually ships.
+target_compile_options(arm_core_test PRIVATE -fno-fast-math -fno-lto)
+target_link_options(arm_core_test PRIVATE -fno-lto)
+
 # Drop the unused spectral_arm32_process_interleaved() (and its
 # spectral_mono_to_stereo_q15 dependency in spectral_out.c) so the harness links
 # against only arm32 + q15 + lut.

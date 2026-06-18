@@ -453,27 +453,36 @@ had compile_commands + flags.make + link.txt all byte-identical to a passing bui
 **ThinLTO's load-dependent, non-bit-reproducible parallel backend interacting with fast-math
 reassociation** (and possibly a latent UB the optimizer then exploits) on that numeric path.
 
-This is the single highest-priority finding to land (correctness-before-performance): the
-*default* build can nondeterministically emit grossly-wrong audio. It overlaps §IV-M7 and the
-`embedded-arch-audit` re-seed work.
+**RESOLVED 2026-06-18 (commit pending).** Root-caused and fixed.
 
-**Phases:**
-- **VIII.1** Root-cause: bisect whether it is (a) a real UB in the f64 re-seed under
-  `-ffast-math` (run that path under UBSan/ASan + `-fno-fast-math` and a fixed ThinLTO cache
-  `-Wl,-cache_path_lto`/`--thinlto-cache-dir`), or (b) pure ThinLTO codegen nondeterminism.
-  *[M / investigation — the bisect is the work]*
-- **VIII.2** Fix per the root cause: if UB, fix the re-seed math (likely the cheaper
-  carry-state renorm from §IV-m.2 sidesteps the f64 path entirely); if ThinLTO-only, pin a
-  reproducible-codegen flag for the affected TU or build the arm32 host-sim TUs without
-  fast-math (they exist to mirror firmware, where SAFE_MATH is already the default). *[M / med]*
-- **VIII.3** Make the test a **reproducibility gate**: run `arm32_process_correctness` over N
-  fresh builds (or a fixed-seed ThinLTO cache) in CI so a nondeterministic draw fails loudly
-  rather than ~1/13 of the time. *[S / low]*
+**Root cause (measured, not assumed):**
+- **Not a source UB** — ASan+UBSan over the full re-seed path is clean (healthy 80.7 dB).
+- **Not a deterministic fast-math fragility** — the suspect `spectral_osc_sin_init_f64` is
+  fast-math-robust in isolation (precise vs `-ffast-math` give an identical 6.0e-12 max error
+  vs libm over the argument range).
+- It is **ThinLTO's non-reproducible parallel codegen** on the host-compiled *fixed-point*
+  arm32 path, which only ever runs through ThinLTO+fast-math **because the harness inherited
+  the desktop profile**. The shipped firmware is unaffected: Daisy ships `SAFE_MATH` (no
+  `-ffast-math`) and arm-none-eabi-gcc does no ThinLTO. So this was a **test-harness fidelity
+  violation** (canon #24 — a host harness validating firmware code must use the firmware's
+  numeric semantics), not a shipped-correctness defect.
 
-**Canon:** the default build must be numerically deterministic — a flag combination that can
-nondeterministically change *audible* output is a correctness defect, not a flake to retry.
-**Tests:** an N-build reproducibility harness for the arm32 re-seed SINAD; UBSan coverage of
-the f64 re-seed path.
+**Fix:** `arm_core_test` now compiles `-fno-fast-math -fno-lto` (firmware-faithful, precise,
+non-LTO) — the exact config proven healthy + deterministic above. Removes both candidate
+triggers; the harness now matches what actually ships.
+
+**Validation:** 20/20 fresh `tests_all` builds pass `arm32_process_correctness` after the fix
+(the ThinLTO nondeterminism source is gone); full ctest + m7 gate green.
+
+**Test (landed):** `test_build_flags.py::test_arm_correctness_harness_is_firmware_faithful`
+pins `-fno-fast-math -fno-lto` on the harness (fail-on-bug: drop the override → it re-acquires
+the desktop ThinLTO/fast-math). **Canon:** new AI_CANON #27 — a host harness/sim that validates
+firmware code compiles with the firmware's numeric profile, not the desktop one.
+
+**Carried forward (not this fix):** the host-embedded *sim* targets (`simulate`, `embedded_arm`)
+still compile the arm32 code with an embedded *fast-math* group — a narrower fidelity gap
+(firmware default is SAFE_MATH). Tracked for the observability/fidelity pass; lower risk (they
+run the perf/resource model, not the SINAD correctness gate).
 
 ---
 

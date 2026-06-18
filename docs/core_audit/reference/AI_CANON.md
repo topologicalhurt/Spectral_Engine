@@ -354,3 +354,14 @@ flags (`-mavx2`, `-mno-avx512f`, `-mcpu=cortex-m7`) are **arch-gated** — emitt
 ISA they name, never sprayed across all hosts. The optimization level is a profile property,
 not `CMAKE_BUILD_TYPE` (the engine stays optimized under `Debug`). A widening that down-clocks
 (AVX-512) is OFF by default and enabled only behind a measured net win, never speculatively.
+
+## 27. A host harness that validates firmware code compiles with the firmware's numeric profile
+
+A host build that runs firmware code for correctness (e.g. the arm32 correctness harness) must
+use the firmware's numeric semantics — precise/`SAFE_MATH`, no host-only ThinLTO/`-ffast-math`
+— not the desktop profile it happens to inherit. Two reasons: fidelity (it must test what
+ships, per #24) and reproducibility. ThinLTO's parallel codegen is not bit-reproducible across
+builds; combined with `-ffast-math` on a precision-sensitive fixed-point path it produced a
+rare, gross, non-deterministic miscompile (a ~28 dB SINAD collapse, ASan/UBSan-clean) — a
+build-determinism defect, never a flake to retry. The default build must be numerically
+deterministic; a flag combination that can change *audible* output across builds is a defect.

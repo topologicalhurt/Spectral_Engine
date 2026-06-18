@@ -85,5 +85,45 @@ def test_x86_isa_flags_present_on_x86(tmp_path):
     )
 
 
+def _tu_args(tmp_path: Path, output_substr: str, file_suffix: str) -> list[str]:
+    """The compiler arguments for one TU (matched by output dir + source suffix)."""
+    if shutil.which("cmake") is None:
+        pytest.skip("cmake not on PATH")
+    build = tmp_path / "b"
+    cfg = subprocess.run(
+        ["cmake", "-S", str(ROOT), "-B", str(build),
+         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
+        capture_output=True, text=True,
+    )
+    if cfg.returncode != 0:
+        pytest.skip(f"configure failed in this environment:\n{cfg.stderr[-2000:]}")
+    ccdb = build / "compile_commands.json"
+    if not ccdb.exists():
+        pytest.skip("compile_commands.json not generated")
+    for entry in json.loads(ccdb.read_text()):
+        if output_substr in entry.get("output", "") and entry["file"].endswith(file_suffix):
+            return entry.get("arguments") or entry.get("command", "").split()
+    pytest.skip(f"TU not found: {output_substr} / {file_suffix}")
+    return []
+
+
+def test_arm_correctness_harness_is_firmware_faithful(tmp_path):
+    """The arm_core_test correctness harness exercises FIRMWARE fixed-point code,
+    which ships precise (SAFE_MATH default) and without ThinLTO. Compiling it with
+    the host's -ffast-math + -flto=thin was unfaithful and caused a rare
+    nondeterministic ThinLTO miscompile (plan §VIII). Pin the firmware-faithful,
+    reproducible flags. Fail-on-bug: drop the override and the harness re-acquires
+    -flto=thin / fast-math semantics."""
+    args = _tu_args(tmp_path, "arm_core_test.dir", "spectral_synth_arm32.c")
+    assert "-fno-lto" in args, (
+        "arm_core_test must compile -fno-lto: ThinLTO codegen on this fixed-point "
+        "path is non-reproducible and rarely miscompiles (plan §VIII)."
+    )
+    assert "-fno-fast-math" in args, (
+        "arm_core_test must compile -fno-fast-math to match the firmware's precise "
+        "(SAFE_MATH) semantics it is meant to validate."
+    )
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
