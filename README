@@ -26,67 +26,70 @@ If you are interested in a more detailed project description see spectral_engine
 DEPENDENCIES
 ------------
 
-A pinned, reproducible environment with EVERY dependency below (except the
-macOS system SDK, the optional CUDA stack, and the external Daisy SDKs) is
-provided by the Nix flake at the repo root:
+The easiest way to get a reproducible build up & running is with nix, I.e, `nix develop`
 
-    nix develop            # drops you into a shell with the full toolchain
+CORE:
 
-The full list, by role:
-
-CORE BUILD (always required)
 - CMake ≥ 3.21
-- GNU Make (the root Makefile wraps cmake; you can also call cmake directly)
+- GNU Make (optional) - Wraps CMake. E.g. see build section below
 - A C11 compiler — Clang (Apple/LLVM) or GCC
 - OpenMP runtime — libomp (macOS/Clang) or libgomp (Linux/GCC); CPU parallel synth
-- libsndfile — WAV/audio I/O
+- libsndfile - WAV/audio I/O
 
-PLATFORM ACCELERATION (auto-selected by the build)
+PLATFORM ACCELERATION:
+
 - macOS: Accelerate / vDSP (FFT + atan2) and Metal + Foundation (GPU backend).
-  These ship with the Xcode Command Line Tools / macOS SDK — no separate install.
-- Linux: FFTW3 (libfftw3-dev) for the host FFT.
+  These ship standard with the Xcode Command Line Tools / macOS SDK.
+- Linux: FFTW3 (libfftw3-dev).
 - Optional GPU (Linux + NVIDIA): CUDA Toolkit / nvcc — build with
   `-DSPECTRAL_USE_CUDA=ON` and target `cuda`.
 
-VENDORED, IN-SOURCE (git submodules; managed by `python -m spectral_tools.vendor`)
+VENDORED / IN-SOURCE:
+
 - CMSIS-DSP   — Q15/Q31 FFT for the IFFT synthesis path
 - CMSIS_6     — Cortex-M core headers
 - simde       — header-only SIMD portability (SSE2 intrinsics -> NEON/AVX)
 - xxHash      — resource hash system (xx32/xx3)
-  See `third_party/libs.yaml` for the manifest; patchsets are kept in-source as subtrees.
 
-EMBEDDED + ARM PERFORMANCE MODEL (Cortex-M firmware, perf gate, WCET)
+  See `third_party/libs.yaml` for the full manifest; patchsets are kept in-source as subtrees.
+  Git submodules are managed by `python -m spectral_tools.vendor`
+
+EMBEDDED ARM:
+
 - arm-none-eabi-gcc ≥ 15 with newlib — VENDORED in-tree at
-  `tools/toolchains/xpack-arm-none-eabi-gcc-15.2.1` (the perf stack uses it by
-  default; a system/brew install also works).
-- qemu-system-arm ≥ 11 — the [measured] M7 instruction counts.
-- llvm-mca (from LLVM) — the [modeled] M7 cycle numbers (the perf gate's modeled
-  half). On macOS Homebrew this keg is keg-only; the discovery checks
-  `/opt/homebrew/opt/llvm/bin/llvm-mca` directly, so no PATH change is needed.
+  `tools/toolchains/xpack-arm-none-eabi-gcc-<version>`
+- qemu-system-arm ≥ 11
+- llvm-mca (from LLVM)
+
+  llvm-mca and qemu are ONLY needed for the embedded perf model / `pytest tests/tools`;
+  the desktop build does not require them.
+
+DAISY SEED PORT:
+
 - dfu-util — `make daisy-flash` (flashing a Daisy Seed).
 - libDaisy + DaisySP — external board SDKs for `make daisy`, passed via
   `-DSPECTRAL_DAISY_LIBDAISY_DIR=... -DSPECTRAL_DAISY_DAISYSP_DIR=...`.
-  (llvm-mca and qemu are ONLY needed for the embedded perf model / `pytest tests/tools`;
-   the desktop build does not require them.)
 
-PYTHON ≥ 3.12 (tooling: vendoring, perf model, benchmarks, behavioral tests)
-- exact pins in `tools/requirements.txt`: numpy 2.4.2, xxhash 3.6.0,
-  pytest 8.4.1, pyyaml 6.0.3.  `pip install -r tools/requirements.txt`
+OPTIONAL DEV TOOLS:
 
-OPTIONAL DEV TOOLS (build degrades gracefully if absent)
-- ripgrep (rg)     — the log-discipline build check
-- llvm-profdata    — PGO profile merge (also from LLVM)
+- ripgrep (rg)     — Log-discipline build check
+- llvm-profdata    — PGO profile merge
 
-QUICK INSTALL (outside Nix)
+  The build degrades gracefully if absent.
+
+QUICK INSTALL on host:
+
 - macOS:  ```brew install cmake libomp libsndfile llvm qemu dfu-util ripgrep```
-          (plus Xcode Command Line Tools for Accelerate/Metal)
+          + Xcode Command Line Tools for Accelerate/Metal
 - Debian/Ubuntu:
           ```sudo apt-get install -y cmake build-essential libomp-dev \
               libsndfile1-dev libfftw3-dev qemu-system-arm gcc-arm-none-eabi \
               llvm dfu-util ripgrep```
 - Python (any OS):  ```pip install -r tools/requirements.txt```
 
+-----
 BUILD
+-----
 
 Run all build commands from the repository root.
 

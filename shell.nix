@@ -2,7 +2,7 @@
 #
 # For the PINNED, reproducible environment prefer the flake:  nix develop
 # (that pins nixpkgs via flake.lock). This file resolves nixpkgs from the
-# caller's <nixpkgs> channel, so it is convenient but not bit-reproducible.
+# caller's <nixpkgs> channel.
 #
 # It re-exports the flake's devShell when flakes are available, else builds an
 # equivalent shell from the channel.

@@ -3,9 +3,13 @@
 Parses every engine TU/header's #include directives, resolves in-repo
 headers by basename, and fails on any edge the layer law forbids:
 
-  kernel   (core/ + runtime/)  -> kernel only, EXCEPT the dispatch-registry
-                                  allowlist below (the static vtable must
-                                  name the driver symbols).
+  kernel   (core/ + runtime/)  -> kernel only, EXCEPT the deliberate
+                                  ALLOWLIST below: the backend dispatch
+                                  registry's static vtable (must name driver
+                                  symbols), and the shared width-templated
+                                  SIMD-sin SSOT (a source template the kernel
+                                  instantiates at the include site, not a
+                                  runtime arch dependency).
   arch/X   -> kernel + arch/X       (one ISA never includes another)
   drivers/X-> kernel + drivers/X    (one driver never includes another)
   analysis -> kernel + analysis
@@ -37,6 +41,16 @@ ALLOWLIST = {
     # vtable table must name driver symbols; everything else uses the vtable.
     ("spectral_engine/core/spectral_backend.c", "spectral_metal.h"),
     ("spectral_engine/core/spectral_backend.c", "spectral_cuda.h"),
+    # Shared SIMD compute SSOT. The width-templated minimax-sin .inc is a source
+    # TEMPLATE instantiated at the include site (the includer supplies the OSC_*
+    # vector vocabulary + SIMDe headers), not a runtime arch dependency. It lives
+    # in arch/simd because its fallbacks call SIMDe intrinsics directly, so it
+    # cannot move down to core/ without dragging SIMDe into the kernel. It is the
+    # SAME single source the oscillator SIMD kernel instantiates: the IFFT hybrid
+    # synth's F6 host-SIMD trig (renderer-owned, host-only, APPROX_TRIG-gated)
+    # re-instantiates it at 4-wide rather than keeping a 3rd copy of the formula
+    # (commit 42bc3c2baf "extract don't copy"; IFFT_SYNTHESIS_PLAN.md F6).
+    ("spectral_engine/core/spectral_synth_ifft.c", "spectral_fast_sin_simd.inc"),
 }
 
 SOURCE_SUFFIXES = {".c", ".h", ".m", ".cu", ".inc"}
