@@ -350,17 +350,26 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
 #if SPECTRAL_TRACK_DEBUG_TIMING
     phase_start = omp_get_wtime();
 #endif
-    /* Phase-at-peaks: one atan2f(im,re) per bin at this validated peak, into this
-     * thread's scratch (cf-1..cf+1 on the current frame, cf on the next). The
-     * single ps[cf] feeds all three downstream reads — emit_segment's validity
-     * gate, seg->phase, and the estimator input — so it is one atan2, not three,
-     * and bit-for-bit consistent across them. Replaces the all-bins producer atan2. */
+    /* Phase-at-peaks: take atan2f(im,re) only at the bins this peak's estimator
+     * actually reads, into this thread's scratch. ps[cf] + nps[cf] are ALWAYS
+     * needed — ps[cf] feeds emit_segment's validity gate, seg->phase, and the
+     * phase-vocoder advance; nps[cf] is the next-frame phase for that advance.
+     *
+     * ps[cf-1]/ps[cf+1] are read ONLY by spectral_peak_reconstruct_triplet, i.e.
+     * ONLY by the complex estimators (jacobsen/candan/quinn). The default
+     * LOG_PARABOLIC path never touches them, so computing them there is two wasted
+     * atan2f per peak. Gate them on the SAME predicate that decides whether they
+     * are read — the resolved estimator's CAP_COMPLEX_TRIPLET capability — so the
+     * non-complex paths never feed (or read) stale scratch, and the complex paths
+     * still get an exact cf-1/cf+1 triplet. */
     float* __restrict__ ps = tracker->thread_phase_scratch[tid];
     float* __restrict__ nps = tracker->thread_next_phase_scratch[tid];
-    ps[cf - 1u] = atan2f(ctx->im_row[cf - 1u], ctx->re_row[cf - 1u]);
-    ps[cf]      = atan2f(ctx->im_row[cf],      ctx->re_row[cf]);
-    ps[cf + 1u] = atan2f(ctx->im_row[cf + 1u], ctx->re_row[cf + 1u]);
-    nps[cf]     = atan2f(ctx->next_im_row[cf], ctx->next_re_row[cf]);
+    ps[cf]  = atan2f(ctx->im_row[cf],      ctx->re_row[cf]);
+    nps[cf] = atan2f(ctx->next_im_row[cf], ctx->next_re_row[cf]);
+    if (tracker->peak_model.capabilities & SPECTRAL_PEAK_MODEL_CAP_COMPLEX_TRIPLET) {
+        ps[cf - 1u] = atan2f(ctx->im_row[cf - 1u], ctx->re_row[cf - 1u]);
+        ps[cf + 1u] = atan2f(ctx->im_row[cf + 1u], ctx->re_row[cf + 1u]);
+    }
 
     if (!spectral_tracker_emit_segment(tracker, tid, ctx->row, ctx->next_row, ps, nps, cf, ctx->frame_start_sample,
                                        tracker->freq_step_omega, tracker->freq_step_df,
