@@ -23,3 +23,7 @@ guidelines. By rule, nothing here is a plan or pertains to planning.
 - `VALIDATION_OWNERSHIP.md` — who/what validates each surface.
 - `FULL_FUSED_PARITY_HARNESS.md` — the full-vs-fused parity harness spec (realized by
   `tests/core_contracts/test_full_fused_parity.c`).
+- `BUILD_PROFILES.md` — the build-flag philosophy: `cmake/profiles.cmake` is the SSOT;
+  host vs embedded/firmware profiles; AVX-512-off + arch-gating + reproducibility.
+- `GENERATED_ARTIFACTS.md` — the registry of committed generated sources (generator +
+  verify-on-build guard per artifact); the stamp-OUTPUT clean-safety pattern.

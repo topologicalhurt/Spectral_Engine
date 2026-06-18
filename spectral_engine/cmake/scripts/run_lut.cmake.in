@@ -1,0 +1,28 @@
+if(NOT DEFINED SPECTRAL_LUT_MODE)
+    message(FATAL_ERROR "SPECTRAL_LUT_MODE is required (generate|verify).")
+endif()
+
+set(_python "@SPECTRAL_PYTHON@")
+set(_lut_module "spectral_tools.generators.lut_generator")
+set(_tools_pythonpath "@SPECTRAL_TOOLS_PYTHONPATH@")
+set(_lut_output "@SPECTRAL_LUT_OUTPUT@")
+
+if(NOT EXISTS "${_python}")
+    message(FATAL_ERROR
+        "Configured Python interpreter does not exist: ${_python}. "
+        "Run target 'prepare_python_tools' and re-run the build.")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "PYTHONPATH=${_tools_pythonpath}"
+            "${_python}" -m "${_lut_module}"
+            --mode "${SPECTRAL_LUT_MODE}"
+            --output "${_lut_output}"
+    RESULT_VARIABLE _lut_result)
+
+if(NOT _lut_result EQUAL 0)
+    message(FATAL_ERROR
+        "lut_generator module '${_lut_module}' failed in mode '${SPECTRAL_LUT_MODE}' "
+        "(exit=${_lut_result}, python=${_python})")
+endif()

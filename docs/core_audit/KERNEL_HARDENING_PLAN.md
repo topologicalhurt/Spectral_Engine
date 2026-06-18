@@ -99,7 +99,16 @@ banners; (3) no `generated/`-folder or `asm/` convention; (4) the build-tree-sta
 (just landed) + the generated-vs-measurement distinction are institutional knowledge in
 two `.cmake` comments, not canon.
 
-**Phases:**
+**LANDED 2026-06-18 (Phase C):** I.1 closed — `lut_generator.py` gained `--mode verify`;
+`lut-codegen.cmake` wires `generate_lut`/`verify_lut` (build-tree stamp) onto every target
+that compiles `spectral_lut.c`; clean-safe, committed bytes unchanged. I.2 — registry
+`reference/GENERATED_ARTIFACTS.md` + the completeness gate
+`tests/tools/test_generated_artifacts.py` (a banner-bearing committed file not in the
+registry fails). I.4/I.3 — AI_CANON #28 codifies the rules + reserves `asm/`. Decisions taken
+per the recommendations: files stay in place; registry is a human doc + behavioral test (not
+cmake-readable — a future refinement); `spectral_lut_data.h` stays committed + now guarded.
+
+**Phases (for reference — all closed except the noted refinement):**
 - **I.1** Bring `spectral_lut_data.h` under the stamp+verify pattern: a `run_lut.cmake.in`
   runner, build-tree `generate_lut.stamp` OUTPUT, `DEPENDS` on the script + the config
   header that fixes `SPECTRAL_OSC_LUT_BITS`, and a `verify_lut` target wired onto every
