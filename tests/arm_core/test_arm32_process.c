@@ -3,7 +3,7 @@
  * Drives spectral_arm32_init/load/process (the actual Cortex-M codepath, built on
  * the host with SPECTRAL_ARM_M7 forced and portable intrinsic fallbacks) and
  * asserts behavioral correctness properties of the rendered audio. This replaces
- * the vacuous sim-reimplementation oracle for correctness (ULTRAPLAN A1b).
+ * the vacuous sim-reimplementation oracle for correctness (CAMPAIGN_2_MASTER_PLAN A1b).
  *
  * Checks are assumption-minimal: the single-tone frequency is verified against the
  * NOMINAL input frequency (not derived from the synth's own scaling), so a broken

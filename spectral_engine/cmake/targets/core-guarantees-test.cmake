@@ -1,4 +1,4 @@
-# Guarantee-manifest / self-report harness (CTest), ULTRAPLAN Phase B1/B2.
+# Guarantee-manifest / self-report harness (CTest), CAMPAIGN_2_MASTER_PLAN Phase B1/B2.
 #
 # Compiled tests for the active-guarantee bitset in core/spectral_guarantees.h
 # (B2 self-report) and the per-gate error budgets in the guarantee registry

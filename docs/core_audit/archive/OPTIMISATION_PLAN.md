@@ -1,10 +1,12 @@
 # Optimisation Plan — minimal high-performance spectral-resynthesis kernel
 
+> **ARCHIVED 2026-06-18.** Kernel-optimisation track closed: F1/F3 infra + O1-B/O2-A landed; the **F** synthesis fork is resolved (oscillator-bank stays the default, IFFT ships gated — see `../IFFT_SYNTHESIS_PLAN.md`); remaining O-items are landed or declined-on-data.
+
 Status: **PARTLY LANDED.** F1/F3 infra, O1-B output tiling, O2-A SIMD sine, and the ARM
 coupled-form oscillator are in; the big OPEN decision is **F2 — synthesis method (oscillator-bank
 vs inverse-FFT)** — engaged measure-first in [`REVIEWER_HANDOFF.md`](REVIEWER_HANDOFF.md) (the "F"
 fork). Original plan text follows.
-Owner track: optimisation. Companion to `docs/core_audit/reference/ULTRAPLAN.md` (master plan).
+Owner track: optimisation. Companion to `docs/core_audit/archive/CAMPAIGN_2_MASTER_PLAN.md` (master plan).
 Audit date: 2026-06-01. Evidence cited as `file:line` against the current tree.
 Revision: **v2** — adds the SOTA survey (Part A) and an architectural-minimality stage
 inventory (Part B), and re-orders the work so the two *foundational algorithm* decisions
@@ -18,18 +20,18 @@ re-scoped under the foundation decisions and tagged with their contingencies.
 ## 0. Relationship to the master plan (non-conflict statement)
 
 This is a **separate, additive track**; it does not re-order, re-scope, or contradict any
-phase of `ULTRAPLAN.md`. Single point of contact:
+phase of `CAMPAIGN_2_MASTER_PLAN.md`. Single point of contact:
 
 ```text
-ULTRAPLAN Phase D (compiled harness + golden-vector oracle, lines 997–1068)
+CAMPAIGN_2_MASTER_PLAN Phase D (compiled harness + golden-vector oracle, lines 997–1068)
         IS THE PREREQUISITE AND VERIFICATION GATE for this plan.
 ```
 
-Goldens are captured from the **current, unoptimised** kernel FIRST (ULTRAPLAN line 79),
+Goldens are captured from the **current, unoptimised** kernel FIRST (CAMPAIGN_2_MASTER_PLAN line 79),
 freezing today's numerical behaviour as the contract. Every change here is verified by
 diffing against those goldens. Deliberate behaviour changes (the foundation work changes
 the segment representation and may change reconstruction within tolerance) get a **new,
-signed-off golden** — never a silently-moved tolerance. The remaining deferred ULTRAPLAN
+signed-off golden** — never a silently-moved tolerance. The remaining deferred CAMPAIGN_2_MASTER_PLAN
 observation (GPU fade-tail) stays Phase D's, not this plan's; its companion (Daisy .spq
 re-validation) landed in review-3.
 
@@ -243,7 +245,7 @@ Sequencing principle: **fix the algorithm, then tune it.** Foundation (F-) phase
 *what* is computed; micro-opt (O-) phases change *how fast* the now-minimal computation
 runs. No O- item lands before the F- decision it depends on.
 
-## Phase 0 — Verification gate (with ULTRAPLAN D0–D2)
+## Phase 0 — Verification gate (with CAMPAIGN_2_MASTER_PLAN D0–D2)
 
 Stand up the compiled harness; commit goldens from the **current** kernel. Extend
 `arm32_process_correctness` fixtures with a **chirp** case (needed by F1/F3/O4-A). Blocks
@@ -453,7 +455,7 @@ Suggested execution order (value × safety): **Phase0 → O3-B → O4-B → O1-B
 - Non-ARM hand assembly (directive: ARM only for now).
 - Building the SMS residual (A6) or Johnston masking (A7) now — recorded as named future
   work; F2 keeps the door open (residual is near-free under inverse-FFT synthesis).
-- Any change to ULTRAPLAN's phase ordering or closure criteria; no new test philosophy.
+- Any change to CAMPAIGN_2_MASTER_PLAN's phase ordering or closure criteria; no new test philosophy.
 ```
 
 ---

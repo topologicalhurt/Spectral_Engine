@@ -1,5 +1,7 @@
 # Plan: compute STFT phase only at tracked peak bins (store re/im, not phase)
 
+> **ARCHIVED 2026-06-18.** Landed + validated (see the LANDED section below); the only open item is the external FFTW/x86 CI check.
+
 ## LANDED 2026-06-18 (commits 973cf27, 91a66c4, e4da221, a5d5d4b, e258a12 on `minimal`)
 
 Implemented in 5 steps + an adversarial audit. The instructive twist: the *speed*

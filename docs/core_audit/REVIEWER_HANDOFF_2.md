@@ -84,7 +84,7 @@ item after the S1 model is calibrated enough to price it.
   `SPECTRAL_USE_VDSP=0` is now redundant: the vDSP window path was removed, so all
   backends generate the symmetric form. Cross-backend parity is enforced by
   `window_backend_parity`.
-- `ULTRAPLAN.md` / `OPTIMISATION_PLAN.md` contain many "ctest 4/4" historical
+- `CAMPAIGN_2_MASTER_PLAN.md` / `OPTIMISATION_PLAN.md` contain many "ctest 4/4" historical
   pass-notes — those are records, not current claims; the current count is 18.
 - Vendored deps: any doc referencing `third_party/libs.txt` is stale — it is now
   `third_party/libs.yaml` managed by `python -m spectral_tools.vendor` (ADR-0003).

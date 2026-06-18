@@ -1,5 +1,7 @@
 # Q-Type Refactor & SIMD-Width Generalization Plan
 
+> **ARCHIVED 2026-06-18.** Threads A and B landed; Thread C (wider SIMD tiers) is x86/AVX-CI-gated. Locally complete.
+
 > **Status:** design captured 2026-06-05, awaiting maintainer-set execution order.
 > **Relationship to [QTYPE_DOMAIN_PLAN.md](QTYPE_DOMAIN_PLAN.md):** that plan shipped the
 > opt-in Q15 *compute kernels* (Q0–Q5 + Bv, PASS206–216) and a *starter* discipline layer.

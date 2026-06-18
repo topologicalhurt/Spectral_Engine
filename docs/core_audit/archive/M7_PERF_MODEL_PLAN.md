@@ -1,5 +1,7 @@
 # M7 Performance Model — Campaign 3 / S1 measurement stack
 
+> **ARCHIVED 2026-06-18.** P0–P6 complete; the no-hardware Cortex-M7 perf-model stack ships and the perf-gate is green. The live contract is the code/baseline it produced (census/qemu/cycles/memory/wcet); AI.md cites this doc for provenance.
+
 Goal (REVIEWER_HANDOFF §S1): the most accurate Cortex-M7 performance model obtainable
 without hardware — instruction cycles, cache/prefetch behavior, bytes moved — with
 **measured** quantities strictly separated from **modeled** ones. The existing

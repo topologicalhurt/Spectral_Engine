@@ -331,6 +331,6 @@ Two hard nuances baked into this header:
 
 Golden-gated (maintainer is the golden authority; behavior/precision re-baselines need
 sign-off). Measure-don't-assert. KISS. Don't force-unify Q15 with float. Plan-first;
-maintainer sets order. See `OSCILLATOR_UNIFICATION_PLAN.md`, `ULTRAPLAN.md`, and the
+maintainer sets order. See `OSCILLATOR_UNIFICATION_PLAN.md`, `CAMPAIGN_2_MASTER_PLAN.md`, and the
 memory notes `faster-path-should-default`, `avoid-assumptions`,
 `algorithm-before-microopt`.

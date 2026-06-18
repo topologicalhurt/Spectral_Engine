@@ -1,12 +1,29 @@
 # Archived planning docs — completed campaigns
 
-These plans/audits are **done**; kept for history (git also has full history). The forward
-mandate and the actively-worked plan(s) live one level up in `../` (`../REVIEWER_HANDOFF.md`,
-`../IFFT_SYNTHESIS_PLAN.md`); the canon, reference docs, and
-not-currently-executing plans (AI_CANON, CORE_CONTRACTS, CHANGELOG, OPTIMISATION_PLAN, ULTRAPLAN,
-OSCILLATOR_BACKEND_CONTRACT_PLAN, QTYPE_REFACTOR_PLAN, REVIEWER_HANDOFF_2, …) live in
-`../reference/` (see its README).
+These plans/audits are **done** (or locally complete with a maintainer/CI-gated tail); kept for
+history (git also has full history). The actively-worked plans + handoffs live one level up in
+`../` (`../REVIEWER_HANDOFF.md`, `../REVIEWER_HANDOFF_2.md`, `../IFFT_SYNTHESIS_PLAN.md`); the
+canon, contracts, and guidelines live in `../reference/` (which by rule holds **no** plans).
 
+## Closed this pass (2026-06-18)
+- `ANALYSIS_PHASE_AT_PEAKS_PLAN.md` — store the STFT spectrum as fp16 re/im, take `atan2f` only at
+  tracked peaks (LANDED: net −2.9ms/−4.4%, memory-neutral; validation + complex-estimator gate test
+  closed; FFTW/x86 runtime check is the one external-CI item).
+- `DESKTOP_PERF_CAMPAIGN.md` — the 2026-06 desktop+ARM perf campaign (was `PERF_OPTIMISATION_PLAN`):
+  meter audit + `isfinite` inline win landed; frontier verdict closed it for speed (kernels at their
+  limits, remaining wins gated off-host).
+- `M7_PERF_MODEL_PLAN.md` — the Cortex-M7 no-hardware perf-model stack (P0–P6 complete; the live
+  perf-gate contract is the code/baseline it produced — census/qemu/cycles/memory/wcet). Cited by AI.md.
+- `OPTIMISATION_PLAN.md` — kernel optimisation track: F1/F3 infra + O1-B/O2-A landed; the **F** fork
+  (oscillator-bank vs IFFT) is resolved — osc-bank stays the default, IFFT ships gated (`../IFFT_SYNTHESIS_PLAN.md`).
+- `OSCILLATOR_BACKEND_CONTRACT_PLAN.md` — backend contract + Q15 unification: Phase 0/1a/1d landed,
+  1b declined-on-evidence, 1c is maintainer-gated (the LUT-scale decision).
+- `QTYPE_REFACTOR_PLAN.md` — Q-type type-system + SIMD-width generalization: Threads A/B landed;
+  Thread C (wider tiers) is x86/AVX-CI-gated.
+- `CAMPAIGN_2_MASTER_PLAN.md` — the Campaign-2 master plan (was `ULTRAPLAN`); superseded by the
+  Campaign-3 mandate `../REVIEWER_HANDOFF.md`.
+
+## Earlier campaigns
 - `MASTER_PLAN_CLOSURE_CRITERIA.md` — Campaign-2 stop criteria (met).
 - `CLEANUP_HARDENING_PLAN.md` — Macro-1 cleanup campaign C1–C8 (done). Its Macro-2 logical
   audit (L1–L6) is carried forward in the handoff.

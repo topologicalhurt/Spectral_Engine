@@ -1,4 +1,4 @@
-# Full/fused analysis parity harness (CTest) — ULTRAPLAN Phase D, item D1.
+# Full/fused analysis parity harness (CTest) — CAMPAIGN_2_MASTER_PLAN Phase D, item D1.
 #
 # Compiled (not string-grep) realization of docs/core_audit/reference/FULL_FUSED_PARITY_HARNESS.md.
 # Drives the REAL production analysis entry point analyze_audio_with_path_mode()

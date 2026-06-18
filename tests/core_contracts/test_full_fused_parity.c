@@ -1,6 +1,6 @@
 /* test_full_fused_parity.c
  *
- * D1 (ULTRAPLAN Phase D) — compiled full/fused analysis parity harness.
+ * D1 (CAMPAIGN_2_MASTER_PLAN Phase D) — compiled full/fused analysis parity harness.
  *
  * Implements docs/core_audit/reference/FULL_FUSED_PARITY_HARNESS.md as a real CTest
  * (not a string-grep): deterministic fixtures are run through the production

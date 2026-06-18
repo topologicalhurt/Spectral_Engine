@@ -238,7 +238,7 @@ small adversarial pass between major streams to catch drift.
 ## 6. Map to the surviving planning docs (open work lives here)
 
 Active (keep current as you close items):
-- `ULTRAPLAN.md` — Campaign-2 master plan. **Status now stale in places** (Phase A2/A3 dual-MAC +
+- `CAMPAIGN_2_MASTER_PLAN.md` — Campaign-2 master plan. **Status now stale in places** (Phase A2/A3 dual-MAC +
   DMA coherency + section binding LANDED this session; D4 CI + grep-test retirement DONE). Open:
   Phase D2/D3/D5 (golden oracle sign-off, LUT-gen feedback, regression backfill), and the on-target
   A2/A3/A4 frontier → **S1/S2/S4**.

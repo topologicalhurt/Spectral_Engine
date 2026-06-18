@@ -103,7 +103,7 @@ typedef struct SpectralAnalysisStftMatrix {
      * double-scaled peak-scan key (parity). With SpectralHalf=fp16, re+im are
      * the same 4 bytes/bin the old single phase plane was, so the layout is
      * memory-neutral vs the old magsq+phase (the float fallback is +50%). See
-     * docs/core_audit/ANALYSIS_PHASE_AT_PEAKS_PLAN.md. */
+     * docs/core_audit/archive/ANALYSIS_PHASE_AT_PEAKS_PLAN.md. */
     SpectralHalf* re;
     SpectralHalf* im;
     size_t total_bins;

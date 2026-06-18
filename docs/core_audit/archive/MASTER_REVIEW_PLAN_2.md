@@ -5,7 +5,7 @@
 LANDED (each commit gated by all-targets build + ctest 24/24 + m7-baseline perf gate):
 - W1 `comment scrub` — units lie (convert_segments Hz→rad/sample), stale-type lie
   (q63-as-Q30), canon-§6 prefetcher claim + first-person voice (peak_track), all
-  surviving ULTRAPLAN/PASS/Thread-A/codename refs, filename-echo banners, atan2
+  surviving CAMPAIGN_2_MASTER_PLAN/PASS/Thread-A/codename refs, filename-echo banners, atan2
   provenance.
 - W2 `dead code` — NATIVE dispatch vocabulary + emptied oscillator_dispatch.c (deleted),
   CUDA alias macros, unreferenced getters, Pade consts + false GPU comment, 7 orphaned
@@ -105,7 +105,7 @@ q15/q31/q63/uq16/uq32 (5 types, filename names 1) and was independently re-disco
 separate audit lenses; the entire `oscillator.*` family in `core/` is the only un-`spectral_`-prefixed
 group in the kernel, with non-namespaced guards, re-discovered by **four** lenses. The comment
 scrub the first pass claimed to complete is **not** complete — live `pass 145`, `pass 140`,
-`PASS8`, `PASS200`, `ULTRAPLAN Phase A2/A3`, `Thread-A`, and a fleet of internal phase-codenames
+`PASS8`, `PASS200`, `CAMPAIGN_2_MASTER_PLAN Phase A2/A3`, `Thread-A`, and a fleet of internal phase-codenames
 (`Q3b/Q5b/Q5c/Bv/O1-B/B1`) survive in shipped code, plus a flat-out **units lie** ("freq > 255 Hz"
 for a rad/sample threshold) in user-facing CLI output and a **stale-type lie** (a Q63 accumulator
 documented as Q30, pointing the reader at the wrong helper). The K&R-on-hottest-kernels pass was
@@ -201,10 +201,10 @@ file", but the CMSIS-Q15 verdict deserves a build to confirm).
 - **rule:** AI.md item 6; AI_CANON §6/§16
 - **fix:** Rewrite to house style: neutral system-POV opener, then technical detail (the 3-condition local-max predicate, the movemask collapse) in third-person imperative. Delete WHAT-restating lines, the `====` bars, the exclamation.
 
-### B5 — Residual pass/PASS/ULTRAPLAN change-history survives the "scrubbed" claim [HIGH]
-- **file:line:** `core/spectral_q.c:12-16` ("former code ... halved every output sample ... caught by tests/arm_core, fixed in pass 145", "removed in pass 140"); `spectral_q.h:264` ("See spectral_q.c / pass 145."); `arch/simd/oscillator_simd_kernel.inc:24` ("the same <=1 ULP class already accepted at PASS200"); `analysis/spectral_analysis_fft.c:296` ("(PASS8: 2/Σwindow)"); `core/spectral_guarantees.h:1` ("(ULTRAPLAN Phase B1/B2)"); `runtime/spectral_perf_accounting.h:32` ("(ULTRAPLAN A2)"); `arch/arm/spectral_synth_arm32.c:14` ("NOT yet realized (ULTRAPLAN Phase A2/A3 ...)").
+### B5 — Residual pass/PASS/CAMPAIGN_2_MASTER_PLAN change-history survives the "scrubbed" claim [HIGH]
+- **file:line:** `core/spectral_q.c:12-16` ("former code ... halved every output sample ... caught by tests/arm_core, fixed in pass 145", "removed in pass 140"); `spectral_q.h:264` ("See spectral_q.c / pass 145."); `arch/simd/oscillator_simd_kernel.inc:24` ("the same <=1 ULP class already accepted at PASS200"); `analysis/spectral_analysis_fft.c:296` ("(PASS8: 2/Σwindow)"); `core/spectral_guarantees.h:1` ("(CAMPAIGN_2_MASTER_PLAN Phase B1/B2)"); `runtime/spectral_perf_accounting.h:32` ("(CAMPAIGN_2_MASTER_PLAN A2)"); `arch/arm/spectral_synth_arm32.c:14` ("NOT yet realized (CAMPAIGN_2_MASTER_PLAN Phase A2/A3 ...)").
 - **rule:** AI.md item 6; AI_CANON §18 (the prompt: any such reference found IS a live finding)
-- **fix:** Strip every `pass N`/`PASS N`/`ULTRAPLAN Phase X` clause; keep the math WHY (q15.c keeps the >>15-vs->>16 −6 dB rationale; fft.c keeps "window amp scale 2/Σwindow, unscaled DFT"; kernel.inc keeps "<=1 ULP class pinned by the osc_width_parity ctest").
+- **fix:** Strip every `pass N`/`PASS N`/`CAMPAIGN_2_MASTER_PLAN Phase X` clause; keep the math WHY (q15.c keeps the >>15-vs->>16 −6 dB rationale; fft.c keeps "window amp scale 2/Σwindow, unscaled DFT"; kernel.inc keeps "<=1 ULP class pinned by the osc_width_parity ctest").
 
 ### B6 — Hot-kernel comments saturated with internal phase-codenames (Q3b/Q5b/Q5c/Bv/O1-B/B1) [HIGH]
 - **file:line:** `core/spectral_oscillator.c:33,131,143,224,233` ("Q3b oracle, Q5b integer-NCO phase", "Packed 8×Q15 SIMD twin (Q5c)"); `spectral_oscillator_dispatch.h:135-137` ("plus sine (B1)"); `spectral_synth_cpu.c:31,260` ("Output-tiling (O1-B)"); `spectral_phase_nco8.h:1` ("(Q5c follow-up \"Bv\")"); `arch/simd/oscillator_simd.c:98-119`.

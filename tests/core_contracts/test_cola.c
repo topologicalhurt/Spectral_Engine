@@ -1,4 +1,4 @@
-/* test_cola.c - COLA/WOLA reconstruction-invariant contract test (ULTRAPLAN B0).
+/* test_cola.c - COLA/WOLA reconstruction-invariant contract test (CAMPAIGN_2_MASTER_PLAN B0).
  *
  * Exercises spectral_overlap_add_is_constant / _envelope_stats (the
  * Constant/Weighted OverLap-Add invariant in spectral_contracts.h) against:

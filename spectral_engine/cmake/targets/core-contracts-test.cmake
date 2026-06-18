@@ -2,7 +2,7 @@
 #
 # Compiled (not string-grep) tests for the canonical kernel invariants declared in
 # core/spectral_contracts.h. Currently exercises the COLA/WOLA overlap-add
-# reconstruction invariant (ULTRAPLAN Phase B0) against both a constructed
+# reconstruction invariant (CAMPAIGN_2_MASTER_PLAN Phase B0) against both a constructed
 # periodic window and the engine's own spectral_window_* generators.
 #
 # Run: cmake --build build --target core_contracts_test && ctest --test-dir build -R core_contracts

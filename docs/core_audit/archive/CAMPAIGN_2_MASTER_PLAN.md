@@ -1,4 +1,6 @@
-# Spectral Kernel Ultraplan — Campaign 2
+# Campaign 2 — Master Plan (formerly "Ultraplan")
+
+> **ARCHIVED 2026-06-18.** Campaign 2 is closed; the standing forward mandate is the Campaign-3 doc `../REVIEWER_HANDOFF.md`. Kept for history.
 
 This is the master plan for the second core campaign. Campaign 1 (the host-kernel
 audit, passes 1–137) is closed per `MASTER_PLAN_CLOSURE_CRITERIA.md`; its two
@@ -1098,7 +1100,7 @@ oracle.
 ```
 
 > Cross-reference (additive, non-conflicting): the optimisation track in
-> `docs/core_audit/reference/OPTIMISATION_PLAN.md` consumes this phase's harness + golden
+> `docs/core_audit/archive/OPTIMISATION_PLAN.md` consumes this phase's harness + golden
 > oracle as its verification gate. It introduces no new test philosophy and does
 > not alter Phase D scope, ordering, or closure criteria — the goldens here freeze
 > the current numerical contract that the optimisation work is verified against.

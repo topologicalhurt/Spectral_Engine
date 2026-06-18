@@ -1,5 +1,7 @@
 # Performance optimisation plan — profile-driven, algorithm-first, then asm-tune
 
+> **ARCHIVED 2026-06-18** (formerly `PERF_OPTIMISATION_PLAN`). The 2026-06 desktop+ARM perf campaign: meter audit + `isfinite` inline win landed; the frontier verdict closed it for speed.
+
 Goal: optimise toward the assembly level, but only where the algorithm is already the right one
 (no "house on sand"). This plan is grounded in real profiles on both targets, not guesses.
 

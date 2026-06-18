@@ -1,4 +1,4 @@
-/* test_guarantees.c - Active-guarantee manifest + drift contract (ULTRAPLAN B1/B2).
+/* test_guarantees.c - Active-guarantee manifest + drift contract (CAMPAIGN_2_MASTER_PLAN B1/B2).
  *
  * Two responsibilities, both compiled (not string-grep):
  *

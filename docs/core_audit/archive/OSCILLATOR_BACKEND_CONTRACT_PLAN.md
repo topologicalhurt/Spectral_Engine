@@ -1,5 +1,7 @@
 # Oscillator Backend Contract & Q15 Unification Plan
 
+> **ARCHIVED 2026-06-18.** Phase 0/1a/1d landed; 1b declined-on-evidence; 1c is maintainer-gated (the LUT-scale decision). Locally complete.
+
 > **Status:** design captured 2026-06-06; maintainer chose "unify all Q15 first".
 > **Executed 2026-06-06 (PASS222):** Phase 0 (matrix in program design + docs) ✅,
 > Phase 1a (divergence characterized) ✅, Phase 1d (contract versioned) ✅.

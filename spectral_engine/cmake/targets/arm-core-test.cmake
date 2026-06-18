@@ -5,7 +5,7 @@
 # capability forced on (SPECTRAL_HAS_DUAL_MAC=1) so the voice-pairing path is
 # covered too -- both run through the portable intrinsic fallbacks in
 # spectral_q.h (host arm64 has no __ARM_FEATURE_DSP, and the portable smlald
-# is bit-identical to the hardware SMLALD). Correctness half of ULTRAPLAN A1b;
+# is bit-identical to the hardware SMLALD). Correctness half of CAMPAIGN_2_MASTER_PLAN A1b;
 # the sim is the perf/resource model over the SAME real code.
 #
 # Run: cmake --build build --target arm_core_test && ctest --test-dir build -R arm32

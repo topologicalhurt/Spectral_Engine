@@ -153,7 +153,7 @@ deterministic_reduction  SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS (0) INVERSE: he
 therefore represented in the manifest *through* `ieee_strict_fp`, not as its own bit.
 
 `SPECTRAL_OPT_LEVEL` is **intentionally absent**: it is defined (default 1) but no C
-source reads it, so it gates no guarantee. The ULTRAPLAN claim that `>= 2` drops LUT
+source reads it, so it gates no guarantee. The CAMPAIGN_2_MASTER_PLAN claim that `>= 2` drops LUT
 interpolation to nearest is aspirational; do not add a bit until code honors the level.
 
 ## Self-report
