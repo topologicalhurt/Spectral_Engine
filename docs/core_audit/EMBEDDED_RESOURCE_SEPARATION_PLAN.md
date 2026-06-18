@@ -62,7 +62,7 @@ to verify; **REFUTED** = candidate concern checked and dismissed (do not re-liti
 | kr-01 fade-partition dup | dup | med | **PERF-GATED** (or parity test) | Three-region fade boundary math is hand-duplicated across M7 / non-M7 / SIMD; already one clamp out of sync. Hoist to one `static inline` or pin with a parity test. |
 | fpu-02 48-sample WCET | fpu-alu | high | **MODEL/TEST** | m7 baseline prices the 256-sample buffer cap; the codec block is `DAISY_AUDIO_BLOCK_SIZE=48`, so the per-block seed is under-weighted ~5.3×. Add a 48-sample WCET scenario. |
 | arch-03 / kr-03 SNR gate | honesty | med | **MODEL/TEST ✅ landed** | The 72 dB SNR contract was validated only under the *renorm* regime; the shipped *re-seed* regime had no SNR/THD gate. `arm_core_test::test_single_tone` now measures coherent SINAD over the sustain region at the kernel's exact rendered frequency — **measured 80.7 dB, floor 70.0** (fail-on-bug: 2% 2nd-harmonic → 28 dB, gate trips). This is the safety net required before the Phase-A drift-regime change. |
-| cache-02 dormant SCB untested | cache | med | **MODEL/TEST** | The cacheable `SCB_InvalidateDCache_by_Addr` arm is compiled by no build/test (the dormancy test forces the DTCM sibling, which preprocesses it out). Extract the line-round arithmetic to a host unit test. |
+| cache-02 dormant SCB untested | cache | med | **MODEL/TEST ✅ landed** | The cacheable `SCB_InvalidateDCache_by_Addr` arm is compiled by no build/test. The line-round + overflow arithmetic is now extracted to `spectral_cache_invalidate_range` (`spectral_mem.h`) and pinned by `arm_core_test::test_cache_invalidate_range` (align/round-up/overflow/INT32_MAX cases, fail-on-bug verified). The dormant DMA path calls it (behaviorally identical; the SCB call stays firmware-only). No measured-codegen change (DMA path is `SPECTRAL_HAS_DMA`-dormant; helper unused in measured builds). |
 | arch-05 firmware purity | arch | low | **MODEL/TEST** | The layer law checks include direction, not OS-contract-freedom. Add a test over `SPECTRAL_SOURCES_DAISY_ENGINE` for denylisted symbols (`omp.h`, `mmap`, `sysconf`, `fopen`…). |
 | arch-02 sim renders other osc | arch | med | **MODEL/TEST** | `simulate`/`embedded_arm` host targets don't set `SPECTRAL_ARM_M7`, so they render the **LUT** oscillator while firmware renders the **coupled** one. Force M7 on the sim, or state the divergence at its surface. |
 | fpu-07 Q-domain markers | mixing | low | **DOC** (verify test) | The RT integer loops carry no `SPECTRAL_Q_DOMAIN` markers, so "no float in the recurrence" is convention-only. Wrap the per-sample bodies (seed stays outside). |
@@ -101,7 +101,21 @@ coherent SINAD of the shipped re-seed regime over the sustain region (measured 8
 fail-on-bug verified). Build this BEFORE Phase A so the drift-regime change has an audio-quality
 gate to prove against. ctest 32/32 green.
 
-**Phase A — FPU/ALU separation (the core concern). PERF-GATED; needs an m7-baseline regen window.**
+**Landed (TEST, cache-02 — coherency arithmetic):** `spectral_cache_invalidate_range`
+(`spectral_mem.h`) extracts the DMA-RX line-round + overflow guards into a host-testable inline,
+pinned by `arm_core_test::test_cache_invalidate_range` (fail-on-bug verified). The firmware-only
+SCB call is unchanged; the dormant DMA path calls the helper. ctest 32/32; measured codegen
+untouched.
+
+> **Phase A is blocked in toolchain-limited environments.** Any arm32 codegen change renumbers GCC
+> labels → the m7 perf gate's kernel keys mismatch → `m7_baseline.json` must be regenerated
+> (`benchmark_workflow m7-baseline --generate`). That regen AND the live gate
+> (`test_perf_gate_live_stack_within_contract`) both require **`llvm-mca`** (for the `[modeled]`
+> cycle numbers) and a newlib arm cross-gcc + qemu. Where `llvm-mca` is absent (e.g. an
+> Apple-clang-only box — `brew install llvm` provides it), do Phase A only after installing it, or
+> have the maintainer regenerate the baseline. Do NOT land a hot-path change with a stale baseline.
+
+**Phase A — FPU/ALU separation (the core concern). PERF-GATED; needs an m7-baseline regen window + `llvm-mca`.**
 1. Extend the active-voice record (SoA + AoS) with `cos_w/sin_w` and the running `(c,s)` (fpu-03).
 2. Seed `spectral_coupled_init` **once at activation**; carry state across blocks; call the ALU
    `spectral_coupled_renorm` once per block in place of the f64 re-seed (fpu-01, fpu-05).

@@ -282,6 +282,37 @@ static void test_in_place_load(const q15_t* lut, uint32_t sr) {
           "out-of-bounds in-place payload must be rejected");
 }
 
+/* Pin the coherency-critical DMA-invalidate range arithmetic
+ * (spectral_cache_invalidate_range, spectral_mem.h). On firmware this feeds
+ * SCB_InvalidateDCache_by_Addr after a DMA RX into a cacheable buffer; that branch is
+ * firmware-only and was exercised by NO build/test, but the line-rounding + overflow
+ * guards — the part that actually keeps the buffer coherent — are pure arithmetic and
+ * tested here. uintptr_t is 64-bit on the host and 32-bit on the M7; the rounding logic
+ * is width-independent, so the host result validates the firmware path. */
+static void test_cache_invalidate_range(void) {
+    printf("test_cache_invalidate_range:\n");
+    const uintptr_t L = 32u;                 /* SPECTRAL_CACHE_LINE on M7 */
+    uintptr_t b = 0; int32_t n = 0;
+
+    CHECK(spectral_cache_invalidate_range(0x1000u, 64u, L, &b, &n) == 1 && b == 0x1000u && n == 64,
+          "aligned 64B stays [0x1000,64] (got 0x%lx,%d)", (unsigned long)b, n);
+    b = 0; n = 0;
+    CHECK(spectral_cache_invalidate_range(0x1010u, 32u, L, &b, &n) == 1 && b == 0x1000u && n == 64,
+          "misaligned 32B spans 2 lines -> [0x1000,64] (got 0x%lx,%d)", (unsigned long)b, n);
+    b = 0; n = 0;
+    CHECK(spectral_cache_invalidate_range(0x2000u, 33u, L, &b, &n) == 1 && b == 0x2000u && n == 64,
+          "aligned 33B rounds end up -> [0x2000,64] (got 0x%lx,%d)", (unsigned long)b, n);
+
+    CHECK(spectral_cache_invalidate_range(0x1000u, 0u, L, &b, &n) == 0, "zero bytes -> no invalidate");
+    CHECK(spectral_cache_invalidate_range(0u, 64u, L, &b, &n) == 0, "null ptr -> no invalidate");
+    CHECK(spectral_cache_invalidate_range(0x1000u, 64u, 48u, &b, &n) == 0,
+          "non-power-of-two line -> no invalidate");
+    CHECK(spectral_cache_invalidate_range(0x1000u, (size_t)INT32_MAX + 64u, L, &b, &n) == 0,
+          "range wider than INT32_MAX -> no invalidate (CMSIS signature limit)");
+    CHECK(spectral_cache_invalidate_range(UINTPTR_MAX - 8u, 64u, L, &b, &n) == 0,
+          "ptr+bytes overflows the address space -> no invalidate");
+}
+
 int main(void) {
     const uint32_t sr = 44100;
     static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
@@ -292,6 +323,7 @@ int main(void) {
     test_short_segment_fade(lut, sr);
     test_invalid_rejected(lut, sr);
     test_in_place_load(lut, sr);
+    test_cache_invalidate_range();
 
     printf(g_fail ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return g_fail ? 1 : 0;

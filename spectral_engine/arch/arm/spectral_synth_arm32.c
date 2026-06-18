@@ -149,17 +149,14 @@ static int dma_prefetch_coherent = 0;
 
 static void spectral_arm32_dma_rx_sync(const void* ptr, size_t bytes) {
 #if SPECTRAL_ARM32_DMA_BUFFER_CACHEABLE && SPECTRAL_USE_CMSIS && defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    const uintptr_t line = (uintptr_t)SPECTRAL_CACHE_LINE;
-    if (ptr && bytes > 0u && line > 0u && (line & (line - 1u)) == 0u) {
-        uintptr_t begin = (uintptr_t)ptr & ~(line - 1u);
-        uintptr_t end = 0u;
-        if ((uintptr_t)ptr <= UINTPTR_MAX - bytes &&
-            (uintptr_t)ptr + bytes <= UINTPTR_MAX - (line - 1u)) {
-            end = ((uintptr_t)ptr + bytes + (line - 1u)) & ~(line - 1u);
-            if (end > begin && (end - begin) <= (uintptr_t)INT32_MAX) {
-                SCB_InvalidateDCache_by_Addr((uint32_t*)begin, (int32_t)(end - begin));
-            }
-        }
+    /* Range-rounding + overflow guards live in the host-testable helper
+     * spectral_cache_invalidate_range (spectral_mem.h, pinned by cache_invalidate_range
+     * in arm_core_test); only the SCB call stays firmware-only. */
+    uintptr_t inv_begin;
+    int32_t inv_len;
+    if (spectral_cache_invalidate_range((uintptr_t)ptr, bytes, (uintptr_t)SPECTRAL_CACHE_LINE,
+                                        &inv_begin, &inv_len)) {
+        SCB_InvalidateDCache_by_Addr((uint32_t*)inv_begin, inv_len);
     }
 #else
     (void)ptr;

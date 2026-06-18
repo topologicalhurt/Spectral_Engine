@@ -18,6 +18,7 @@
 #define SPECTRAL_MEM_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #if defined(SPECTRAL_BSP_MEM_HEADER)
 #include SPECTRAL_BSP_MEM_HEADER   /* board-provided bindings; device lives in the BSP */
@@ -53,6 +54,33 @@
 _Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
                "cache line must be multiple of size_t");
 #endif
+
+/* Round [ptr, ptr+bytes) OUT to cache-line boundaries for a D-cache invalidate-by-address
+ * (begin rounded DOWN to a line, end rounded UP), with the overflow guards a DMA-RX coherency
+ * path needs. This is the coherency-critical arithmetic behind SCB_InvalidateDCache_by_Addr:
+ * if begin were not rounded down (or end not rounded up) the invalidate would miss the partial
+ * lines at the ends and leave stale cache; the static-asserted whole-line buffer sizing (see
+ * the DMA buffer in the arm32 synth) then guarantees the rounded-out range cannot reach a
+ * neighbor's dirty line.
+ *
+ * Returns 1 and writes [*out_begin, *out_len] (len <= INT32_MAX, the CMSIS SCB signature limit)
+ * when a non-empty line-aligned range exists; returns 0 (DO NOT invalidate) for a null/empty
+ * range, a non-power-of-two line, a ptr+bytes that overflows the address space, or a range wider
+ * than INT32_MAX. Pure address arithmetic so it is host-unit-testable; the SCB call itself stays
+ * in the firmware-only DMA path. `line` MUST be a power of two (the SSOT SPECTRAL_CACHE_LINE is). */
+static inline int spectral_cache_invalidate_range(uintptr_t ptr, size_t bytes, uintptr_t line,
+                                                  uintptr_t* out_begin, int32_t* out_len) {
+    if (!out_begin || !out_len) return 0;
+    if (ptr == 0u || bytes == 0u || line == 0u || (line & (line - 1u)) != 0u) return 0;
+    if (ptr > UINTPTR_MAX - (uintptr_t)bytes ||
+        ptr + (uintptr_t)bytes > UINTPTR_MAX - (line - 1u)) return 0;   /* address-space overflow */
+    uintptr_t begin = ptr & ~(line - 1u);
+    uintptr_t end = (ptr + (uintptr_t)bytes + (line - 1u)) & ~(line - 1u);
+    if (end <= begin || (end - begin) > (uintptr_t)INT32_MAX) return 0;
+    *out_begin = begin;
+    *out_len = (int32_t)(end - begin);
+    return 1;
+}
 
 /* Single zeroing primitive for the embedded path. Deliberately self-contained -- a word-store
  * loop, NOT a libc memset -- because <string.h> is not a freestanding header and bare embedded
