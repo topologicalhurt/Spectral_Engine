@@ -18,9 +18,17 @@ if(NOT SPECTRAL_REPRO_BUILD)
         -freciprocal-math
         -ffp-contract=fast
         -march=native
-        -mtune=native
-        -mavx2
-        -mno-avx512f)
+        -mtune=native)
+    # x86-only SIMD-ISA flags. -mavx2 enables 256-bit AVX2; -mno-avx512f caps AVX-512
+    # OFF by default (a wider lane that down-clocks the core can net-lose — see the
+    # AVX-512 rationale in KERNEL_HARDENING_PLAN §VII; canon doc lands in Phase B).
+    # ARCH-GATE (kernel-hardening VI.1/VII.1): on arm64 these are -Wunused-command-line-
+    # argument noise (NEON is already on via -march=native) — emit them only on x86.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|i[3-6]86)$")
+        list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
+            -mavx2
+            -mno-avx512f)
+    endif()
 endif()
 
 set(SPECTRAL_COMMON_LINK_OPTIONS)

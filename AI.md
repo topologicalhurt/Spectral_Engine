@@ -214,9 +214,11 @@ instance opens a fresh ledger in `docs/core_audit/`.
 
 ## Reference docs
 `docs/core_audit/` (top): the actively-worked plans + handoffs — `REVIEWER_HANDOFF.md` (the
-standing mandate), `REVIEWER_HANDOFF_2.md` (its status reconciliation), the live workstream
-`IFFT_SYNTHESIS_PLAN.md`, and `PLAN_CLOSURE_LEDGER.md` (full per-plan accounting: every plan
-item's disposition — done / declined / gated / closed — and the gates that block the remainder).
+standing mandate), `REVIEWER_HANDOFF_2.md` (its status reconciliation), the live workstreams
+`IFFT_SYNTHESIS_PLAN.md` and `EMBEDDED_RESOURCE_SEPARATION_PLAN.md` (the S1 embedded
+FPU/ALU-separation, cache-coherency, bandwidth & arch-separation ledger; principles canonized as
+`AI_CANON.md` 21–25), and `PLAN_CLOSURE_LEDGER.md` (full per-plan accounting: every plan item's
+disposition — done / declined / gated / closed — and the gates that block the remainder).
 `docs/core_audit/reference/`: canon + contracts + guidelines only — **no plans** — `AI_CANON.md`
 (rules), `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md` (paper-backed methods), `CHANGELOG.md`,
 `DISCIPLINE_FINDINGS.md`, `KERNEL_PATCHING_GUIDELINES.md`, `VALIDATION_OWNERSHIP.md`,
