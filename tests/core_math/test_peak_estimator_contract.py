@@ -295,6 +295,109 @@ int main(void) {
         subprocess.run([str(exe)], check=True, cwd=ROOT)
 
 
+def test_phase_at_peaks_lazy_phase_and_complex_gate_contract() -> None:
+    """Pins the phase-at-peaks contract (the plan's 'add a spot-check'):
+
+    (A) seg->phase == atan2f((float)im[cf], (float)re[cf]) at the peak bin — the
+        tracker computes phase lazily from the fp16 complex spectrum, and that
+        single value becomes the segment phase.
+    (B) the estimator-gate computes ps[cf-1]/ps[cf+1] for a COMPLEX estimator:
+        JACOBSEN reads the cf±1 phase triplet, so varying the cf-1 phase MUST move
+        the frequency offset. If the gate (CAP_COMPLEX_TRIPLET) were broken, both
+        runs would read the same stale scratch and omega would not move — fail.
+    """
+    cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    assert cc, "no C compiler available"
+
+    harness = r'''
+#include "spectral_peak_track.h"
+#include "spectral_windows.h"
+#include <math.h>
+
+#define N_FFT    64
+#define N_FREQS  33
+#define N_FRAMES 2u
+#define PEAK_BIN 8
+
+/* 2-frame STFT: symmetric (1,4,1) magsq peak at PEAK_BIN; the peak + its
+ * neighbours carry caller-set complex values (fp16-stored). */
+static SegmentArray run(SpectralPeakEstimatorType est,
+                        float pk_re, float pk_im,
+                        float lo_re, float lo_im, float hi_re, float hi_im,
+                        double* t) {
+    float magsq[N_FREQS * 2] = {0};
+    SpectralHalf re[N_FREQS * 2] = {0};
+    SpectralHalf im[N_FREQS * 2] = {0};
+    for (unsigned f = 0; f < N_FRAMES; f++) {
+        float* row = magsq + (size_t)f * N_FREQS;
+        SpectralHalf* rr = re + (size_t)f * N_FREQS;
+        SpectralHalf* ii = im + (size_t)f * N_FREQS;
+        row[PEAK_BIN - 1] = 1.0f; row[PEAK_BIN] = 4.0f; row[PEAK_BIN + 1] = 1.0f;
+        rr[PEAK_BIN - 1] = (SpectralHalf)lo_re; ii[PEAK_BIN - 1] = (SpectralHalf)lo_im;
+        rr[PEAK_BIN]     = (SpectralHalf)pk_re; ii[PEAK_BIN]     = (SpectralHalf)pk_im;
+        rr[PEAK_BIN + 1] = (SpectralHalf)hi_re; ii[PEAK_BIN + 1] = (SpectralHalf)hi_im;
+    }
+    return spectral_track_peaks_with_window_descriptor(
+        magsq, re, im, 4.0f, N_FRAMES, (unsigned)N_FREQS, 48000, N_FFT, 1, -120.0f,
+        spectral_window_descriptor(SPECTRAL_WINDOW_HANN), est, t);
+}
+
+int main(void) {
+    double t = 0.0;
+
+    /* (A) lazy-phase pin: peak carries phase theta=0.7. */
+    const float theta = 0.7f;
+    SegmentArray a = run(SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC,
+                         2.0f * cosf(theta), 2.0f * sinf(theta),
+                         1.0f, 0.0f, 1.0f, 0.0f, &t);
+    if (a.count != 1u || !a.segs) return 1;
+    float expect = atan2f((float)(SpectralHalf)(2.0f * sinf(theta)),
+                          (float)(SpectralHalf)(2.0f * cosf(theta)));
+    if (fabsf(a.segs[0].phase - expect) > 5.0e-3f) return 2;   /* fp16 ULP band */
+    spectral_segment_array_free(&a);
+
+    /* (B) complex-estimator gate sensitivity: vary cf-1 phase (0 vs +pi/2). */
+    double t1 = 0.0, t2 = 0.0;
+    SegmentArray j1 = run(SPECTRAL_PEAK_ESTIMATOR_JACOBSEN_COMPLEX,
+                          2.0f, 0.0f,  1.0f, 0.0f,  1.0f, 0.0f, &t1);
+    SegmentArray j2 = run(SPECTRAL_PEAK_ESTIMATOR_JACOBSEN_COMPLEX,
+                          2.0f, 0.0f,  0.0f, 1.0f,  1.0f, 0.0f, &t2);
+    if (j1.count != 1u || j2.count != 1u || !j1.segs || !j2.segs) return 3;
+    if (fabsf(j1.segs[0].omega - j2.segs[0].omega) < 1.0e-4f) return 4;  /* must MOVE */
+    spectral_segment_array_free(&j1);
+    spectral_segment_array_free(&j2);
+    return 0;
+}
+'''
+
+    with tempfile.TemporaryDirectory(prefix="spectral-phase-at-peaks-") as tmp:
+        tmp_path = Path(tmp)
+        harness_c = tmp_path / "phase_at_peaks.c"
+        exe = tmp_path / "phase_at_peaks"
+        harness_c.write_text(harness, encoding="utf-8")
+        link_flags = ["-framework", "Accelerate"] if sys.platform == "darwin" else []
+        subprocess.run(
+            [
+                cc, "-std=c11",
+                "-I", str(ROOT / "spectral_engine/core"),
+                "-I", str(ROOT / "spectral_engine/runtime"),
+                "-I", str(ROOT / "spectral_engine/analysis"),
+                "-I", str(ROOT / "third_party/simde"),
+                str(ROOT / "spectral_engine/analysis/spectral_peak_track.c"),
+                str(ROOT / "spectral_engine/analysis/spectral_peak_model.c"),
+                str(ROOT / "spectral_engine/analysis/spectral_peak_interp.c"),
+                str(ROOT / "spectral_engine/analysis/spectral_peak_estimator.c"),
+                str(ROOT / "spectral_engine/core/spectral_fast_math.c"),
+                str(ROOT / "spectral_engine/core/spectral_windows.c"),
+                str(ROOT / "spectral_engine/core/spectral_common.c"),
+                str(ROOT / "spectral_engine/core/spectral_log.c"),
+                str(harness_c), "-lm", *link_flags, "-o", str(exe),
+            ],
+            check=True, cwd=ROOT,
+        )
+        subprocess.run([str(exe)], check=True, cwd=ROOT)
+
+
 def _compile_and_run_estimator_flags(extra_cflags: list[str]) -> dict[tuple[int, int], dict[str, float]]:
     cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
     assert cc, "no C compiler available"

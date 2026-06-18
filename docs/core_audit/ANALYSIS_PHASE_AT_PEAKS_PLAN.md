@@ -31,6 +31,22 @@ hinged on the **storage type**, not the atan2 relocation.
 - *Possible further squeeze (not done):* the track +2.3ms is the per-peak `atan2f`;
   since fp16 already softens to −99.6 dBFS, a fast poly atan2 at peaks could trim it.
 
+### Plan validation — COMPLETE (the doc's Validation section, now closed)
+
+- **Lazy-phase spot-check (the plan's "add a spot-check if a hard pin is wanted") — DONE.**
+  `test_phase_at_peaks_lazy_phase_and_complex_gate_contract` (Part A) pins
+  `seg->phase == atan2f((float)im[cf], (float)re[cf])` at the peak (within the fp16 band).
+- **Complex-estimator gate — DONE.** Part B is a fail-on-bug test: it runs JACOBSEN
+  twice with different `cf-1` phase and asserts the frequency offset MOVES; with the
+  `CAP_COMPLEX_TRIPLET` gate neutered (cf±1 never computed) the test FAILS (verified) —
+  so a future estimator that reads the cf±1 triplet without the cap is caught.
+- **FFTW/x86 runtime validation — the ONE remaining item, and it is external by design.**
+  The plan ("Why not landed") already scopes it to Linux CI: the macOS/ARM host links
+  Accelerate/vDSP at configure time, so the `#else` FFTW producer can't be exercised here.
+  It is code-reviewed (the audit) and got a defensive DC/Nyquist `im=0` pin; run
+  `full_fused_parity` on an x86/Linux box with `fftw3f` to close it. Expect a bigger win
+  there (its dense path was the scalar poly `spectral_magsq_phase`).
+
 ---
 
 Status: DESIGNED + critiqued (multi-agent workflow), ready to execute. The immediate x86/Linux
