@@ -362,13 +362,17 @@ void spectral_fft_single_frame(const SpectralFftResources* res,
     spectral_magsq_only((float*)out_buf, out_magsq, &frame_max, n_freqs);
 
     if (out_re && out_im) {
-        /* fftwf r2c output is interleaved [re,im]; deinterleave so the tracker
-         * can take atan2f at peak bins only. DC/Nyquist already carry im==0. */
+        /* fftwf r2c output is interleaved [re,im]; deinterleave (fp32->fp16) so
+         * the tracker can take atan2f at peak bins only. */
         const float* cpx = (const float*)out_buf;
         for (size_t k = 0; k < n_freqs; k++) {
-            out_re[k] = cpx[2u * k];
-            out_im[k] = cpx[2u * k + 1u];
+            out_re[k] = (SpectralHalf)cpx[2u * k];
+            out_im[k] = (SpectralHalf)cpx[2u * k + 1u];
         }
+        /* DC + Nyquist are real for a real input; fftwf writes im==0 there, but
+         * pin it defensively so atan2f(0,re) is exact, matching the vDSP path. */
+        out_im[0] = (SpectralHalf)0.0f;
+        out_im[n_freqs - 1u] = (SpectralHalf)0.0f;
     }
 
     spectral_fft_apply_magsq_scales(res, out_magsq, n_freqs, &frame_max);

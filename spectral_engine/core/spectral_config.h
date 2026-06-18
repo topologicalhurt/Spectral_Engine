@@ -632,12 +632,13 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #endif
 #endif
 
-/* Backend-dependent default for the analysis-phase atan2 (see the note near the other
- * APPROX gates above). When vDSP is live the STFT phase is Accelerate vvatan2f (exact +
- * vectorized), so keep the exact-atan2 guarantee. Otherwise the live phase path is the
- * polynomial spectral_magsq_phase, whose exact alternative is scalar libm atan2f at ~5x
- * the cost (the dominant non-FFT cost of x86/Linux analysis); default to the SIMD-vectorized
- * ~2e-4 rad poly (drift-budgeted by core_guarantees_drift_test), as TRIG does for the sine. */
+/* Gate for the spectral_magsq_phase / spectral_atan2_poly primitive (used by the
+ * vDSP-audit bench and exposed via the SPECTRAL_GUARANTEE_EXACT_ATAN2 guarantee).
+ * NOTE: as of the phase-at-peaks refactor the ANALYSIS path no longer computes dense
+ * phase at all — it stores the fp16 complex spectrum and takes libm atan2f only at the
+ * tracked peak bins (exact there, on every backend), so this flag no longer affects
+ * analysis. It still selects the poly-vs-exact behaviour of the magsq_phase primitive
+ * for any remaining caller; default to the SIMD-vectorized ~2e-4 rad poly off vDSP. */
 #ifndef SPECTRAL_ENABLE_APPROX_ATAN2
 #if SPECTRAL_USE_VDSP
 #define SPECTRAL_ENABLE_APPROX_ATAN2 0

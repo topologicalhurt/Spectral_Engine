@@ -1,5 +1,38 @@
 # Plan: compute STFT phase only at tracked peak bins (store re/im, not phase)
 
+## LANDED 2026-06-18 (commits 973cf27, 91a66c4, e4da221, a5d5d4b, e258a12 on `minimal`)
+
+Implemented in 5 steps + an adversarial audit. The instructive twist: the *speed*
+hinged on the **storage type**, not the atan2 relocation.
+
+- **fp32 re/im (steps 1–3) was a REGRESSION**: storing magsq+re+im as 3 fp32 arrays is
+  +50% memory and, on a bandwidth-bound vDSP box, the extra `im` store (+~1.7ms FFT)
+  outweighed the removed (already-vectorized) `vvatan2f`. Net +2.2ms / +3% on Apple
+  Silicon, with **no** accuracy gain there (vDSP's dense phase was already exact). The
+  audit (phase-at-peaks-audit workflow) confirmed correctness but recommended against
+  shipping it unconditionally.
+- **fp16 re/im (step e258a12) turned it into a WIN**: `magsq(fp32)+re+im(fp16)` =
+  8 bytes/bin, *identical* to the old `magsq+phase(fp32)` → memory- AND bandwidth-
+  neutral. Phase is taken only at peaks via `atan2f((float)im,(float)re)`, where fp16's
+  ~3e-4 rad error is **−99.6 dBFS rms / −75 dBFS worst** (inaudible, tolerance-parity-
+  passing). Measured (vDSP, interleaved A/B, 8 threads): fft 35.7→30.6 (−5.1), track
+  9.9→12.2 (+2.3, per-peak atan2), **total 65.7→62.8 = −2.9ms / −4.4% faster; RSS
+  256→256MB**. Single clean path, faster on both backends → **the backend gate was
+  unnecessary**. FFTW/x86 should win more (its dense path was the scalar poly
+  `spectral_magsq_phase`); validate `full_fused_parity` there.
+- **estimator-gate (a5d5d4b)**: `handle_candidate` computes `atan2f` at `cf`+`next-cf`
+  always and `cf±1` only when the estimator carries `CAP_COMPLEX_TRIPLET` (the complex
+  estimators), since the default LOG_PARABOLIC reads only `cf`/`next-cf`. Halves the
+  per-peak atan2 on the production path.
+- Identical 179873 segments; 8 C parity tests + the `peak_estimator_contract` harness
+  (updated to a real-valued re/im spectrum) green. `SpectralHalf` (= `_Float16`, float
+  fallback) lives in `spectral_common.h`. `SPECTRAL_ENABLE_APPROX_ATAN2` / the
+  `EXACT_ATAN2` guarantee no longer affect analysis (phase is exact-at-peaks everywhere).
+- *Possible further squeeze (not done):* the track +2.3ms is the per-peak `atan2f`;
+  since fp16 already softens to −99.6 dBFS, a fast poly atan2 at peaks could trim it.
+
+---
+
 Status: DESIGNED + critiqued (multi-agent workflow), ready to execute. The immediate x86/Linux
 slowness is ALREADY fixed (commit 030d3ee — backend-dependent `SPECTRAL_ENABLE_APPROX_ATAN2`
 default). This is the strictly-better follow-up: exact phase everywhere, faster than even Apple's
