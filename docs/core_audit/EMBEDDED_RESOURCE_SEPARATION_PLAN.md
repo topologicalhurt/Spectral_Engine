@@ -55,7 +55,7 @@ to verify; **REFUTED** = candidate concern checked and dismissed (do not re-liti
 | q63-width (bw-03) | bandwidth | info | **DOC ✅ landed** | Pinned the q63 contract at the accum decl (128·2³⁰=2³⁷>int32; SMLALD needs 64-bit dest). |
 | stretch-doc (honesty-01) | honesty | high | **DOC ✅ landed** | `spectral_arm32_set_stretch` is a silent no-op; commented as intentionally inert + synth-time-only. |
 | renorm-note (fpu-05/kr-03) | fpu-alu | med | **DOC ✅ landed** | `spectral_coupled_renorm` is test-only; noted at its def + the standing fix. |
-| **fpu-01** seed-per-block | fpu-alu | **high** | **PERF-GATED** | Seed once at *activation*, carry (c,s)+(cos_w,sin_w) in the voice record, bound drift with ALU renorm. Removes ~99% of per-block FPU for sustained partials. |
+| **fpu-01** carry-(c,s)+renorm | fpu-alu | high | **⛔ DECLINED on data** | After fpu-03, also carry the `(c,s)` state across blocks + one ALU `spectral_coupled_renorm`/block, dropping the f64 state-seed. Implemented + verified (digest IDENTICAL `07f868f5…` for the workload, SINAD 80.7 unchanged, perf gate green), but the measured gain on the STONE workload was only **−1.2% process_insns** (2.10M→2.08M) while it **costs +4 KB DTCM** (`osc_c[512]+osc_s[512]`) and swaps the exact-by-construction re-seed for a drift-bounded regime (only empirically byte-identical for tested inputs). Reverted per the minimal/decline-on-data discipline — the per-block seed was NOT the remaining bottleneck (fpu-03 already removed it). **Caveat (recreatable):** the benefit scales with partial *duration*; STONE is transient-heavy, so a held-note/drone workload would show more. Revisit only with a sustained-content WCET scenario (fpu-02) showing a gain that justifies the DTCM. |
 | **fpu-03** invariant-constants | fpu-alu | med | **✅ LANDED** | `cos_w/sin_w` depend only on (constant) ω; were recomputed every block. Now computed ONCE at activation, stored in the active record (AoS+SoA), threaded into `synth_segment_m7`/`synth_core_pair_m7`; only the `(c,s)` state is re-seeded per block. **Byte-identical** (m7 baseline digest unchanged `07f868f5…`; host `arm_core_test` output identical) and **−44% process_insns** (3.76M→2.10M) — measuring that the per-block f64 re-seed *dominated* the embedded synth. Steady-state cyc/voice-sample 24.01 unchanged. m7 baseline re-signed (label keys + insns only); perf gate + ctest 32/32 green. |
 | **kr-02** WCET cap unenforced | wiring | **high** | **API / PERF-GATED** | `DAISY_MAX_ACTIVE=128` (WCET budget) is enforced **nowhere**; runtime cap is `SPECTRAL_ARM32_MAX_ACTIVE=512` (4× the proven budget). Enforce a runtime `max_active`, or delete the budget comment. |
 | bandwidth-01 dead LUT on M7 | bandwidth | med | **PERF-GATED** | M7 path never reads the 8 KB sine LUT yet `process()` requires it non-null and Daisy holds it resident. Gate the precondition on the LUT path; reclaim ~8 KB SRAM. |
@@ -115,17 +115,19 @@ untouched.
 > Apple-clang-only box — `brew install llvm` provides it), do Phase A only after installing it, or
 > have the maintainer regenerate the baseline. Do NOT land a hot-path change with a stale baseline.
 
-**Phase A — FPU/ALU separation (the core concern). PERF-GATED; needs an m7-baseline regen window + `llvm-mca`.**
-1. Extend the active-voice record (SoA + AoS) with `cos_w/sin_w` and the running `(c,s)` (fpu-03).
-2. Seed `spectral_coupled_init` **once at activation**; carry state across blocks; call the ALU
-   `spectral_coupled_renorm` once per block in place of the f64 re-seed (fpu-01, fpu-05).
-3. Before/after: codegen-confirm, run `arm32_process_correctness`, add the production-regime SNR
-   test (arch-03), regenerate `m7_baseline.json`, and price it at the **48-sample** block (fpu-02).
-   *Done-when:* audio steady state touches no FP; per-block FPU drops to scan+prune; SNR ≥ the
-   `osc_recursive` budget under the *shipped* regime.
-4. Only after A lands and is green: evaluate the dual-domain (FPU-voices + ALU-voices) split for
-   *actual* simultaneity behind `SPECTRAL_EMBEDDED_FLOAT` — **benchmark on the S1 model first**;
-   decline-on-data is a valid outcome.
+**Phase A — FPU/ALU separation (the core concern). PERF-GATED; m7-baseline regen + `llvm-mca`.**
+1. **✅ LANDED (fpu-03, commit 26f8314):** extend the active record (SoA+AoS) with `cos_w/sin_w`
+   computed ONCE at activation; render reuses them. Byte-identical (digest `07f868f5…`), **−44%
+   process_insns**. The codegen-confirm / `arm32_process_correctness` / production-regime SNR gate
+   (arch-03) / baseline re-sign loop is proven and documented (label-key re-pin + wrapper sync).
+2. **⛔ DECLINED on data (fpu-01):** also carry `(c,s)` + per-block ALU renorm to drop the f64
+   state-seed. Implemented + verified green, but only **−1.2%** more on STONE for **+4 KB DTCM** and
+   a drift-regime swap — reverted (the seed was not the remaining bottleneck). Revisit only if a
+   sustained-content WCET scenario (fpu-02) shows it pays for the DTCM.
+3. **Open:** price the existing path at the real **48-sample** codec block (fpu-02) — model/bench,
+   not codegen-gated; this also gives fpu-01 a fair (sustained) re-measurement if revisited.
+4. Later: evaluate the dual-domain (FPU-voices + ALU-voices) split for *actual* simultaneity behind
+   `SPECTRAL_EMBEDDED_FLOAT` — **benchmark on the S1 model first**; decline-on-data is a valid outcome.
 
 **Phase B — real-time safety + bandwidth. PERF-GATED / API.**
 - Enforce a runtime `max_active` (default 512; Daisy passes `DAISY_MAX_ACTIVE=128`) at the
