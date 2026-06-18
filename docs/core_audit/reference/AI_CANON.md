@@ -81,6 +81,12 @@ Incorrect pattern:
 - “zero-cost approximation”
 - “Linux overcommit guarantees...”
 - “single source of truth” when Metal/CUDA strings duplicate formulas
+- “placement is INERT / lands in default memory” once the BSP binding it names as
+  the precondition already exists in source — a placement (or any conditional-
+  optimization) claim is a build-configuration-specific, objdump-checkable fact, not a
+  free-standing truth. State the exact config it holds in and the verification command;
+  never cite section names absent from the active tree. When a BSP binding lands, every
+  comment predicated on its absence is stale and must be re-checked against the binding.
 
 These are claims requiring tests. Convert claims into measurable invariants or remove them.
 
@@ -259,3 +265,80 @@ fork actually is:
 
 The full verified census + the iFFT-exception rationale is in
 `archive/ARCH_PATH_SELECTION.md`.
+
+## 21. FPU and ALU are temporally owned on embedded, not simultaneously saturated
+
+A Cortex-M-class core issues one in-order instruction stream. Even the dual-issue M7 cannot
+hide a floating-point burst behind a *serial* integer recurrence: when each step depends on the
+previous (the coupled oscillator), there is no cross-sample ILP to overlap with the FP work.
+"Leverage the FPU and ALU simultaneously" is only meaningful *across overlapping work items*
+(e.g. one voice's float prep overlapping another voice's integer render), never within one
+serial kernel. The rules that follow keep the unit ownership clean and the FP cost honest:
+
+- A per-voice float setup cost computed in floating point and then consumed by a pure-integer
+  per-sample loop is an **FPU burst at the block boundary**, serialized against the integer
+  loop — the opposite of overlap. Compute per-voice float **invariants once at activation** and
+  carry them in the voice record; never recompute a loop-invariant (a rotation matrix from a
+  fixed `omega`) every block. Bound recurrence drift with an **integer-domain renorm**, not a
+  per-block float re-seed.
+- Minimize float on the real-time path. It cannot hide behind integer work on a serial stream,
+  so its cost is additive, not free.
+- **“Rare / activation-time” is a real-time claim.** Measure it against the *smallest* real
+  hardware block (the codec block, e.g. 48 samples), not the largest buffer the kernel can hold
+  (e.g. 256). A fixed per-block cost dominates real-time headroom precisely at the small block.
+- Bracket the fixed-point hot loop in `SPECTRAL_Q_DOMAIN BEGIN/END` markers so a stray float in
+  the per-sample recurrence fails the `q_domain_contract` test — the RT loop is the highest-value
+  place to enforce purity, and an FP op injected there re-creates the very interleaving this rule
+  forbids.
+- State the de-facto unit-ownership model at the kernel surface ("FPU only for the seed; the
+  per-sample loop is pure Q31/Q15 ALU; no concurrent FPU+ALU synthesis"). A clean
+  setup-burst/steady-state split is a legitimate model — but it is a contract to write down, and
+  it makes minimizing the float burst mandatory, not optional.
+
+## 22. A memory barrier is not cache maintenance
+
+A `dsb`/`__DSB()` *orders* memory accesses; it does **not** clean or invalidate the data cache.
+On a cacheable region:
+
+- Data a DMA **writes** and the CPU reads needs an **invalidate-after-RX** — a barrier alone
+  leaves the CPU reading stale cache.
+- Data the CPU **writes** and a DMA reads needs a **clean-before-TX**.
+- A read-only-by-CPU RX buffer needs no pre-DMA clean; a buffer the engine never hands to a DMA
+  carries no engine-side flush (it belongs to whoever owns the DMA — e.g. the BSP codec buffer).
+
+Each barrier's comment names the specific producer/consumer pair it fences. "Ensure caches are
+coherent" after pure same-core CPU writes to normal memory orders nothing and overstates its
+role. Dormant cache-maintenance code is only protected from rot if the dormancy test compiles
+the **dangerous** configuration (cacheable + invalidate), not its safe sibling (DTCM, which
+preprocesses the maintenance away). Extract the pure address arithmetic (line-round + overflow
+guards) into a host-unit-testable inline so the logic that keeps a cacheable buffer coherent is
+exercised even when the `SCB_*` call itself is firmware-only.
+
+## 23. A real-time / WCET budget cap is the value the code enforces at the boundary
+
+A constant that documents a hard real-time budget (max active voices, max block) must be the
+value **checked at admission**, not a sibling note next to a larger storage bound. If a budget
+cap and a storage cap differ, the smaller (the budget) gates admission and the larger only sizes
+arrays — and the admission check references the budget constant *by name*. An unenforced budget
+constant is fiction: the kernel will run past it and miss the deadline with no guard firing.
+
+## 24. A host simulation compiles the firmware's capabilities; firmware purity is proven against the firmware source set
+
+- A host "simulation" of an embedded target must force the same capability macros the firmware
+  selects (the CPU/DSP gate the host cannot auto-detect). Otherwise it renders a *different
+  program* than the device — a perf model can be correct on op-counts yet drive a different
+  oscillator. If the divergence is intentional, say so at the simulation's surface.
+- The include-direction layer law does **not** prove "no host/OS contracts in code the firmware
+  compiles": a file can have legal in-repo include edges and still pull `<omp.h>`/`mmap`/`stdio`.
+  That guarantee is asserted against the **firmware source set** (the build manifest) — a test
+  that the firmware TUs reference no denylisted OS symbols — not against the whole repo's include
+  graph. Separation enforced only by which files the manifest happens to compile is separation by
+  convention, not by contract.
+
+## 25. A runtime control that cannot act must fail loud
+
+Never accept a parameter, void it, and return success. A stub that returns OK is worse than one
+that returns an error, because the whole stack above it (knob, protocol, wrapper) then advertises
+a capability the engine does not have. If a control is architecturally a build/synth-time
+parameter with no runtime path, the setter rejects a non-identity value (or is marked
+unimplemented at its surface), and the doc states where the parameter actually takes effect.

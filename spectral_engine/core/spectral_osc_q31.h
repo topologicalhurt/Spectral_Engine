@@ -4,11 +4,16 @@
  * sample -- no phase->table gather, so it has DETERMINISTIC latency (no cache miss) and
  * needs no LUT. Chosen over the magic-circle form, which is non-viable in fixed point
  * (ellipse amplitude error collapses SNR near Nyquist; Q15 state is unusable). The coupled
- * form with Q31 state matches the 12-bit-LUT SNR (~76-87 dB) and, with per-block renorm,
- * exceeds it -- see the characterization in tests (test_osc_recursive).
+ * form with Q31 state matches the 12-bit-LUT SNR (~76-87 dB). The characterization
+ * (test_osc_recursive) drives one long recurrence with a cheap per-block ALU renorm
+ * (spectral_coupled_renorm) and exceeds the LUT SNR. NOTE: the shipping arm32 synth does
+ * NOT renorm -- it bounds drift by re-seeding from the exact uint32 phase every block (so
+ * its SNR is anchored on that regime, not the renorm one; closing that test gap and adopting
+ * the cheaper carry-state+renorm model are tracked in EMBEDDED_RESOURCE_SEPARATION_PLAN.md).
  *
- * Split: the per-sample STEP is pure Q31 fixed point (the hot loop). INIT is float
- * (activation-time only, rare) and uses the self-contained minimax sine -- no libm, M7 FPU.
+ * Split: the per-sample STEP is pure Q31 fixed point (the hot loop). INIT is DOUBLE
+ * precision (spectral_osc_sin_init_f64, a degree-15 Taylor -- no libm, M7 FPU). On the arm32
+ * path INIT runs PER BLOCK PER VOICE (not "rare" -- a per-block FPU burst); see the plan.
  *
  * Per voice: state (c, s) Q31 + constants (cos_w, sin_w) Q31. Per sample: 4 q31xq31->q63
  * multiplies + 2 add/sub. The recurrence is SERIAL (each sample depends on the previous),
@@ -41,7 +46,10 @@ static inline q31_t spectral_coupled_step(SpectralCoupledOsc* o, q31_t cos_w, q3
 
 /* Re-normalize the state toward unit magnitude with ONE Newton 1/sqrt step (no sqrt):
  * for m2 = c^2+s^2 near 1, g = (3 - m2)/2 ~= 1/sqrt(m2). Bounds the slow Q31 quantization
- * drift; call once per block, not per sample. g is Q30 (range ~[1,1.01], no overflow). */
+ * drift; call once per block, not per sample. g is Q30 (range ~[1,1.01], no overflow).
+ * Pure Q31/ALU drift control (no FPU). Test-only today: the arm32 synth re-seeds from the
+ * exact phase each block instead of carrying state + renorm; adopting this as the production
+ * drift control (and dropping the per-block FPU re-seed) is tracked in the plan. */
 static inline void spectral_coupled_renorm(SpectralCoupledOsc* o) {
     q63_t m2 = ((q63_t)o->c * o->c + (q63_t)o->s * o->s) >> 31;   /* ~2^31 at unit */
     q31_t g  = (q31_t)(0x60000000LL - (m2 >> 2));                 /* (3 - m2_norm)/2 in Q30 */
@@ -49,8 +57,9 @@ static inline void spectral_coupled_renorm(SpectralCoupledOsc* o) {
     o->s = (q31_t)(((q63_t)o->s * g) >> 30);
 }
 
-/* Self-contained DOUBLE-precision sine for activation-time init ONLY (rare; no libm, never
- * the hot path). Q31 rotation constants need ~1e-9 accuracy: the float minimax (~1e-7) leaves
+/* Self-contained DOUBLE-precision sine for oscillator init (no libm; not the per-SAMPLE hot
+ * loop, but on the arm32 path it runs per block per voice -- a per-block FPU cost, not "rare").
+ * Q31 rotation constants need ~1e-9 accuracy: the float minimax (~1e-7) leaves
  * the rotation angle slightly off, which drifts the phase over a long partial and collapses
  * SNR (measured: erratic -3..60 dB). This degree-15 odd Taylor folded to [-pi/2, pi/2] is
  * < 1e-11 over that range -- below Q31 resolution. Args here are bounded (|x| <= 3pi/2), so
@@ -75,7 +84,8 @@ static inline q31_t spectral_double_to_q31_round(double f) {
     return (q31_t)(v + (v >= 0.0 ? 0.5 : -0.5));
 }
 
-/* Activation-time init (rare). omega = rad/sample, phi = initial phase rad. Fills the
+/* Per-voice seed. omega = rad/sample, phi = initial phase rad. (The arm32 synth currently
+ * calls this per block per voice -- a per-block FPU cost; see the plan.) Fills the
  * per-voice rotation constants (cos_w, sin_w) and the initial state (c, s) to Q31 precision
  * so the recurrence frequency is exact to the fixed-point floor. cos(x) = sin(x + pi/2). */
 static inline void spectral_coupled_init(SpectralCoupledOsc* o, double omega, double phi,

@@ -6,25 +6,40 @@
  * single-lane saturating DSP intrinsics (__smulbb, __qadd16, __qadd32) are used.
  *
  * What is actually true today:
- *   - Phase accumulator is Q31, oscillator output Q15.
+ *   - Phase is a UQ0.32 accumulator (full circle == 2^32); the per-sample
+ *     oscillator is the coupled-form Q31 rotation (spectral_coupled_step), output
+ *     taken from the Q31 sine >>16 to Q15.
  *   - An active-segment list avoids scanning inactive segments.
- *   - The hot loop (synth_core_m7) is SCALAR Q15, unrolled by 4 (4 independent
- *     single-lane MACs), segment-major.
+ *   - The hot loop (synth_core_m7) is a SCALAR Q31 recurrence + Q15 MAC, unrolled
+ *     by 4, segment-major.
+ *   - Dual 16-bit MAC IS realized: synth_core_pair_m7 folds two full-sustain voices'
+ *     (sine,amp) products into the q63 accumulator with one SMLALD (gated on the
+ *     SPECTRAL_HAS_DUAL_MAC capability, codegen-confirmed).
  *
- * NOT yet realized (do not read the following as done):
- *   - Dual 16-bit MAC: spectral_smlad() exists but is NOT called here. Exploiting
- *     it needs a voice-parallel (sample-major) loop nest so two voices' (sine,amp)
- *     pack into one SMLAD. The current segment-major nest makes SoA buy nothing.
- *   - Memory placement: SPECTRAL_MEM_FAST/_FAST_CODE emit .dtcm_data/.itcm_text/
- *     .sdram_data, but the Daisy BSP linker uses .dtcmram_bss/.sdram_bss (and has
- *     no ITCM section), so placement is currently INERT -- hot data/code land in
- *     default memory until the section names are bound to the BSP and verified.
- *   - LUT residency: the sine LUT is gathered every sample, strided by phase_inc
- *     (effectively random in-table -- it does NOT "minimize cache misses"); it is
- *     not pinned to DTCM.
+ * Resource model -- FPU vs ALU (see docs/core_audit/EMBEDDED_RESOURCE_SEPARATION_PLAN.md):
+ *   - The per-sample recurrence is PURE Q31/Q15 integer (ALU/DSP). No float.
+ *   - The ONLY floating-point work is the per-voice oscillator seed
+ *     (spectral_coupled_init, double precision). synth_segment_m7 currently re-seeds
+ *     EVERY block per voice, so the FPU runs a burst at each block boundary and is
+ *     idle for the rest of the block: a clean temporal ownership boundary, but ZERO
+ *     FPU/ALU overlap and a per-block cost (carry-state + ALU renorm is the standing
+ *     fix; tracked in the plan).
+ *
+ * Memory placement -- resolved by the BSP, objdump-checkable, NOT inert:
+ *   - With no BSP (host / simulation / unbound target) SPECTRAL_MEM_FAST / _BULK /
+ *     _FAST_CODE are portable no-ops (default memory).
+ *   - On the Daisy build SPECTRAL_BSP_MEM_HEADER binds SPECTRAL_MEM_FAST ->
+ *     .dtcmram_bss, so the q63 accumulator and the active-voice context land in DTCM
+ *     (zero wait-state); SPECTRAL_MEM_BULK -> .sdram_bss. SPECTRAL_MEM_FAST_CODE stays
+ *     a no-op (libDaisy maps no ITCM section). Verify after a firmware link with the
+ *     objdump recipe in api/daisy_seed/daisy_seed_mem.h.
+ *   - LUT residency: ONLY the generic (non-M7) fallback gathers the sine LUT. The M7
+ *     path uses the gather-free coupled oscillator and never reads the LUT during
+ *     synthesis, so "cache misses" do not apply on M7 (the LUT is still required
+ *     non-null as a precondition -- tracked in the plan).
  *   - Cycle/WCET numbers come from the validated M7 measurement stack
- *     (m7-census / m7-stalls / m7-wcet); the old in-C cost model was
- *     retired (uncalibrated, priced an obsolete kernel shape).
+ *     (m7-census / m7-stalls / m7-wcet); the old in-C cost model was retired
+ *     (uncalibrated, priced an obsolete kernel shape).
  */
 
 #include "spectral_synth_arm32.h"
@@ -631,6 +646,12 @@ void spectral_arm32_set_amplitude(SpectralArm32Ctx* ctx, float amplitude) {
     ctx->amplitude_q15 = (q15_t)(amplitude * Q15_MAX);
 }
 
+/* Stretch is a SYNTH-TIME parameter baked into freq_q88 at segment conversion, NOT a
+ * runtime control: the embedded path has no re-render, so a stretch applied after load
+ * cannot take effect. This setter is intentionally inert. The public Daisy stack still
+ * forwards a pot/UART stretch and replies OK -- making that path fail loud (or marking it
+ * unimplemented at its surface) is the honesty item tracked in
+ * docs/core_audit/EMBEDDED_RESOURCE_SEPARATION_PLAN.md. Do not read this no-op as a knob. */
 void spectral_arm32_set_stretch(SpectralArm32Ctx* ctx, float stretch) {
     if (!ctx) return;
     (void)stretch;
@@ -965,10 +986,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     SPECTRAL_MAYBE_UNUSED const q15_t* restrict osc_lut = ctx->osc_lut;  /* generic (non-M7) LUT path */
     const q15_t master_amp = ctx->amplitude_q15;
 
-    /* Static q63 accumulator, cache-line aligned and tagged SPECTRAL_MEM_FAST so a
-     * bound BSP can place it in DTCM for zero wait-state access. Placement is INERT
-     * until the BSP section names are bound (see file header); today it lands in
-     * default memory. Single-threaded audio callback, no reentrancy. */
+    /* Static q63 accumulator, cache-line aligned and tagged SPECTRAL_MEM_FAST. On the
+     * Daisy build that resolves to .dtcmram_bss -> DTCM (zero wait-state); with no BSP
+     * (host/sim) it is a portable no-op and the buffer lands in default memory (see the
+     * placement note in the file header). 2 KB (256 q63), single-threaded audio callback,
+     * no reentrancy. The width is q63 by contract: at the 128-voice budget a worst-case sum
+     * is ~128 * 2^30 (Q2.30 product) = 2^37, which overflows int32, and SMLALD requires a
+     * 64-bit destination -- the wide carrier lets the mix saturate exactly once at pack. */
 #if defined(__GNUC__) || defined(__clang__)
     static q63_t accum[SPECTRAL_ARM32_MAX_BLOCK] __attribute__((aligned(SPECTRAL_CACHE_LINE))) SPECTRAL_MEM_FAST;
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
