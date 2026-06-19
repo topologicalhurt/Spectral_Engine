@@ -381,6 +381,7 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
                                    float* out_buf, size_t out_len,
                                    SpectralWavetableBank* wt_bank, double* t_synth,
                                    SpectralTimingResults* paths);
+static void pipeline_print_paths(const SpectralTimingResults* t);
 
 /* Analysis is only available when NOT in restricted mode */
 #if !SPECTRAL_RESTRICTED_MODE
@@ -1275,9 +1276,12 @@ static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray 
         }
 #endif
     }
-    /* Record the paths actually taken for the consolidated "Paths:" line (II.5). */
+    /* Record the paths actually taken for the consolidated "Paths:" line (II.5). req_backend
+     * is the user's ACTUAL request (opts->backend), not the local req_backend that --quality
+     * /--q15 force to CPU above — otherwise the "(req X)" suffix would hide those GPU->CPU
+     * forcings (e.g. `--quality high -b 2` would print backend=CPU with no "(req Metal)"). */
     if (paths) {
-        paths->req_backend = (int)req_backend;
+        paths->req_backend = (int)opts->backend;
         paths->eff_backend = (int)effective_backend;
         paths->q15_requested = opts->enable_q15 ? 1 : 0;
         paths->q15_active = q15_active;
@@ -1350,6 +1354,10 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     if (cache_mode_handled) {
         if (timing) *timing = t;
         result = PIPELINE_OK;
+        /* Cache mode prints its own timing summary (pipeline_print_cache_mode_summary), not
+         * the normal Timing block, but the Paths record is where cache=hit|built is meaningful
+         * — so surface it here too. */
+        pipeline_print_paths(&t);
 #if !SPECTRAL_NO_PERF
         {
             PerfMetrics perf_end = perf_snapshot(wall_start);
@@ -1429,31 +1437,37 @@ void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t seg
     SPECTRAL_LOG_INFO("Audio: %.2fs Realtime: %.1fx Segs/sec: %.0fK",
                       t->audio_dur, t->realtime_x,
                       (wall > 0) ? (segment_count / wall / 1000) : 0.0);
+    pipeline_print_paths(t);
+}
 
-    /* Consolidated "Paths:" record (II.5): which paths ACTUALLY ran. backend shows the
-     * effective backend + "(req X)" when it fell back from the requested one; q15 shows
-     * on / fell-back-to-float / off; proc lists the adaptive fixtures that applied. */
-    {
-        char backend_str[80];
-        char proc_buf[256];
-        const char* q15s = t->q15_active ? "on" : (t->q15_requested ? "fell-back-to-float" : "off");
-        const char* caches = t->cache_hit ? "hit" : (t->cache_built ? "built" : "none");
-        const char* procs = "none";
-        if (t->proc_applied) {
-            spectral_process_mask_to_string(t->proc_applied, proc_buf, sizeof(proc_buf));
-            procs = proc_buf;
-        }
-        if (t->eff_backend == 0) {
-            snprintf(backend_str, sizeof(backend_str), "n/a");
-        } else if (t->req_backend != t->eff_backend && t->req_backend != 0) {
-            snprintf(backend_str, sizeof(backend_str), "%s (req %s)",
-                     spectral_backend_name((SynthBackend)t->eff_backend),
-                     spectral_backend_name((SynthBackend)t->req_backend));
-        } else {
-            snprintf(backend_str, sizeof(backend_str), "%s",
-                     spectral_backend_name((SynthBackend)t->eff_backend));
-        }
-        SPECTRAL_LOG_INFO("Paths: backend=%s  q15=%s  cache=%s  hybrid=%s  proc=%s",
-                          backend_str, q15s, caches, t->hybrid_engaged ? "on" : "off", procs);
+/* Consolidated "Paths:" record (II.5): which paths ACTUALLY ran. backend shows the effective
+ * backend + "(req X)" when it fell back from the requested one; q15 shows on / fell-back-to-
+ * float / off; proc lists the adaptive fixtures that applied. Shared by the normal-mode and
+ * cache-mode renders (cache=hit|built is only meaningful in cache mode). */
+static void pipeline_print_paths(const SpectralTimingResults* t) {
+    char backend_str[80];
+    char proc_buf[256];
+    const char* q15s;
+    const char* caches;
+    const char* procs = "none";
+
+    if (!t) return;
+    q15s = t->q15_active ? "on" : (t->q15_requested ? "fell-back-to-float" : "off");
+    caches = t->cache_hit ? "hit" : (t->cache_built ? "built" : "none");
+    if (t->proc_applied) {
+        spectral_process_mask_to_string(t->proc_applied, proc_buf, sizeof(proc_buf));
+        procs = proc_buf;
     }
+    if (t->eff_backend == 0) {
+        snprintf(backend_str, sizeof(backend_str), "n/a");
+    } else if (t->req_backend != t->eff_backend && t->req_backend != 0) {
+        snprintf(backend_str, sizeof(backend_str), "%s (req %s)",
+                 spectral_backend_name((SynthBackend)t->eff_backend),
+                 spectral_backend_name((SynthBackend)t->req_backend));
+    } else {
+        snprintf(backend_str, sizeof(backend_str), "%s",
+                 spectral_backend_name((SynthBackend)t->eff_backend));
+    }
+    SPECTRAL_LOG_INFO("Paths: backend=%s  q15=%s  cache=%s  hybrid=%s  proc=%s",
+                      backend_str, q15s, caches, t->hybrid_engaged ? "on" : "off", procs);
 }

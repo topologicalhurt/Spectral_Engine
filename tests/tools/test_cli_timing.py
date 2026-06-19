@@ -38,8 +38,8 @@ RT_LINE = re.compile(r"Audio:\s*([\d.]+)s\s*Realtime:\s*([\d.]+)x")
 
 
 @pytest.fixture(scope="session")
-def cli_run(tmp_path_factory) -> tuple[str, str]:
-    """Build desktop once and run the CLI on the bench fixture; return (stdout+stderr)."""
+def desktop_binary(tmp_path_factory) -> Path:
+    """Build desktop once; return the binary path (shared by the run-based tests)."""
     if shutil.which("cmake") is None:
         pytest.skip("cmake not on PATH")
     if not WAV.exists():
@@ -56,7 +56,13 @@ def cli_run(tmp_path_factory) -> tuple[str, str]:
     bins = list((build / "bin").glob("spectral_*desktop"))
     if not bins:
         pytest.skip("no desktop binary produced")
-    run = subprocess.run([str(bins[0]), str(WAV), *BENCH_ARGS], capture_output=True, text=True)
+    return bins[0]
+
+
+@pytest.fixture(scope="session")
+def cli_run(desktop_binary) -> str:
+    """Run the CLI on the bench fixture (non-cache); return stdout+stderr."""
+    run = subprocess.run([str(desktop_binary), str(WAV), *BENCH_ARGS], capture_output=True, text=True)
     assert run.returncode == 0, f"CLI run failed: {run.stderr[-1500:]}"
     return run.stdout + run.stderr
 
@@ -124,6 +130,21 @@ def test_paths_record_reflects_effective_run(cli_run):
     assert m.group(1) == "CPU", f"effective backend should be CPU (requested), got {m.group(1)}"
     assert m.group(2) in ("on", "off", "fell-back-to-float")
     assert m.group(3) in ("hit", "built", "none")
+
+
+def test_cache_mode_prints_paths_with_cache_state(desktop_binary, tmp_path):
+    """II.5 code-review fix: in cache mode the consolidated Paths line is printed too (it was
+    suppressed before — the cache-mode exit bypassed the normal render), and cache= reports
+    the only state where it is meaningful (built/hit). Run in an isolated cwd so the
+    output/cache dir is fresh -> first run builds. Fail-on-bug: drop the cache-mode Paths
+    render and no `cache=built` line appears."""
+    args = [str(desktop_binary), str(WAV), "--cache", *BENCH_ARGS]
+    r = subprocess.run(args, capture_output=True, text=True, cwd=tmp_path)
+    assert r.returncode == 0, f"cache run failed: {r.stderr[-1500:]}"
+    out = r.stdout + r.stderr
+    m = re.search(r"^Paths:.*cache=(\S+)", out, re.MULTILINE)
+    assert m, "cache-mode run must still print the consolidated Paths line"
+    assert m.group(1) in ("built", "hit"), f"cache state should be built/hit, got {m.group(1)}"
 
 
 if __name__ == "__main__":

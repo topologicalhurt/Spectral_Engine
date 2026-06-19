@@ -96,6 +96,9 @@ int perf_get_num_cores(void) {
 void perf_get_rusage_counts(long* major_faults, long* vol_ctx, long* invol_ctx) {
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        /* ru_majflt (major page faults, the costly-paging proxy) is Linux-meaningful; Darwin
+         * does not maintain it for RUSAGE_SELF, so on macOS it reads 0 regardless of real
+         * page-in I/O. The context-switch counts are populated on both. */
         *major_faults = (long)usage.ru_majflt;
         *vol_ctx = (long)usage.ru_nvcsw;
         *invol_ctx = (long)usage.ru_nivcsw;
