@@ -36,6 +36,13 @@ typedef struct {
     double wall_total;  /* honest total = real monotonic wall span of the whole run */
     double audio_dur;
     double realtime_x;  /* audio_dur / wall_total */
+    /* Per-stage WALL spans (II.3), from the stage markers. analysis_wall includes STFT-matrix
+     * / FFT-resource alloc the kernel timers (t_fft+t_track) miss; synth_wall includes backend
+     * init (e.g. Metal first-dispatch) the synth kernel timer (t_synth) misses. Per-stage idle
+     * = stage_wall - stage_busy is where each stage's hidden time lives. 0 if the stage was
+     * skipped (e.g. analysis on a cache hit). norm/write are pure-kernel (wall ~ busy). */
+    double analysis_wall;
+    double synth_wall;
     /* Run-paths record (II.5): which paths ACTUALLY ran, for the consolidated "Paths:" line.
      * eff_backend is the SynthBackend that ran (after any fallback); req_backend what was asked.
      * proc_* are SpectralProcessMask bitsets. Ints (not the enums) to keep this header light. */

@@ -196,8 +196,13 @@ reads 3% of real heap.
   Test `tests/tools/test_cli_timing.py` pins Total≥marker-wall + realtime-from-wall (fail-on-bug:
   the 13× kernel-sum regression drops Total far below the marker wall). Bench parser unaffected
   (the `FFT: … Total:` line format is unchanged; `Total` is now the honest value). *[done]*
-- **II.3** Per-stage **wall/busy/idle** in the render; give GPU `init()` its own
-  accounted span so 57ms lands in idle/init, not vanishing. *[M / med — touches backends]*
+- **II.3 — LANDED (Phase D-4).** Per-stage **wall** captured from the stage markers
+  (`analysis_wall`, `synth_wall` on `SpectralTimingResults`) and a `Stage idle:` line shows
+  `stage_wall - stage_kernel_busy` per stage: analysis idle = STFT/FFT-resource alloc, **synth
+  idle = backend init** (the GPU first-dispatch time that used to vanish — instead of giving
+  `init()` its own stage, it lands honestly as synth idle). Verified: `synth 33.9ms (backend-init)`
+  on Metal vs 13ms on CPU. norm/write are pure-kernel (idle~0), not broken out. Test
+  `test_cli_timing.py::test_per_stage_idle_present`. *[done]*
 - **II.4 — LANDED (Phase D-2), minimal variant.** The "Peak tracked %.1f MB" line (a sum of
   the near-unwired `perf_track_alloc` sites — ~3% of RSS, a naming lie) is replaced by the real
   **RSS delta** (`Memory: RSS <end> MB (%+ld MB this run)`). Added the free getrusage counters

@@ -426,6 +426,7 @@ static PipelineError pipeline_render_and_write(
     pipeline_resources_track_render(resources, resources->segments.count, out_bytes);
 #endif
 
+    uint64_t synth_begin_ns = spectral_log_get_monotonic_ns();  /* II.3 per-stage wall */
     SPECTRAL_STAGE_BEGIN("synth");
     {
         SpectralError synth_err = run_synthesis(opts, resources->segments, resources->output,
@@ -441,6 +442,11 @@ static PipelineError pipeline_render_and_write(
         }
     }
     SPECTRAL_STAGE_END("synth");
+    {
+        uint64_t synth_end_ns = spectral_log_get_monotonic_ns();
+        timing->synth_wall = (synth_end_ns > synth_begin_ns)
+            ? (double)(synth_end_ns - synth_begin_ns) / 1e9 : 0.0;
+    }
 
     SPECTRAL_STAGE_BEGIN("norm");
     {
@@ -634,6 +640,8 @@ static PipelineError pipeline_analyze_input_to_segments(
                                         &timing->t_fft, &timing->t_track);
     analysis_end_ns = spectral_log_get_monotonic_ns();
     SPECTRAL_STAGE_END_AT("analysis", analysis_end_ns);
+    timing->analysis_wall = (analysis_end_ns > analysis_begin_ns)
+        ? (double)(analysis_end_ns - analysis_begin_ns) / 1e9 : 0.0;  /* II.3 per-stage wall */
     if (emit_split_analysis_markers) {
         pipeline_emit_split_analysis_markers(analysis_begin_ns, analysis_end_ns, timing);
     }
@@ -1434,6 +1442,20 @@ void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t seg
 #endif
     SPECTRAL_LOG_INFO("Busy: %.1fms Idle: %.1fms (wall - kernel: alloc / backend-init / gaps)",
                       busy*1000, idle*1000);
+    /* Per-stage idle (II.3) = stage wall - stage kernel busy: where each stage's hidden time
+     * is. analysis idle = STFT/FFT-resource alloc; synth idle = backend init (e.g. Metal
+     * first-dispatch). norm/write are pure-kernel (idle ~ 0), so not broken out. */
+    {
+        double a_busy = t->t_fft + t->t_track;
+        double a_idle = (t->analysis_wall > a_busy) ? (t->analysis_wall - a_busy) : 0.0;
+        double s_idle = (t->synth_wall > t->t_synth) ? (t->synth_wall - t->t_synth) : 0.0;
+        if (t->analysis_wall > 0.0) {
+            SPECTRAL_LOG_INFO("Stage idle: analysis %.1fms (alloc/setup)  synth %.1fms (backend-init)",
+                              a_idle*1000, s_idle*1000);
+        } else {
+            SPECTRAL_LOG_INFO("Stage idle: synth %.1fms (backend-init)", s_idle*1000);
+        }
+    }
     SPECTRAL_LOG_INFO("Audio: %.2fs Realtime: %.1fx Segs/sec: %.0fK",
                       t->audio_dur, t->realtime_x,
                       (wall > 0) ? (segment_count / wall / 1000) : 0.0);

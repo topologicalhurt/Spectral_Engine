@@ -35,6 +35,7 @@ FFT_LINE = re.compile(
     r"Norm:\s*([\d.]+)ms\s*Write:\s*([\d.]+)ms\s*Total:\s*([\d.]+)ms")
 BUSY_LINE = re.compile(r"Busy:\s*([\d.]+)ms\s*Idle:\s*([\d.]+)ms")
 RT_LINE = re.compile(r"Audio:\s*([\d.]+)s\s*Realtime:\s*([\d.]+)x")
+STAGE_IDLE_LINE = re.compile(r"Stage idle:.*synth\s+([\d.]+)ms")
 
 
 @pytest.fixture(scope="session")
@@ -106,6 +107,15 @@ def test_realtime_is_derived_from_wall(cli_run):
     assert abs(realtime - expect) / expect < 0.02, (
         f"Realtime {realtime}x != audio/wall {expect:.1f}x — realtime not derived from the "
         f"wall Total (plan §II)")
+
+
+def test_per_stage_idle_present(cli_run):
+    """II.3: a per-stage idle line attributes each stage's wall-minus-kernel hidden time
+    (synth idle = backend init/dispatch overhead). Fail-on-bug: drop the per-stage wall
+    capture and the line vanishes."""
+    m = STAGE_IDLE_LINE.search(cli_run)
+    assert m, "the per-stage 'Stage idle:' line is missing (plan §II.3)"
+    assert float(m.group(1)) >= 0.0, f"synth idle must be non-negative, got {m.group(1)}"
 
 
 def test_memory_report_is_honest(cli_run):
