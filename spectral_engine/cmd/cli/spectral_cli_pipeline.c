@@ -1054,7 +1054,10 @@ static PipelineError pipeline_execute_cache_mode(
                     timing, cache_was_loaded, cache_built_this_run,
                     cache_state->t_lookup,
                     cached_render_total, cache_mode_total);
+                /* Cache mode reports the render wall span as both busy and wall total
+                 * (it is end-to-end render time, not a kernel sum). */
                 timing->t_total = cache_mode_total;
+                timing->wall_total = cache_mode_total;
 
                 pipeline_release_resources(&synth_res);
 
@@ -1332,9 +1335,10 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     result = pipeline_run_synthesis_stage(run_opts, &resources, sample_rate, n_samples, &t);
     if (result != PIPELINE_OK) goto cleanup;
 
-    t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm + t.t_write;
+    t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm + t.t_write;  /* busy sum */
+    t.wall_total = omp_get_wtime() - wall_start;                          /* honest wall span */
     t.audio_dur = (double)n_samples / sample_rate;
-    t.realtime_x = (t.t_total > 0) ? (t.audio_dur / t.t_total) : 0.0;
+    t.realtime_x = (t.wall_total > 0) ? (t.audio_dur / t.wall_total) : 0.0;
     spectral_pipeline_print_timing(&t, resources.segments.count);
 
 #if !SPECTRAL_NO_PERF
@@ -1358,16 +1362,22 @@ cleanup:
 void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t segment_count) {
     if (!t) return;
     
+    /* "Total" is the honest WALL span; the per-stage figures are BUSY (kernel) times whose
+     * sum (t_total) is shown as Busy, with Idle = wall - busy (alloc / backend-init / gaps). */
+    double busy = t->t_total, wall = t->wall_total;
+    double idle = (wall > busy) ? (wall - busy) : 0.0;
 #if SPECTRAL_RESTRICTED_MODE
     SPECTRAL_LOG_INFO("\n--- Timing ---");
     SPECTRAL_LOG_INFO("Synth: %.1fms Norm: %.1fms Write: %.1fms Total: %.1fms",
-                      t->t_synth*1000, t->t_norm*1000, t->t_write*1000, t->t_total*1000);
+                      t->t_synth*1000, t->t_norm*1000, t->t_write*1000, wall*1000);
 #else
     SPECTRAL_LOG_INFO("\n--- Timing ---");
     SPECTRAL_LOG_INFO("FFT: %.1fms Track: %.1fms Synth: %.1fms Norm: %.1fms Write: %.1fms Total: %.1fms",
-                      t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_write*1000, t->t_total*1000);
+                      t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_write*1000, wall*1000);
 #endif
+    SPECTRAL_LOG_INFO("Busy: %.1fms Idle: %.1fms (wall - kernel: alloc / backend-init / gaps)",
+                      busy*1000, idle*1000);
     SPECTRAL_LOG_INFO("Audio: %.2fs Realtime: %.1fx Segs/sec: %.0fK",
                       t->audio_dur, t->realtime_x,
-                      (t->t_total > 0) ? (segment_count / t->t_total / 1000) : 0.0);
+                      (wall > 0) ? (segment_count / wall / 1000) : 0.0);
 }

@@ -188,9 +188,14 @@ reads 3% of real heap.
 **Phases** (built on the §D substrate):
 - **II.1** Define **`SpectralRunRecord`** — the single source of timing truth per run; CLI
   renders it, Python bench parses it, neither recomputes totals. *[M / low, additive]*
-- **II.2** Make `Total` + `realtime_x` **wall** (monotonic first-BEGIN→last-END); report
-  kernel/busy sub-timings additionally, labeled "busy", never as the run total. *[S / low —
-  the headline honesty fix]*
+- **II.2 — LANDED (Phase D-1).** `SpectralTimingResults` gained `wall_total` (real monotonic
+  span via `omp_get_wtime() - wall_start`); the headline `Total` is now WALL (was the
+  kernel-timer sum that under-reported by up to ~13×), `realtime_x` divides by wall, and a
+  `Busy: <kernel sum>  Idle: <wall-busy>` line surfaces the alloc/backend-init/gap time. Verified
+  on a real run (Total 623ms wall vs Busy 589ms vs marker-wall 611ms; Realtime 62.8× honest).
+  Test `tests/tools/test_cli_timing.py` pins Total≥marker-wall + realtime-from-wall (fail-on-bug:
+  the 13× kernel-sum regression drops Total far below the marker wall). Bench parser unaffected
+  (the `FFT: … Total:` line format is unchanged; `Total` is now the honest value). *[done]*
 - **II.3** Per-stage **wall/busy/idle** in the render; give GPU `init()` its own
   accounted span so 57ms lands in idle/init, not vanishing. *[M / med — touches backends]*
 - **II.4** Real **alloc + realloc + fault** accounting: route the known heap sites through

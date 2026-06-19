@@ -18,16 +18,24 @@ typedef struct SpectralCliOptions SpectralCliOptions;
 extern "C" {
 #endif
 
-/* Pipeline timing results */
+/* Pipeline timing results.
+ *
+ * t_fft..t_write are per-stage BUSY (kernel) spans. t_total is their SUM (busy total).
+ * wall_total is the real monotonic wall time of the whole run (analysis + synth + backend
+ * init + norm + write + inter-stage gaps) — it is the honest headline, and is >= t_total;
+ * the difference (idle = wall_total - t_total) is allocation/backend-init/scheduling time
+ * the per-stage kernel timers do not see. realtime_x is audio_dur / wall_total (NOT the
+ * summed-kernel total, which over-reports realtime by the idle ratio). */
 typedef struct {
     double t_fft;
     double t_track;
     double t_synth;
     double t_norm;
     double t_write;
-    double t_total;
+    double t_total;     /* busy total = sum of the per-stage kernel spans */
+    double wall_total;  /* honest total = real monotonic wall span of the whole run */
     double audio_dur;
-    double realtime_x;
+    double realtime_x;  /* audio_dur / wall_total */
 } SpectralTimingResults;
 
 /* Run the full processing pipeline

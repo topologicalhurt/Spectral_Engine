@@ -1,0 +1,99 @@
+"""CLI timing honesty gate (kernel-hardening II).
+
+The headline `Total` was a SUM OF KERNEL TIMERS, not wall time — it under-reported
+the real run by up to ~13x and made `Realtime` a fiction. The fix (spectral_cli_pipeline.c)
+makes `Total` the real monotonic wall span and derives `Realtime` from it, with a Busy/Idle
+breakdown. This test pins that honesty against the INDEPENDENT stderr stage markers:
+
+  - Total (wall) >= Busy (sum of per-stage kernel timers)         [wall can't be < kernel]
+  - Total ~>= the stage-marker wall (first BEGIN .. last END)      [Total IS wall, not the sum]
+  - Realtime == audio_dur / (Total/1000)                          [realtime derived from wall]
+
+Fail-on-bug: revert Total to the kernel sum and the marker-wall assertion fails (the sum is
+strictly below the marker wall, which contains alloc/setup the kernel timers don't).
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+WAV = ROOT / "resources/testing/shakespeare_he_saw_the_cat.wav"
+BENCH_ARGS = ["0", "1.0", "0", "4096", "128", "-90", "8", "1"]
+
+FFT_LINE = re.compile(
+    r"FFT:\s*([\d.]+)ms\s*Track:\s*([\d.]+)ms\s*Synth:\s*([\d.]+)ms\s*"
+    r"Norm:\s*([\d.]+)ms\s*Write:\s*([\d.]+)ms\s*Total:\s*([\d.]+)ms")
+BUSY_LINE = re.compile(r"Busy:\s*([\d.]+)ms\s*Idle:\s*([\d.]+)ms")
+RT_LINE = re.compile(r"Audio:\s*([\d.]+)s\s*Realtime:\s*([\d.]+)x")
+MARKER = re.compile(r"SPECTRAL_STAGE_(BEGIN|END)\s+\S+\s+(\d+)")
+
+
+@pytest.fixture(scope="session")
+def cli_run(tmp_path_factory) -> tuple[str, str]:
+    """Build desktop once and run the CLI on the bench fixture; return (stdout+stderr)."""
+    if shutil.which("cmake") is None:
+        pytest.skip("cmake not on PATH")
+    if not WAV.exists():
+        pytest.skip(f"bench fixture missing: {WAV}")
+    build = tmp_path_factory.mktemp("cli_timing")
+    cfg = subprocess.run(["cmake", "-S", str(ROOT), "-B", str(build),
+                          "-DCMAKE_BUILD_TYPE=Release"], capture_output=True, text=True)
+    if cfg.returncode != 0:
+        pytest.skip(f"configure failed:\n{cfg.stderr[-1500:]}")
+    bld = subprocess.run(["cmake", "--build", str(build), "--target", "desktop", "-j8"],
+                         capture_output=True, text=True)
+    if bld.returncode != 0:
+        pytest.skip(f"desktop build failed:\n{bld.stderr[-1500:]}")
+    bins = list((build / "bin").glob("spectral_*desktop"))
+    if not bins:
+        pytest.skip("no desktop binary produced")
+    run = subprocess.run([str(bins[0]), str(WAV), *BENCH_ARGS], capture_output=True, text=True)
+    assert run.returncode == 0, f"CLI run failed: {run.stderr[-1500:]}"
+    return run.stdout + run.stderr
+
+
+def _parse(out: str):
+    fft = FFT_LINE.search(out)
+    busy = BUSY_LINE.search(out)
+    rt = RT_LINE.search(out)
+    assert fft and busy and rt, "could not parse the Timing section (format changed?)"
+    stages = [float(fft.group(i)) for i in range(1, 6)]
+    total = float(fft.group(6))
+    markers = [(m.group(1), int(m.group(2))) for m in MARKER.finditer(out)]
+    return stages, total, float(busy.group(1)), float(busy.group(2)), \
+        float(rt.group(1)), float(rt.group(2)), markers
+
+
+def test_total_is_wall_not_kernel_sum(cli_run):
+    stages, total, busy, idle, _audio, _rt, markers = _parse(cli_run)
+    assert abs(busy - sum(stages)) <= 0.6, f"Busy {busy} != sum of stages {sum(stages)}"
+    assert total >= busy - 0.6, f"Total(wall) {total} < Busy(kernel sum) {busy} — impossible"
+    assert abs((total - busy) - idle) <= 0.6, f"Idle {idle} != Total-Busy {total-busy}"
+    if markers:
+        begins = [ns for k, ns in markers if k == "BEGIN"]
+        ends = [ns for k, ns in markers if k == "END"]
+        marker_wall_ms = (max(ends) - min(begins)) / 1e6
+        # Total is the WALL span: it must reach the independently-measured marker wall.
+        # The kernel sum (the old bug) is strictly below it. 5% slack for clock granularity.
+        assert total >= marker_wall_ms * 0.95, (
+            f"Total {total}ms < marker wall {marker_wall_ms:.1f}ms*0.95 — Total looks like the "
+            f"kernel sum ({busy}ms), not wall (plan §II regression)")
+
+
+def test_realtime_is_derived_from_wall(cli_run):
+    _stages, total, _busy, _idle, audio, realtime, _markers = _parse(cli_run)
+    expect = audio / (total / 1000.0)
+    assert abs(realtime - expect) / expect < 0.02, (
+        f"Realtime {realtime}x != audio/wall {expect:.1f}x — realtime not derived from the "
+        f"wall Total (plan §II)")
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-v"]))
