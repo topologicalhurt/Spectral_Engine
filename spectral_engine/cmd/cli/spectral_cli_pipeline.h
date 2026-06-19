@@ -36,6 +36,18 @@ typedef struct {
     double wall_total;  /* honest total = real monotonic wall span of the whole run */
     double audio_dur;
     double realtime_x;  /* audio_dur / wall_total */
+    /* Run-paths record (II.5): which paths ACTUALLY ran, for the consolidated "Paths:" line.
+     * eff_backend is the SynthBackend that ran (after any fallback); req_backend what was asked.
+     * proc_* are SpectralProcessMask bitsets. Ints (not the enums) to keep this header light. */
+    int      req_backend;     /* requested SynthBackend (BACKEND_*) */
+    int      eff_backend;     /* effective SynthBackend that ran */
+    int      q15_requested;   /* --q15 asked */
+    int      q15_active;      /* Q15 compute domain actually engaged (not fell back to float) */
+    int      cache_hit;       /* segments served from cache */
+    int      cache_built;     /* cache built this run */
+    int      hybrid_engaged;  /* IFFT-hybrid fast path taken */
+    uint32_t proc_requested;  /* processing-chain stages requested (mask) */
+    uint32_t proc_applied;    /* processing-chain stages applied (mask) */
 } SpectralTimingResults;
 
 /* Run the full processing pipeline

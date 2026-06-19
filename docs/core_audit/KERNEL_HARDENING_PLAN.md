@@ -212,8 +212,16 @@ reads 3% of real heap.
   scratch-grow realloc was left unwired (its TU is linked by 7 minimal osc/q15 test harnesses
   that don't link perf.c; low value, not worth the link-dep churn). Full alloc-byte routing
   (the non-minimal variant) deferred. *[done — minimal]*
-- **II.5** **Stage-ran mask + fallback mask** as a structured one-line record. *[M / low —
-  read-only instrumentation of existing decision points]*
+- **II.5 — LANDED (Phase D-3).** A consolidated **`Paths:`** line records which paths
+  ACTUALLY ran: `backend=<eff> [(req X)]  q15=<on|fell-back-to-float|off>  cache=<hit|built|none>
+  hybrid=<on|off>  proc=<applied fixtures|none>`. The effective backend + Q15 state are captured
+  out of `run_synthesis` (the `(req X)` suffix shows a fallback from the requested backend);
+  the proc-applied mask out of `pipeline_apply_processing_mask`; cache state out of the cache
+  executor. Verified: `backend=Metal` on `-b 2`, `q15=on` on `--q15 sine`, `backend=CPU` on the
+  CPU path. The fields are added to `SpectralTimingResults` (the per-run record). Test
+  `test_cli_timing.py::test_paths_record_reflects_effective_run`. Remaining for II.5: a true
+  machine-readable bitmask (vs the human line) + the IFFT-hybrid `engaged` flag (the gate is
+  compile-off by default, so it always reads `off` today) — folds into the II.1 record. *[done]*
 - **II.6** Align the Python bench to the new record; keep warm-median-with-spread doctrine;
   share the stage/fallback enum C↔Python by **generation or binary-parse (C-truth rule)**,
   never hand-duplicated (kills the `STAGE_RE_V1/V2` parser drift). *[M / med]*

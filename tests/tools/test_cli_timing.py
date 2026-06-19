@@ -107,5 +107,17 @@ def test_memory_report_is_honest(cli_run):
         "Faults line must report major faults, ctx-switches, and the realloc count")
 
 
+def test_paths_record_reflects_effective_run(cli_run):
+    """II.5: a consolidated 'Paths:' line records which paths actually ran. The bench args
+    request backend 1 (CPU), so it must report backend=CPU, and carry the q15/cache/hybrid/
+    proc fields. Fail-on-bug: the record drops or mis-reports the effective backend."""
+    m = re.search(r"^Paths:\s*backend=(\S+)\s+q15=(\S+)\s+cache=(\S+)\s+hybrid=(\S+)\s+proc=",
+                  cli_run, re.MULTILINE)
+    assert m, "the consolidated Paths line is missing or malformed (plan §II.5)"
+    assert m.group(1) == "CPU", f"effective backend should be CPU (requested), got {m.group(1)}"
+    assert m.group(2) in ("on", "off", "fell-back-to-float")
+    assert m.group(3) in ("hit", "built", "none")
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
