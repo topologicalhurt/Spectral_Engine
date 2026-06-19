@@ -8,8 +8,10 @@ ADR-0001 rules 3/5).
 
 The default fixture is the standard counts workload (M7_PERF_MODEL_PLAN.md):
 9 staggered 8192-sample voices (odd count keeps one voice unpaired past
-dual-MAC pairing), 16384 output samples in 256-sample blocks, fades
-exercised at every boundary.
+dual-MAC pairing), rendered in 48-sample blocks (DAISY_AUDIO_BLOCK_SIZE — the
+REAL codec callback, not the 256-sample engine buffer cap; measuring at 256
+under-priced per-block overhead by ~13%), total a multiple of 48 that contains
+all voices, fades exercised at every boundary.
 """
 
 from __future__ import annotations
@@ -108,10 +110,14 @@ class WorkloadFixture:
 
 def default_fixture() -> WorkloadFixture:
     return WorkloadFixture(
-        name="stagger9-8k",
+        name="stagger9-8k-b48",
         sample_rate=48_000,
-        total_samples=16_384,
-        block_samples=256,
+        # Render at the real 48-sample Daisy codec block (DAISY_AUDIO_BLOCK_SIZE). total is the
+        # smallest multiple of 48 that still contains the last voice (ends at 8192+8192=16384):
+        # 48*342 = 16416. The 256-block fixture under-priced per-block overhead (seed/fade/prologue)
+        # by ~13% (process_insns 2.10M@256 -> 2.37M@48) — the device never runs the 256 path.
+        total_samples=16_416,
+        block_samples=48,
         voices=tuple(
             Voice(start=i * 1024, length=8192, freq_hz=220.0 * (i + 1), amp=0.05)
             for i in range(9)

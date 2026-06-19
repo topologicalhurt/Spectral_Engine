@@ -48,6 +48,10 @@ typedef struct {
      * (constant) phase_inc and reused every block (see SpectralActiveSegQ15). */
     q31_t    cos_w[SPECTRAL_ARM32_MAX_ACTIVE];
     q31_t    sin_w[SPECTRAL_ARM32_MAX_ACTIVE];
+    /* Carried recurrence state (c,s): seeded once at activation, advanced across blocks with
+     * one ALU renorm per block (no per-block f64 seed). */
+    q31_t    osc_c[SPECTRAL_ARM32_MAX_ACTIVE];
+    q31_t    osc_s[SPECTRAL_ARM32_MAX_ACTIVE];
 #endif
     q15_t    amp_current[SPECTRAL_ARM32_MAX_ACTIVE];
     q15_t    amp_delta[SPECTRAL_ARM32_MAX_ACTIVE];

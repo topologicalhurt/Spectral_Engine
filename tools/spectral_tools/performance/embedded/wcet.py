@@ -46,14 +46,15 @@ from .toolchain import Toolchain
 # Loops are keyed by their GCC-emitted .L label. These labels are a function of the
 # whole TU's layout, so any change to spectral_synth_arm32.c renumbers them uniformly
 # even when the per-iteration loop codegen (cycles/voice-sample) is byte-identical. They
-# last shifted when the coupled-oscillator rotation constants were hoisted to voice
-# activation (per-block FPU re-seed removed from the render): the loop bodies and their
-# cycles/iter are UNCHANGED (verified in-band), labels only.
+# last shifted when the coupled oscillator moved to carry (c,s) across blocks with a
+# per-block ALU renorm (dropping the per-block f64 seed): the per-sample loop bodies and
+# their cycles/iter are UNCHANGED (verified in-band — renorm is per-block, not in the
+# loop), labels only.
 SAMPLES_PER_ITER = {
-    "synth_core_m7/.L422": 16.0,   # main sustain loop
-    "synth_core_pair_m7/.L504": 2.0,
-    "synth_core_m7/.L424": 1.0,    # scalar tail
-    "synth_fade_m7/.L594": 1.0,
+    "synth_core_m7/.L352": 16.0,   # main sustain loop
+    "synth_core_pair_m7/.L434": 2.0,
+    "synth_core_m7/.L354": 1.0,    # scalar tail
+    "synth_fade_m7/.L524": 1.0,
 }
 # Guard band for cycles/voice-sample: if a kernel falls outside, the unroll
 # map has drifted and the WCET must not be trusted silently.

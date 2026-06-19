@@ -726,15 +726,13 @@ static inline void synth_core_pair_m7(
     uint32_t blk_start,
     uint32_t blk_end,
     uint32_t* restrict phaseA, q15_t* restrict ampA, uint32_t phase_incA, q15_t amp_deltaA,
-    q31_t cwA, q31_t swA,
+    q31_t cwA, q31_t swA, SpectralCoupledOsc* restrict oscA,
     uint32_t* restrict phaseB, q15_t* restrict ampB, uint32_t phase_incB, q15_t amp_deltaB,
-    q31_t cwB, q31_t swB
+    q31_t cwB, q31_t swB, SpectralCoupledOsc* restrict oscB
 ) {
-    /* Rotation constants cwA/swA/cwB/swB come from the per-voice activation (constant over
-     * the partial); only the (c,s) state is re-seeded from the exact phase each block. */
-    SpectralCoupledOsc oA, oB;
-    spectral_coupled_seed_state(&oA, (double)(*phaseA) * SPECTRAL_PHASE_U32_TO_RAD);
-    spectral_coupled_seed_state(&oB, (double)(*phaseB) * SPECTRAL_PHASE_U32_TO_RAD);
+    /* Rotation constants cwA/swA/cwB/swB are per-voice activation constants; the (c,s) state is
+     * CARRIED in oscA/oscB across blocks (no per-block f64 seed), one renorm per block each. */
+    SpectralCoupledOsc oA = *oscA, oB = *oscB;
     q15_t aA = *ampA, aB = *ampB;
     for (uint32_t j = blk_start; j < blk_end; j++) {
         SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
@@ -744,6 +742,8 @@ static inline void synth_core_pair_m7(
         aA = spectral_qadd16(aA, amp_deltaA);
         aB = spectral_qadd16(aB, amp_deltaB);
     }
+    spectral_coupled_renorm(&oA);  *oscA = oA;
+    spectral_coupled_renorm(&oB);  *oscB = oB;
     uint32_t blk_len = blk_end - blk_start;
     *phaseA += phase_incA * blk_len;  *ampA = aA;
     *phaseB += phase_incB * blk_len;  *ampB = aB;
@@ -796,6 +796,7 @@ static inline void synth_segment_m7(
     uint32_t phase_inc,
     q31_t cos_w,
     q31_t sin_w,
+    SpectralCoupledOsc* restrict osc_io,
     q15_t amp_start,
     q15_t amp_delta,
     uint32_t* phase_out,
@@ -806,11 +807,10 @@ static inline void synth_segment_m7(
 ) {
     q15_t amp = amp_start;
 
-    /* Seed the rotating state (c,s) from the canonical phase for this block -- the per-block
-     * drift resync. The rotation constants cos_w/sin_w are passed in: they depend only on the
-     * constant phase_inc, so they are computed ONCE at voice activation, not per block. */
-    SpectralCoupledOsc osc;
-    spectral_coupled_seed_state(&osc, (double)phase_start * SPECTRAL_PHASE_U32_TO_RAD);
+    /* Continue the rotating state (c,s) from where the previous block left off -- carried in
+     * osc_io, not re-seeded from phase (no per-block f64 sine). cos_w/sin_w are the per-voice
+     * constants. One renorm at the end of the block bounds the slow Q31 drift. */
+    SpectralCoupledOsc osc = *osc_io;
 
     uint32_t seg_fade_out_start = seg_length - fade_len;
     uint32_t blk_len = blk_end - blk_start;
@@ -868,8 +868,14 @@ static inline void synth_segment_m7(
                       &amp, amp_delta, fade_val, (q15_t)-fade_step);
     }
 
-    /* Advance the canonical phase by the whole block (mod 2^32, exactly as the per-sample
-     * increment would), so the next block re-seeds the oscillator from the exact phase. */
+    /* One ALU renorm per block bounds the slow Q31 magnitude drift of the carried recurrence
+     * (validated to the SNR budget by test_osc_recursive at this cadence), then hand the state
+     * to the next block. */
+    spectral_coupled_renorm(&osc);
+    *osc_io = osc;
+
+    /* Advance the canonical phase by the whole block (kept for seek/activation consistency; the
+     * oscillator no longer re-seeds from it -- it carries (c,s) across blocks). */
     *phase_out = phase_start + phase_inc * blk_len;
     *amp_out = amp;
 }
@@ -926,6 +932,8 @@ static inline void spectral_arm32_prune_expired_active(SpectralArm32Ctx* ctx, ui
 #if SPECTRAL_ARM_M7
             ctx->active_soa.cos_w[i]       = ctx->active_soa.cos_w[last];
             ctx->active_soa.sin_w[i]       = ctx->active_soa.sin_w[last];
+            ctx->active_soa.osc_c[i]       = ctx->active_soa.osc_c[last];
+            ctx->active_soa.osc_s[i]       = ctx->active_soa.osc_s[last];
 #endif
             ctx->active_soa.amp_current[i] = ctx->active_soa.amp_current[last];
             ctx->active_soa.amp_delta[i]   = ctx->active_soa.amp_delta[last];
@@ -1068,12 +1076,15 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             }
 
 #if SPECTRAL_ARM_M7
-            /* Compute the coupled-oscillator rotation constants ONCE here (they depend only on
-             * the constant phase_inc); the per-block M7 render reuses them instead of
-             * recomputing two f64 minimax sines per block per voice. */
+            /* Seed the per-voice oscillator ONCE here: the rotation constants depend only on
+             * the constant phase_inc, and the (c,s) state is seeded from the activation phase.
+             * The per-block render reuses the constants and CARRIES (c,s) across blocks (one
+             * ALU renorm per block bounds drift), so no f64 sine is ever evaluated per block. */
             q31_t seg_cos_w, seg_sin_w;
             spectral_coupled_freq_constants((double)phase_inc * SPECTRAL_PHASE_U32_TO_RAD,
                                             &seg_cos_w, &seg_sin_w);
+            SpectralCoupledOsc seg_osc;
+            spectral_coupled_seed_state(&seg_osc, (double)phase_acc * SPECTRAL_PHASE_U32_TO_RAD);
 #endif
 #if SPECTRAL_SOA_ACTIVE
             ctx->active_soa.seg_idx[slot] = ctx->next_seg_idx;
@@ -1088,6 +1099,8 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #if SPECTRAL_ARM_M7
             ctx->active_soa.cos_w[slot] = seg_cos_w;
             ctx->active_soa.sin_w[slot] = seg_sin_w;
+            ctx->active_soa.osc_c[slot] = seg_osc.c;
+            ctx->active_soa.osc_s[slot] = seg_osc.s;
 #endif
 #else
             SpectralActiveSegment* act = &ctx->active[slot];
@@ -1103,6 +1116,8 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #if SPECTRAL_ARM_M7
             act->cos_w = seg_cos_w;
             act->sin_w = seg_sin_w;
+            act->osc_c = seg_osc.c;
+            act->osc_s = seg_osc.s;
 #endif
 #endif
             ctx->num_active++;
@@ -1172,6 +1187,8 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             q15_t    d_ampB    = ctx->active_soa.amp_delta[i + 1];
             q31_t    cwA = ctx->active_soa.cos_w[i],     swA = ctx->active_soa.sin_w[i];
             q31_t    cwB = ctx->active_soa.cos_w[i + 1], swB = ctx->active_soa.sin_w[i + 1];
+            SpectralCoupledOsc oscA = { ctx->active_soa.osc_c[i],     ctx->active_soa.osc_s[i] };
+            SpectralCoupledOsc oscB = { ctx->active_soa.osc_c[i + 1], ctx->active_soa.osc_s[i + 1] };
 #else
             SpectralActiveSegment* actB = &ctx->active[i + 1];
             uint32_t phaseB    = actB->phase_acc;
@@ -1180,19 +1197,27 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             q15_t    d_ampB    = actB->amp_delta;
             q31_t    cwA = act->cos_w,  swA = act->sin_w;
             q31_t    cwB = actB->cos_w, swB = actB->sin_w;
+            SpectralCoupledOsc oscA = { act->osc_c,  act->osc_s };
+            SpectralCoupledOsc oscB = { actB->osc_c, actB->osc_s };
 #endif
             synth_core_pair_m7(accum, 0u, num_samples,
-                               &phase, &amp, phase_inc, d_amp, cwA, swA,
-                               &phaseB, &ampB, phase_incB, d_ampB, cwB, swB);
+                               &phase, &amp, phase_inc, d_amp, cwA, swA, &oscA,
+                               &phaseB, &ampB, phase_incB, d_ampB, cwB, swB, &oscB);
             spectral_perf_paired_voice_samples(num_samples);  /* voice B (A counted above) */
 #if SPECTRAL_SOA_ACTIVE
             ctx->active_soa.phase_acc[i]       = phase;
             ctx->active_soa.amp_current[i]     = amp;
+            ctx->active_soa.osc_c[i]           = oscA.c;
+            ctx->active_soa.osc_s[i]           = oscA.s;
             ctx->active_soa.phase_acc[i + 1]   = phaseB;
             ctx->active_soa.amp_current[i + 1] = ampB;
+            ctx->active_soa.osc_c[i + 1]       = oscB.c;
+            ctx->active_soa.osc_s[i + 1]       = oscB.s;
 #else
             act->phase_acc   = phase;   act->amp_current   = amp;
+            act->osc_c = oscA.c;        act->osc_s = oscA.s;
             actB->phase_acc  = phaseB;  actB->amp_current  = ampB;
+            actB->osc_c = oscB.c;       actB->osc_s = oscB.s;
 #endif
             i += 2;
             continue;
@@ -1205,13 +1230,22 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #if SPECTRAL_SOA_ACTIVE
             q31_t cos_w = ctx->active_soa.cos_w[i];
             q31_t sin_w = ctx->active_soa.sin_w[i];
+            SpectralCoupledOsc osc = { ctx->active_soa.osc_c[i], ctx->active_soa.osc_s[i] };
 #else
             q31_t cos_w = act->cos_w;
             q31_t sin_w = act->sin_w;
+            SpectralCoupledOsc osc = { act->osc_c, act->osc_s };
 #endif
             synth_segment_m7(accum, blk_start, blk_end,
-                             phase, phase_inc, cos_w, sin_w, amp, d_amp,
+                             phase, phase_inc, cos_w, sin_w, &osc, amp, d_amp,
                              &phase, &amp, seg_offset, seg_length, fade_len);
+#if SPECTRAL_SOA_ACTIVE
+            ctx->active_soa.osc_c[i] = osc.c;
+            ctx->active_soa.osc_s[i] = osc.s;
+#else
+            act->osc_c = osc.c;
+            act->osc_s = osc.s;
+#endif
         }
 #else
         /* Generic inner loop with linear fade envelope */

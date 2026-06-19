@@ -55,12 +55,30 @@ to verify; **REFUTED** = candidate concern checked and dismissed (do not re-liti
 | q63-width (bw-03) | bandwidth | info | **DOC ✅ landed** | Pinned the q63 contract at the accum decl (128·2³⁰=2³⁷>int32; SMLALD needs 64-bit dest). |
 | stretch-doc (honesty-01) | honesty | high | **DOC ✅ landed** | `spectral_arm32_set_stretch` is a silent no-op; commented as intentionally inert + synth-time-only. |
 | renorm-note (fpu-05/kr-03) | fpu-alu | med | **DOC ✅ landed** | `spectral_coupled_renorm` is test-only; noted at its def + the standing fix. |
-| **fpu-01** carry-(c,s)+renorm | fpu-alu | high | **RE-MEASURED — recommend re-land w/ fpu-02** | After fpu-03, also carry `(c,s)` across blocks + one ALU `spectral_coupled_renorm`/block, dropping the f64 state-seed. Byte-identical for the workload (digest `07f868f5…`), SINAD 80.7, gate green; **−1.2%** at the fixture's **256-sample** block — which is why it was first DECLINED. **Re-measured (empirical, see Block-size measurement below): at the REAL 48-sample Daisy block it is −5.76%** (per-block overhead is paid 5.3× more often). The 1.2% was a fixture artifact, not the true cost. Trade: 5.76% compute/WCET headroom for **+4 KB DTCM** (`osc_c[512]+osc_s[512]`) on a compute-bound (not DTCM-bound) target. Currently REVERTED (tree at fpu-03); recommend re-landing TOGETHER WITH fpu-02 (so the gate measures the real block and reflects the 5.76%). |
+| **fpu-01** carry-(c,s)+renorm | fpu-alu | high | **✅ LANDED (w/ fpu-02)** | Carry `(c,s)` across blocks + one ALU `spectral_coupled_renorm`/block, dropping the per-block f64 state-seed entirely. The shipped drift regime is now carry+renorm (NOT byte-identical to re-seed — a validated audio change: `osc_recursive` 86–93 dB SNR over 8s, `arm_core_test` SINAD 80.7; new golden render checksum `0ed6e0ac`). **Measured directly at the real 48-sample block (fpu-02 fixture): −5.96%** process_insns (2,373,319→2,231,920); was only −1.2% at the old 256-block fixture (the artifact that first declined it). Cost +4 KB DTCM (`osc_c/osc_s[512]`) — REQUIRED for the 512-voice real-time target. Steady-state cyc/voice-sample 24.01 unchanged. |
 | **fpu-03** invariant-constants | fpu-alu | med | **✅ LANDED** | `cos_w/sin_w` depend only on (constant) ω; were recomputed every block. Now computed ONCE at activation, stored in the active record (AoS+SoA), threaded into `synth_segment_m7`/`synth_core_pair_m7`; only the `(c,s)` state is re-seeded per block. **Byte-identical** (m7 baseline digest unchanged `07f868f5…`; host `arm_core_test` output identical) and **−44% process_insns** (3.76M→2.10M) — measuring that the per-block f64 re-seed *dominated* the embedded synth. Steady-state cyc/voice-sample 24.01 unchanged. m7 baseline re-signed (label keys + insns only); perf gate + ctest 32/32 green. |
-| **kr-02** WCET cap unenforced | wiring | **high** | **API / PERF-GATED** | `DAISY_MAX_ACTIVE=128` (WCET budget) is enforced **nowhere**; runtime cap is `SPECTRAL_ARM32_MAX_ACTIVE=512` (4× the proven budget). Enforce a runtime `max_active`, or delete the budget comment. |
+| **kr-02** WCET cap doc-stale | wiring | med | **REFRAMED by the 512-voice target** | Originally: `DAISY_MAX_ACTIVE=128` (old WCET cap) is enforced nowhere while the runtime cap is 512 → recommended enforcing 128. **The 512-voice target reverses this**: 512 is the goal, so the 512 cap is correct and must NOT be lowered. The defect is now doc-only: `DAISY_MAX_ACTIVE=128` and its "WCET-gated, 128 voices proven" comment are **stale** (the budget analysis above shows 512 is ~1.0–1.5× over on the oscillator bank → the real path to 512 is IFFT). Fix: update/retire `DAISY_MAX_ACTIVE` to state the 512 target + that 512-voice real-time rides the IFFT path, not assert a 128 guarantee. |
 | bandwidth-01 dead LUT on M7 | bandwidth | med | **PERF-GATED** | M7 path never reads the 8 KB sine LUT yet `process()` requires it non-null and Daisy holds it resident. Gate the precondition on the LUT path; reclaim ~8 KB SRAM. |
 | kr-01 fade-partition dup | dup | med | **PERF-GATED** (or parity test) | Three-region fade boundary math is hand-duplicated across M7 / non-M7 / SIMD; already one clamp out of sync. Hoist to one `static inline` or pin with a parity test. |
-| fpu-02 48-sample fixture | fpu-alu | high | **MEASURED — fidelity gap confirmed** | The counts fixture (`stagger9-8k`) renders at **block=256**, but the real Daisy callback is **`DAISY_AUDIO_BLOCK_SIZE=48`**. MEASURED: process_insns 2,101,357 @256 → **2,373,319 @48 (+12.9%)** — the perf model under-prices per-block overhead by that much. The fixture should render at the real 48-sample block (its total must become a multiple of 48). This also lets fpu-01 be gated at its true −5.76%. SSOT-fixture change → maintainer-confirmable. |
+| fpu-02 48-sample fixture | fpu-alu | high | **✅ LANDED** | The counts fixture (`stagger9-8k`) rendered at **block=256**, but the real Daisy callback is **`DAISY_AUDIO_BLOCK_SIZE=48`** — under-pricing per-block overhead by **+12.9%** (2.10M→2.37M, measured). The canonical fixture now renders at block=48 (`stagger9-8k-b48`, total 16,416 = 48·342), so the perf model measures the real target and fpu-01 is gated at its true −5.96%. New input fixture digest + golden render checksum (re-signed baseline). |
+
+### 512-voice real-time target (maintainer constraint: ~speech intelligibility)
+
+The per-voice oscillator bank does **not** reach 512 real-time voices at 48 kHz on the M7 — the
+**per-sample loop** (24.01 cyc/voice-sample, unchanged by fpu-01/fpu-03) is the wall, not the
+per-block overhead. 512 voices need `512·48·cyc_vs` cycles per 48-sample block:
+
+| clock | all-paired (20.0 cyc/vs) | budget | verdict | max voices (paired) |
+|------:|--------------------------:|-------:|:-------:|:-------------------:|
+| 400 MHz | 491,766 cyc/block | 400,000 | 1.23× over | ~416 |
+| 480 MHz | 491,766 cyc/block | 480,000 | 1.02× over | ~499 |
+
+fpu-01 + dual-MAC are necessary but **insufficient** for 512. 512 voices = a *dense* spectrum, which
+is exactly the regime where **inverse-FFT (Rodet-Depalle) synthesis (~8×)** wins over the per-partial
+oscillator (the F2 algorithm fork / IFFT_SYNTHESIS_PLAN). **Conclusion: the route to 512-voice
+real-time is the IFFT synthesis path for dense frames, not further oscillator micro-opt.** The
+512-slot active-record sizing (`SPECTRAL_ARM32_MAX_ACTIVE=512`) is therefore CORRECT — and kr-02's
+"enforce 128" is OFF the table (128 was the old WCET cap; the target is 512).
 
 ### Block-size measurement (empirical, fpu-03 tree, qemu counts)
 

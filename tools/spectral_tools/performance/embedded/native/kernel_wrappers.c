@@ -30,16 +30,20 @@ void mca_synth_core_pair_m7(q63_t* restrict accum, uint32_t blk_start, uint32_t 
                             uint32_t phase_incA, q15_t amp_deltaA,
                             uint32_t* restrict phaseB, q15_t* restrict ampB,
                             uint32_t phase_incB, q15_t amp_deltaB) {
-    /* Rotation constants are per-voice activation work (computed once, not per block); the
-     * production path stores them in the active record. Compute them here OUTSIDE the marked
-     * region so the measured loop is the steady-state dual-MAC, matching the kernel. */
+    /* Rotation constants and the initial (c,s) are per-voice activation work (the production
+     * path stores them in the active record and CARRIES (c,s) across blocks). Set them up here
+     * OUTSIDE the marked region so the measured loop is the steady-state dual-MAC + per-block
+     * renorm, matching the kernel. */
     q31_t cwA, swA, cwB, swB;
     spectral_coupled_freq_constants((double)phase_incA * SPECTRAL_PHASE_U32_TO_RAD, &cwA, &swA);
     spectral_coupled_freq_constants((double)phase_incB * SPECTRAL_PHASE_U32_TO_RAD, &cwB, &swB);
+    SpectralCoupledOsc oscA, oscB;
+    spectral_coupled_seed_state(&oscA, (double)(*phaseA) * SPECTRAL_PHASE_U32_TO_RAD);
+    spectral_coupled_seed_state(&oscB, (double)(*phaseB) * SPECTRAL_PHASE_U32_TO_RAD);
     MCA_BEGIN(synth_core_pair_m7);
     synth_core_pair_m7(accum, blk_start, blk_end,
-                       phaseA, ampA, phase_incA, amp_deltaA, cwA, swA,
-                       phaseB, ampB, phase_incB, amp_deltaB, cwB, swB);
+                       phaseA, ampA, phase_incA, amp_deltaA, cwA, swA, &oscA,
+                       phaseB, ampB, phase_incB, amp_deltaB, cwB, swB, &oscB);
     MCA_END();
 }
 #endif

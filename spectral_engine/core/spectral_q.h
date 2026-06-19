@@ -363,6 +363,11 @@ typedef struct __attribute__((aligned(4))) {
      * instead of recomputing two f64 minimax sines per block. */
     q31_t    cos_w;
     q31_t    sin_w;
+    /* Carried recurrence state (c,s) in Q31. Seeded once at activation, then advanced
+     * continuously across blocks (one ALU renorm per block bounds the slow Q31 drift) so
+     * the f64 sine seed is never paid per block. */
+    q31_t    osc_c;
+    q31_t    osc_s;
 #endif
     uint32_t seg_start;
     uint32_t seg_end;
