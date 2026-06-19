@@ -65,7 +65,12 @@ def render(binary: Path, wav: Path, timbre: int, backend: str,
     if proc.returncode != 0:
         print(proc.stdout, proc.stderr, sep="\n")
         raise RuntimeError(f"render failed (timbre {timbre}, backend {backend})")
-    return proc.stdout, run_dir / "output" / "out_c.wav"
+    # The output WAV is named after the input stem (unique per input), not a fixed
+    # out_c.wav; run_dir is fresh so exactly one .wav is produced — glob for it.
+    wavs = sorted((run_dir / "output").glob("*.wav"))
+    if not wavs:
+        raise RuntimeError(f"render produced no .wav (timbre {timbre}, backend {backend})")
+    return proc.stdout, wavs[0]
 
 
 def main() -> int:
