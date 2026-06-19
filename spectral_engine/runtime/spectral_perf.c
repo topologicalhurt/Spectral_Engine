@@ -4,9 +4,10 @@
  *   macOS: mach_task_info(), getrusage(), sysctlbyname()
  *   Linux: /proc/self/statm, getrusage(), sysconf()
  *
- * Allocation Tracking:
- *   perf_track_alloc/free maintain running total and peak
- *   Used to measure actual memory consumption vs theoretical
+ * Memory + fault reporting (perf_print): real RSS + resident delta, getrusage major
+ *   page-faults / context-switches, and the realloc counter (g_realloc_count). The
+ *   perf_track_alloc/free running-total machinery is retained substrate for the deferred
+ *   full alloc-byte routing (II.4 non-minimal variant); it is not currently displayed.
  *
  * Embedded estimation is in runtime/spectral_perf_embedded.c
  */

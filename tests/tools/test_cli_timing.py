@@ -24,6 +24,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from spectral_tools.core.constants import STAGE_MARKER_LINE_RE  # noqa: E402 — canonical marker regex
+
 WAV = ROOT / "resources/testing/shakespeare_he_saw_the_cat.wav"
 BENCH_ARGS = ["0", "1.0", "0", "4096", "128", "-90", "8", "1"]
 
@@ -32,7 +35,6 @@ FFT_LINE = re.compile(
     r"Norm:\s*([\d.]+)ms\s*Write:\s*([\d.]+)ms\s*Total:\s*([\d.]+)ms")
 BUSY_LINE = re.compile(r"Busy:\s*([\d.]+)ms\s*Idle:\s*([\d.]+)ms")
 RT_LINE = re.compile(r"Audio:\s*([\d.]+)s\s*Realtime:\s*([\d.]+)x")
-MARKER = re.compile(r"SPECTRAL_STAGE_(BEGIN|END)\s+\S+\s+(\d+)")
 
 
 @pytest.fixture(scope="session")
@@ -66,7 +68,12 @@ def _parse(out: str):
     assert fft and busy and rt, "could not parse the Timing section (format changed?)"
     stages = [float(fft.group(i)) for i in range(1, 6)]
     total = float(fft.group(6))
-    markers = [(m.group(1), int(m.group(2))) for m in MARKER.finditer(out)]
+    # canonical stage-marker protocol: ^SPECTRAL_STAGE_(BEGIN|END) <name> <ns>$ -> (kind, ns)
+    markers = []
+    for line in out.splitlines():
+        mm = STAGE_MARKER_LINE_RE.match(line.strip())
+        if mm:
+            markers.append((mm.group(1), int(mm.group(3))))
     return stages, total, float(busy.group(1)), float(busy.group(2)), \
         float(rt.group(1)), float(rt.group(2)), markers
 

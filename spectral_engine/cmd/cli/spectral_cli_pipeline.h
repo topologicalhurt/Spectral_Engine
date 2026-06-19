@@ -46,7 +46,6 @@ typedef struct {
     int      cache_hit;       /* segments served from cache */
     int      cache_built;     /* cache built this run */
     int      hybrid_engaged;  /* IFFT-hybrid fast path taken */
-    uint32_t proc_requested;  /* processing-chain stages requested (mask) */
     uint32_t proc_applied;    /* processing-chain stages applied (mask) */
 } SpectralTimingResults;
 

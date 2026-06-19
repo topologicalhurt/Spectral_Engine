@@ -690,7 +690,6 @@ static PipelineError pipeline_apply_processing_mask(
     }
     print_processing_mask_report(&proc_report);
     if (paths) {  /* which adaptive fixtures actually ran, for the consolidated Paths line */
-        paths->proc_requested = (uint32_t)proc_report.requested;
         paths->proc_applied = (uint32_t)proc_report.applied;
     }
     return PIPELINE_OK;
@@ -1439,6 +1438,11 @@ void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t seg
         char proc_buf[256];
         const char* q15s = t->q15_active ? "on" : (t->q15_requested ? "fell-back-to-float" : "off");
         const char* caches = t->cache_hit ? "hit" : (t->cache_built ? "built" : "none");
+        const char* procs = "none";
+        if (t->proc_applied) {
+            spectral_process_mask_to_string(t->proc_applied, proc_buf, sizeof(proc_buf));
+            procs = proc_buf;
+        }
         if (t->eff_backend == 0) {
             snprintf(backend_str, sizeof(backend_str), "n/a");
         } else if (t->req_backend != t->eff_backend && t->req_backend != 0) {
@@ -1449,9 +1453,7 @@ void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t seg
             snprintf(backend_str, sizeof(backend_str), "%s",
                      spectral_backend_name((SynthBackend)t->eff_backend));
         }
-        spectral_process_mask_to_string(t->proc_applied, proc_buf, sizeof(proc_buf));
         SPECTRAL_LOG_INFO("Paths: backend=%s  q15=%s  cache=%s  hybrid=%s  proc=%s",
-                          backend_str, q15s, caches, t->hybrid_engaged ? "on" : "off",
-                          t->proc_applied ? proc_buf : "none");
+                          backend_str, q15s, caches, t->hybrid_engaged ? "on" : "off", procs);
     }
 }
