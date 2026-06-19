@@ -543,9 +543,11 @@ void spectral_arm32_init(SpectralArm32Ctx* ctx,
      * nothing the accumulator does. Valid partials (omega <= pi) never reach the wrap. */
     ctx->phase_inc_scale_q24 = (uint32_t)((double)(1u << 24) / SPECTRAL_TWO_PI + 0.5);
     ctx->amplitude_q15 = Q15_MAX;
-    
-    /* Ensure caches are coherent after init */
-    spectral_data_sync_barrier();
+    /* No barrier here: init only does same-core CPU writes to ctx (memset + the scalar fields
+     * above), publishing nothing to a DMA/peripheral/second master, so a dsb would order nothing
+     * a later same-core access to normal memory does not already see. The barriers that DO earn
+     * their place are in load/load_in_place, which fence the segment-pool writes (incl. an
+     * external SD/in-place fill) before the pool is exposed to synthesis. */
 }
 
 void spectral_arm32_reset(SpectralArm32Ctx* ctx) {
@@ -676,6 +678,7 @@ static inline void synth_core_m7(
     q15_t* restrict amp,
     q15_t amp_delta
 ) {
+    // SPECTRAL_Q_DOMAIN BEGIN  -- per-sample Q31 recurrence + Q15 MAC; no float (enforced)
     SpectralCoupledOsc o = *osc;   /* recurrence runs in registers */
     q15_t am = *amp;
     uint32_t j = blk_start;
@@ -712,6 +715,7 @@ static inline void synth_core_m7(
     }
     *osc = o;
     *amp = am;
+    // SPECTRAL_Q_DOMAIN END
 }
 
 #if SPECTRAL_HAS_DUAL_MAC
@@ -732,6 +736,7 @@ static inline void synth_core_pair_m7(
 ) {
     /* Rotation constants cwA/swA/cwB/swB are per-voice activation constants; the (c,s) state is
      * CARRIED in oscA/oscB across blocks (no per-block f64 seed), one renorm per block each. */
+    // SPECTRAL_Q_DOMAIN BEGIN  -- dual-MAC per-sample Q31 recurrence; no float (enforced)
     SpectralCoupledOsc oA = *oscA, oB = *oscB;
     q15_t aA = *ampA, aB = *ampB;
     for (uint32_t j = blk_start; j < blk_end; j++) {
@@ -747,6 +752,7 @@ static inline void synth_core_pair_m7(
     uint32_t blk_len = blk_end - blk_start;
     *phaseA += phase_incA * blk_len;  *ampA = aA;
     *phaseB += phase_incB * blk_len;  *ampB = aB;
+    // SPECTRAL_Q_DOMAIN END
 }
 
 #endif /* SPECTRAL_HAS_DUAL_MAC */
@@ -768,6 +774,7 @@ static inline void synth_fade_m7(
     q15_t fade_val,
     q15_t fade_step
 ) {
+    // SPECTRAL_Q_DOMAIN BEGIN  -- per-sample Q31 recurrence + Q15 fade ramp; no float (enforced)
     SpectralCoupledOsc o = *osc;
     q15_t am = *amp;
     for (uint32_t j = blk_start; j < blk_end; j++) {
@@ -780,6 +787,7 @@ static inline void synth_fade_m7(
     }
     *osc = o;
     *amp = am;
+    // SPECTRAL_Q_DOMAIN END
 }
 
 /* Full segment synthesis with linear fade envelope.
@@ -1170,6 +1178,13 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
         q15_t d_amp = act->amp_delta;
 #endif
 
+        /* This #if SPECTRAL_ARM_M7 forks the whole OSCILLATOR ALGORITHM, not just DSP intrinsics:
+         * the M7 arm runs the gather-free coupled-recurrence oscillator (deterministic latency, no
+         * LUT), the #else arm the LUT-gather oscillator. That is a CAPABILITY ("fast tightly-coupled
+         * recurrence / no-gather", config.h capability block) currently PROXIED by the CPU macro --
+         * the engine's one embedded core. A second core (M4F, RISC-V) should extend a capability
+         * map here, not the CPU id; the macro is kept (not a speculative new capability) per the
+         * config.h "express by the CPU macro until measured" policy. */
 #if SPECTRAL_ARM_M7
 #if SPECTRAL_HAS_DUAL_MAC
         /* Dual-MAC fast path: when this voice and the next BOTH render the whole block
