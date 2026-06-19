@@ -198,10 +198,20 @@ reads 3% of real heap.
   (the `FFT: … Total:` line format is unchanged; `Total` is now the honest value). *[done]*
 - **II.3** Per-stage **wall/busy/idle** in the render; give GPU `init()` its own
   accounted span so 57ms lands in idle/init, not vanishing. *[M / med — touches backends]*
-- **II.4** Real **alloc + realloc + fault** accounting: route the known heap sites through
-  counted helpers (or, minimal variant, add the free `ru_majflt`/ctx-switch rusage fields +
-  count the key sites); print alloc_bytes, alloc_count, realloc_count, major_faults — or
-  don't print "Peak tracked" at all. *[M / low-med]*
+- **II.4 — LANDED (Phase D-2), minimal variant.** The "Peak tracked %.1f MB" line (a sum of
+  the near-unwired `perf_track_alloc` sites — ~3% of RSS, a naming lie) is replaced by the real
+  **RSS delta** (`Memory: RSS <end> MB (%+ld MB this run)`). Added the free getrusage counters
+  (`ru_majflt`, `ru_nvcsw`, `ru_nivcsw`) to `PerfMetrics`, printed as deltas, plus a
+  **realloc counter** (`g_realloc_count` / `perf_track_realloc`) wired at the no-realloc-contract
+  site (`spectral_peak_interp.c` tracker seg-grow). New `Faults: major <n>, ctx-switch <v>/<iv>,
+  reallocs <n>` line. Measured on a real run: RSS +689 MB (was "Peak tracked 0.7 MB"!), 32
+  reallocs surfaced (the contract is violated 32× — feeds the IV-d.3 seg-capacity right-sizing).
+  Test `test_cli_timing.py::test_memory_report_is_honest`. *Also fixed a latent D-1 break:*
+  `wall_start` was declared under `!SPECTRAL_NO_PERF`, so `wall_total` broke the restricted
+  build (which `tests_all` doesn't build) — now declared unconditionally. The osc_bandlimited
+  scratch-grow realloc was left unwired (its TU is linked by 7 minimal osc/q15 test harnesses
+  that don't link perf.c; low value, not worth the link-dep churn). Full alloc-byte routing
+  (the non-minimal variant) deferred. *[done — minimal]*
 - **II.5** **Stage-ran mask + fallback mask** as a structured one-line record. *[M / low —
   read-only instrumentation of existing decision points]*
 - **II.6** Align the Python bench to the new record; keep warm-median-with-spread doctrine;

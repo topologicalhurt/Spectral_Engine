@@ -43,17 +43,26 @@ typedef struct {
     double sys_time_ms;
     double wall_time_ms;
     int num_cores;
+    /* getrusage counters (free in the same struct user/sys come from). Reported as
+     * end-start deltas: major_faults = page-ins requiring I/O (the "costly paging"
+     * proxy); ctx switches = preemption/scheduling. */
+    long major_faults;
+    long vol_ctx_switches;
+    long invol_ctx_switches;
 } PerfMetrics;
 
 extern size_t g_peak_alloc;
 extern size_t g_current_alloc;
+extern size_t g_realloc_count;   /* reallocs observed this run (no-realloc-contract counter) */
 
 void perf_get_memory(size_t* resident_kb, size_t* virtual_kb);
 void perf_get_cpu_time(double* user_ms, double* sys_ms);
+void perf_get_rusage_counts(long* major_faults, long* vol_ctx, long* invol_ctx);
 int perf_get_num_cores(void);
 
 void perf_track_alloc(size_t bytes);
 void perf_track_free(size_t bytes);
+void perf_track_realloc(void);    /* increment g_realloc_count (call at each realloc site) */
 void perf_reset_tracking(void);
 
 PerfMetrics perf_snapshot(double wall_start);

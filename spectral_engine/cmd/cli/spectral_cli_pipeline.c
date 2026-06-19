@@ -1258,9 +1258,10 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     int sample_rate = 0;
     size_t n_samples = 0;
 
-#if !SPECTRAL_NO_PERF
+    /* Declared unconditionally: it is the basis for the honest wall Total (see
+     * SpectralTimingResults.wall_total), which is reported in every build mode, not only
+     * when the !SPECTRAL_NO_PERF process-metrics block below is compiled in. */
     double wall_start = omp_get_wtime();
-#endif
 
     omp_set_num_threads(run_opts->n_threads);
     prewarm_backend_if_requested(run_opts);

@@ -5,6 +5,9 @@
 #include "spectral_utils.h"
 #include "spectral_windows.h"
 #include "spectral_omp.h"
+#if !SPECTRAL_NO_PERF
+#include "spectral_perf.h"  /* perf_track_realloc — count the no-realloc-contract violation */
+#endif
 #include <math.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -184,6 +187,9 @@ int spectral_tracker_emit_segment(
         }
 
         SPECTRAL_LOG_WARN("Track segment realloc: tid=%d cap=%zu->%zu (unexpected)", tid, count, new_cap);
+#if !SPECTRAL_NO_PERF
+        perf_track_realloc();  /* surface the contract violation as a counted metric */
+#endif
         new_arr = (TrackSegment*)spectral_aligned_alloc(new_bytes);
         if (!new_arr) {
             spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);

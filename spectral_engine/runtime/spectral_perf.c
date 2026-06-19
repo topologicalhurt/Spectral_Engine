@@ -27,6 +27,7 @@
 /* Global allocation tracking state */
 size_t g_peak_alloc = 0;
 size_t g_current_alloc = 0;
+size_t g_realloc_count = 0;
 
 #ifdef __APPLE__
 
@@ -91,6 +92,17 @@ int perf_get_num_cores(void) {
 }
 #endif
 
+void perf_get_rusage_counts(long* major_faults, long* vol_ctx, long* invol_ctx) {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        *major_faults = (long)usage.ru_majflt;
+        *vol_ctx = (long)usage.ru_nvcsw;
+        *invol_ctx = (long)usage.ru_nivcsw;
+    } else {
+        *major_faults = *vol_ctx = *invol_ctx = 0;
+    }
+}
+
 void perf_track_alloc(size_t bytes) {
     #pragma omp critical
     {
@@ -107,9 +119,15 @@ void perf_track_free(size_t bytes) {
     }
 }
 
+void perf_track_realloc(void) {
+    #pragma omp atomic
+    g_realloc_count++;
+}
+
 void perf_reset_tracking(void) {
     g_peak_alloc = 0;
     g_current_alloc = 0;
+    g_realloc_count = 0;
 }
 
 PerfMetrics perf_snapshot(double wall_start) {
@@ -117,6 +135,7 @@ PerfMetrics perf_snapshot(double wall_start) {
     size_t res_kb, virt_kb;
     perf_get_memory(&res_kb, &virt_kb);
     perf_get_cpu_time(&m.user_time_ms, &m.sys_time_ms);
+    perf_get_rusage_counts(&m.major_faults, &m.vol_ctx_switches, &m.invol_ctx_switches);
     m.current_resident_mb = res_kb / SPECTRAL_BYTES_PER_KIB;
     (void)virt_kb;  /* virtual size is not reported; perf_get_memory fills it anyway */
     m.num_cores = perf_get_num_cores();
@@ -131,10 +150,19 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
     double total_cpu = user_delta + sys_delta;
     double utilization = (wall_delta > 0) ? 100.0 * total_cpu / (wall_delta * n_threads) : 0;
     double parallelism = (wall_delta > 0) ? (total_cpu / wall_delta) : 0.0;
+    /* Real resident growth this run — replaces the old "Peak tracked" figure, which summed a
+     * handful of instrumented sites (perf_track_alloc, wired almost nowhere) and read ~3% of
+     * RSS, a naming lie. RSS delta is the honest memory cost. */
+    long rss_delta_mb = (long)end->current_resident_mb - (long)start->current_resident_mb;
 
     SPECTRAL_LOG_INFO("\n--- Performance Metrics ---");
-    SPECTRAL_LOG_INFO("Memory:  RSS %zu MB, Peak tracked %.1f MB",
-                      end->current_resident_mb, BYTES_TO_MB(g_peak_alloc));
+    SPECTRAL_LOG_INFO("Memory:  RSS %zu MB (%+ld MB this run)",
+                      end->current_resident_mb, rss_delta_mb);
+    SPECTRAL_LOG_INFO("Faults:  major %ld, ctx-switch %ld vol / %ld invol, reallocs %zu",
+                      end->major_faults - start->major_faults,
+                      end->vol_ctx_switches - start->vol_ctx_switches,
+                      end->invol_ctx_switches - start->invol_ctx_switches,
+                      g_realloc_count);
     SPECTRAL_LOG_INFO("CPU:     User %.1f ms, Sys %.1f ms, Total %.1f ms",
                       user_delta, sys_delta, total_cpu);
     SPECTRAL_LOG_INFO("Threads: %d / %d cores, Util %.1f%%, Parallelism %.2fx",

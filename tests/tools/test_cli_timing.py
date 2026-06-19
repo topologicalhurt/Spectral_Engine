@@ -95,5 +95,17 @@ def test_realtime_is_derived_from_wall(cli_run):
         f"wall Total (plan §II)")
 
 
+def test_memory_report_is_honest(cli_run):
+    """II.4: the old 'Peak tracked' line summed a near-unwired instrumented subset (~3% of
+    RSS) — a naming lie. It must be GONE, replaced by the real RSS delta, plus a Faults line
+    surfacing page faults / context switches / realloc count."""
+    assert "Peak tracked" not in cli_run, (
+        "the misleading 'Peak tracked' memory figure is back (plan §II.4)")
+    assert re.search(r"Memory:\s*RSS\s+\d+\s*MB\s*\([+-]\d+\s*MB", cli_run), (
+        "Memory line must report RSS + the real resident delta (+/- MB this run)")
+    assert re.search(r"Faults:\s*major\s+\d+.*reallocs\s+\d+", cli_run), (
+        "Faults line must report major faults, ctx-switches, and the realloc count")
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
