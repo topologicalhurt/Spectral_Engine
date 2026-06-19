@@ -14,7 +14,9 @@ CLI::
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from ...core.process import run
@@ -27,48 +29,56 @@ RENDER_SRC = NATIVE_DIR / "qemu" / "qemu_render_main.c"
 _HARNESS_WAV = "qemu_render.wav"
 
 
-def render_wav(tc: Toolchain, out_dir: Path, fixture: WorkloadFixture | None = None,
-               *, wav_name: str = _HARNESS_WAV) -> tuple[Path, str | None]:
-    """Build + run the render harness; return (wav_path, checksum).
+def render_wav(tc: Toolchain, wav_path: Path, fixture: WorkloadFixture | None = None,
+               *, build_dir: Path | None = None) -> tuple[Path, str | None]:
+    """Build the render harness, run it under QEMU, and write ONLY the rendered WAV to wav_path.
 
-    The harness writes the WAV relative to qemu's working directory, so we run with
-    ``cwd=out_dir`` and the file lands in ``out_dir``; it is renamed to ``wav_name`` if needed.
+    The harness compile (ELF, the generated fixture header, object files) happens in a throwaway
+    build dir so it never clutters the WAV's directory. Pass build_dir to keep the artifacts (for
+    debugging the ELF); omit it to build in an auto-cleaned temp dir. Returns (wav_path, checksum)
+    where checksum is the rig's rotl5/xor of the render (bit-identity check vs the counts rig).
     """
     if tc.qemu_system_arm is None:
         raise RuntimeError("qemu-system-arm unavailable; run toolchain.discover(need={'qemu'})")
-    out_dir = out_dir.resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    wav_path = wav_path.resolve()
+    wav_path.parent.mkdir(parents=True, exist_ok=True)
     spec = fixture or default_fixture()
     spec.validate()
 
-    elf = _build_runner_elf(tc, spec, out_dir, main_src=RENDER_SRC)
-    result = run(
-        [str(tc.qemu_system_arm), "-M", "mps2-an500", "-semihosting",
-         "-display", "none", "-serial", "none", "-monitor", "none",
-         "-kernel", str(elf)],
-        cwd=out_dir, timeout_sec=300, check=False,
-    )
-    stdout = (result.stdout + "\n" + result.stderr).replace("\r", "")
-    verdict = RESULT_RE.search(stdout)
-    if result.returncode != 0 or verdict is None or verdict.group(1) != "PASS":
-        raise RuntimeError(f"qemu render failed (rc={result.returncode}):\n{stdout}")
-
-    produced = out_dir / _HARNESS_WAV
-    if not produced.exists():
-        raise RuntimeError(f"render exited PASS but wrote no {produced}\n{stdout}")
-    target = out_dir / wav_name
-    if target != produced:
-        produced.replace(target)
-    checksum = CHECKSUM_RE.search(stdout)
-    return target, (checksum.group(1) if checksum else None)
+    tmp_ctx = (tempfile.TemporaryDirectory(prefix="spectral-qemu-render-")
+               if build_dir is None else None)
+    build = Path(tmp_ctx.name) if tmp_ctx is not None else build_dir.resolve()
+    try:
+        build.mkdir(parents=True, exist_ok=True)
+        elf = _build_runner_elf(tc, spec, build, main_src=RENDER_SRC)
+        # The harness writes the WAV relative to qemu's cwd, so run inside the build dir.
+        result = run(
+            [str(tc.qemu_system_arm), "-M", "mps2-an500", "-semihosting",
+             "-display", "none", "-serial", "none", "-monitor", "none",
+             "-kernel", str(elf)],
+            cwd=build, timeout_sec=300, check=False,
+        )
+        stdout = (result.stdout + "\n" + result.stderr).replace("\r", "")
+        verdict = RESULT_RE.search(stdout)
+        if result.returncode != 0 or verdict is None or verdict.group(1) != "PASS":
+            raise RuntimeError(f"qemu render failed (rc={result.returncode}):\n{stdout}")
+        produced = build / _HARNESS_WAV
+        if not produced.exists():
+            raise RuntimeError(f"render exited PASS but wrote no WAV in {build}\n{stdout}")
+        shutil.move(str(produced), str(wav_path))   # only the WAV leaves the build dir
+        checksum = CHECKSUM_RE.search(stdout)
+        return wav_path, (checksum.group(1) if checksum else None)
+    finally:
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()
 
 
 def main(argv: list[str]) -> int:
     out = Path(argv[1]).resolve() if len(argv) > 1 else Path(_HARNESS_WAV).resolve()
     repo_root = Path(__file__).resolve().parents[4]
     tc = discover(repo_root, need=frozenset({"qemu"}))
-    wav, checksum = render_wav(tc, out.parent, wav_name=out.name)
-    print(f"wrote {wav}  (frames from fixture, mono 16-bit PCM; render checksum={checksum})")
+    wav, checksum = render_wav(tc, out)
+    print(f"wrote {wav}  (mono 16-bit PCM; render checksum={checksum})")
     return 0
 
 
