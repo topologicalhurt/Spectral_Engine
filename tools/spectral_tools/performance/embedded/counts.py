@@ -104,8 +104,11 @@ class CountsReport:
         }
 
 
-def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) -> Path:
+def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path,
+                      *, main_src: Path | None = None) -> Path:
     qemu_dir = NATIVE_DIR / "qemu"
+    if main_src is None:
+        main_src = qemu_dir / "qemu_main.c"   # the counts rig; siblings (audio dump) pass their own
     arm_backend_dir = tc.repo_root / "spectral_engine/arch/arm"
     (out_dir / HEADER_NAME).write_text(fixture.to_c_header(), encoding="utf-8")
 
@@ -113,9 +116,9 @@ def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) ->
     objects: list[Path] = []
     compile_plan: list[tuple[Path, tuple[str, ...]]] = [
         (qemu_dir / "startup.c", ()),
-        # -fno-builtin: qemu_main defines sinf itself (routed through the
+        # -fno-builtin: the harness defines sinf itself (routed through the
         # kernel's f64 init sine); keep GCC from folding it as a builtin.
-        (qemu_dir / "qemu_main.c", ("-fno-builtin",)),
+        (main_src, ("-fno-builtin",)),
         *((tu, ()) for tu in tc.kernel_tus()),
     ]
     for src, extra in compile_plan:
@@ -130,7 +133,8 @@ def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path) ->
             raise CountsError(f"compile failed for {src.name}:\n{result.stderr}")
         objects.append(obj)
 
-    elf = out_dir / "qemu_counts.elf"
+    elf = out_dir / ("qemu_counts.elf" if main_src.name == "qemu_main.c"
+                     else f"{main_src.stem}.elf")
     # -lc_nano: newlib-nano memcpy/memset — the libc family the Daisy firmware
     # links (nano.specs), so libc traffic in counts matches production.
     result = run(
