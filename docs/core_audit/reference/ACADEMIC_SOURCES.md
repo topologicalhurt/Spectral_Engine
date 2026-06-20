@@ -53,6 +53,19 @@ Only academic/technical sources are used for this research plan. Vendor manuals 
 29. A. Freed, X. Rodet, and P. Depalle, “Synthesis and Control of Hundreds of Sinusoidal Partials on a Workstation without Custom Hardware,” *Proc. ICSPAT*, 1992. (First real-time transform-domain synthesizer.)
 30. L. Savioja, V. Välimäki, and J. O. Smith, “Real-Time Additive Synthesis with One Million Sinusoids Using a GPU,” *Proc. AES 128th Convention*, 2010; and “Audio Signal Processing Using Graphics Processing Units,” *J. Audio Eng. Soc.*, 2011. (Additive synthesis is embarrassingly data-parallel — the basis for the F6/F7 SIMDe/vDSP/GPU parallelization of the IFFT path.)
 
+## Synthesis methods and rendering (renderer-abstraction plan)
+
+These ground the per-renderer recipes in `active/RENDERER_ABSTRACTION_PLAN.md`. Supported renderers now: additive, wavetable, subtractive; the rest are catalogued for future renderers.
+
+31. J. B. Allen and L. R. Rabiner, “A Unified Approach to Short-Time Fourier Analysis and Synthesis,” *Proceedings of the IEEE*, 1977. (OLA and filter-bank-summation as dual STFT interpretations — the formal basis for IFFT-renderer ↔ oscillator-bank duality.)
+32. J. O. Smith, “Dual Views of the Short-Time Fourier Transform,” in *Spectral Audio Signal Processing* [7]. (The OLA/FBS duality used in the renderer plan.)
+33. R. Bristow-Johnson, “Wavetable Synthesis 101, A Fundamental Perspective,” *Proc. AES 101st Convention*, 1996. (A wavetable as a stored harmonic spectrum; band-limiting by Nyquist harmonic truncation — the wavetable renderer recipe.)
+34. C. Roads, *The Computer Music Tutorial*, MIT Press, 1996; and *Microsound*, MIT Press, 2001. (Wavetable synthesis; granular synthesis as time–frequency (Gabor) atoms — the future granular renderer.)
+35. G. Fant, *Acoustic Theory of Speech Production*, Mouton, 1960. (The source–filter model underpinning the subtractive renderer: a rich source shaped by a transfer function = spectral multiplication via the convolution theorem [2].)
+36. J. M. Chowning, “The Synthesis of Complex Audio Spectra by Means of Frequency Modulation,” *Journal of the Audio Engineering Society*, 1973. (FM Bessel-function sideband spectra; a time-varying modulation index produces a moving spectrum that breaks per-frame stationarity — the future FM renderer.)
+37. S. Bilbao, *Numerical Sound Synthesis*, Wiley, 2009. (Modal vs finite-difference/waveguide physical models — the future modal and waveguide renderers.)
+38. J. O. Smith, *Physical Audio Signal Processing*, W3K Publishing, 2010. (Digital waveguides: bidirectional delay lines as time-domain-native synthesis.)
+
 ## How these sources constrain implementation
 
 - Window functions and interpolation must distinguish coherent gain, RMS gain, and leakage behavior; see Harris and Oppenheim/Schafer.
