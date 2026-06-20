@@ -1,7 +1,6 @@
 /* spectral_peak_interp.c - Sub-bin Frequency Interpolation */
 #include "spectral_peak_interp.h"
 #include "spectral_peak_estimator.h"
-#include "spectral_log.h"
 #include "spectral_utils.h"
 #include "spectral_windows.h"
 #include "spectral_omp.h"
@@ -186,9 +185,12 @@ int spectral_tracker_emit_segment(
             return 0;
         }
 
-        SPECTRAL_LOG_WARN("Track segment realloc: tid=%d cap=%zu->%zu (unexpected)", tid, count, new_cap);
+        /* No-realloc is a structural perf-contract (the seg buffer is pre-sized): a growth here
+         * is a violation. Surface it as a counted metric, NOT a per-growth log — this runs inside
+         * the OMP parallel emit region, so stdout I/O here would serialize threads and interleave
+         * across them. The always-on CLI "Faults: ... reallocs N" line reports the count. */
 #if !SPECTRAL_NO_PERF
-        perf_track_realloc();  /* surface the contract violation as a counted metric */
+        perf_track_realloc();
 #endif
         new_arr = (TrackSegment*)spectral_aligned_alloc(new_bytes);
         if (!new_arr) {
