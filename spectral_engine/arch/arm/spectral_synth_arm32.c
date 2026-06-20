@@ -747,9 +747,11 @@ static inline void synth_core_pair_m7(
     uint32_t deltas = ((uint32_t)(uint16_t)amp_deltaB << 16) | (uint16_t)amp_deltaA;
     for (uint32_t j = blk_start; j < blk_end; j++) {
         SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
-        q15_t sA = (q15_t)(oA.s >> 16); spectral_coupled_step(&oA, cwA, swA);
-        q15_t sB = (q15_t)(oB.s >> 16); spectral_coupled_step(&oB, cwB, swB);
-        uint32_t samples = ((uint32_t)(uint16_t)sB << 16) | (uint16_t)sA;
+        /* Pack both voices' current samples (hi16 of each q31 oscillator state) into one word
+         * BEFORE stepping -- spectral_pack_hi16 folds the two >>16 extractions into one PKHTB. */
+        uint32_t samples = spectral_pack_hi16((uint32_t)oB.s, (uint32_t)oA.s);
+        spectral_coupled_step(&oA, cwA, swA);
+        spectral_coupled_step(&oB, cwB, swB);
         accum[j] = spectral_smlald_packed(accum[j], samples, amps);
         amps = spectral_qadd16x2(amps, deltas);
     }

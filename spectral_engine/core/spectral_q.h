@@ -210,6 +210,15 @@ static inline q63_t spectral_smlald_packed(q63_t acc, uint32_t packed_s, uint32_
 static inline uint32_t spectral_qadd16x2(uint32_t a, uint32_t b) {
     return (uint32_t)__qadd16((int32_t)a, (int32_t)b);
 }
+/* Pack the high halfwords (bits[31:16]) of two words into one q15x2 word: result low lane =
+ * hi[bits31:16] of `lo`, result high lane = hi[bits31:16] of `hi`. One PKHTB — folds the two
+ * arithmetic >>16 sample extractions in the pair kernel INTO the pack (3 ops -> 1). GCC emits
+ * neither PKHBT nor PKHTB from C, so this is hand-asm; pure data-dependency, no flags/memory. */
+static inline uint32_t spectral_pack_hi16(uint32_t hi, uint32_t lo) {
+    uint32_t r;
+    __asm__("pkhtb %0, %1, %2, asr #16" : "=r"(r) : "r"(hi), "r"(lo));
+    return r;
+}
 /* ACLE has no __smulbb (GCC arm_acle.h: __smlabb yes, __smulbb no — the DSP
  * branch failed to compile under arm-none-eabi-gcc). A widened 16x16 multiply
  * is exact and GCC selects SMULBB for it (codegen-verified). */
@@ -262,6 +271,11 @@ static inline uint32_t spectral_qadd16x2(uint32_t a, uint32_t b) {
     q15_t a0 = (q15_t)(int16_t)(a & 0xFFFFu), a1 = (q15_t)(int16_t)(a >> 16);
     q15_t b0 = (q15_t)(int16_t)(b & 0xFFFFu), b1 = (q15_t)(int16_t)(b >> 16);
     return ((uint32_t)(uint16_t)spectral_qadd16(a1, b1) << 16) | (uint16_t)spectral_qadd16(a0, b0);
+}
+/* Pack the high halfwords (bits[31:16]) of two words: low lane = hi16(lo), high lane = hi16(hi).
+ * Bit-identical to the M7 PKHTB form. */
+static inline uint32_t spectral_pack_hi16(uint32_t hi, uint32_t lo) {
+    return (hi & 0xFFFF0000u) | ((lo >> 16) & 0xFFFFu);
 }
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return (q31_t)a * (q31_t)b;
