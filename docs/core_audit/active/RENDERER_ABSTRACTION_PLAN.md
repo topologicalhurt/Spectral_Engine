@@ -212,12 +212,18 @@ summed into one buffer (the §1 payoff).
     additive IFFT deposit, consistent-by-construction with `spectral_wavetable_lookup`. NEW
     `wavetable_harmonics` ctest (#21): planted-harmonic extraction + round-trip + expansion/truncation
     (fail-on-bug). The bridge TU is test-only until 3a-2 wires it.
-  - **3a-2 — NEXT.** End-to-end: render a wavetable scene via expansion + the IFFT, **opt-in** (default
-    unchanged, like the sine hybrid fast path), with a cross-domain **render-parity** test (freq-domain
-    render vs the time-domain table read, measured tolerance — the two domains differ by linear-interp
-    imaging + the IFFT approximation, so this is a "within X dB" consistency gate, not bit-exact). Then
-    dispatch routing for wavetable timbres. The IFFT is an approximation, so default-on rides the
-    maintainer F3 golden (same contract as the sine IFFT path).
+  - **3a-2 — LANDED (commit 6232044).** End-to-end render parity: expand wavetable partials and render
+    them through the real `spectral_ifft_synth_render`, asserting a match to the exact band-limited
+    additive sum. NEW `wavetable_render_parity` ctest (#22), fractional fundamentals (the realistic
+    motif-truncation case), MEASURED floor -63.1 dBFS RMS, gate frozen at -55 dBFS (+8 dB headroom);
+    verified sensitive (a 0.3 rad phase corruption -> -15.4 dBFS, fails). The reference is the additive
+    sum, NOT the raw linear-interp read (which aliases/images above the table Nyquist — the band-limited
+    render legitimately differs); 3a-1's round-trip ties the harmonics to the table samples, so the
+    chain proves the freq render reproduces the table's band-limited tone. The -63 dBFS floor IS the
+    IFFT approximation (why the path rides the F3 golden).
+  - **3a-3 — NEXT.** The opt-in production render path (a callable wavetable→IFFT renderer with the bank
+    + scratch lifecycle) and dispatch routing for wavetable timbres (default unchanged, like the sine
+    hybrid fast path). Default-on rides the maintainer F3 golden.
   - **3b** — subtractive gains the explicit **filter** stage — `H(f)` per-bin multiply (freq-domain) and
     its time-domain dual — with a source×filter parity test. The one genuinely new DSP; needs a
     filter-form decision (per-band spectral envelope vs cutoff/Q biquad).
