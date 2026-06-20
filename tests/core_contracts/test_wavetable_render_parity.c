@@ -67,7 +67,8 @@ int main(void)
     CHECK(s != NULL, "ifft synth create");
     outf = (float*)malloc(TOTAL * sizeof(float));
     if (!s || !outf) { fprintf(stderr, "FAIL: setup\n"); return 1; }
-    spectral_ifft_synth_render(s, parts, np, outf, TOTAL);
+    CHECK(spectral_ifft_synth_render(s, parts, np, outf, TOTAL) == 0,
+          "ifft render accepted every expanded partial (all within the renderer domain)");
 
     /* exact band-limited additive reference = the deposited partials' cosine sum */
     for (i = 0; i < TOTAL; i++) {

@@ -66,13 +66,13 @@ int main(void)
     count = spectral_wavetable_expand(amp_k, phase_k, n_harm,
                                       /*f0_bin*/10.0f, /*amp*/2.0f, /*phase0*/0.5f,
                                       /*n_fft*/512u, out, 64);
-    CHECK(count == 16, "expand deposits k=1..16 (all below Nyquist bin 256)");
+    CHECK(count == 16, "expand deposits k=1..16 (all below the renderer edge bin 255)");
     CHECK(approx(out[0].bin, 10.0, 1e-4) && approx(out[0].amp, 2.0 * A1, 1e-4) &&
           approx(out[0].phase0, 1.0 * 0.5 + P1, 1e-4), "expanded harmonic 1");
     CHECK(approx(out[2].bin, 30.0, 1e-4) && approx(out[2].amp, 2.0 * A3, 1e-4) &&
           approx(out[2].phase0, 3.0 * 0.5 + P3, 1e-4), "expanded harmonic 3");
 
-    /* Nyquist truncation: f0_bin=20, n_fft=512 -> bin 256; k*20<256 keeps k=1..12 */
+    /* band-limit at the renderer edge: f0_bin=20, n_fft=512 -> bin_max 255; k*20<255 keeps k=1..12 */
     count = spectral_wavetable_expand(amp_k, phase_k, n_harm, 20.0f, 1.0f, 0.0f, 512u, out, 64);
     CHECK(count == 12, "Nyquist truncation keeps k=1..12 at f0_bin=20");
 

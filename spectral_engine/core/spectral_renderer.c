@@ -22,11 +22,18 @@ static const SpectralRenderer k_renderers[SPECTRAL_RENDERER_COUNT] = {
                                         { 1u, 1u, 1u } },
 };
 
+/* Adding a renderer id must extend k_renderers (above) AND the timbre map (below). */
+_Static_assert(SPECTRAL_RENDERER_COUNT == 3, "k_renderers must cover every SpectralRendererId");
+
 const SpectralRenderer* spectral_renderer_by_id(SpectralRendererId id)
 {
     if ((unsigned)id >= (unsigned)SPECTRAL_RENDERER_COUNT) return NULL;
     return &k_renderers[id];
 }
+
+/* If a TIMBRE_* is added, classify it explicitly below rather than letting `default` silently
+ * map it to additive — this assert forces revisiting the switch when the enum grows. */
+_Static_assert(TIMBRE_COUNT == 8, "spectral_renderer_for_timbre must classify every TIMBRE_*");
 
 SpectralRendererId spectral_renderer_for_timbre(SpectralTimbre timbre)
 {

@@ -16,6 +16,7 @@
 #include "spectral_utils.h"
 #include "spectral_log.h"
 #include "spectral_renderer.h"
+#include "spectral_wavetable.h"
 #include <stdio.h>
 
 static SpectralError cpu_synth_vtable(SegmentArray sa, float* buf, size_t len,
@@ -187,12 +188,17 @@ SpectralError spectral_synth_dispatch_ex(
     synth_effective_timbre_reset(timbre);
     if (out_effective_timbre) *out_effective_timbre = timbre;
 
-    /* Renderer identity is a capability decision (AI_CANON #29): which synthesis strategy this
-     * timbre maps to (the wavetable renderer is bank-selected, handled separately). Host-only —
-     * the renderer registry is guarded out of the real firmware build. */
+    /* Renderer identity is a capability decision (AI_CANON #29): which synthesis strategy runs.
+     * The wavetable renderer is bank-selected, so consult the bank — a timbre served by the bank
+     * renders as wavetable, otherwise the timbre's classification. Host-only — the renderer
+     * registry is guarded out of the real firmware build. */
 #if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-    SPECTRAL_LOG_INFO("Renderer: %s (timbre=%d)",
-                      spectral_renderer_name(spectral_renderer_for_timbre(timbre)), (int)timbre);
+    {
+        SpectralRendererId rid = (bank && spectral_wavetable_has_timbre(bank, (int)timbre))
+                                 ? SPECTRAL_RENDERER_WAVETABLE
+                                 : spectral_renderer_for_timbre(timbre);
+        SPECTRAL_LOG_INFO("Renderer: %s (timbre=%d)", spectral_renderer_name(rid), (int)timbre);
+    }
 #endif
 
     if (backend == BACKEND_AUTO || backend == BACKEND_EXPORT)

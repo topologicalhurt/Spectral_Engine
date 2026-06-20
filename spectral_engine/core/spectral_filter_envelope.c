@@ -8,15 +8,23 @@
 
 #if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
+#include <math.h>
+
 float spectral_filter_envelope_gain(const SpectralFilterEnvelope* env, float freq_hz)
 {
+    int n_points;
     int last;
     int i;
 
     if (!env || env->n_points <= 0) return 1.0f;            /* passthrough */
-    if (env->n_points == 1) return env->gain[0];
+    if (isnan(freq_hz)) return 1.0f;                        /* NaN -> passthrough (inf is clamped below) */
 
-    last = env->n_points - 1;
+    /* Never index past the fixed-size arrays even if a caller sets a bad n_points. */
+    n_points = env->n_points;
+    if (n_points > SPECTRAL_FILTER_ENVELOPE_MAX_POINTS) n_points = SPECTRAL_FILTER_ENVELOPE_MAX_POINTS;
+    if (n_points == 1) return env->gain[0];
+
+    last = n_points - 1;
     if (freq_hz <= env->freq_hz[0]) return env->gain[0];    /* clamp below */
     if (freq_hz >= env->freq_hz[last]) return env->gain[last]; /* clamp above */
 

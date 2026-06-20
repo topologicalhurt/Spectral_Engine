@@ -8,9 +8,10 @@
 
 #if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
+#include "spectral_consts.h"   /* SPECTRAL_PI_D */
 #include <math.h>
 
-static const double SPECTRAL_WT_TWO_PI = 6.283185307179586476925286766559;
+static const double SPECTRAL_WT_TWO_PI = 2.0 * SPECTRAL_PI_D;
 
 size_t spectral_wavetable_harmonics(const SpectralWavetable* table,
                                     float* amp_k, float* phase_k, size_t max_k)
@@ -52,8 +53,13 @@ size_t spectral_wavetable_expand(const float* amp_k, const float* phase_k, size_
                                  float f0_bin, float amp, float phase0, size_t n_fft,
                                  SpectralIfftPartial* out, size_t cap)
 {
-    const size_t nyquist_bin_i = n_fft / 2u;   /* integer bin n_fft/2 (exact for power-of-two n_fft) */
-    const float nyquist_bin = (float)nyquist_bin_i;
+    /* Band-limit to the IFFT renderer's EXACT partial domain: ifft_partial_valid accepts
+     * 1 < bin < n_fft/2 - 1 (spectral_synth_ifft.c). A harmonic outside that interval would be
+     * counted here yet REJECTED by spectral_ifft_synth_render — which fails the whole render on
+     * any out-of-domain partial — so the two band-limit edges must agree. The (n_fft >= 4) guard
+     * keeps n_fft/2 - 1 from unsigned-wrapping on a degenerate n_fft. */
+    const size_t bin_max_i = (n_fft >= 4u) ? (n_fft / 2u - 1u) : 0u;
+    const float bin_max = (float)bin_max_i;
     size_t count = 0;
     size_t k;
 
@@ -61,7 +67,8 @@ size_t spectral_wavetable_expand(const float* amp_k, const float* phase_k, size_
 
     for (k = 1; k < n_harm && count < cap; k++) {
         float bin = (float)k * f0_bin;
-        if (bin >= nyquist_bin) break;   /* Nyquist truncation = band-limiting */
+        if (bin >= bin_max) break;       /* upper edge = renderer's bin_max (= n_fft/2 - 1) */
+        if (bin <= 1.0f) continue;       /* renderer rejects bin <= 1; higher harmonics may still fit */
         out[count].bin = bin;
         out[count].amp = amp * amp_k[k];
         out[count].phase0 = (float)k * phase0 + phase_k[k];
