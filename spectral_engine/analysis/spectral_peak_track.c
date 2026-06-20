@@ -714,14 +714,27 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     if (!spectral_tracker_derive_create_scalars(n_freqs, sr, n_fft, hop, db_thresh, max_magsq,
                                                 &thresh_linear_sq, &threshsq, &inv_hop,
                                                 &freq_step_omega, &freq_step_df, &hop_float)) {
+        /* origin of a silent NULL on the direct tracker API (the analyze_audio path
+         * validates the same shape earlier); log the inputs so the bad constraint shows. */
+        SPECTRAL_LOG_ERROR("tracker_create: invalid params "
+                           "(n_freqs=%zu sr=%d n_fft=%d hop=%d thresh=%.1f max_magsq=%.3g)",
+                           n_freqs, sr, n_fft, hop, (double)db_thresh, (double)max_magsq);
         return NULL;
     }
 
     if (n_threads < 1) n_threads = 1;
-    if (n_threads > SPECTRAL_MAX_THREADS) return NULL;
+    if (n_threads > SPECTRAL_MAX_THREADS) {
+        SPECTRAL_LOG_ERROR("tracker_create: n_threads=%d exceeds SPECTRAL_MAX_THREADS=%d",
+                           n_threads, SPECTRAL_MAX_THREADS);
+        return NULL;
+    }
 
     SpectralTracker* tracker = (SpectralTracker*)malloc(sizeof(SpectralTracker));
-    if (!tracker) return NULL;
+    if (!tracker) {
+        SPECTRAL_LOG_ERROR("tracker_create: out of memory allocating SpectralTracker (%zu bytes)",
+                           sizeof(SpectralTracker));
+        return NULL;
+    }
 
     tracker->n_threads = n_threads;
     tracker->n_freqs = n_freqs;
