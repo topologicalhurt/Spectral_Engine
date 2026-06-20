@@ -183,6 +183,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/proc-mask-honesty-test.cmake"
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/resource-path-canonical-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/error-origin-logs-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/renderer-dispatch-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/peak-interp-parabolic-test.cmake")
@@ -238,6 +239,7 @@ add_dependencies(tests_all
     resource_path_canonical_test
     full_fused_parity_test
     error_origin_logs_test
+    renderer_dispatch_test
     osc_formulas_domain_test
     window_backend_parity_test
     peak_interp_parabolic_test
