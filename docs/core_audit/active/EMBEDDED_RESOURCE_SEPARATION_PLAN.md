@@ -64,21 +64,23 @@ to verify; **REFUTED** = candidate concern checked and dismissed (do not re-liti
 
 ### 512-voice real-time target (maintainer constraint: ~speech intelligibility)
 
-The per-voice oscillator bank does **not** reach 512 real-time voices at 48 kHz on the M7 — the
-**per-sample loop** (24.01 cyc/voice-sample, unchanged by fpu-01/fpu-03) is the wall, not the
-per-block overhead. 512 voices need `512·48·cyc_vs` cycles per 48-sample block:
+The per-sample loop is the wall, not the per-block overhead. 512 voices need `512·48·cyc_vs`
+cycles per 48-sample block. **highword-mul (LANDED) cut the pair kernel 20.0 → 16.0 cyc/vs:**
 
-| clock | all-paired (20.0 cyc/vs) | budget | verdict | max voices (paired) |
-|------:|--------------------------:|-------:|:-------:|:-------------------:|
-| 400 MHz | 491,766 cyc/block | 400,000 | 1.23× over | ~416 |
-| 480 MHz | 491,766 cyc/block | 480,000 | 1.02× over | ~499 |
+| clock | OLD 20.0 cyc/vs | **NEW 16.0 cyc/vs (highword-mul)** | budget | verdict (16.0) |
+|------:|----------------:|-----------------------------------:|-------:|:--------------:|
+| 400 MHz | 491,520 (1.23× over) | **393,216** | 400,000 | **0.98× — FITS** (~520) |
+| 480 MHz | 491,520 (1.02× over) | **393,216** | 480,000 | 0.82× — comfortable |
 
-fpu-01 + dual-MAC are necessary but **insufficient** for 512. 512 voices = a *dense* spectrum, which
-is exactly the regime where **inverse-FFT (Rodet-Depalle) synthesis (~8×)** wins over the per-partial
-oscillator (the F2 algorithm fork / IFFT_SYNTHESIS_PLAN). **Conclusion: the route to 512-voice
-real-time is the IFFT synthesis path for dense frames, not further oscillator micro-opt.** The
-512-slot active-record sizing (`SPECTRAL_ARM32_MAX_ACTIVE=512`) is therefore CORRECT — and kr-02's
-"enforce 128" is OFF the table (128 was the old WCET cap; the target is 512).
+**REVISED conclusion (highword-mul LANDED): the per-product high-word multiply (−20% on the pair
+kernel) brings 512 voices onto the EXACT per-partial oscillator bank — 98% of the 400 MHz budget
+(steady-state paired), comfortable at 480 MHz. The IFFT is NO LONGER REQUIRED for 512.** Caveat: 98%
+is the steady-state paired ideal; per-block overhead (segment scan, prune, activation seed, output
+pack) and fade/unpaired regions (WCET worst 22.02 cyc/vs) eat into it, so @400 MHz is at the edge
+(~490–512) and 480 MHz is the safe target for a guaranteed 512. The IFFT (F2 / IFFT_SYNTHESIS_PLAN)
+remains the lever for *denser-than-512* or lower power, but the exact oscillator now reaches the
+speech-intelligibility target. The 512-slot sizing (`SPECTRAL_ARM32_MAX_ACTIVE=512`) is CORRECT;
+kr-02's "enforce 128" stays OFF the table.
 
 ### Block-size measurement (empirical, fpu-03 tree, qemu counts)
 
@@ -119,7 +121,8 @@ New confirmed findings + dispositions (none move the binding constraint):
 | layout-seg16-not-14 | low | **TRACKED** | Daisy streams the 16 B `SpectralSegmentQ15` (`SPECTRAL_Q15_COMPACT=0`); `df_q15` is read into cache but unused on M7 (chirp load-rejected). `=1` → 14 B (−12.5% activation bytes) only after confirming the .spq tool round-trips 14 B. Footprint, not bottleneck. |
 | cache-hotcold-08 | low | **seg_idx ✅ TRIMMED; freq_delta KEPT** | `seg_idx[]` was orphan write-only (activation+prune wrote it, nothing read it) → removed from the SoA + AoS structs + both activation writes + the prune shuffle (~2 KB AXI-SRAM). Behavior-neutral (SINAD 80.7 unchanged) and the m7 perf gate stayed green WITHOUT a regen — the synth kernels take field POINTERS (not the struct) and are emitted before the activation/prune code, so removing a trailing field renumbers nothing. `freq_delta[]` is NOT orphan dead — it is chirp scaffolding under `#if SPECTRAL_HAS_CHIRP` (=1 on Daisy); removing it alone would leave inconsistent half-scaffolding (df_q15/the validator/CHIRP stay), so KEPT pending a build-or-drop-chirp decision. |
 | accum-block-cap | low | **✅ LANDED (DTCM reclaim, Daisy-gated)** | `SPECTRAL_ARM32_MAX_BLOCK = SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE = 256`, but the Daisy codec block is 48 → `accum[]`/`temp[]` (SPECTRAL_MEM_FAST → DTCM) over-allocated ~1.5 KB DTCM/buffer. daisy-config.cmake now overrides the default to **64** (≥48 + headroom) for the firmware only; host/sim/test builds keep 256 (they exercise 256-sample blocks — test_embedded_perf, test_proc_mask_honesty). The deliberate `==256` _Static_assert relaxed to a `[48,256]` range (the buffers are `[MAX_BLOCK]` so they cannot desync — the assert only bounds it). Host verified (build + SINAD + perf gate byte-identical); firmware-mode spot-compile with `=64` passes the assert and compiles, but the actual DTCM reclaim needs a maintainer firmware LINK to confirm (no libDaisy here). |
-| compute-ceiling (4-voice probe) | — | **MEASURED — no kernel win exists** | Direct llvm-mca probe (the production 2-voice pair vs a 4-voice interleave, real coupled_step/smlald/qadd16, CortexM7Model): 2-voice = 20.5 cyc/voice-sample @ IPC 1.34 (matches production 20.01/1.349); **4-voice = 23.3 cyc/voice-sample @ IPC 1.31 — WORSE** (register spill: 4 oscillators + constants + amps exceed the 14 GP regs). So the 2-voice pair is the structural optimum on the M7; the ~33% idle issue slots are a hardware dual-issue limit on `smull`-heavy code, NOT reclaimable latency. **There is NO kernel-level compute win.** The only compute levers are the 480 MHz clock (~+20%, ~499 voices) or the algorithm (IFFT for dense). Memory has zero stalls (m7-stalls: 0 SDRAM, 0 serial-bound). |
+| compute-ceiling (4-voice probe) | — | **MEASURED — interleaving has no win (instruction SELECTION does → highword-mul)** | Direct llvm-mca probe (production 2-voice pair vs a 4-voice interleave, real ops, CortexM7Model): 2-voice = 20.5 cyc/vs @ IPC 1.34 (matches production 20.01); **4-voice = 23.3 @ IPC 1.31 — WORSE** (register spill: 4 oscillators + constants + amps > 14 GP regs). So 2-voice pairing is the structural optimum for *interleaving* — the idle issue slots are NOT reclaimable by more parallelism. But the kernel WAS beatable by instruction **selection** — see **highword-mul**. m7-stalls: 0 SDRAM, 0 serial-bound (pure compute). |
+| **highword-mul** (coupled_step) | fpu-alu | high | **✅ LANDED (−28% process_insns, audio change)** | The hot coupled-osc step did each Q31 rotation as a full q63 product + a 64-bit `>>31` extraction. Reformulated to the **high-word multiply** (per-product `>>32` = the smull high word, free) + a **saturating** `qadd(x,x)` to restore the Q31 scale (`spectral_qadd32/qsub32` → single-cycle branchless QADD/QSUB on the M7; the saturation absorbs the +1-LSB the per-product `>>32` rounds over the `>>31` form, which at a full-scale low-omega peak a bare `<<1` wraps catastrophically — **caught by osc_recursive at 28/110 Hz, −3 dB**; a plain clamp compiles to branches and is a net LOSS, the saturating-arith form is the key). **Pair kernel 20.0 → 16.0 cyc/voice-sample (−20%); process_insns 2,231,920 → 1,598,063 (−28%).** SNR-equivalent (osc_recursive PASS all freqs 28 Hz–18 kHz ≥83 dB; arm_core_test SINAD; all 12 osc/arm/sim ctests). Audio-changing (per-product truncates a bit earlier) → m7 baseline re-signed; embedded-only blast radius (desktop float uses a different osc); portable (host = C-saturating fallback). m7 `.L` labels unchanged (inlined). **This is what put 512 on the exact bank (see §512).** renorm left full-precision (per-block, amortized; precision matters for drift). |
 
 | arch-03 / kr-03 SNR gate | honesty | med | **MODEL/TEST ✅ landed** | The 72 dB SNR contract was validated only under the *renorm* regime; the shipped *re-seed* regime had no SNR/THD gate. `arm_core_test::test_single_tone` now measures coherent SINAD over the sustain region at the kernel's exact rendered frequency — **measured 80.7 dB, floor 70.0** (fail-on-bug: 2% 2nd-harmonic → 28 dB, gate trips). This is the safety net required before the Phase-A drift-regime change. |
 | cache-02 dormant SCB untested | cache | med | **MODEL/TEST ✅ landed** | The cacheable `SCB_InvalidateDCache_by_Addr` arm is compiled by no build/test. The line-round + overflow arithmetic is now extracted to `spectral_cache_invalidate_range` (`spectral_mem.h`) and pinned by `arm_core_test::test_cache_invalidate_range` (align/round-up/overflow/INT32_MAX cases, fail-on-bug verified). The dormant DMA path calls it (behaviorally identical; the SCB call stays firmware-only). No measured-codegen change (DMA path is `SPECTRAL_HAS_DMA`-dormant; helper unused in measured builds). |
