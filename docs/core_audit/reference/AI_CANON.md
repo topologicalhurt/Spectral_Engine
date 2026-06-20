@@ -391,3 +391,21 @@ ERROR = originated failure aborting the op; WARN = degraded but proceeding; INFO
 DEBUG/TRACE = loop-grain. Embedded RT paths use only the strippable `SPECTRAL_DBG`-class macros
 (no always-on log symbol reachable from the M7 synth path). `log_check` guarantees the CHANNEL
 (never raw printf); the presence lint + a decision-logging test guarantee COVERAGE.
+
+## 30. SIMD width is widest-available unless that op's latency is worse, decided per-op
+
+Vector width is a per-operation property, not a global build constant. The default is
+**widest-available** (chosen from the ISA the build actually targets), with one carve-out:
+an op widens only if its *latency* does not get worse at the wider width. The one real case
+today is the AVX-512 down-clock — a wider register file that lowers core clocks and can
+net-lose — which is why it is OFF by default (encoded crudely as the global `-mno-avx512f`,
+#26) and would be lifted **per-op only behind a measured net win**, never globally or
+speculatively. Width selection is made from the SIMDe natural-width predicates
+(`SIMDE_NATURAL_{FLOAT,INT}_VECTOR_SIZE_GE`) the kernels already compile against — a separate
+hand-maintained width oracle (`OSC_SIMD_WIDTH`) is a second source of truth and a smell to
+retire. Do **not** author a wider-tier kernel on hardware that cannot measure it (the
+16×Q15@256 and 512-bit float tiers are x86-CI-gated, not written speculatively); a lifted
+flag with no kernel changes nothing. The rationale lives here, not only in commit history.
+Honest current state: the float oscillator honors widest-available; the Q15 pack8 kernel is
+still pinned 8-wide@128 and the `OSC_SIMD_WIDTH` oracle still exists — the per-op-predicate
+migration is open work, gated on x86 silicon + a measured win.

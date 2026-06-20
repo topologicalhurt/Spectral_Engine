@@ -493,13 +493,17 @@ downclock) is encoded as the blunt global `-mno-avx512f`. `OSC_SIMD_WIDTH`
 separate from the `SIMDE_NATURAL_*_VECTOR_SIZE_GE` idiom the kernels use.
 
 **Phases:**
-- **VII.1 (= VI.1)** Arch-gate the x86 ISA flags → warnings clean. *[S / low]*
-- **VII.2** Replace the blunt `-mno-avx512f` cap with a **capability + per-op latency
-  policy**: width chosen per-op via `SIMDE_NATURAL_{FLOAT,INT}_VECTOR_SIZE_GE`, with an
-  explicit downclock carve-out; retire the parallel `OSC_SIMD_WIDTH` oracle. The actual
-  512-bit/256-Q15 **kernels stay x86-CI-gated** (won't author what we can't measure). *[M /
-  med — policy now, kernels gated]*
-- **VII.3** Document the AVX-512 decision + the width policy as canon. *[S / low]*
+- **VII.1 (= VI.1) — LANDED.** The x86 ISA flags are arch-gated in `cmake/profiles.cmake`
+  (`spectral_profile_host_native_isa()` emits `-mavx2`/`-mno-avx512f` only on x86);
+  `test_build_flags.py` asserts x86-flags-absent-on-arm64. Warnings clean.
+- **VII.2 — GATED (dispatch-path change + x86-CI).** The per-op latency policy + retiring
+  the `OSC_SIMD_WIDTH` oracle touches the hot oscillator dispatch and the real wider kernels
+  need x86 silicon to measure. Policy is now canon (#30); the code migration is attended /
+  x86-CI work, not an unattended commit.
+- **VII.3 — LANDED.** AI_CANON **#30** ("SIMD width is widest-available unless that op's
+  latency is worse, decided per-op") captures the AVX-512-off rationale + the width policy +
+  the `OSC_SIMD_WIDTH`-is-a-smell + don't-author-unmeasurable-kernels rules, with the honest
+  current-state note. The build-flag side was already #26.
 
 **Canon:** host ISA flags are capability-gated, never CPU-blind; SIMD width =
 widest-available-unless-latency-worse, decided per-op via SIMDe natural-width predicates
