@@ -23,7 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "spectral_fs.h"
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
+#include "spectral_fs.h"   /* host file I/O; absent on real firmware (arch-05) */
+#endif
 
 static void wavetable_mark_loaded(SpectralWavetableBank* bank,
                                   SpectralWavetable* table,
@@ -128,6 +130,12 @@ static int wavetable_runtime_samples_valid(const spectral_sample_t* samples, uin
 }
 
 
+/* Host file loaders (load/save/load_raw/load_hex): pull stdio (FILE*, sscanf), the
+ * spectral_fs_* shim (NOT in the firmware link set), and the heap. Compiled on every HOST build
+ * (desktop + the embedded host-sims, which run on an OS) but EXCLUDED from real firmware
+ * (SPECTRAL_EMBEDDED && !SPECTRAL_IS_EMBEDDED_SIM), which uses spectral_wavetable_load_buffer
+ * instead (arch-05; enforced by test_firmware_purity). */
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id) {
@@ -543,6 +551,7 @@ WavetableError spectral_wavetable_load_hex(SpectralWavetableBank* bank,
 
     return WAVETABLE_OK;
 }
+#endif /* host file loaders: !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM (arch-05) */
 
 
 WavetableError spectral_wavetable_load_buffer(SpectralWavetableBank* bank,
