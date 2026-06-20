@@ -55,7 +55,7 @@ this has been observed to produce a *grossly* wrong result on rare draws (the
 `arm32_process_correctness` re-seed SINAD test fell to ~28 dB vs a 70 dB floor on ~1 build
 in 13, with byte-identical compiler inputs). This is a latent reproducibility/UB hazard,
 NOT a flag-policy issue — tracked as a correctness finding in
-`../KERNEL_HARDENING_PLAN.md` (build-reproducibility). `SPECTRAL_REPRO_BUILD` exists to
+`../archive/KERNEL_HARDENING_PLAN.md` (build-reproducibility). `SPECTRAL_REPRO_BUILD` exists to
 get a bit-reproducible build when that matters.
 
 ## Adding a profile or flag

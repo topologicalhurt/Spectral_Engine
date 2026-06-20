@@ -1,5 +1,21 @@
 # Kernel-hardening cleanup plan
 
+**STATUS: CLOSED 2026-06-21 — archived.** All non-gated work LANDED (consolidated in CHANGELOG
+Pass 275); every remaining item is GATED-with-rationale, so there is no local do-now work. Two
+stale premises corrected at closure (verified against code):
+- **IV-m.2** (carry-state + per-block renorm, the plan's flagged "one genuinely significant
+  algorithmic trade") **SHIPPED** via the separate embedded-resource-separation campaign
+  (commit fc48d889; `spectral_coupled_renorm` now has production callers in `spectral_synth_arm32.c`;
+  the exact-frequency-guarantee trade was resolved there, measured −5.96% at the 48-sample block).
+- **III**'s "dead `amplitude` slot" premise is **STALE** — `s_perf_stats.amplitude` IS written
+  (`spectral_synth_arm32.c:376`) and live-called under `SPECTRAL_RESTRICTED_PROFILE`, so III.1's
+  "kill the dead slot" is moot.
+GATED remainder (deferred with rationale; lives on here + in CHANGELOG Pass 275): II.1
+SpectralRunRecord (shared-CLI parallel conflict), II.6 bench enum-share, III embedded telemetry
+(m7-baseline), IV-d.1/d.2 magsq vectorize (maintainer ULP call), IV-d.4 / IV-m.4 / VII C1/C3
+(x86-CI / hardware), IV-m.1 de-spill (m7-baseline), V.3 presence-lint (attended tuning), VII.2
+per-op width policy (x86-CI).
+
 **Opened 2026-06-18, branch `minimal`.** This is the single active plan for the next
 stretch. Lifecycle (maintainer's stated flow): **author → implement fully (with new
 tests + new AI.md/canon principles per finding) → audit against AI.md principles →
