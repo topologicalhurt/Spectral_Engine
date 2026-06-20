@@ -8,7 +8,7 @@
 /* Wide q63 accumulator -> Q15. The accumulator holds the EXACT sum of Q15*Q15 (Q30)
  * products, so the additive mix is clipped exactly once here (proper mix headroom),
  * rather than per-MAC into a Q31 as the legacy path did. */
-void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, q15_t scale) {
+void spectral_q63_to_q15_scaled(q63_t* accum, q15_t* dst, uint32_t count, q15_t scale) {
     if (count > 0u && (!accum || !dst)) return;
     for (uint32_t i = 0; i < count; i++) {
         /* Q2.30 MAC sum -> Q15: arithmetic >>15, then a BRANCHLESS saturating narrow. ssat16 on a
@@ -17,6 +17,9 @@ void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, 
          * sum ~2^39 -> 2^24), so the q31 narrow is exact and this is byte-identical over the design
          * range; ssat16 still clamps the out-of-Q15 magnitude exactly as the q63 clamp did. */
         q15_t sample = spectral_ssat16((q31_t)(accum[i] >> 15));
+        accum[i] = 0;   /* DRAIN the q63 accumulator as we read it -> the next block needs no
+                         * separate zeroing pass. Safe: the synth only writes [0..count] and the
+                         * (static) accum is zero-initialized, so any unwritten tail stays zero. */
         dst[i] = spectral_mul_q15(sample, scale);
     }
 }

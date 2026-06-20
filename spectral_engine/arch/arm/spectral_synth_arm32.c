@@ -1030,10 +1030,11 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     static q63_t accum[SPECTRAL_ARM32_MAX_BLOCK];
 #endif
     
-    /* Clear the q63 accumulator through the one retargetable zeroing primitive
-     * (spectral_mem.h) rather than assuming a raw memset here. */
-    spectral_mem_zero(accum, (size_t)num_samples * sizeof(accum[0]));
-    
+    /* No per-block accum clear: spectral_q63_to_q15_scaled DRAINS (zeros) the accumulator as it
+     * packs the output, and the static accum is zero-initialized, so each block's [0..num_samples]
+     * is already clean (the synth only writes that range; the tail stays zero). Saves the per-block
+     * zeroing pass entirely (it was a newlib memset, ~90 K dynamic insns on the counts fixture). */
+
     /* Prefetch first few segments from SDRAM */
 #if SPECTRAL_HAS_DMA && SPECTRAL_ARM_M7
     spectral_arm32_dma_prefetch(ctx);

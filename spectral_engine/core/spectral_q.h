@@ -292,7 +292,9 @@ static inline q15_t spectral_scale_q15(q15_t sample, q15_t amplitude) {
 
 /* Wide (q63) accumulator variant: exact sum of Q15*Q15 products, saturated to Q15
  * once at the end (>>15) before applying the master scale. */
-void spectral_q63_to_q15_scaled(const q63_t* accum, q15_t* dst, uint32_t count, q15_t scale);
+/* Drains (zeros) the q63 accumulator as it converts -> Q15: the arm32 render relies on this so it
+ * needs no separate per-block accum-clear. accum is non-const (written to zero). */
+void spectral_q63_to_q15_scaled(q63_t* accum, q15_t* dst, uint32_t count, q15_t scale);
 
 /* ============================ SIGNED Q LADDER ============================
  * Cross-product format conversions between the signed Q types, treating every

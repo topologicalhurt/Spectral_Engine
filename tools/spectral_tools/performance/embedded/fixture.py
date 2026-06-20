@@ -123,3 +123,32 @@ def default_fixture() -> WorkloadFixture:
             for i in range(9)
         ),
     )
+
+
+def sustained_fixture(n_voices: int, total_samples: int = 4800,
+                      block_samples: int = 48) -> WorkloadFixture:
+    """N simultaneously-active sustained voices (all start at 0) — the recurrence-dominated
+    regime the 512-voice real-time target lives in, vs default_fixture's ~4-voice average.
+    Fixed per-block overheads (segment scan, accum-zero, output pack) amortize to ~0 here, so
+    process_insns / (n_voices * total_samples) converges to the kernel's per-voice-sample cost
+    as n grows. amp is scaled ~1/n so the q63 mix stays well inside Q15 at the output pack."""
+    if not 1 <= n_voices <= 512:
+        raise ValueError(f"n_voices {n_voices} outside [1, 512] (SPECTRAL_ARM32_MAX_ACTIVE)")
+    amp = min(0.4 / n_voices, 0.05)
+    return WorkloadFixture(
+        name=f"sustained{n_voices}",
+        sample_rate=48_000,
+        total_samples=total_samples,
+        block_samples=block_samples,
+        voices=tuple(
+            Voice(start=0, length=total_samples, freq_hz=110.0 + i * 17.0, amp=amp)
+            for i in range(n_voices)
+        ),
+    )
+
+
+def voice_sweep_fixtures(counts: tuple[int, ...] = (4, 16, 64, 128, 256, 512)
+                         ) -> tuple[WorkloadFixture, ...]:
+    """The voice-count sweep: one sustained fixture per N. Lets the perf stack measure the
+    per-voice-sample cost across the polyphony range and watch the fixed overheads amortize."""
+    return tuple(sustained_fixture(n) for n in counts)
