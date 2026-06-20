@@ -200,6 +200,16 @@ static inline q63_t spectral_smlald(q63_t acc, q15_t a0, q15_t b0, q15_t a1, q15
     uint32_t packed_b = ((uint32_t)(uint16_t)b1 << 16) | (uint16_t)b0;
     return (q63_t)__smlald(packed_a, packed_b, (long long)acc);
 }
+/* Packed dual-MAC: acc + s_lo*a_lo + s_hi*a_hi with samples/amps PRE-PACKED in 16-bit lanes
+ * (low = voice A, high = voice B). Lets the pair kernel carry both amps in one register, ramp
+ * them with a single QADD16, and feed SMLALD the packed amps directly (no per-call repack). */
+static inline q63_t spectral_smlald_packed(q63_t acc, uint32_t packed_s, uint32_t packed_a) {
+    return (q63_t)__smlald(packed_s, packed_a, (long long)acc);
+}
+/* Packed dual saturating Q15 add — both 16-bit lanes independently (== two spectral_qadd16). */
+static inline uint32_t spectral_qadd16x2(uint32_t a, uint32_t b) {
+    return (uint32_t)__qadd16((int32_t)a, (int32_t)b);
+}
 /* ACLE has no __smulbb (GCC arm_acle.h: __smlabb yes, __smulbb no — the DSP
  * branch failed to compile under arm-none-eabi-gcc). A widened 16x16 multiply
  * is exact and GCC selects SMULBB for it (codegen-verified). */
@@ -242,6 +252,16 @@ static inline q31_t spectral_smlad(q31_t acc, q15_t a0, q15_t b0, q15_t a1, q15_
 /* Dual 16-bit MAC into a q63 accumulator: acc + a0*b0 + a1*b1, exact (no overflow). */
 static inline q63_t spectral_smlald(q63_t acc, q15_t a0, q15_t b0, q15_t a1, q15_t b1) {
     return acc + (q63_t)((q31_t)a0 * b0) + (q63_t)((q31_t)a1 * b1);
+}
+static inline q63_t spectral_smlald_packed(q63_t acc, uint32_t packed_s, uint32_t packed_a) {
+    q15_t s0 = (q15_t)(int16_t)(packed_s & 0xFFFFu), s1 = (q15_t)(int16_t)(packed_s >> 16);
+    q15_t a0 = (q15_t)(int16_t)(packed_a & 0xFFFFu), a1 = (q15_t)(int16_t)(packed_a >> 16);
+    return acc + (q63_t)((q31_t)s0 * a0) + (q63_t)((q31_t)s1 * a1);
+}
+static inline uint32_t spectral_qadd16x2(uint32_t a, uint32_t b) {
+    q15_t a0 = (q15_t)(int16_t)(a & 0xFFFFu), a1 = (q15_t)(int16_t)(a >> 16);
+    q15_t b0 = (q15_t)(int16_t)(b & 0xFFFFu), b1 = (q15_t)(int16_t)(b >> 16);
+    return ((uint32_t)(uint16_t)spectral_qadd16(a1, b1) << 16) | (uint16_t)spectral_qadd16(a0, b0);
 }
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return (q31_t)a * (q31_t)b;

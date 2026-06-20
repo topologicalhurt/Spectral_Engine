@@ -740,20 +740,24 @@ static inline void synth_core_pair_m7(
      * CARRIED in oscA/oscB across blocks (no per-block f64 seed), one renorm per block each. */
     // SPECTRAL_Q_DOMAIN BEGIN  -- dual-MAC per-sample Q31 recurrence; no float (enforced)
     SpectralCoupledOsc oA = *oscA, oB = *oscB;
-    q15_t aA = *ampA, aB = *ampB;
+    /* Carry both voices' amps PACKED in one register (low lane = A, high = B): the per-sample
+     * ramp is ONE QADD16 for the pair, and SMLALD consumes the packed amps directly -- saving
+     * the second QADD16 and the per-call repack. Bit-identical (each 16-bit lane is independent). */
+    uint32_t amps   = ((uint32_t)(uint16_t)*ampB << 16) | (uint16_t)*ampA;
+    uint32_t deltas = ((uint32_t)(uint16_t)amp_deltaB << 16) | (uint16_t)amp_deltaA;
     for (uint32_t j = blk_start; j < blk_end; j++) {
         SPECTRAL_PREFETCH_WRITE(&accum[j + 8]);
         q15_t sA = (q15_t)(oA.s >> 16); spectral_coupled_step(&oA, cwA, swA);
         q15_t sB = (q15_t)(oB.s >> 16); spectral_coupled_step(&oB, cwB, swB);
-        accum[j] = spectral_smlald(accum[j], sA, aA, sB, aB);
-        aA = spectral_qadd16(aA, amp_deltaA);
-        aB = spectral_qadd16(aB, amp_deltaB);
+        uint32_t samples = ((uint32_t)(uint16_t)sB << 16) | (uint16_t)sA;
+        accum[j] = spectral_smlald_packed(accum[j], samples, amps);
+        amps = spectral_qadd16x2(amps, deltas);
     }
     spectral_coupled_renorm(&oA);  *oscA = oA;
     spectral_coupled_renorm(&oB);  *oscB = oB;
     uint32_t blk_len = blk_end - blk_start;
-    *phaseA += phase_incA * blk_len;  *ampA = aA;
-    *phaseB += phase_incB * blk_len;  *ampB = aB;
+    *phaseA += phase_incA * blk_len;  *ampA = (q15_t)(int16_t)(amps & 0xFFFFu);
+    *phaseB += phase_incB * blk_len;  *ampB = (q15_t)(int16_t)(amps >> 16);
     // SPECTRAL_Q_DOMAIN END
 }
 
@@ -988,7 +992,12 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     }
 
     if (SPECTRAL_UNLIKELY(ctx->output_position >= ctx->output_length ||
-                          ctx->num_segments == 0u || !ctx->segments || !ctx->osc_lut)) {
+                          ctx->num_segments == 0u || !ctx->segments
+#if !SPECTRAL_ARM_M7
+                          || !ctx->osc_lut   /* only the LUT-gather path needs the table; the M7
+                                              * coupled oscillator never reads it (bandwidth-01) */
+#endif
+                          )) {
         spectral_arm32_zero_output(out_left, out_right, num_samples);
         spectral_perf_process_end(perf_start, 0, 0);
         return 0;

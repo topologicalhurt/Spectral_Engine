@@ -51,10 +51,10 @@ from .toolchain import Toolchain
 # their cycles/iter are UNCHANGED (verified in-band — renorm is per-block, not in the
 # loop), labels only.
 SAMPLES_PER_ITER = {
-    "synth_core_m7/.L352": 16.0,   # main sustain loop
-    "synth_core_pair_m7/.L434": 2.0,
-    "synth_core_m7/.L354": 1.0,    # scalar tail
-    "synth_fade_m7/.L524": 1.0,
+    "synth_core_m7/.L346": 16.0,   # main sustain loop
+    "synth_core_pair_m7/.L428": 2.0,
+    "synth_core_m7/.L348": 1.0,    # scalar tail
+    "synth_fade_m7/.L518": 1.0,
 }
 # Guard band for cycles/voice-sample: if a kernel falls outside, the unroll
 # map has drifted and the WCET must not be trusted silently.

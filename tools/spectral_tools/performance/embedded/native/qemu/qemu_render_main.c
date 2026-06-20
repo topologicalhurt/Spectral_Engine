@@ -46,7 +46,9 @@ static const FixtureVoice fixture_spec[N_SEG] = { FIXTURE_VOICES(X) };
 #define SPECTRAL_QEMU_RENDER_WAV "qemu_render.wav"
 #endif
 
+#if !SPECTRAL_ARM_M7
 static q15_t lut[SPECTRAL_OSC_LUT_SIZE + 1];
+#endif
 static SpectralSegmentQ15 segbuf[N_SEG] __attribute__((section(".bulk_bss")));
 static SpectralSegmentQ15 fixture[N_SEG];
 static SpectralArm32Ctx ctx;
@@ -57,7 +59,9 @@ int main(void) {
         volatile unsigned char* p = (volatile unsigned char*)segbuf;
         for (uint32_t i = 0; i < sizeof segbuf; i++) p[i] = 0u;
     }
-    spectral_lut_init_sine(lut);
+#if !SPECTRAL_ARM_M7
+    spectral_lut_init_sine(lut);   /* LUT-gather path only; coupled osc reads no LUT */
+#endif
 
     for (uint32_t i = 0; i < N_SEG; i++) {
         const FixtureVoice* v = &fixture_spec[i];
@@ -70,7 +74,11 @@ int main(void) {
         fixture[i].df_q15    = 0;
     }
 
+#if SPECTRAL_ARM_M7
+    spectral_arm32_init(&ctx, segbuf, N_SEG, (const q15_t*)0, SR);   /* coupled osc: no LUT */
+#else
     spectral_arm32_init(&ctx, segbuf, N_SEG, lut, SR);
+#endif
     if (spectral_arm32_load(&ctx, fixture, N_SEG, TOTAL) != SPECTRAL_OK) {
         semihost_write0("RESULT: FAIL (load)\n");
         return 1;

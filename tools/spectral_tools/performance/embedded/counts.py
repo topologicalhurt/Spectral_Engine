@@ -24,7 +24,8 @@ from .toolchain import NATIVE_DIR, Toolchain
 RANGE_SYMBOLS = (
     "spectral_arm32_process",
     "spectral_arm32_load",
-    "spectral_lut_init_sine",
+    # spectral_lut_init_sine intentionally NOT required: the M7 coupled-osc harness no
+    # longer inits the (dead) sine LUT, so gc-sections drops the symbol (bandwidth-01).
     "memcpy",
     "memset",
     "main",

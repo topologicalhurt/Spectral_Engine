@@ -23,8 +23,10 @@
  * synthesis (bandwidth-01: reclaimable once process()'s non-null precondition is gated off
  * the M7 path -- PERF-gated, maintainer-sequenced). */
 static SpectralSegmentQ15 s_segment_pool[DAISY_MAX_SEGMENTS_SAFE] DAISY_SDRAM_BSS;
+#if !SPECTRAL_ARM_M7   /* LUT oscillator (non-M7 builds); the M7 coupled osc reads no LUT (bandwidth-01) */
 static q15_t s_osc_lut[SPECTRAL_OSC_LUT_SIZE + 1] DAISY_SRAM;
 static uint8_t s_lut_initialized = 0;
+#endif
 static DaisySpectralCtx* s_active_ctx = NULL;
 
 #ifdef DAISY_HAS_FATFS
@@ -33,7 +35,11 @@ static uint8_t s_sd_mounted = 0;
 #endif
 
 static inline uint32_t daisy_base_memory_used(void) {
+#if !SPECTRAL_ARM_M7
     return (uint32_t)(sizeof(DaisySpectralCtx) + sizeof(s_osc_lut));
+#else
+    return (uint32_t)(sizeof(DaisySpectralCtx));   /* no LUT on the coupled-osc M7 build */
+#endif
 }
 
 /* Initialization */
@@ -53,17 +59,23 @@ DaisyResult daisy_spectral_init(DaisySpectralCtx* ctx, uint32_t sample_rate) {
         sample_rate = DAISY_SAMPLE_RATE;
     }
     
-    /* Initialize oscillator LUT once */
+#if !SPECTRAL_ARM_M7
+    /* Initialize oscillator LUT once (LUT-gather path; the M7 coupled osc never reads it) */
     if (!s_lut_initialized) {
         spectral_lut_init_sine(s_osc_lut);
         s_lut_initialized = 1;
     }
-    
+#endif
+
     /* Initialize embedded synthesis context */
     spectral_arm32_init(&ctx->synth,
                            s_segment_pool,
                            DAISY_MAX_SEGMENTS_SAFE,
+#if !SPECTRAL_ARM_M7
                            s_osc_lut,
+#else
+                           (const q15_t*)0,   /* coupled osc: no LUT (bandwidth-01) */
+#endif
                            sample_rate);
     
     /* Set Daisy defaults */
