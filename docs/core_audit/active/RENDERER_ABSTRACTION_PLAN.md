@@ -205,10 +205,22 @@ summed into one buffer (the §1 payoff).
   boundary only; the m7-pinned `spectral_arm32_*` kernel names are excluded. Each batch:
   build + `tests_all` + ctest + m7 gate before commit.
 - **Stage 3 — formalize wavetable + subtractive as first-class renderers.**
-  - 3a: wavetable gains a frequency-domain **deposit** path (harmonic-vector placement) so it runs on
-    the IFFT domain, not only time-domain; parity test vs the time-domain table read.
-  - 3b: subtractive gains the explicit **filter** stage — `H(f)` per-bin multiply (freq-domain) and its
-    time-domain dual — with a source×filter parity test. This is the one genuinely new DSP in scope.
+  - **3a-1 — LANDED (commit 078fee2).** `core/spectral_wavetable_harmonics.h/.c`: extract a table's
+    harmonic series `{amp_k, phase_k}` by DFT of its OWN samples, and expand a wavetable partial into
+    its harmonics as additive `SpectralIfftPartial`s (bin `k·f0`, amp `amp·amp_k`, phase
+    `k·phase0 + phase_k`, Nyquist-truncated). Freq-domain wavetable rendering thus reuses the existing
+    additive IFFT deposit, consistent-by-construction with `spectral_wavetable_lookup`. NEW
+    `wavetable_harmonics` ctest (#21): planted-harmonic extraction + round-trip + expansion/truncation
+    (fail-on-bug). The bridge TU is test-only until 3a-2 wires it.
+  - **3a-2 — NEXT.** End-to-end: render a wavetable scene via expansion + the IFFT, **opt-in** (default
+    unchanged, like the sine hybrid fast path), with a cross-domain **render-parity** test (freq-domain
+    render vs the time-domain table read, measured tolerance — the two domains differ by linear-interp
+    imaging + the IFFT approximation, so this is a "within X dB" consistency gate, not bit-exact). Then
+    dispatch routing for wavetable timbres. The IFFT is an approximation, so default-on rides the
+    maintainer F3 golden (same contract as the sine IFFT path).
+  - **3b** — subtractive gains the explicit **filter** stage — `H(f)` per-bin multiply (freq-domain) and
+    its time-domain dual — with a source×filter parity test. The one genuinely new DSP; needs a
+    filter-form decision (per-band spectral envelope vs cutoff/Q biquad).
 
 ## 7. Risks and gates
 
