@@ -19,20 +19,23 @@
  * Resource model -- FPU vs ALU (see docs/core_audit/EMBEDDED_RESOURCE_SEPARATION_PLAN.md):
  *   - The per-sample recurrence is PURE Q31/Q15 integer (ALU/DSP). No float.
  *   - The ONLY floating-point work is the per-voice oscillator seed
- *     (spectral_coupled_init, double precision). synth_segment_m7 currently re-seeds
- *     EVERY block per voice, so the FPU runs a burst at each block boundary and is
- *     idle for the rest of the block: a clean temporal ownership boundary, but ZERO
- *     FPU/ALU overlap and a per-block cost (carry-state + ALU renorm is the standing
- *     fix; tracked in the plan).
+ *     (spectral_coupled_freq_constants + _seed_state, double precision), paid ONCE at
+ *     voice ACTIVATION (fpu-03/fpu-01). The invariant (cos_w,sin_w) are stored in the
+ *     active record; the (c,s) state CARRIES across blocks, bounded by a cheap ALU
+ *     renorm -- so the audio steady state touches no FPU at all. Clean temporal
+ *     ownership; no FPU/ALU overlap (the recurrence is serial -- see the plan section 0).
  *
  * Memory placement -- resolved by the BSP, objdump-checkable, NOT inert:
  *   - With no BSP (host / simulation / unbound target) SPECTRAL_MEM_FAST / _BULK /
  *     _FAST_CODE are portable no-ops (default memory).
  *   - On the Daisy build SPECTRAL_BSP_MEM_HEADER binds SPECTRAL_MEM_FAST ->
- *     .dtcmram_bss, so the q63 accumulator and the active-voice context land in DTCM
- *     (zero wait-state); SPECTRAL_MEM_BULK -> .sdram_bss. SPECTRAL_MEM_FAST_CODE stays
- *     a no-op (libDaisy maps no ITCM section). Verify after a firmware link with the
- *     objdump recipe in api/daisy_seed/daisy_seed_mem.h.
+ *     .dtcmram_bss, so the q63 accumulator (the one SPECTRAL_MEM_FAST static here) lands
+ *     in DTCM (zero wait-state). The active-voice CONTEXT (ctx_/synth state, incl. the
+ *     fpu-01 osc_c/osc_s carries) is NOT tagged -> default .bss/SRAM; pinning it (or just
+ *     the hot SoA carries) to DTCM is a tracked on-target follow-up (dtcm-ctx in the plan).
+ *     SPECTRAL_MEM_BULK -> .sdram_bss. SPECTRAL_MEM_FAST_CODE stays a no-op (libDaisy maps
+ *     no ITCM section). Verify after a firmware link with the objdump recipe in
+ *     api/daisy_seed/daisy_seed_mem.h.
  *   - LUT residency: ONLY the generic (non-M7) fallback gathers the sine LUT. The M7
  *     path uses the gather-free coupled oscillator and never reads the LUT during
  *     synthesis, so "cache misses" do not apply on M7 (the LUT is still required
@@ -220,10 +223,6 @@ static inline int spectral_arm32_segment_chirp_supported(const SpectralSegmentQ1
     return 1;
 #endif
 }
-
-#if SPECTRAL_USE_CMSIS
-#include "arm_math.h"
-#endif
 
 /* Keep op/cycle accounting gating centralized. */
 typedef struct SpectralPerfSegScanState {

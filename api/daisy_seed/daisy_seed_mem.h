@@ -10,12 +10,14 @@
  * runs from internal flash via the I-cache) until an ITCM section is added to the linker
  * script. Verify the binding after a firmware link:
  *   arm-none-eabi-objdump -t build/bin/daisy/APP.elf | grep -E 'dtcmram_bss|sdram_bss'
- *   arm-none-eabi-nm -S build/bin/daisy/APP.elf | grep -E 'accum|s_synth_ctx'   # addr in DTCM range
+ *   arm-none-eabi-nm -S build/bin/daisy/APP.elf | grep -E ' accum$'   # accum -> addr in DTCM range
  *
- * NOTE: .dtcmram_bss is zero-initialized (BSS), matching the zero-init hot state (the q63
- * accumulator, the active-segment context). Initialized hot data such as the sine LUT needs
- * an initialized DTCM section (.dtcmram_data) the BSP does not yet provide -- pinning the LUT
- * to DTCM is a follow-up that requires a linker-script addition.
+ * NOTE: .dtcmram_bss is zero-initialized (BSS), matching the zero-init hot state. Only the q63
+ * accumulator carries SPECTRAL_MEM_FAST today, so only IT lands in DTCM; the active-voice context
+ * (ctx_/synth state, incl. the fpu-01 osc_c/osc_s carries) is an untagged C++ member -> default
+ * .bss/SRAM. Pinning the context (or just the hot SoA carries) to DTCM is a tracked on-target
+ * follow-up (dtcm-ctx). Initialized hot data such as the sine LUT needs an initialized DTCM section
+ * (.dtcmram_data) the BSP does not yet provide -- pinning the LUT to DTCM is a separate follow-up.
  */
 #ifndef DAISY_SEED_MEM_H
 #define DAISY_SEED_MEM_H
