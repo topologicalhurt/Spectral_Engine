@@ -10,8 +10,18 @@
 #include "ff.h"
 #endif
 
-/* Static memory pools */
-
+/* Static memory pools.
+ *
+ * s_segment_pool is the SDRAM-resident segment store (DAISY_SDRAM_BSS -> .sdram_bss
+ * @ 0xC0000000). Its L1 D-cache behaviour rides the MPU region attribute, which is
+ * libDaisy's default and is NOT configured in this tree -- the load-bearing assumption
+ * for sd-load coherency (see the f_read in daisy_spectral_load_sd). Normally write-back
+ * write-allocate, which is why a DMA fill of the pool would need an invalidate.
+ *
+ * s_osc_lut is the 8 KB sine LUT, consumed ONLY by the generic (non-M7) gather oscillator;
+ * the Daisy M7 build renders the gather-free coupled recurrence and never reads it during
+ * synthesis (bandwidth-01: reclaimable once process()'s non-null precondition is gated off
+ * the M7 path -- PERF-gated, maintainer-sequenced). */
 static SpectralSegmentQ15 s_segment_pool[DAISY_MAX_SEGMENTS_SAFE] DAISY_SDRAM_BSS;
 static q15_t s_osc_lut[SPECTRAL_OSC_LUT_SIZE + 1] DAISY_SRAM;
 static uint8_t s_lut_initialized = 0;
@@ -126,8 +136,20 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
     
     uint32_t seg_bytes = header.num_segments * sizeof(SpectralSegmentQ15);
     
-    /* Read directly into segment pool (segments is non-const in pool) */
-    if (f_read(&file, (void*)ctx->synth.segments, seg_bytes, &bytes_read) != FR_OK || 
+    /* Read directly into segment pool (segments is non-const in pool).
+     *
+     * CACHE-COHERENCY CONTRACT (sd-load): ctx->synth.segments is the SDRAM pool
+     * (s_segment_pool, DAISY_SDRAM_BSS). If FatFS/SDMMC services this f_read by DMA
+     * AND the MPU maps SDRAM write-back (libDaisy's default region attribute -- NOT
+     * set in this tree; see s_segment_pool), the DMA write bypasses the L1 D-cache and
+     * a later synthesis read can hit a STALE line. spectral_arm32_load_in_place() below
+     * issues a dsb (write-completion ordering) but NOT a cache invalidate. The fix when
+     * both conditions hold is a line-rounded SCB_InvalidateDCache_by_Addr over
+     * [segments, seg_bytes) here -- the recipe already exists in
+     * spectral_arm32_dma_rx_sync (spectral_cache_invalidate_range). Gated ON-TARGET:
+     * confirm the f_read DMAs and the SDRAM attribute on hardware first (an
+     * unconditional invalidate is wasted if f_read is CPU-copy or SDRAM non-cacheable). */
+    if (f_read(&file, (void*)ctx->synth.segments, seg_bytes, &bytes_read) != FR_OK ||
         bytes_read != seg_bytes) {
         f_close(&file);
         return DAISY_ERR_SD_READ;

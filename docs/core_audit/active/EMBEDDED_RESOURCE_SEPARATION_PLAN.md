@@ -93,6 +93,32 @@ f64 state-seed net of renorm, from the direct fpu-01@256 delta 25,569/288).
 | 128   | 2,164,294     | 576     | ~−2.3%        |
 | 64    | 2,289,042     | 1152    | ~−4.4%        |
 | **48 (real Daisy)** | **2,373,319** | **1539** | **−5.76%** |
+
+### Cache / bandwidth roofline audit (2026-06-20, 4-finder adversarial workflow, 15/21 confirmed)
+
+**Verdict: the path is NOT bandwidth-limited — it is compute-bound on the serial per-sample Q31/Q15
+coupled recurrence (24.0 cyc/voice-sample, measured). The roofline is healthy by design.** The one
+thing that would make a streaming synth SDRAM-bound — rescanning the pool every callback — does not
+happen: segment traversal is **O(active)** via the monotonic `next_seg_idx` cursor + the
+`seg_start>=out_end` break (arm32.c:1043-1049) backed by the sorted-load invariant (validate at :480).
+So SDRAM is read ~once per segment at activation (~0.07-0.8 KB/block, ~28× left of the ridge) and never
+binds. The recurrence sits on the compute ceiling; 512 voices = ~148% of the 400 MHz budget → **the IFFT
+route for dense frames is the only ceiling-raiser; cache/bandwidth work cannot move it.**
+
+Modeled tiers: **DTCM** ~1.6 GB/s zero-wait (holds `accum[]`, the compute substrate); **AXI-SRAM**
+L1-cached (holds the 24 KB SoA — see dtcm-ctx); **SDRAM/FMC** ~0.2 GB/s effective (segment pool, not the
+wall). Ridge ≈ 4 ops/byte; the recurrence runs at 15-160 ops/byte (far right = compute-bound).
+
+New confirmed findings + dispositions (none move the binding constraint):
+
+| id | sev | disposition | one-line |
+|----|-----|-------------|----------|
+| coh-mpu-sdram-attr / coh-sd-load | med | **DOC ✅ landed + ON-TARGET** | The SDRAM cacheability attribute (MPU region) is libDaisy's default and was UNdocumented in-tree, yet it gates whether the sd-load `f_read`-into-SDRAM (daisy_spectral_load_sd:130) needs a D-cache invalidate. **Documented the contract** at `s_segment_pool` + the f_read (the one real, conditional coherency gap). The invalidate itself is ON-TARGET (confirm f_read DMAs + SDRAM is write-back on HW; recipe exists in `spectral_arm32_dma_rx_sync`). |
+| dtcm-ctx (re-quantified) | med | **ON-TARGET** | SoA = 24 KB > 16 KB D-cache; per-block *touched* footprint 16.2 KB@416 / 20.0 KB@512 EXCEEDS the cache; hot carry subset ~7 KB. Pinning the hot carries to DTCM removes the residency cliff — a **WCET-margin** win, NOT a ceiling-raiser. Loop streams the SoA single-pass so it is not thrashing today (live front ~384 B). |
+| cache-soa-02 | low | **ACCEPT** | Prune swap-with-last writes 14 separate SoA arrays = ~7× write-amplification (448 B vs 64 B AoS) per pruned voice. Cold + bounded by deaths/block; SoA is still the right call (it beats AoS on the hot streaming path). |
+| layout-seg16-not-14 | low | **TRACKED** | Daisy streams the 16 B `SpectralSegmentQ15` (`SPECTRAL_Q15_COMPACT=0`); `df_q15` is read into cache but unused on M7 (chirp load-rejected). `=1` → 14 B (−12.5% activation bytes) only after confirming the .spq tool round-trips 14 B. Footprint, not bottleneck. |
+| cache-hotcold-08 | low | **DOCUMENTED-DEAD (mention, don't delete)** | SoA `freq_delta[]` + `seg_idx[]` are render-dead (~4 KB; grep-confirmed write-only tree-wide — `freq_delta` never even written at activation, `seg_idx` written but no reader). Trimming is a struct-layout change that risks the m7 `.L`-label numbering (PERF-gate) and removes state the maintainer may want (future chirp / voice→segment telemetry). Available on request; not landed per the surgical rule. |
+
 | arch-03 / kr-03 SNR gate | honesty | med | **MODEL/TEST ✅ landed** | The 72 dB SNR contract was validated only under the *renorm* regime; the shipped *re-seed* regime had no SNR/THD gate. `arm_core_test::test_single_tone` now measures coherent SINAD over the sustain region at the kernel's exact rendered frequency — **measured 80.7 dB, floor 70.0** (fail-on-bug: 2% 2nd-harmonic → 28 dB, gate trips). This is the safety net required before the Phase-A drift-regime change. |
 | cache-02 dormant SCB untested | cache | med | **MODEL/TEST ✅ landed** | The cacheable `SCB_InvalidateDCache_by_Addr` arm is compiled by no build/test. The line-round + overflow arithmetic is now extracted to `spectral_cache_invalidate_range` (`spectral_mem.h`) and pinned by `arm_core_test::test_cache_invalidate_range` (align/round-up/overflow/INT32_MAX cases, fail-on-bug verified). The dormant DMA path calls it (behaviorally identical; the SCB call stays firmware-only). No measured-codegen change (DMA path is `SPECTRAL_HAS_DMA`-dormant; helper unused in measured builds). |
 | arch-05 firmware purity | arch | low→**med** | **✅ LANDED (MODEL/TEST)** | The layer law checks include *direction*, not OS-contract-freedom (kernel→kernel is legal; system includes ignored). A re-audit found `spectral_wavetable.c` (a `SPECTRAL_SOURCES_DAISY_ENGINE` TU) compiled 4 host file loaders (`load`/`save`/`load_raw`/`load_hex`) UNGUARDED into firmware: `nm -u` (real-firmware mode) named `FILE*`/`sscanf`, the `spectral_fs_*` shim (NOT in the firmware link set → would be unresolved externals), and `malloc/calloc/free` — all inside those 4 fns (the bank is fixed arrays; `load_buffer` is the firmware path). Fixed: gated the `spectral_fs.h` include + the 4 loaders under the emulator guard `#if !SPECTRAL_EMBEDDED \|\| SPECTRAL_IS_EMBEDDED_SIM` (kept on desktop + host-sims, excluded ONLY on real firmware, which defines neither SIMULATION nor USE_EMBEDDED_SYNTH per daisy-config.cmake). NEW `tests/tools/test_firmware_purity.py` recompiles every engine TU in real-firmware mode and asserts `nm -u` names no host file I/O / heap / FS-shim / OS-threading symbol (fail-on-bug verified: neutering the guard trips it with the exact 10-symbol set). All 4 firmware TUs now CLEAN; all host targets link. |
