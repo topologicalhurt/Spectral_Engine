@@ -6,6 +6,12 @@
 #include <limits.h>
 #include <float.h>
 
+#if SPECTRAL_USE_VDSP
+#define SPECTRAL_FFT_BACKEND_NAME "vDSP"
+#else
+#define SPECTRAL_FFT_BACKEND_NAME "FFTW3f"
+#endif
+
 static int spectral_fft_magsq_scale_valid(float scale)
 {
     return spectral_is_finite_f32(scale) && scale > 0.0f;
@@ -202,6 +208,10 @@ int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
         if (!res->fft_plans[t]) goto fail;
     }
 #endif
+    /* FFT backend identity is a capability decision (#29) — the vDSP-vs-FFTW3f path was never
+     * visible. One line per analysis (same cadence as the crossover/summary logs). */
+    SPECTRAL_LOG_INFO("FFT backend: " SPECTRAL_FFT_BACKEND_NAME
+                      " (n_fft=%zu n_freqs=%zu threads=%d)", n_fft, n_freqs, n_threads);
     return 1;
 
 fail:
