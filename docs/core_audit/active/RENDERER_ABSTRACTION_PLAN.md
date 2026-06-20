@@ -230,10 +230,14 @@ summed into one buffer (the §1 payoff).
     (`freq = bin·sr/n_fft`) — filtering as spectral multiplication, source-agnostic (filters wavetable
     or additive partials alike). NEW `filter_envelope` ctest (#23): interpolation/clamping/degenerate
     cases + the per-partial apply (fail-on-bug). Test-only TU for now.
-  - **3b-2 — NEXT (F3-gated).** Wire a subtractive renderer that runs its source (the bandlimited
-    timbres' harmonics, or a wavetable) through the envelope, end-to-end; an integration test that
-    FFTs a filtered saw and confirms the output spectrum = source × `H(f)`. Production dispatch routing
-    rides the maintainer F3 golden, like the sine/wavetable IFFT paths.
+  - **3b-2 integration test — LANDED (commit 67eaf5a).** End-to-end: saw source → harmonics → expand →
+    low-pass filter → real IFFT render, then an independent single-bin DFT confirms the output spectrum
+    = source × `H(f)` (passband survives, stopband cut). NEW `subtractive_filter_render` ctest (#24),
+    fail-on-bug verified. Also landed the code-review fix pass (commit fcb0065): the expand/renderer
+    Nyquist off-by-one, the filter `n_points`/NaN bounds, the bank-aware renderer-id log, and
+    `_Static_assert`s on the renderer/timbre enum counts.
+  - **3b-2 dispatch — NEXT (F3-gated).** Routing subtractive (and wavetable) timbres through these
+    freq-domain paths in production rides the maintainer F3 golden, like the sine/wavetable IFFT paths.
 
 ## 7. Risks and gates
 
