@@ -222,9 +222,24 @@ SegmentArray analyze_audio_with_path_mode(const float* audio, size_t n_samples, 
     SpectralAnalysisShape shape = {0};
     SegmentArray result = (SegmentArray)SEGMENT_ARRAY_EMPTY;
 
-    if (!audio || !t_fft || !t_track ||
-        spectral_analysis_shape_init(&shape, n_samples, sr, n_fft, hop, db_thresh) != SPECTRAL_OK) {
+    if (!audio || !t_fft || !t_track) {
+        spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_PARAM,
+                                 "analyze_audio: null argument (audio=%p t_fft=%p t_track=%p)",
+                                 (const void*)audio, (void*)t_fft, (void*)t_track);
         return spectral_analysis_return_empty(t_fft, t_track);
+    }
+    {
+        SpectralError shape_err =
+            spectral_analysis_shape_init(&shape, n_samples, sr, n_fft, hop, db_thresh);
+        if (shape_err != SPECTRAL_OK) {
+            /* shape_init validates sr range / n_fft>0 / hop>0 / overflow; log the params so the
+             * specific failing constraint is visible (was a silent empty result). */
+            spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, shape_err,
+                                     "analyze_audio: invalid analysis shape "
+                                     "(n_samples=%zu sr=%d n_fft=%d hop=%d thresh=%.1f)",
+                                     n_samples, sr, n_fft, hop, (double)db_thresh);
+            return spectral_analysis_return_empty(t_fft, t_track);
+        }
     }
 
     shape.path = spectral_analysis_path_decide(shape.total_bins, path_mode);

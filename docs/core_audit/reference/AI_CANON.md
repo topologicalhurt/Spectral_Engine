@@ -377,3 +377,17 @@ committed file itself — CMake adds every OUTPUT to `clean`, so the file-as-OUT
 + verified) from generated **measurement intermediates** (e.g. census `.s` — ephemeral, never
 committed; the committed artifact is the frozen counts). Generated assembly, if it ever ships
 as a build input, lives in a committed `asm/` folder under this same contract.
+
+## 29. Every major path logs its entry, its decisions, and its error origins
+
+A stage logs its entry once (INFO); every capability/dispatch decision and every fallback-taken
+logs (INFO for the designed path, WARN when degraded); every ORIGINATING `SPECTRAL_ERR_*`/decline
+return logs the specific reason at the site (the caller's generic "X failed" is not enough — log
+the failing constraint and the inputs). Use the existing structured helpers
+(`spectral_log_error_codef`/`_warn_codef`, `spectral_format_resolution_context`); do not invent a
+third idiom. **Hot kernels carry NO logging** — the caller logs the aggregate outcome; leaf
+recurrences and admissibility predicates stay silent and deterministic. Level discipline:
+ERROR = originated failure aborting the op; WARN = degraded but proceeding; INFO = stage/path;
+DEBUG/TRACE = loop-grain. Embedded RT paths use only the strippable `SPECTRAL_DBG`-class macros
+(no always-on log symbol reachable from the M7 synth path). `log_check` guarantees the CHANNEL
+(never raw printf); the presence lint + a decision-logging test guarantee COVERAGE.

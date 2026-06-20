@@ -205,6 +205,10 @@ int spectral_fft_resources_alloc(SpectralFftResources* res, int n_threads,
     return 1;
 
 fail:
+    /* Any FFT-setup/plan or per-thread buffer allocation failed; the caller turns this into an
+     * empty analysis result, so surface the origin (was a silent return 0). */
+    SPECTRAL_LOG_ERROR("FFT resource allocation failed (n_threads=%d, n_fft=%zu, n_freqs=%zu)",
+                       n_threads, n_fft, n_freqs);
     spectral_fft_resources_free(res);
     return 0;
 }

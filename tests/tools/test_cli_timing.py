@@ -118,6 +118,14 @@ def test_per_stage_idle_present(cli_run):
     assert float(m.group(1)) >= 0.0, f"synth idle must be non-negative, got {m.group(1)}"
 
 
+def test_analysis_path_decision_logged(cli_run):
+    """V (logging): the analysis path decision (full_matrix vs spsc_pipeline) is a major
+    capability decision and must be visible in the output. Fail-on-bug: neuter the
+    'Analysis crossover' log and this fails."""
+    assert re.search(r"Analysis crossover:.*path=(full_matrix|spsc_pipeline)", cli_run), (
+        "the analysis path decision must be logged (plan §V / AI_CANON #29)")
+
+
 def test_memory_report_is_honest(cli_run):
     """II.4: the old 'Peak tracked' line summed a near-unwired instrumented subset (~3% of
     RSS) — a naming lie. It must be GONE, replaced by the real RSS delta, plus a Faults line
