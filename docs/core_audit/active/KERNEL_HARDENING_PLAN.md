@@ -315,12 +315,25 @@ segment counts identical at −20/−40/−60 dBFS.** The culprit: `spectral_fft
 (`spectral_analysis_fft.c:93-130`) does scalar, double-precision, **branchy per-bin** work
 on inputs that are provably finite≥0 — defeating auto-vectorization.
 
-- **IV-d.1** Vectorize the interior scale+max (keep the endpoint clamp); the measured
-  −13% single-thread / −9% 8-thread win. *[S / low — `full_fused_parity` is the gate]*
-- **IV-d.2** Fuse magsq with `vDSP_zvmags` (secondary, same fn). *[S / low]*
-- **IV-d.3** Demote/remove the per-growth realloc `WARN` in the **parallel emit hot path**
-  (`spectral_peak_interp.c:172-196`) — it fires on every buffer growth inside the OMP region.
-  *[S / low — log-only]*
+- **IV-d.1 — GATED on a maintainer ULP call (NOT shipped; the research's stated gate is
+  wrong).** The measured −13%/−9% win is real, but `full_fused_parity` is **NOT** a valid
+  gate for it: `spectral_fft_apply_magsq_scales` is shared by BOTH the full and fused paths,
+  so vectorizing it changes both identically and the fused-vs-full parity passes trivially —
+  it proves nothing about whether the vectorized output matches the *original scalar* output.
+  The real risk: the scalar reference does the scale in **double** (`(float)((double)v*(double)s)`);
+  float SIMD (`vDSP_vsmul`) rounds once, diverging by up to 1 ULP. magsq is the **double-scaled
+  peak-scan parity key** (the dB-threshold gate reads it), so a 1-ULP shift can flip a peak at
+  threshold → different segment count. The research's "segment counts identical at −20/−40/−60"
+  is the *real* evidence, but it's input-specific. To ship this needs: (a) the producer-equivalence
+  unit test with an explicit ULP tolerance (not exact), (b) a maintainer decision on the
+  double→float precision trade for the peak-scan key (the "faster-path-should-default" doctrine
+  wants the ULP + what-breaks measured, which conflicts with "magsq stays the double-scaled key").
+  Left for an attended pass. *[S code / but a precision decision, not a free win]*
+- **IV-d.2** Fuse magsq with `vDSP_zvmags` (secondary, same fn). Same precision gate as IV-d.1. *[S / low]*
+- **IV-d.3 — LANDED (commit 2f23c245).** Removed the per-growth realloc `SPECTRAL_LOG_WARN`
+  from inside the OMP parallel emit region (`spectral_peak_interp.c`) — it serialized the
+  threads and violated #29. The counted `perf_track_realloc()` (Phase D-2) + the always-on
+  CLI "Faults: … reallocs N" line surface the violation without hot-path I/O.
 - **IV-d.4 (gated)** The bigger lever (drop the fp16 store entirely → −27.6%) and the
   FFTW/x86 scalar magsq path are **x86-CI-gated** (no x86 silicon here).
 
@@ -372,16 +385,28 @@ identity (vDSP vs FFTW) is never logged. `log_check` enforces **channel** (no ra
 but not **presence** — a new silent `SPECTRAL_ERR` ships uncaught.
 
 **Phases:**
-- **V.1** Write the major-path logging contract into `reference/` (canon). *[S / low]*
-- **V.2** Backfill the high-value silent **decision/error origins** using the existing
-  structured helpers (`spectral_log_error_codef`/`_warn_codef`, `spectral_format_resolution_context`)
-  — no third logging idiom. Cover: analysis path decision, FFT backend identity + init
-  failure, tracker create/finalize failures, backend fallback, IFFT-hybrid engage/decline +
-  reason, resource-load failures, per-stage chain errors. *[M / low-med — pure additive]*
-- **V.3** Extend the lint from **channel → presence**: every originating `SPECTRAL_ERR`/
-  decline return in a dispatch/pipeline **allowlist** has an adjacent log. *[M / med]*
-- **V.4** A behavioral fail-on-bug ctest pinning decision/error logging (neuter a log →
-  test fails). *[M / low]*
+- **V.1 — LANDED (commit b3fe2ba8).** The major-path logging contract is AI_CANON #29
+  (stage entry; capability/dispatch decisions + fallbacks; originating `SPECTRAL_ERR` logs
+  its cause at the site; existing structured helpers, no third idiom; hot kernels silent;
+  level discipline; embedded uses strippable `SPECTRAL_DBG`).
+- **V.2 — PARTIAL (commits b3fe2ba8, a4b26ac1).** Backfilled the highest-value always-reached
+  silent origins: `analyze_audio` null-arg + invalid-shape (was a silent empty SegmentArray),
+  FFT-init `fail:` (was a silent `return 0`), and the three `spectral_tracker_create` NULL
+  exits (bad params / thread overflow / OOM). The analysis path decision + summary were
+  **already** logged (the research's "0 library logs" overstated it). REMAINING (follow-ups,
+  not done): FFT backend identity (vDSP vs FFTW), tracker finalize, backend fallback,
+  IFFT-hybrid engage/decline (compile-gated off by default), resource-load failures.
+- **V.3 — DEFERRED (needs attended tuning).** Channel→presence lint. The heuristic
+  (originating `SPECTRAL_ERR` vs a pass-through return) has real false-positive risk;
+  rec stands (advisory first), but it wants an attended pass to tune the allowlist, not an
+  unattended build-gating commit.
+- **V.4 — LANDED (commit 6575a6cf).** `error_origin_logs` ctest (#19) drives the real
+  `analyze_audio` (reuses the desktop link set minus main) and asserts the null-arg +
+  invalid-shape cause strings; verified fail-on-bug (neuter either log → fails). The
+  CLI-level `analysis_path_decision_logs` (test_cli_timing.py) pins the path-decision log.
+  Also **IV-d.3 LANDED (commit 2f23c245)**: removed the per-growth realloc `SPECTRAL_LOG_WARN`
+  from inside the OMP emit region (the counted `perf_track_realloc` + always-on CLI Faults
+  line replace it — #29 hot-path rule + III's "counter supersedes LOG_WARN" canon).
 
 **Canon:** every stage logs entry once (INFO); every capability/dispatch decision +
 fallback logs (INFO designed-path, WARN degraded); **hot kernels carry NO logging**
