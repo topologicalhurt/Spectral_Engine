@@ -1,7 +1,7 @@
 # Renderer abstraction plan — one spectral frame model, many rendering strategies
 
-Status: DESIGN (Stage 0). No code changes proposed here are landed. This is the approval
-artifact for reframing "synthesis" as "rendering" and introducing a first-class renderer axis.
+Status: Stage 1 LANDED (commit 99221a4); Stages 2–3 pending. Reframes "synthesis" as
+"rendering" — a first-class renderer axis distinct from execution domain and device.
 
 ## 0. Thesis and scope
 
@@ -191,14 +191,16 @@ summed into one buffer (the §1 payoff).
 
 ## 6. Staged refactor (each stage independently green; m7 + parity gates are the guard)
 
-- **Stage 0 — this document + canon.** Add the renderer × domain × device model to `AI_CANON` and a
-  `CORE_CONTRACTS` row. Zero code. *(The approval artifact.)*
-- **Stage 1 — introduce the renderer layer as a wrapper (low risk).** Define `SpectralRenderer` +
-  `SpectralRendererId` and wrap the *existing* `synth_cpu` / wavetable / IFFT / hybrid behind it, with
-  **no symbol renames and no change to the arm32 inner loop**. The hybrid router becomes the formal
-  domain router; the `SpectralBackendVTable` is re-scoped to the device axis. Default render path stays
-  byte-identical ⇒ `full_fused_parity` / `gpu_backend_parity` / `osc_parity` / m7 gate green by
-  construction. New ctest: a renderer-dispatch table test (each id resolves to the right recipe).
+- **Stage 0 — LANDED (commit 799c130).** This document + `ACADEMIC_SOURCES.md` [31]–[38]. (The
+  `AI_CANON`/`CORE_CONTRACTS` rows are folded into Stage 2, when the rename makes the vocabulary final.)
+- **Stage 1 — LANDED (commit 99221a4).** `core/spectral_renderer.h/.c`: `SpectralRendererId`
+  {ADDITIVE, WAVETABLE, SUBTRACTIVE}, `SpectralRendererCaps` {spectral_native, deposits_harmonic_stack,
+  needs_filter}, the registry, and `spectral_renderer_for_timbre()`. Host-side metadata, guarded out
+  of the real firmware build. Live consumer: `spectral_synth_dispatch_ex` logs the renderer identity
+  (AI_CANON #29), host/sim-gated — verified live ("Renderer: additive (timbre=0)"). No symbol renames,
+  arm32 inner loop untouched, audio output unchanged ⇒ parity + m7 gate green by construction. NEW
+  `renderer_dispatch` ctest (#20) pins id→descriptor / caps / timbre→renderer (verified fail-on-bug).
+  The full router-rewiring (consume the registry to pick the domain, not just log) rides Stage 2.
 - **Stage 2 — terminology sweep `synth → render`, gated, host-only.** Rename at the host/CLI/dispatch
   boundary only; the m7-pinned `spectral_arm32_*` kernel names are excluded. Each batch:
   build + `tests_all` + ctest + m7 gate before commit.
