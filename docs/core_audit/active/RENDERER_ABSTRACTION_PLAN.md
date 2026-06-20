@@ -224,9 +224,16 @@ summed into one buffer (the §1 payoff).
   - **3a-3 — NEXT.** The opt-in production render path (a callable wavetable→IFFT renderer with the bank
     + scratch lifecycle) and dispatch routing for wavetable timbres (default unchanged, like the sine
     hybrid fast path). Default-on rides the maintainer F3 golden.
-  - **3b** — subtractive gains the explicit **filter** stage — `H(f)` per-bin multiply (freq-domain) and
-    its time-domain dual — with a source×filter parity test. The one genuinely new DSP; needs a
-    filter-form decision (per-band spectral envelope vs cutoff/Q biquad).
+  - **3b-1 — LANDED (commit 9be448f).** The subtractive filter, as a **per-band spectral envelope**
+    (maintainer-chosen form). `core/spectral_filter_envelope.h/.c`: a piecewise-linear `H(f)`
+    (≤32 `{freq, gain}` breakpoints, endpoint-clamped) applied as a per-partial amplitude multiply
+    (`freq = bin·sr/n_fft`) — filtering as spectral multiplication, source-agnostic (filters wavetable
+    or additive partials alike). NEW `filter_envelope` ctest (#23): interpolation/clamping/degenerate
+    cases + the per-partial apply (fail-on-bug). Test-only TU for now.
+  - **3b-2 — NEXT (F3-gated).** Wire a subtractive renderer that runs its source (the bandlimited
+    timbres' harmonics, or a wavetable) through the envelope, end-to-end; an integration test that
+    FFTs a filtered saw and confirms the output spectrum = source × `H(f)`. Production dispatch routing
+    rides the maintainer F3 golden, like the sine/wavetable IFFT paths.
 
 ## 7. Risks and gates
 
