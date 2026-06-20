@@ -182,6 +182,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-sin-init-parity-test.cmak
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/proc-mask-honesty-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/resource-path-canonical-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/error-origin-logs-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/peak-interp-parabolic-test.cmake")
@@ -206,7 +207,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/convert-segments-units-test.c
 foreach(_spectral_osc_test_target
         osc_parity_test osc_width_parity_test
         q15_production_parity_test q15_simd_parity_test
-        full_fused_parity_test
+        full_fused_parity_test error_origin_logs_test
         bench_q15_pack8 bench_q15_throughput)
     if(TARGET ${_spectral_osc_test_target})
         add_dependencies(${_spectral_osc_test_target} generate_metal_osc)
@@ -236,6 +237,7 @@ add_dependencies(tests_all
     proc_mask_honesty_test
     resource_path_canonical_test
     full_fused_parity_test
+    error_origin_logs_test
     osc_formulas_domain_test
     window_backend_parity_test
     peak_interp_parabolic_test
