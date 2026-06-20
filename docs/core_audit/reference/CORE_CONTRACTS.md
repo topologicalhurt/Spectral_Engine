@@ -40,6 +40,29 @@ length > 0
 amp >= 0
 ```
 
+## Renderer abstraction (renderer × domain × device)
+
+Synthesis is rendering over one scene model (`SegmentArray`). Three orthogonal axes (AI_CANON #31):
+
+```text
+renderer  (what sound)    additive | wavetable | subtractive    [+ FM/granular/modal/waveguide/stochastic future]
+domain    (how executed)  time-domain oscillator | frequency-domain inverse-FFT   (the OLA/FBS dual STFT readings)
+device    (on silicon)    CPU | Metal | CUDA                    (SpectralBackendVTable)
+```
+
+- Renderers **superpose** (additive synthesis is linear): a scene partitions across renderers/domains
+  and sums into one buffer = the SMS deterministic-plus-stochastic decomposition generalized to N.
+- The oscillator bank and the IFFT are **domains, not renderers**; the legacy `SynthBackend` enum
+  conflates renderer/domain/device.
+- A frequency-domain renderer is an **opt-in fast path** in its OWN TU compiled only into its
+  parity-test target (never the engine library) ⇒ the default render path is byte-identical by
+  construction; default-on rides the F3 golden. Pinned against the exact band-limited additive sum.
+
+Supported now: additive (`synth_cpu` / the sine IFFT hybrid), wavetable
+(`spectral_wavetable_harmonics` + `spectral_synth_hybrid_try_render_wavetable`), subtractive
+(`spectral_filter_envelope`: a rich source × a per-band `H(f)`). Plan:
+`active/RENDERER_ABSTRACTION_PLAN.md`.
+
 ## Tile layout contract
 
 ```text

@@ -409,3 +409,33 @@ flag with no kernel changes nothing. The rationale lives here, not only in commi
 Honest current state: the float oscillator honors widest-available; the Q15 pack8 kernel is
 still pinned 8-wide@128 and the `OSC_SIMD_WIDTH` oracle still exists — the per-op-predicate
 migration is open work, gated on x86 silicon + a measured win.
+
+## 31. Synthesis is rendering: one scene model, renderers × domain × device, linearly mixed
+
+Synthesis is framed as **rendering** over a single scene model — the `SegmentArray` of tracked
+partials — consumed by interchangeable renderers. Three concerns that the legacy `SynthBackend`
+enum conflates are kept **orthogonal**:
+- **Renderer** = *what sound* (the creative synthesis strategy): additive, wavetable, subtractive
+  are supported; FM/granular/modal/waveguide/stochastic are catalogued for later. A renderer is
+  defined by what it deposits per partial + which `Segment` fields it honors; chosen by the user.
+- **Domain** = *how it is executed*: time-domain oscillator vs frequency-domain inverse-FFT — the
+  overlap-add and filter-bank-summation **dual readings of one STFT** (Allen–Rabiner; J.O. Smith).
+  The oscillator bank and the IFFT are *domains, not renderers*; the engine picks the domain by
+  density/stationarity (the hybrid crossover ≈ 7 partials).
+- **Device** = *on what silicon*: CPU / Metal / CUDA (the `SpectralBackendVTable` axis); by availability.
+
+**Renderers superpose.** Additive synthesis is linear, so a scene partitions across renderers and
+domains and **sums** into one buffer — the Serra SMS deterministic-plus-stochastic decomposition
+generalized to N renderers. Each renderer is "what to place in the spectrum" over the same scene;
+none forks the render core (additive = one lobe per partial; wavetable = the table's harmonic stack;
+subtractive = harmonics × a per-band envelope `H(f)`, the convolution theorem making the filter a
+per-bin multiply).
+
+**The frequency domain is an APPROXIMATION** (band-limited + intra-frame-stationary), so a
+freq-domain renderer is an **opt-in fast path** whose default-on acceptance rides the maintainer
+**F3 golden**. An opt-in fast path lives in its OWN TU compiled only into its parity-test target —
+never the engine library — so the default render path is **byte-identical by construction** (the m7
+gate + parity follow for free); it is pinned against the exact band-limited additive sum. Where the
+IFFT byte-matches the time-domain reference (pure sines) it is parity; where it is band-limited and
+the default aliases (the raw wavetable table read) the F3 call is band-limited-vs-aliasing, not a
+byte match. Plan + sources: `active/RENDERER_ABSTRACTION_PLAN.md`, `ACADEMIC_SOURCES.md` [8,9,28,31,32].
