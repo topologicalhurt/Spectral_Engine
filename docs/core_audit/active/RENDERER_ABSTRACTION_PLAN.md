@@ -221,9 +221,16 @@ summed into one buffer (the §1 payoff).
     render legitimately differs); 3a-1's round-trip ties the harmonics to the table samples, so the
     chain proves the freq render reproduces the table's band-limited tone. The -63 dBFS floor IS the
     IFFT approximation (why the path rides the F3 golden).
-  - **3a-3 — NEXT.** The opt-in production render path (a callable wavetable→IFFT renderer with the bank
-    + scratch lifecycle) and dispatch routing for wavetable timbres (default unchanged, like the sine
-    hybrid fast path). Default-on rides the maintainer F3 golden.
+  - **3a-3 — LANDED (commit c40c5c18).** The opt-in wavetable IFFT fast path, mirroring the sine
+    hybrid: `spectral_synth_hybrid_try_render_wavetable` (own TU, compiled only into its parity-test
+    target — never the engine library, so the default path is byte-identical BY CONSTRUCTION; dispatch
+    wiring rides F3). Per active segment it expands the table's harmonics and renders via
+    `spectral_ifft_synth_render_dynamic`; reuses the sine segment-eligibility gate + a frame-buffer
+    partial-count gate. NEW `synth_hybrid_wavetable_parity` ctest (#25): RENDERED + deep-interior
+    parity vs the band-limited additive sum (−60.1 dBFS, gate −52) + the decline contract; fail-on-bug
+    verified. KEY: band-limited render ≠ the aliasing default, so acceptance is the F3 judgment (not a
+    byte match). The bank→table resolution + the actual **dispatch routing** (for both sine + wavetable
+    hybrids) remain F3-gated.
   - **3b-1 — LANDED (commit 9be448f).** The subtractive filter, as a **per-band spectral envelope**
     (maintainer-chosen form). `core/spectral_filter_envelope.h/.c`: a piecewise-linear `H(f)`
     (≤32 `{freq, gain}` breakpoints, endpoint-clamped) applied as a per-partial amplitude multiply
