@@ -90,6 +90,10 @@ function(spectral_daisy_collect_compile_definitions out_var)
         SPECTRAL_EMBEDDED=1
         SPECTRAL_NO_PERF=1
         SPECTRAL_COMPACT_SEG=1
+        # Daisy codec block is DAISY_AUDIO_BLOCK_SIZE=48; tighten the arm32 block cap from the
+        # generic 256 default to 64 (>=48, with headroom) so accum[]/temp[] in DTCM aren't
+        # over-allocated. Must stay >= DAISY_AUDIO_BLOCK_SIZE (arm32 _Static_assert bounds it).
+        SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE=64
         SPECTRAL_BSP_MEM_HEADER=\"daisy_seed_mem.h\"
         HSE_VALUE=16000000
         DAISY_HAS_FATFS=1)

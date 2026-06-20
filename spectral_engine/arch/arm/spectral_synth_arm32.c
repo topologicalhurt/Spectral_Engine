@@ -81,14 +81,17 @@ static inline void spectral_data_sync_barrier(void) {
  * sized to this, and a larger num_samples is truncated to it. This is the
  * engine's canonical embedded block size (SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE,
  * spectral_config.h) -- the same block the M7 perf model / WCET budget assume
- * (daisy_seed_config.h: "128 active voices at 256-sample blocks"). The
- * _Static_assert below pins the value: if the engine block size ever moves off
- * 256, this fires rather than letting the buffers silently desynchronize from
- * the cap. */
+ * (daisy_seed_config.h: "128 active voices at 256-sample blocks"). accum[]/temp[]
+ * are declared [SPECTRAL_ARM32_MAX_BLOCK], so they can never desync from the cap; the
+ * assert below just bounds it to a sane range. The Daisy firmware overrides
+ * SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE down to 64 (>= its 48-sample codec block, with
+ * headroom) via daisy-config.cmake -- reclaiming the DTCM the 256 cap over-allocated for
+ * accum[]/temp[] (SPECTRAL_MEM_FAST -> .dtcmram_bss). Host/sim/test builds keep 256 (they
+ * exercise 256-sample blocks: test_embedded_perf, test_proc_mask_honesty). */
 #define SPECTRAL_ARM32_MAX_BLOCK SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE
-_Static_assert(SPECTRAL_ARM32_MAX_BLOCK == 256u,
-               "arm32 accum[]/temp[] buffers and the block cap are sized to 256; "
-               "update them together with SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE");
+_Static_assert(SPECTRAL_ARM32_MAX_BLOCK >= 48u && SPECTRAL_ARM32_MAX_BLOCK <= 256u,
+               "arm32 block cap must hold the real codec block (>= 48) and stay within the "
+               "256-sample design ceiling; set via SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE");
 
 /*
  * DMA prefetch from SDRAM to DTCM buffer.
@@ -948,7 +951,6 @@ static inline void spectral_arm32_prune_expired_active(SpectralArm32Ctx* ctx, ui
             ctx->active_soa.seg_end[i]     = ctx->active_soa.seg_end[last];
             ctx->active_soa.seg_length[i]  = ctx->active_soa.seg_length[last];
             ctx->active_soa.fade_len[i]    = ctx->active_soa.fade_len[last];
-            ctx->active_soa.seg_idx[i]     = ctx->active_soa.seg_idx[last];
 #if SPECTRAL_HAS_CHIRP
             ctx->active_soa.freq_delta[i]  = ctx->active_soa.freq_delta[last];
 #endif
@@ -1094,7 +1096,6 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
             spectral_coupled_seed_state(&seg_osc, (double)phase_acc * SPECTRAL_PHASE_U32_TO_RAD);
 #endif
 #if SPECTRAL_SOA_ACTIVE
-            ctx->active_soa.seg_idx[slot] = ctx->next_seg_idx;
             ctx->active_soa.phase_inc[slot] = phase_inc;
             ctx->active_soa.phase_acc[slot] = phase_acc;
             ctx->active_soa.amp_current[slot] = amp_cur;
@@ -1111,7 +1112,6 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
 #endif
 #else
             SpectralActiveSegment* act = &ctx->active[slot];
-            act->seg_idx = ctx->next_seg_idx;
             act->phase_inc = phase_inc;
             act->phase_acc = phase_acc;
             act->amp_current = amp_cur;
