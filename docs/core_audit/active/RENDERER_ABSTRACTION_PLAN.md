@@ -191,8 +191,11 @@ summed into one buffer (the §1 payoff).
 
 ## 6. Staged refactor (each stage independently green; m7 + parity gates are the guard)
 
-- **Stage 0 — LANDED (commit 799c130).** This document + `ACADEMIC_SOURCES.md` [31]–[38]. (The
-  `AI_CANON`/`CORE_CONTRACTS` rows are folded into Stage 2, when the rename makes the vocabulary final.)
+- **Stage 0 — LANDED (commit 799c130).** This document + `ACADEMIC_SOURCES.md` [31]–[38]. The
+  `AI_CANON`/`CORE_CONTRACTS` rows LANDED early (commit fae6099) once the renderers were proven:
+  **AI_CANON #31** ("Synthesis is rendering: one scene model, renderers × domain × device, linearly
+  mixed") + a CORE_CONTRACTS "Renderer abstraction" section. (Originally deferred to Stage 2; pulled
+  forward since the architecture is settled and the rename is conflict-blocked.)
 - **Stage 1 — LANDED (commit 99221a4).** `core/spectral_renderer.h/.c`: `SpectralRendererId`
   {ADDITIVE, WAVETABLE, SUBTRACTIVE}, `SpectralRendererCaps` {spectral_native, deposits_harmonic_stack,
   needs_filter}, the registry, and `spectral_renderer_for_timbre()`. Host-side metadata, guarded out
