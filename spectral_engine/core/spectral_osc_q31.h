@@ -46,10 +46,10 @@ typedef struct SpectralCoupledOsc {
  * or above the >>31 form at every tested frequency. Portable: on a 64-bit host the >>32 is a
  * native shift, so the desktop/sim render tracks the device. */
 static inline q31_t spectral_coupled_step(SpectralCoupledOsc* o, q31_t cos_w, q31_t sin_w) {
-    q31_t hcc = (q31_t)((q63_t)o->c * cos_w >> 32);
-    q31_t hss = (q31_t)((q63_t)o->s * sin_w >> 32);
-    q31_t hsc = (q31_t)((q63_t)o->s * cos_w >> 32);
-    q31_t hcs = (q31_t)((q63_t)o->c * sin_w >> 32);
+    q31_t hcc = spectral_smmul(o->c, cos_w);
+    q31_t hss = spectral_smmul(o->s, sin_w);
+    q31_t hsc = spectral_smmul(o->s, cos_w);
+    q31_t hcs = spectral_smmul(o->c, sin_w);
     /* Restore the Q31 scale with a SATURATING double (qadd(x,x) == saturating <<1): the
      * per-product >>32 can round the pair +1 LSB over the >>31 form, so a full-scale peak
      * (low omega, cos_w ~ 2^31) would otherwise reach +2^31 and wrap. QADD/QSUB are single-cycle

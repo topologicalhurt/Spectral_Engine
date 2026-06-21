@@ -225,6 +225,15 @@ static inline uint32_t spectral_pack_hi16(uint32_t hi, uint32_t lo) {
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return (q31_t)a * (q31_t)b;
 }
+/* Signed most-significant-word multiply: high 32 bits of a*b == (q63_t)a*b >> 32. One SMMUL
+ * (single dest reg) vs the smull+discard-low GCC emits for the C shift (two regs) — frees a
+ * scratch per product, easing register pressure in the coupled recurrence. GCC does not select
+ * SMMUL from the shift, so hand-asm; byte-identical (SMMUL returns bits[63:32] exactly). */
+static inline q31_t spectral_smmul(q31_t a, q31_t b) {
+    q31_t r;
+    __asm__("smmul %0, %1, %2" : "=r"(r) : "r"(a), "r"(b));
+    return r;
+}
 
 #else
 /* Portable C fallback */
@@ -279,6 +288,10 @@ static inline uint32_t spectral_pack_hi16(uint32_t hi, uint32_t lo) {
 }
 static inline q31_t spectral_smulbb(q15_t a, q15_t b) {
     return (q31_t)a * (q31_t)b;
+}
+/* Signed most-significant-word multiply: high 32 bits of a*b. Bit-identical to the M7 SMMUL. */
+static inline q31_t spectral_smmul(q31_t a, q31_t b) {
+    return (q31_t)((q63_t)a * b >> 32);
 }
 
 #endif /* __ARM_FEATURE_DSP */
