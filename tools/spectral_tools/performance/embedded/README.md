@@ -38,7 +38,8 @@ ceiling ~277 voices — 512 needs the IFFT or fade-pairing+TCM-residence.)
 | **WCET / ACET / BCET** | `deterministic` (`execution_time`), `m7-wcet --active N` | modeled+measured |
 | Regression gate vs frozen baseline | `m7-baseline` (`--generate` to re-sign) | measured+modeled |
 | **Hottest functions/lines** | `hotspots [--voices N]` | measured (PC-histogram → addr2line) |
-| FPU/MAC/ALU saturation | *planned* — **modeled** (llvm-mca port pressure; M7 has NO PMU) | modeled |
+| **FPU/MAC/ALU/SIMD saturation** | `saturation` | **modeled** (llvm-mca port pressure / cycles; M7 has NO PMU) |
+| Idle / interrupts / on-device cycles | *planned (P3 on-device DWT contract)* | measured (DWT, erratum-aware) |
 | Matrix of target × instrument | `measure --list` / `measure --target m7` | — |
 
 ## What is and isn't sound (read this before trusting a number)

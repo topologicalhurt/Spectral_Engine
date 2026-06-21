@@ -267,14 +267,16 @@ incremental worst-case reductions if 512-on-the-oscillator is pursued, but neith
 alone.
 
 **ALSO LANDED:**
-- **P4 (partial)** — `hotspots` command (per-PC histogram → addr2line inlined func+line;
-  `spectral_pchist.c` plugin + `hotspots.py`; verified at 512: smmul 27% / __qadd 20% /
-  pair 18%). **WCET/ACET/BCET + sustain IPC** in the `deterministic` report (512@480:
-  WCET 738k FAIL / ACET 505k ~105% / BCET 332k 69% — even typical all-sustain is over).
+- **P4 (host metrics DONE)** — `hotspots` (per-PC histogram → addr2line inlined func+line;
+  verified @512: smmul 27% / __qadd 20% / pair 18%); **WCET/ACET/BCET + sustain IPC** in the
+  `deterministic` report (512@480: WCET 738k FAIL / ACET 505k ~105% / BCET 332k 69%);
+  **`saturation`** = modeled FPU/MAC/ALU/SIMD per-unit utilization (llvm-mca port pressure;
+  all kernels latency/dependency-bound, FPU 0% = integer recurrence). The only metric still
+  pending is the on-device-measured set (idle/interrupts/HW cycles) = P3.
 - **P5 (partial)** — README updated (every metric's command + soundness caveats).
 
 **REMAINING:** P1b device abstraction (DeviceProfile + Teensy stub); P3 the unified
-SpectralPerfSample contract (versioned header + Python mirror tethering on-device DWT,
-erratum-aware); P4 modeled FPU/MAC/ALU saturation (llvm-mca port pressure); P5 finish
-(qemu_main/render dedup + reporting-surface audit); and the note-#1 fade-pairing + TCM-
-residence engine work toward 512 (marginal — IFFT is the clean route).
+SpectralPerfSample contract (versioned header + Python mirror tethering on-device DWT for
+idle/interrupts/HW cycles, erratum-aware); P5 finish (qemu_main/render dedup +
+reporting-surface audit); and the note-#1 fade-pairing + TCM-residence engine work toward
+512 (marginal — IFFT is the clean route).
