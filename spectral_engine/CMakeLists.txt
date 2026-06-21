@@ -189,6 +189,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/wavetable-render-parity-test.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/filter-envelope-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/subtractive-filter-render-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/synth-hybrid-wavetable-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/kernel-api-freeze-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/peak-interp-parabolic-test.cmake")
@@ -213,7 +214,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/convert-segments-units-test.c
 foreach(_spectral_osc_test_target
         osc_parity_test osc_width_parity_test
         q15_production_parity_test q15_simd_parity_test
-        full_fused_parity_test error_origin_logs_test
+        full_fused_parity_test error_origin_logs_test kernel_api_freeze_test
         bench_q15_pack8 bench_q15_throughput)
     if(TARGET ${_spectral_osc_test_target})
         add_dependencies(${_spectral_osc_test_target} generate_metal_osc)
@@ -250,6 +251,7 @@ add_dependencies(tests_all
     filter_envelope_test
     subtractive_filter_render_test
     synth_hybrid_wavetable_parity_test
+    kernel_api_freeze_test
     osc_formulas_domain_test
     window_backend_parity_test
     peak_interp_parabolic_test
