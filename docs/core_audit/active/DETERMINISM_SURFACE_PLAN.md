@@ -248,18 +248,23 @@ production input, no test-softening**.
 **VERDICT (the honest headline):** 512 voices @ 480 MHz = **~154% of budget → FAIL** on the
 exact oscillator; deterministic ceiling **~277 voices** (worst-case) / ~504 (all-sustain).
 
-**Note #1 — path to 100% at 512 (validated analysis, implementation pending):** the worst
-case is 512 UNPAIRED fade kernels (t1 ≈ 565k). A fade is just a linear amp ramp, so fading
-voices CAN be dual-MAC-paired exactly like sustain (the pair kernel already ramps amps via
-qadd16x2). The only obstacles are (a) the dispatch excludes fades (arm32_voice_full_sustain)
-and (b) mid-block slope transitions. Fix: a paired-fade path that splits the block at the
-union of both lanes' transition points and runs the existing pair kernel per constant-slope
-sub-range with sign-flipped packed deltas → ≈halves the fade worst case (t1 565k→~283k, WCET
-~456k = 95%). Combined with **TCM-residence** (the chosen cache stance: ctx/accum/kernels in
-DTCM/ITCM → t3 90k→~30k) → WCET ~396k = **~82% → PASSES the 90% gate at 512**. So 512 @ 480 is
-reachable on the exact oscillator via (fade-pairing + TCM-residence), OR via the IFFT — both
-substantial, focused efforts. The fade-pairing also makes the SMMUL fade +1cyc tradeoff
-(which now gates determinism) worth revisiting (pair-only coupled_step split).
+**Note #1 — path to 100% at 512 (analysis CORRECTED 2026-06-21 after reading synth_fade_m7):**
+the worst case is 512 UNPAIRED fade kernels (t1 ≈ 565k). **CORRECTION to the earlier estimate:**
+the fade kernel applies TWO multiplicative envelopes per sample — `faded = sample·fade_val`
+then `accum += faded·am` (arm32.c:791-792) — whereas sustain applies ONE (`accum += sample·am`).
+So a paired-fade canNOT just reuse the SMLALD dual-MAC the way sustain pairing does: the
+per-lane `fade_val` multiply stays per-lane. Pairing therefore saves only the dual-MAC + the
+loop/ramp overhead, NOT the fade multiply → ~30-40% on the fade kernel (worst_cyc 23→~15), so
+t1 565k→~368k, WCET ~540k = **~112%** (NOT the ~95% first estimated). Combined with
+**TCM-residence** (chosen cache stance: ctx/accum/kernels→DTCM/ITCM, t3 90k→~30k) → WCET
+~480k = **~94-100%, MARGINAL** at the 90% gate. (For the da≈0 worst case the two envelopes
+collapse to one linear ramp and pairing IS clean, but the adversary picks da≠0, so the strict
+WCET needs the two-envelope paired kernel.) **Net: the exact-oscillator path to 512 is
+marginal AND costly (a complex two-envelope paired-fade kernel + HW-gated TCM placement); the
+IFFT is the clean route to 512** — confirming it as the right next phase. The fade-pairing
+(partial, ~112%) and the SMMUL fade-split (byte-identical, 154→149%) remain available as
+incremental worst-case reductions if 512-on-the-oscillator is pursued, but neither closes it
+alone.
 
 **REMAINING:** P1b device abstraction (DeviceProfile + Teensy stub); P3 the unified
 SpectralPerfSample contract (versioned header + Python mirror tethering on-device DWT,
