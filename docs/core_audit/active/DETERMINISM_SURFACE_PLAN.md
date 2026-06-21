@@ -224,3 +224,45 @@ Each phase: ctest/pytest green + the m7 perf gate green (re-sign only on a delib
 5. **Re-run the research synthesis?** The harness died on a session limit after verifying 10
    claims; the substance is captured here. Re-run later for the polished cited report, or
    treat this section as the synthesis.
+
+## 6. Status (live) + maintainer decisions (RESOLVED)
+
+Write-offs (all RESOLVED): cache stance = **TCM-resident + cold-miss bound**; margin =
+**derived from validation residual + reserve = 10%** (gate ≤90%); Teensy = **Daisy-first,
+stub**; clock of record = **480 MHz (committed)**; worst case = **harshest reachable
+production input, no test-softening**.
+
+**LANDED:**
+- **P1a (1c710865)** — Daisy clock → 480 MHz (SSOT + on-device aligned + baseline re-signed;
+  audio checksum 7ed6e0ac unchanged; gate green). Firmware app must select libDaisy
+  FREQ_480MHZ (documented in-header, HW-PENDING).
+- **P2 (3895c5b7)** — the `deterministic` command: PASS/FAIL for N voices @ rated clock via
+  the unified report, reusing the validated WCET stack + the derived margin + the
+  deterministic ceiling.
+- **note #2 PROVEN (d50710d3)** — `test_determinism_invariance.py`: per-voice cost is
+  param-invariant (amplitude exact; frequency within ≤4 insns/voice — the bounded activation
+  seed trig). The determinism guarantee holds across all user parameters.
+- **note #1 ANALYSED** — see below.
+- **P5 partial** — `README.md` (how to generate every metric + the soundness/erratum caveats).
+
+**VERDICT (the honest headline):** 512 voices @ 480 MHz = **~154% of budget → FAIL** on the
+exact oscillator; deterministic ceiling **~277 voices** (worst-case) / ~504 (all-sustain).
+
+**Note #1 — path to 100% at 512 (validated analysis, implementation pending):** the worst
+case is 512 UNPAIRED fade kernels (t1 ≈ 565k). A fade is just a linear amp ramp, so fading
+voices CAN be dual-MAC-paired exactly like sustain (the pair kernel already ramps amps via
+qadd16x2). The only obstacles are (a) the dispatch excludes fades (arm32_voice_full_sustain)
+and (b) mid-block slope transitions. Fix: a paired-fade path that splits the block at the
+union of both lanes' transition points and runs the existing pair kernel per constant-slope
+sub-range with sign-flipped packed deltas → ≈halves the fade worst case (t1 565k→~283k, WCET
+~456k = 95%). Combined with **TCM-residence** (the chosen cache stance: ctx/accum/kernels in
+DTCM/ITCM → t3 90k→~30k) → WCET ~396k = **~82% → PASSES the 90% gate at 512**. So 512 @ 480 is
+reachable on the exact oscillator via (fade-pairing + TCM-residence), OR via the IFFT — both
+substantial, focused efforts. The fade-pairing also makes the SMMUL fade +1cyc tradeoff
+(which now gates determinism) worth revisiting (pair-only coupled_step split).
+
+**REMAINING:** P1b device abstraction (DeviceProfile + Teensy stub); P3 the unified
+SpectralPerfSample contract (versioned header + Python mirror tethering on-device DWT,
+erratum-aware); P4 IPC/BCET/ACET surfaced + `hotspots` + modeled saturation; P5 finish
+(qemu_main/render dedup + reporting-surface audit); and the note-#1 fade-pairing + TCM-
+residence engine work toward 512.
