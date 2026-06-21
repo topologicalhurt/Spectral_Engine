@@ -3,17 +3,19 @@
 Real-time spectral analysis + resynthesis engine in C. Analyze audio into
 sinusoidal segments; resynthesize with stretch/pitch/timbre on desktop (float,
 Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed).
-**Public API: `core/spectral_kernel.h` (frozen 1.0)** — the single umbrella header (analyze_audio,
-synth dispatch, the scene model, errors, I/O, wavetable, the renderer registry), guarded by the
-`kernel_api_freeze` ctest. `docs/core_audit/reference/AI_CANON.md` holds the full correctness rules;
+**Public API: `core/spectral_kernel.h` (v0.0.1 — pre-release, surface-guarded)** — the single
+umbrella header (analyze_audio, synth dispatch, the scene model, errors, I/O, wavetable, the
+renderer registry), versioned + guarded by the `kernel_api_freeze` ctest so changes are deliberate.
+The hard 1.0 freeze is deferred — the library isn't 1.0-ready (S5: no library target, no
+analyze_audio error channel, unprefixed symbols). `docs/core_audit/reference/AI_CANON.md` holds the full correctness rules;
 this file is the orientation. `docs/core_audit/active/` holds the actively-worked plans (the live
 workstreams + handoffs); the canon, reference docs, and paused plans live in
 `docs/core_audit/reference/`, completed campaigns in `docs/core_audit/archive/`.
 **Live status of record:** `docs/core_audit/active/PLAN_CLOSURE_LEDGER.md` — the standing
-`active/REVIEWER_HANDOFF.md` mandate is RECONCILED. The 1.0 API freeze + the S5 maturity scorecard
-are DONE; the live frontier is the **F3 golden** (IFFT default-on) + the S5 punch list (a host-doable
-productization track — real library target/install, error channels, reproducible-build plumbing, GPU
-parity — and a hardware/CI track — on-target M7 bring-up, real-GPU CI).
+`active/REVIEWER_HANDOFF.md` mandate is RECONCILED. The kernel-API surface (`spectral_kernel.h`
+v0.0.1) + the S5 maturity scorecard are DONE; the live frontier is the maintainer's prioritized
+maturity push (**1 embedded, 2 GPU harden+port, 3 reproducible kernel, 4 the C library — at 0.0.1**)
++ the **F3 golden** (IFFT default-on). The S5 punch list enumerates the per-axis gaps.
 
 ## Layout (Linux-kernel-style: kernel / arch / drivers; see archive/KERNEL_LAYOUT_PLAN.md)
 - `spectral_engine/core/` — the kernel: config, constants, oscillators, windows, segments,

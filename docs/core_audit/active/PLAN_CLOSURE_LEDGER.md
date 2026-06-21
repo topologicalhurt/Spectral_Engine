@@ -25,11 +25,12 @@ re-inventoried into the 238-item roll-up below, which stays the 06-18 baseline):
 - **Embedded-perf** (CHANGELOG 276–282, the concurrent agent) → high-word-multiply `coupled_step` etc.;
   **512 voices now fit the EXACT per-partial oscillator bank**, REFUTING the IFFT plan's founding "512
   needs the IFFT" premise (premise-revision banner added to `IFFT_SYNTHESIS_PLAN.md`).
-- **`spectral_kernel.h` 1.0 API freeze** (commits 70b5bd6 + d61f559) → DONE: the single public umbrella
-  header (analyze_audio, synth dispatch, scene model, errors, I/O, wavetable, renderer registry) at
-  `SPECTRAL_KERNEL_VERSION 1.0.0`, with the `kernel_api_freeze` ctest pinning the version + struct
-  layouts + enum values + the curated entry-point signatures (a drift fails to compile). The
-  freq-domain hybrids are explicitly PROVISIONAL (out of 1.0).
+- **`spectral_kernel.h` public-API surface** (commits 70b5bd6 + d61f559; **re-versioned to v0.0.1**
+  per the maintainer — the library isn't 1.0-ready, S5) → DONE: the single public umbrella header
+  (analyze_audio, synth dispatch, scene model, errors, I/O, wavetable, renderer registry) at
+  `SPECTRAL_KERNEL_VERSION 0.0.1` (PRE-RELEASE), with the `kernel_api_freeze` ctest pinning the version
+  + struct layouts + enum values + the curated entry-point signatures so changes are deliberate (a
+  drift fails to compile). NOT a hard freeze until 1.0. The freq-domain hybrids are out of the surface.
 - **S5 maturity scorecard** (delivered inline at `REVIEWER_HANDOFF.md` §S5) → DONE: a 4-axis adversarial
   audit. Verdict — the algorithmic kernel is MATURE on every axis; productization is the gap. Grades:
   embedded device GAPS, 1.0 C library GAPS, reproducible reference kernel NEAR, desktop/GPU GAPS. The
@@ -38,7 +39,8 @@ re-inventoried into the 238-item roll-up below, which stays the 06-18 baseline):
   maintainer-gated (F3 golden) / hardware+CI-gated (on-target M7 bring-up, 128-voice WCET@48 + admission
   cap, real-GPU CI).
 - The reviewer handoffs are RECONCILED / SUPERSEDED; **this ledger is the live status of record.** The
-  two previously-live frontier items (the 1.0 freeze + S5) are now closed; the F3 golden + the S5 punch
+  two previously-live frontier items (the kernel-API surface @ v0.0.1 + S5) are now closed; the maturity
+  push (1 embedded / 2 GPU / 3 reproducible / 4 the C library @ 0.0.1) + the F3 golden + the S5 punch
   list are the remainder.
 
 ---

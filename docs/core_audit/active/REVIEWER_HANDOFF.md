@@ -6,13 +6,13 @@ Campaign-3 work-stream is DONE or correctly GATED: S1 (perf model P0–P6, archi
 bulk landed; STFT-unify/stub-collapse DECLINED-in-writing), S4 (embedded benchmarks + the tests_all
 race fix), and F (the IFFT crossover measured ≈7 partials, the path implemented + parity-tested, and
 the renderer abstraction generalized it — see `RENDERER_ABSTRACTION_PLAN.md` + AI_CANON #31). The two
-items that were the live frontier are now DONE: the **`spectral_kernel.h` 1.0 API freeze** LANDED
-(commits 70b5bd6 + d61f559 — the umbrella header + the `kernel_api_freeze` guard pinning version/
-layouts/enum-values), and **S5** is DELIVERED (the scorecard at §S5 below). What remains is the **F3
-golden** (IFFT default-on) plus the S5 punch list: a host-doable productization track (a real library
-target + `install`, an `analyze_audio` error channel, symbol namespacing, reproducible-build plumbing,
-GPU parity coverage) and a hardware/CI track (on-target M7 bring-up, the 128-voice WCET@48 + admission
-cap, a real-GPU CI runner).
+items that were the live frontier are now DONE: the **`spectral_kernel.h` public-API surface** LANDED
+at **v0.0.1** (commits 70b5bd6 + d61f559 — the umbrella header + the `kernel_api_freeze` guard pinning
+version/layouts/enum-values/signatures; the hard 1.0 freeze is deferred, the library isn't 1.0-ready
+per S5), and **S5** is DELIVERED (the scorecard at §S5 below). The live frontier is now the maintainer's
+prioritized **maturity push: (1) the real-time embedded device, (2) GPU — harden + port more DSP onto
+it, (3) the reproducible reference kernel, (4) the C library (at 0.0.1)** — plus the **F3 golden** (IFFT
+default-on). The S5 punch list enumerates the per-axis gaps (host-doable vs hardware/CI-gated).
 The §0 doctrine still stands; **`PLAN_CLOSURE_LEDGER.md` is the live status of record** and supersedes
 the §6 doc-map below (whose `CAMPAIGN_2`/`OPTIMISATION`/`OSCILLATOR_BACKEND_CONTRACT` targets are now
 in `archive/` + `reference/`).
@@ -215,13 +215,14 @@ the concrete gaps to 1.0 on each axis.
 **Done-when:** a defensible per-axis maturity assessment + the remaining-to-1.0 punch list.
 
 **S5 SCORECARD — DELIVERED 2026-06-21** (4-auditor adversarial audit, grounded in the tree at
-ctest 40 + the spectral_kernel.h 1.0 freeze). Verdict: **the algorithmic kernel is mature on every
-axis; productization is the gap.**
+ctest 40 + the `spectral_kernel.h` v0.0.1 surface). Verdict: **the algorithmic kernel is mature on
+every axis; productization is the gap.** (Maintainer priority for the push: 1 embedded, 2 GPU, 3
+reproducible kernel, 4 the C library — kept at 0.0.1, not 1.0.)
 
 | Target | Grade | The core is strong… | …but to reach 1.0 |
 |---|---|---|---|
 | (a) Real-time **embedded device** (M7/Daisy) | **GAPS** | no-malloc static-pool deterministic Q15/Q31 synth; load-time validation of the untrusted `.spq`; a real qemu+llvm-mca+SDRAM perf gate vs a frozen baseline; SINAD≥70 dB on the real kernel | **BLOCKER:** nothing is validated on real silicon (every cycle/cache/DMA/WCET is host-modeled — QEMU TCG has no timing fidelity, DWT never read). **BLOCKER:** the active-voice cap isn't enforced at admission (`SPECTRAL_ARM32_MAX_ACTIVE`=512 sizes the arrays; `DAISY_MAX_ACTIVE`=128 binds nothing) → a dense file overruns the deadline. No WCET scenario proves 128 voices @ the 48-sample block; no linked firmware ELF / Daisy test suite (libDaisy unvendored); the SD-load D-cache-invalidate fix is documented-not-wired. |
-| (b) 1.0 **C library** | **GAPS** | a single curated `spectral_kernel.h` umbrella with semver + a compile-time freeze guard; structured `SpectralError`; overflow-guarded allocation | **BLOCKER:** there is *no library target* — no `add_library`/`install`/`export`/pkg-config, so nothing external can actually link it. `analyze_audio` has no error channel (returns an empty `SegmentArray` on failure). Unprefixed public symbols (`analyze_audio`, `synth_cpu`) will collide in a host app. *(The version-story contradiction + the values-not-just-sizes freeze gap the audit flagged are now FIXED — commit d61f559.)* |
+| (b) **C library** (v0.0.1, pre-release) | **GAPS** | a single curated `spectral_kernel.h` umbrella with semver + a compile-time surface guard; structured `SpectralError`; overflow-guarded allocation | **BLOCKER:** there is *no library target* — no `add_library`/`install`/`export`/pkg-config, so nothing external can actually link it. `analyze_audio` has no error channel (returns an empty `SegmentArray` on failure). Unprefixed public symbols (`analyze_audio`, `synth_cpu`) will collide in a host app. *(The version-story contradiction + the values-not-just-sizes freeze gap the audit flagged are now FIXED — commit d61f559.)* |
 | (c) Reproducible **reference kernel** | **NEAR** | deep parity battery (full/fused, scalar-vs-SIMD bit-exact, q-ladder vs `__int128`, the new kernel-freeze + renderer tests); the §VIII firmware-faithful determinism fix; paper-backed methods | the `SPECTRAL_REPRO_BUILD` knob is non-functional when set directly + the "repro" profile still appends ThinLTO unconditionally; no *external* golden vector (every parity test is an internal A-vs-B cross-check); no test that the build is actually bit-reproducible; no `-ffile-prefix-map`/`SOURCE_DATE_EPOCH`. |
 | (d) **Desktop/GPU** performance product | **GAPS** | mature SIMDe/OMP additive CPU path with bit-exact SIMD-vs-scalar parity + honest perf observability (wall/Busy/Idle, RSS, Faults); the perf frontier is measured + closed | the GPU is a deliberate *approximation* (hardware `sin`/`asin`, not the CPU's documented formulas) — not a parity/deterministic backend; no evidence the GPU is *faster* (measured slower on the runnable workload); CUDA never compiled/parity-tested; Metal parity never runs in CI (virtualized runner skips it); GPU is additive-only (wavetable/subtractive/IFFT are CPU-only); no desktop/GPU throughput *regression* gate. |
 
