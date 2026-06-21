@@ -3,13 +3,17 @@
 Real-time spectral analysis + resynthesis engine in C. Analyze audio into
 sinusoidal segments; resynthesize with stretch/pitch/timbre on desktop (float,
 Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed).
-`docs/core_audit/reference/AI_CANON.md` holds the full correctness rules; this file
-is the orientation. `docs/core_audit/active/` holds the actively-worked plans (the live
+**Public API: `core/spectral_kernel.h` (frozen 1.0)** — the single umbrella header (analyze_audio,
+synth dispatch, the scene model, errors, I/O, wavetable, the renderer registry), guarded by the
+`kernel_api_freeze` ctest. `docs/core_audit/reference/AI_CANON.md` holds the full correctness rules;
+this file is the orientation. `docs/core_audit/active/` holds the actively-worked plans (the live
 workstreams + handoffs); the canon, reference docs, and paused plans live in
 `docs/core_audit/reference/`, completed campaigns in `docs/core_audit/archive/`.
 **Live status of record:** `docs/core_audit/active/PLAN_CLOSURE_LEDGER.md` — the standing
-`active/REVIEWER_HANDOFF.md` mandate is RECONCILED (its S1–S4 + F work-streams are done or gated;
-the live frontier is the F3 golden + the `spectral_kernel.h` 1.0 freeze, maintainer-owned).
+`active/REVIEWER_HANDOFF.md` mandate is RECONCILED. The 1.0 API freeze + the S5 maturity scorecard
+are DONE; the live frontier is the **F3 golden** (IFFT default-on) + the S5 punch list (a host-doable
+productization track — real library target/install, error channels, reproducible-build plumbing, GPU
+parity — and a hardware/CI track — on-target M7 bring-up, real-GPU CI).
 
 ## Layout (Linux-kernel-style: kernel / arch / drivers; see archive/KERNEL_LAYOUT_PLAN.md)
 - `spectral_engine/core/` — the kernel: config, constants, oscillators, windows, segments,
