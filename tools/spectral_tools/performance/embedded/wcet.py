@@ -113,6 +113,9 @@ class WcetInputs:
     """Live stack outputs the bound is built from."""
     worst_cyc_per_voice_sample: float        # L2 + back-edge bias, worst kernel
     worst_kernel: str
+    best_cyc_per_voice_sample: float         # L2: the CHEAPEST loop's rate (the
+                                             # dual-MAC sustain pair) — for BCET/ACET
+    best_kernel: str
     sustain_insns_per_voice_sample: float    # L2: the CHEAPEST loop's rate, so
                                              # subtracting it OVER-estimates the
                                              # residual (safe for a bound)
@@ -226,6 +229,8 @@ def derive_inputs(tc: Toolchain, *, out_dir: Path) -> WcetInputs:
 
     worst_cpv = 0.0
     worst_kernel = ""
+    best_cpv = float("inf")
+    best_kernel = ""
     min_ipv = float("inf")
     for loop in report.loops:
         key = f"{loop.kernel}/{loop.label}"
@@ -242,6 +247,9 @@ def derive_inputs(tc: Toolchain, *, out_dir: Path) -> WcetInputs:
         if cpv > worst_cpv:
             worst_cpv = cpv
             worst_kernel = key
+        if cpv < best_cpv:
+            best_cpv = cpv
+            best_kernel = key
         min_ipv = min(min_ipv, loop.instructions_per_iter / spi)
     if worst_cpv <= 0.0 or min_ipv == float("inf"):
         raise WcetError("no known hot loops found — kernel extraction drifted")
@@ -266,6 +274,8 @@ def derive_inputs(tc: Toolchain, *, out_dir: Path) -> WcetInputs:
     return WcetInputs(
         worst_cyc_per_voice_sample=worst_cpv,
         worst_kernel=worst_kernel,
+        best_cyc_per_voice_sample=best_cpv,
+        best_kernel=best_kernel,
         sustain_insns_per_voice_sample=min_ipv,
         measured_insns_per_block=process.insns / n_blocks,
         measured_voice_samples_per_block=voice_samples / n_blocks,

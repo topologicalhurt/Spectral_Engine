@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +143,20 @@ def deterministic(tc: Toolchain, *, out_dir: Path,
         else:
             break
 
+    # WCET / ACET / BCET (maintainer: distinguish the three; only WCET gates).
+    # ACET = the expected operating point: all voices SUSTAINING (the dual-MAC pair
+    # kernel, the cheapest loop) with the same conservative memory term — a typical
+    # upper bound. BCET = the optimistic floor: sustain compute only, warm cache, no
+    # scan/mispredict overhead. WCET = the gate above (worst fade kernel + cold cache).
+    sustain_inputs = replace(inputs,
+                             worst_cyc_per_voice_sample=inputs.best_cyc_per_voice_sample,
+                             worst_kernel=inputs.best_kernel)
+    acet_cyc = WcetReport(inputs=sustain_inputs, constants=constants, active=voices,
+                          scan_segments=voices, block=block, sample_rate=sr).wcet_cycles
+    bcet_cyc = voices * block * inputs.best_cyc_per_voice_sample
+    ipc_sustain = (inputs.sustain_insns_per_voice_sample / inputs.best_cyc_per_voice_sample
+                   if inputs.best_cyc_per_voice_sample else 0.0)
+
     rep = WcetReport(inputs=inputs, constants=constants, active=voices,
                      scan_segments=voices, block=block, sample_rate=sr)
     d = rep.as_dict()
@@ -162,6 +176,15 @@ def deterministic(tc: Toolchain, *, out_dir: Path,
         "budget_fraction": round(wcet_cyc / budget, 4),
         "deterministic_ceiling_voices": ceiling,
         "worst_cyc_per_voice_sample": round(inputs.worst_cyc_per_voice_sample, 3),
+        "execution_time": {
+            "wcet_cycles": round(wcet_cyc, 0),   # GATES determinism (worst fade kernel, cold cache)
+            "acet_cycles": round(acet_cyc, 0),   # expected: all-sustain (dual-MAC pair), informational
+            "bcet_cycles": round(bcet_cyc, 0),   # best: sustain compute, warm cache, informational
+            "worst_kernel": inputs.worst_kernel,
+            "best_kernel": inputs.best_kernel,
+            "ipc_sustain_kernel": round(ipc_sustain, 3),  # insns/cycle of the hot pair loop
+            "note": "WCET gates determinism; ACET/BCET are informational, not gates",
+        },
         "terms": d["terms"],
         "provenance": "determinism gate = WCET(worst-case, cold-cache) <= "
                       "budget*(1-margin); " + d["provenance"],
