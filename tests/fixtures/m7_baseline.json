@@ -15,9 +15,9 @@
     "DAISY_SAMPLE_RATE": 48000
   },
   "derived_memory": {
-    "linefill_row_hit": 56.0,
-    "linefill_row_miss": 72.0,
-    "writeback": 40.0
+    "linefill_row_hit": 64.8,
+    "linefill_row_miss": 84.0,
+    "writeback": 48.0
   },
   "kernels": {
     "synth_core_m7/.L351": {
@@ -55,20 +55,20 @@
     {
       "active": 32,
       "block": 48,
-      "budget_cycles": 400000.0,
-      "budget_fraction": 0.2709,
+      "budget_cycles": 480000.0,
+      "budget_fraction": 0.2477,
       "max_budget_fraction": 1.0,
       "scan_segments": 128,
-      "wcet_cycles": 108362.0
+      "wcet_cycles": 118898.0
     },
     {
       "active": 128,
       "block": 256,
-      "budget_cycles": 2133333.0,
-      "budget_fraction": 0.4281,
+      "budget_cycles": 2560000.0,
+      "budget_fraction": 0.363,
       "max_budget_fraction": 1.0,
       "scan_segments": 1024,
-      "wcet_cycles": 913249.0
+      "wcet_cycles": 929161.0
     }
   ],
   "worst_cyc_per_voice_sample": 23.01

@@ -28,14 +28,26 @@
 
 #include <stdint.h>
 
-/* --- Clock tree (libDaisy defaults; system.cpp FREQ_400MHZ path) ----------- */
-/* CPU PLL1P: PLLN=200, HSE/PLLM=4, PLLP=2 -> 400 MHz [libDaisy system.cpp]   */
-#define SPECTRAL_DAISY_CPU_HZ            400000000u
-/* AXI/AHB = SYSCLK/2 (RCC_HCLK_DIV2) -> 200 MHz [libDaisy system.cpp;
- * AN4891 Rev1 p31: "bus matrices run at 200 MHz"]                            */
-#define SPECTRAL_DAISY_AXI_HZ            200000000u
-/* FMC kernel = PLL2R 200 MHz, SDCLK = ker/2 (FMC_SDRAM_CLOCK_PERIOD_2)
- * -> 100 MHz [libDaisy system.cpp + sdram.cpp]                               */
+/* --- Clock tree (FREQ_480MHZ path) -- DETERMINISM STANDARD ----------------
+ * The determinism contract (512 voices @ 480 MHz) is tethered to THIS clock.
+ * 480 MHz is NOT libDaisy's default (that is 400 MHz, FREQ_400MHZ): the firmware
+ * app MUST configure libDaisy for 480 MHz -- System::Config().Boost() /
+ * SysClkFreq == FREQ_480MHZ, which programs VOS0 core voltage + the extra flash
+ * wait states the 480 MHz operating point requires. The perf model + the WCET
+ * gate parse this header, so the DEPLOYED firmware must actually run 480 or the
+ * gate is not honest (a higher clock = a larger per-block budget). This repo is
+ * the engine LIBRARY layer; the clock selection itself lives in the linking app.
+ * HW-PENDING: the 480 boot + the AXI/SDCLK derivations below are unverified on a
+ * board here -- confirm against libDaisy's FREQ_480MHZ path on hardware. */
+/* CPU PLL1P: PLLN=240, HSE/PLLM=4, PLLP=2 -> 480 MHz [libDaisy FREQ_480MHZ]   */
+#define SPECTRAL_DAISY_CPU_HZ            480000000u
+/* AXI/AHB = SYSCLK/2 (RCC_HCLK_DIV2) -> 240 MHz (the H7 AHB max) [FREQ_480MHZ] */
+#define SPECTRAL_DAISY_AXI_HZ            240000000u
+/* FMC kernel = PLL2R, SDCLK = ker/2 -> 100 MHz. PLL2 is INDEPENDENT of SYSCLK,
+ * so the SDRAM clock is unchanged by the 480 MHz SYSCLK move [libDaisy sdram.cpp].
+ * (sdclk_per_cpu_cycle therefore rises 4.0 -> 4.8: each SDRAM linefill costs
+ * more CPU cycles at the faster core -- the WCET cold-memory bound accounts for
+ * it.) HW-PENDING: verify libDaisy keeps FMC@100 on the FREQ_480MHZ path.      */
 #define SPECTRAL_DAISY_SDCLK_HZ          100000000u
 
 /* --- SDRAM geometry (AS4C16M32MSA-6BIN, 64 MB, on FMC bank 1) -------------- */
