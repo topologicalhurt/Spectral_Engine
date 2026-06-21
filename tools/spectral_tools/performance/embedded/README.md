@@ -32,11 +32,12 @@ ceiling ~277 voices — 512 needs the IFFT or fade-pairing+TCM-residence.)
 | **Determinism PASS/FAIL @ target** | `deterministic [--voices N] [--block B]` | modeled (WCET) |
 | How code compiles → instructions (per loop) | `m7-census` | measured (codegen) |
 | Instruction counts + **bandwidth** (ld/st bytes, 32B lines) | `m7-counts` | measured (QEMU TCG) |
-| Modeled **cycles / IPC** per hot loop + validation | `m7-census`, `m7-mca-validate` | modeled (llvm-mca CortexM7Model), validated vs TRM |
+| Modeled **cycles** per hot loop + validation | `m7-census`, `m7-mca-validate` | modeled (llvm-mca CortexM7Model), validated vs TRM |
+| **IPC** (sustain kernel) | `deterministic` (`execution_time.ipc_sustain_kernel`) | modeled |
 | **Stalls / memory bounds** (bandwidth↔serial range) | `m7-stalls` | modeled (P4, over a measured trace) |
-| **WCET / BCET / ACET** (parametric) | `m7-wcet --active N --block B` | modeled+measured |
+| **WCET / ACET / BCET** | `deterministic` (`execution_time`), `m7-wcet --active N` | modeled+measured |
 | Regression gate vs frozen baseline | `m7-baseline` (`--generate` to re-sign) | measured+modeled |
-| Hottest functions/lines | *planned (`hotspots`)* | measured (PC-histogram) |
+| **Hottest functions/lines** | `hotspots [--voices N]` | measured (PC-histogram → addr2line) |
 | FPU/MAC/ALU saturation | *planned* — **modeled** (llvm-mca port pressure; M7 has NO PMU) | modeled |
 | Matrix of target × instrument | `measure --list` / `measure --target m7` | — |
 

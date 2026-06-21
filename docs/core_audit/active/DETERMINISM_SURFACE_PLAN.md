@@ -266,8 +266,15 @@ IFFT is the clean route to 512** — confirming it as the right next phase. The 
 incremental worst-case reductions if 512-on-the-oscillator is pursued, but neither closes it
 alone.
 
+**ALSO LANDED:**
+- **P4 (partial)** — `hotspots` command (per-PC histogram → addr2line inlined func+line;
+  `spectral_pchist.c` plugin + `hotspots.py`; verified at 512: smmul 27% / __qadd 20% /
+  pair 18%). **WCET/ACET/BCET + sustain IPC** in the `deterministic` report (512@480:
+  WCET 738k FAIL / ACET 505k ~105% / BCET 332k 69% — even typical all-sustain is over).
+- **P5 (partial)** — README updated (every metric's command + soundness caveats).
+
 **REMAINING:** P1b device abstraction (DeviceProfile + Teensy stub); P3 the unified
 SpectralPerfSample contract (versioned header + Python mirror tethering on-device DWT,
-erratum-aware); P4 IPC/BCET/ACET surfaced + `hotspots` + modeled saturation; P5 finish
+erratum-aware); P4 modeled FPU/MAC/ALU saturation (llvm-mca port pressure); P5 finish
 (qemu_main/render dedup + reporting-surface audit); and the note-#1 fade-pairing + TCM-
-residence engine work toward 512.
+residence engine work toward 512 (marginal — IFFT is the clean route).
