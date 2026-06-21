@@ -78,6 +78,17 @@ resource-hash pattern). [Earlier drafts named `synth/`, `port/host/`, `port/cmsi
   measured desktop speedup on a dense fixture.
 - **F3 — golden sign-off.** Maintainer listens/diffs a dense render;
   thresholds frozen into the golden set. Done-when: signed.
+  - **GPU caveat (when precise-phase/cubic is wired here).** The additive GPU
+    path packs the 32-byte `SegmentGpu` (omega/df only — quadratic phase; no
+    cubic c2/c3, `spectral_common.h:99`), so a cubic-annotated render dispatched
+    to Metal/CUDA would silently drop to the quadratic model and diverge from the
+    CPU. There is no guard today (the dispatch gate, `gpu_check_timbre_or_fallback`,
+    checks timbre only) — harmless while `SPECTRAL_PRECISE_PHASE=0` (cubic dormant,
+    c3≡0). Wiring precise-phase must therefore EITHER widen `SegmentGpu` + the
+    codegen'd MSL to carry c2/c3 (port the cubic DSP onto the GPU) OR add a
+    dispatch guard that defers cubic-annotated renders to CPU. `gpu_backend_parity`
+    would catch the divergence under a `PRECISE_PHASE=1` build with a
+    non-stationary fixture (speech), which is the natural regression gate.
 - **F4 — embedded (Cortex-M7) port + DEFAULT-ON for embedded (maintainer
   directive 2026-06-15).** The compat audit (see "Embedded integration" below)
   ruled **float-on-M7-FPU over Q31**: the M7 has a hardware single-precision FPU,
