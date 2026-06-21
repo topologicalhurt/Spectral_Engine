@@ -808,6 +808,30 @@ def run_hotspots(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_saturation(args: argparse.Namespace, perf: Performance) -> int:
+    """Modeled functional-unit saturation (llvm-mca port pressure / iteration cycles)."""
+    from ..performance.embedded import codegen, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca"}))
+        rep = codegen.saturation_report(tc, out_dir=out_dir)
+        busiest = max(
+            ((f"{k}:{u}={s:.0%}", s) for k, v in rep["kernels"].items()
+             for u, s in v["saturation"].items()),
+            key=lambda x: x[1], default=("none", 0.0))
+        summary = f"{len(rep['kernels'])} kernels (modeled); busiest unit {busiest[0]}"
+        test = {"name": "saturation", "status": TestStatus.OK.value, "summary": summary, "details": rep}
+    except (toolchain.ToolchainError, codegen.CodegenError) as exc:
+        test = {"name": "saturation", "status": TestStatus.FAILED.value,
+                "summary": "saturation failed", "details": {"error": str(exc)}}
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_measure(args: argparse.Namespace, perf: Performance) -> int:
     """Matrix-driven orchestration: probe or run the instruments for a target.
 
@@ -1021,6 +1045,14 @@ def build_parser() -> argparse.ArgumentParser:
     hotspots.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
     add_output_options(hotspots)
 
+    saturation = sub.add_parser(
+        "saturation",
+        help="Modeled FPU/MAC/ALU/SIMD-DSP functional-unit saturation per kernel "
+             "(llvm-mca port pressure / iteration cycles; the M7 has no PMU).",
+    )
+    saturation.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(saturation)
+
     m7_stalls = sub.add_parser(
         "m7-stalls",
         help="Embedded M7: memory-stall bounds [modeled] from the QEMU address trace "
@@ -1093,6 +1125,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_deterministic(args, perf)
     if args.command == "hotspots":
         return run_hotspots(args, perf)
+    if args.command == "saturation":
+        return run_saturation(args, perf)
     if args.command == "m7-baseline":
         return run_m7_baseline(args, perf)
     if args.command == "measure":

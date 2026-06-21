@@ -330,3 +330,82 @@ def codegen_report(tc: Toolchain, *, out_dir: Path) -> CodegenReport:
     cen = census(tc, out_dir=out_dir)
     loops, failures = loop_analysis(tc, out_dir=out_dir)
     return CodegenReport(census=cen, loops=loops, failed_regions=failures)
+
+
+# --- modeled functional-unit saturation (llvm-mca port pressure) ------------
+# The Cortex-M7 has NO PMU (reference_arm_wcet_methodology), so per-unit
+# utilization cannot be MEASURED on hardware. The defensible model is llvm-mca's
+# per-port resource pressure / iteration cycles = how saturated each functional
+# unit is. Reported as MODELED, never a hardware measurement. Logical units fold
+# the CortexM7Model's dual ports (two ALU pipes, load H/L, etc.).
+SATURATION_UNITS: dict[str, tuple[str, ...]] = {
+    "ALU": ("M7UnitALU",),
+    "MAC": ("M7UnitMAC",),
+    "SIMD_DSP": ("M7UnitSIMD",),
+    "FPU": ("M7UnitVFP", "M7UnitVPortH", "M7UnitVPortL"),
+    "LoadStore": ("M7UnitLoadH", "M7UnitLoadL", "M7UnitStore"),
+    "Shift": ("M7UnitShift1", "M7UnitShift2"),
+    "Branch": ("M7UnitBranch",),
+}
+_MCA_LEGEND_RE = re.compile(r"\[[\d.]+\]\s+-\s+(\w+)")
+_MCA_TOTCYC_RE = re.compile(r"Total Cycles:\s+(\d+)")
+_MCA_ITERS_RE = re.compile(r"Iterations:\s+(\d+)")
+_MCA_PRESS_HDR = "Resource pressure per iteration:"
+
+
+def saturation_report(tc: Toolchain, *, out_dir: Path, iterations: int = 100) -> dict[str, Any]:
+    """Per-kernel MODELED functional-unit saturation = llvm-mca port pressure /
+    iteration cycles. No M7 PMU, so this is the defensible model, not a HW
+    measurement. A unit near 1.0 => throughput-bound on that unit; all units
+    well below => latency/dependency-bound (e.g. a serial recurrence). Additive:
+    does not touch the gated census / loop_analysis."""
+    if tc.llvm_mca is None:
+        raise CodegenError("llvm-mca unavailable; run toolchain.discover(need={'mca'})")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    asm_path = out_dir / "saturation.s"
+    arm_backend_dir = tc.repo_root / "spectral_engine/arch/arm"
+    result = run([tc.arm_gcc, *tc.cflags(extra_includes=(arm_backend_dir,)),
+                  "-S", str(NATIVE_DIR / "kernel_wrappers.c"), "-o", str(asm_path)],
+                 cwd=tc.repo_root, check=False)
+    if result.returncode != 0:
+        raise CodegenError(f"wrapper compile failed:\n{result.stderr}")
+    loops = extract_loop_bodies(asm_path.read_text(encoding="utf-8"))
+
+    kernels: dict[str, Any] = {}
+    for loop in loops:
+        region = "\n".join(["\t.syntax unified", "\t.thumb",
+                            f"# LLVM-MCA-BEGIN {loop.kernel}", *loop.instructions,
+                            "# LLVM-MCA-END", ""])
+        rp = out_dir / f"sat_{loop.label.lstrip('.')}.s"
+        rp.write_text(region, encoding="utf-8")
+        mca = run([tc.llvm_mca, "-mtriple=thumbv7em-none-eabi", "-mcpu=cortex-m7",
+                   f"-iterations={iterations}", str(rp)], cwd=tc.repo_root, check=False)
+        if mca.returncode != 0:
+            continue
+        out = mca.stdout
+        units = _MCA_LEGEND_RE.findall(out)
+        idx = out.find(_MCA_PRESS_HDR)
+        totcyc, iters = _MCA_TOTCYC_RE.search(out), _MCA_ITERS_RE.search(out)
+        if not units or idx < 0 or not totcyc or not iters:
+            continue
+        rows = out[idx:].splitlines()
+        vals = rows[2].split() if len(rows) > 2 else []
+        press = [0.0 if v == "-" else float(v) for v in vals]
+        cyc = int(totcyc.group(1)) / int(iters.group(1))
+        unit_press: dict[str, float] = {}
+        for name, p in zip(units, press):
+            unit_press[name] = unit_press.get(name, 0.0) + p
+        sat = {logical: (round(sum(unit_press.get(m, 0.0) for m in members) / cyc, 3)
+                         if cyc else 0.0)
+               for logical, members in SATURATION_UNITS.items()}
+        kernels[f"{loop.kernel}/{loop.label}"] = {
+            "cyc_per_iter": round(cyc, 2),
+            "bound": ("throughput" if max(sat.values(), default=0.0) > 0.95
+                      else "latency/dependency"),
+            "saturation": sat,
+        }
+    return {
+        "provenance": "modeled: llvm-mca CortexM7Model port pressure / iteration cycles; "
+                      "the M7 has no PMU so unit utilization cannot be measured on hardware",
+        "kernels": kernels,
+    }
