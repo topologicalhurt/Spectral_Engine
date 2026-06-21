@@ -86,6 +86,87 @@ STONE_SCENARIOS: tuple[dict[str, Any], ...] = (
 # (published: worst kernel 24.0 cyc/voice-sample incl. back-edge bias).
 STONE_MAX_CYC_PER_VOICE_SAMPLE = 25.0
 
+# --- the canonical determinism gate (DETERMINISM_SURFACE_PLAN) ---------------
+# "Does the device deterministically render the intelligibility-target workload
+# at its rated clock?" This is THE determinism standard. It is a SEPARATE gate
+# from the stone scenarios above (which guard regression of the SHIPPED capacity)
+# -- this one states the TARGET, and reports PASS/FAIL honestly even while the
+# target is not yet met (the maintainer's rule: do not soften the test to hit it).
+DETERMINISM_VOICES = 512            # the intelligibility-target workload
+DETERMINISM_BLOCK = 48              # the real Daisy codec callback (DAISY_AUDIO_BLOCK_SIZE)
+# Gate margin: WCET must be <= budget*(1 - margin). DERIVED (maintainer write-off:
+# "validation residual + reserve"): the llvm-mca CortexM7Model body residual is
+# <=1% (mca_validation, P3); the M7 is the documented hard case for tight WCET
+# (random-replacement cache + dual-issue; ECRTS'23 ~102% MAE), so the reserve
+# folds that residual + a cold-cache/DWT-erratum engineering margin -> 10%
+# (gate at <=90% of budget). Tighten only if the cache stance moves to fully
+# TCM-resident + cache-off (removes the cold-miss uncertainty).
+DETERMINISM_MARGIN = 0.10
+
+
+def deterministic(tc: Toolchain, *, out_dir: Path,
+                  voices: int = DETERMINISM_VOICES,
+                  block: int = DETERMINISM_BLOCK) -> dict[str, Any]:
+    """The canonical determinism verdict: PASS iff the worst-case WCET of one
+    audio block at `voices` <= budget*(1-margin) at the device's rated clock.
+
+    The worst case is PARAM-INVARIANT by construction -- the embedded path is
+    sine-additive, so timbre/frequency/pitch/stretch/amplitude all reduce to
+    "N sine voices with some phase_inc/amp" and do NOT change the per-voice
+    kernel cost; only voice COUNT and fade-STATE vary. It is taken at the
+    harshest reachable input: every active voice simultaneously in the UNPAIRED
+    fade kernel (e.g. a broadband-transient onset -- the loader permits
+    arbitrarily short simultaneous segments, so this is in-contract)."""
+    inputs = derive_inputs(tc, out_dir=out_dir)
+    constants = load_constants(tc.repo_root)
+    app = parse_daisy_app_config(tc.repo_root)
+    sr = app["DAISY_SAMPLE_RATE"]
+    cpu_hz = constants.defines["SPECTRAL_DAISY_CPU_HZ"]
+    budget = cpu_hz / sr * block
+    threshold = budget * (1.0 - DETERMINISM_MARGIN)
+
+    def wcet_at(n: int) -> float:
+        # Worst-case scan: a single block can activate up to n segments
+        # onsetting together (harshest input); the next_seg_idx cursor keeps
+        # the scan O(active), so n checks is the bound.
+        return WcetReport(inputs=inputs, constants=constants, active=n,
+                          scan_segments=n, block=block,
+                          sample_rate=sr).wcet_cycles
+
+    wcet_cyc = wcet_at(voices)
+    passed = wcet_cyc <= threshold
+
+    ceiling = 0
+    for n in range(1, voices + 1):
+        if wcet_at(n) <= threshold:
+            ceiling = n
+        else:
+            break
+
+    rep = WcetReport(inputs=inputs, constants=constants, active=voices,
+                     scan_segments=voices, block=block, sample_rate=sr)
+    d = rep.as_dict()
+    return {
+        "verdict": "PASS" if passed else "FAIL",
+        "device": "daisy_seed",
+        "clock_hz": cpu_hz,
+        "workload_voices": voices,
+        "block_samples": block,
+        "worst_case": "all active voices in the UNPAIRED fade kernel "
+                      "(param-invariant: sine-additive embedded path; harshest "
+                      "reachable input = simultaneous short-segment onset)",
+        "wcet_block_cycles": round(wcet_cyc, 0),
+        "budget_cycles": round(budget, 0),
+        "margin": DETERMINISM_MARGIN,
+        "threshold_cycles": round(threshold, 0),
+        "budget_fraction": round(wcet_cyc / budget, 4),
+        "deterministic_ceiling_voices": ceiling,
+        "worst_cyc_per_voice_sample": round(inputs.worst_cyc_per_voice_sample, 3),
+        "terms": d["terms"],
+        "provenance": "determinism gate = WCET(worst-case, cold-cache) <= "
+                      "budget*(1-margin); " + d["provenance"],
+    }
+
 
 class ExpectationsError(RuntimeError):
     pass

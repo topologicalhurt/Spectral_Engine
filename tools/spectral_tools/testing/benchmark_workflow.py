@@ -753,6 +753,38 @@ def run_m7_baseline(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_deterministic(args: argparse.Namespace, perf: Performance) -> int:
+    """The CANONICAL determinism gate: does the device deterministically render
+    the voice target at its rated clock? (default 512 voices @ 480 MHz)."""
+    from ..performance.embedded import codegen, counts, expectations, toolchain, wcet
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca", "qemu"}))
+        voices = args.voices if args.voices is not None else expectations.DETERMINISM_VOICES
+        v = expectations.deterministic(tc, out_dir=out_dir, voices=voices, block=args.block)
+        status = TestStatus.OK.value if v["verdict"] == "PASS" else TestStatus.FAILED.value
+        summary = (
+            f"{v['verdict']}: {v['workload_voices']} voices @ {v['clock_hz'] / 1e6:.0f} MHz "
+            f"= {v['budget_fraction'] * 100:.0f}% of budget (gate <= {(1 - v['margin']) * 100:.0f}%); "
+            f"deterministic ceiling {v['deterministic_ceiling_voices']} voices"
+        )
+        test = {"name": "deterministic", "status": status, "summary": summary, "details": v}
+    except (toolchain.ToolchainError, codegen.CodegenError, counts.CountsError,
+            wcet.WcetError, expectations.ExpectationsError) as exc:
+        test = {
+            "name": "deterministic",
+            "status": TestStatus.FAILED.value,
+            "summary": "determinism gate could not run",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_measure(args: argparse.Namespace, perf: Performance) -> int:
     """Matrix-driven orchestration: probe or run the instruments for a target.
 
@@ -943,6 +975,18 @@ def build_parser() -> argparse.ArgumentParser:
     m7_wcet.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
     add_output_options(m7_wcet)
 
+    deterministic = sub.add_parser(
+        "deterministic",
+        help="THE canonical determinism gate: does the device deterministically render the "
+             "voice target at its rated clock? (default 512 voices @ 480 MHz). PASS/FAIL.",
+    )
+    deterministic.add_argument("--voices", type=int, default=None,
+                               help="Voice target (default 512, the intelligibility target)")
+    deterministic.add_argument("--block", type=int, default=48,
+                               help="Block size in samples (default 48, the Daisy codec callback)")
+    deterministic.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(deterministic)
+
     m7_stalls = sub.add_parser(
         "m7-stalls",
         help="Embedded M7: memory-stall bounds [modeled] from the QEMU address trace "
@@ -1011,6 +1055,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_m7_stalls(args, perf)
     if args.command == "m7-wcet":
         return run_m7_wcet(args, perf)
+    if args.command == "deterministic":
+        return run_deterministic(args, perf)
     if args.command == "m7-baseline":
         return run_m7_baseline(args, perf)
     if args.command == "measure":
