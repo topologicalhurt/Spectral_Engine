@@ -21,6 +21,16 @@ _Static_assert(sizeof(SpectralAudioInfo) == sizeof(int) * 2 + sizeof(size_t),
 _Static_assert(SPECTRAL_OK == 0, "FROZEN 1.0: SPECTRAL_OK == 0");
 _Static_assert(SPECTRAL_RENDERER_COUNT == 3, "FROZEN 1.0: 3 renderers (additive/wavetable/subtractive)");
 
+/* ---- frozen enum VALUES (the ABI a consumer encodes against — not just struct sizes) ---- */
+_Static_assert(SPECTRAL_ERR_PARAM == -1 && SPECTRAL_ERR_MEMORY == -2, "FROZEN 1.0: core error codes");
+_Static_assert(TIMBRE_SINE == 0 && TIMBRE_PWM == 7 && TIMBRE_COUNT == 8, "FROZEN 1.0: timbre enum");
+_Static_assert(BACKEND_AUTO == 0 && BACKEND_CPU == 1 && BACKEND_METAL == 2 &&
+               BACKEND_CUDA == 3 && BACKEND_EXPORT == 4, "FROZEN 1.0: SynthBackend enum");
+_Static_assert(SPECTRAL_RENDERER_ADDITIVE == 0 && SPECTRAL_RENDERER_WAVETABLE == 1 &&
+               SPECTRAL_RENDERER_SUBTRACTIVE == 2, "FROZEN 1.0: renderer ids");
+_Static_assert(SPECTRAL_SYNTH_API_VERSION_MAJOR == 1 && SPECTRAL_SYNTH_API_VERSION_MINOR == 0,
+               "FROZEN 1.0: synth API aligned to kernel 1.0");
+
 /* ---- frozen signatures: a typed pointer per curated public entry point ----
  * (the initializer fails to compile if the declared signature changes) */
 static SegmentArray (*const fp_analyze)(const float*, size_t, int, int, int, float, double*, double*)
