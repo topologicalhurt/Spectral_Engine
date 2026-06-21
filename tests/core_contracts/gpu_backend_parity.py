@@ -3,10 +3,13 @@
 
 Runs the desktop binary twice per timbre — backend forced to CPU, then to
 Metal — on the same input, and bounds the difference of the rendered float
-WAVs. Measured floors on the 440 Hz fixture: sine max 2.4e-7 (-132.5 dBFS) /
-RMS 6.4e-8 (-143.9 dBFS), saw max 1.8e-7 / RMS 2.5e-8; the bounds below carry
-~30 dB headroom, far below audibility yet far above any real formula or
-dispatch defect (those land at -40..-70 dBFS).
+WAVs. Covers every GPU-eligible timbre (0..SPECTRAL_GPU_MAX_TIMBRE = parabola),
+so the Metal df (chirp) + da (amp-ramp) path is exercised across the full
+surface, not just two timbres. Measured floors on the 440 Hz fixture (all six):
+worst-case max 2.4e-7 (-132.5 dBFS) / RMS 6.4e-8 (-143.9 dBFS); per-timbre
+max|diff| 1.2e-7..2.4e-7, RMS 1.6e-8..6.4e-8. The bounds below carry ~30 dB
+headroom, far below audibility yet far above any real formula or dispatch
+defect (those land at -40..-70 dBFS).
 
 Standalone (stdlib only) so CTest can run it without pytest. Exit codes:
 0 = pass, 77 = skipped (binary not built, or no Metal device — e.g. a
@@ -26,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 SKIP = 77
-TIMBRES = (0, 1)            # sine, saw — algebraic + harmonic-rich
+TIMBRES = (0, 1, 2, 3, 4, 5)  # all GPU-eligible: sine,saw,square,triangle,asin,parabola (<=SPECTRAL_GPU_MAX_TIMBRE)
 MAX_DIFF_BOUND = 1.0e-5     # ~-100 dBFS
 RMS_DIFF_BOUND = 1.0e-6     # ~-120 dBFS
 CPU, METAL = "1", "2"
