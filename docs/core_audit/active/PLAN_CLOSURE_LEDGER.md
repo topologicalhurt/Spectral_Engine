@@ -12,6 +12,21 @@ classified **238 items**. The adversarial pass demolished an optimistic first-cu
 finders read pre-execution snapshots) or actually GATED. What truly survived as
 *local + safe + decision-consistent* on this arm64 macOS box was small, and is now closed.
 
+**Update 2026-06-21 — campaigns CLOSED since the 2026-06-18 audit** (recorded in the CHANGELOG, not
+re-inventoried into the 238-item roll-up below, which stays the 06-18 baseline):
+- **Kernel-hardening campaign** (CHANGELOG Pass 275) → CLOSED + archived
+  (`archive/KERNEL_HARDENING_PLAN.md`): II CLI observability, VI/VII build-flag SSOT (`profiles.cmake`),
+  §VIII ThinLTO determinism, V logging (AI_CANON #29), VII.3 width policy (#30). Gated remainder
+  (IV-d magsq ULP, III embedded, VII.2, V.3, II.1) deferred-with-rationale — now in the archived plan.
+- **Renderer-abstraction campaign** (CHANGELOG Pass 283) → synthesis reframed as rendering
+  (AI_CANON **#31** + a CORE_CONTRACTS row); additive/wavetable/subtractive renderers + the wavetable
+  IFFT hybrid landed + parity-tested (ctest #20–#25). F3-gated remainder: the hybrid dispatch routing
+  + the host-only `synth → render` rename. Joins the §4.A maintainer-golden gate.
+- **Embedded-perf** (CHANGELOG 276–282, the concurrent agent) → high-word-multiply `coupled_step` etc.;
+  **512 voices now fit the EXACT per-partial oscillator bank**, REFUTING the IFFT plan's founding "512
+  needs the IFFT" premise (premise-revision banner added to `IFFT_SYNTHESIS_PLAN.md`).
+- The reviewer handoffs are RECONCILED / SUPERSEDED; **this ledger is the live status of record.**
+
 ---
 
 ## 1. Roll-up — 238 items by disposition
