@@ -695,6 +695,27 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_ARM32_MAX_ACTIVE    512
 #endif
 
+/* Real-time admission cap: the MOST voices the per-block activation scan admits
+ * (the loop in spectral_synth_arm32.c). DISTINCT from the storage bound above —
+ * storage sizes the active-state arrays; this bounds per-block render WORK so a
+ * dense .spq cannot exceed the WCET budget and overrun the audio deadline.
+ * Defaults to the storage bound (admit up to capacity, the historical
+ * behaviour); a real-time profile lowers it to its measured WCET ceiling. Excess
+ * segments are NOT dropped — they defer to later blocks as active voices expire
+ * and free slots (natural backpressure). Decoupling work from storage means a
+ * future storage bump cannot silently raise the per-block render cost.
+ * (Measured oscillator-bank ceiling ≈ 520 voices @400 MHz / ~625 @480 MHz at the
+ * 16 cyc/voice-sample kernel, so the 512 storage default is itself within
+ * budget; DAISY_MAX_ACTIVE=128 is a stale legacy reference, not this cap.) */
+#ifndef SPECTRAL_ARM32_ACTIVE_CAP
+#define SPECTRAL_ARM32_ACTIVE_CAP    SPECTRAL_ARM32_MAX_ACTIVE
+#endif
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(SPECTRAL_ARM32_ACTIVE_CAP >= 1 &&
+               SPECTRAL_ARM32_ACTIVE_CAP <= SPECTRAL_ARM32_MAX_ACTIVE,
+               "active-voice admission cap must be in [1, storage bound]");
+#endif
+
 /* Analysis Defaults */
 
 #if SPECTRAL_EMBEDDED

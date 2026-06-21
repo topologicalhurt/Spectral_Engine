@@ -66,13 +66,14 @@ _Static_assert(DAISY_WORK_POOL_OFFSET + DAISY_WORK_POOL_SIZE
 /* [chosen: round figure under the ~3.1M (48 MB / 16 B) pool capacity,
  * leaving slack for pool bookkeeping.] */
 #define DAISY_MAX_SEGMENTS_SAFE     2000000
-/* Conservative reference cap for the active-voice budget. NOT enforced at admission: the runtime
- * active-state arrays size to SPECTRAL_ARM32_MAX_ACTIVE and admission is not gated on this value
- * (see EMBEDDED_RESOURCE_SEPARATION_PLAN.md). 128 is the legacy figure; the plan's per-voice WCET
- * budget measures the OSCILLATOR-BANK ceiling near ~416 voices @400MHz / ~499 @480MHz at the real
- * 48-sample codec block. The 512-voice real-time TARGET (≈speech-density resynthesis) rides the
- * inverse-FFT synthesis path for DENSE frames -- the per-partial oscillator bank cannot reach 512
- * within budget. Revise with a fresh WCET derivation, not by hand. */
+/* Conservative legacy reference for the active-voice budget. NOT the admission cap: admission is
+ * gated on SPECTRAL_ARM32_ACTIVE_CAP (spectral_config.h), which defaults to the storage bound
+ * SPECTRAL_ARM32_MAX_ACTIVE (512). 128 is the LEGACY figure and is intentionally not wired to the
+ * cap -- the measured per-voice WCET ceiling is far higher: the oscillator bank reaches ≈520 voices
+ * @400MHz / ~625 @480MHz at the real 48-sample codec block with the 16 cyc/voice-sample kernel, so
+ * the 512 storage default is itself inside budget (and the inverse-FFT path is no longer required
+ * for the 512-voice real-time target). To tighten the real-time cap below storage, set
+ * SPECTRAL_ARM32_ACTIVE_CAP from a fresh WCET derivation -- not by hand-wiring this 128. */
 #define DAISY_MAX_ACTIVE            128
 
 /* Parameter defaults and limits */

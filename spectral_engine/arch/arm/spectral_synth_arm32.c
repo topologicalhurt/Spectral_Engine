@@ -1055,7 +1055,7 @@ uint32_t spectral_arm32_process(SpectralArm32Ctx* ctx,
     /* Activate new segments that start within this block */
     SpectralPerfSegScanState seg_scan_state = spectral_perf_segment_scan_start(ctx);
     while (ctx->next_seg_idx < ctx->num_segments &&
-           ctx->num_active < SPECTRAL_ARM32_MAX_ACTIVE) {
+           ctx->num_active < SPECTRAL_ARM32_ACTIVE_CAP) {
         const SpectralSegmentQ15* seg = get_segment(ctx, ctx->next_seg_idx);
         uint32_t seg_start = seg->start;
         uint32_t seg_length = seg->length;
