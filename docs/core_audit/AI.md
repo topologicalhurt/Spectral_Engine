@@ -4,10 +4,12 @@ Real-time spectral analysis + resynthesis engine in C. Analyze audio into
 sinusoidal segments; resynthesize with stretch/pitch/timbre on desktop (float,
 Metal/CUDA/vDSP) or Cortex-M7 (Q15 fixed-point, Daisy Seed).
 `docs/core_audit/reference/AI_CANON.md` holds the full correctness rules; this file
-is the orientation. `docs/core_audit/` holds only the actively-worked plans
-(REVIEWER_HANDOFF + the live workstreams); the canon, reference docs, and paused
-plans live in `docs/core_audit/reference/`, completed campaigns in `docs/core_audit/archive/`.
-**Forward mandate (what to work on next):** `docs/core_audit/REVIEWER_HANDOFF.md`.
+is the orientation. `docs/core_audit/active/` holds the actively-worked plans (the live
+workstreams + handoffs); the canon, reference docs, and paused plans live in
+`docs/core_audit/reference/`, completed campaigns in `docs/core_audit/archive/`.
+**Live status of record:** `docs/core_audit/active/PLAN_CLOSURE_LEDGER.md` — the standing
+`active/REVIEWER_HANDOFF.md` mandate is RECONCILED (its S1–S4 + F work-streams are done or gated;
+the live frontier is the F3 golden + the `spectral_kernel.h` 1.0 freeze, maintainer-owned).
 
 ## Layout (Linux-kernel-style: kernel / arch / drivers; see archive/KERNEL_LAYOUT_PLAN.md)
 - `spectral_engine/core/` — the kernel: config, constants, oscillators, windows, segments,
@@ -213,15 +215,19 @@ Each completed instance's findings ledger + execution waves are archived under
 instance opens a fresh ledger in `docs/core_audit/`.
 
 ## Reference docs
-`docs/core_audit/` (top): the actively-worked plans + handoffs — `REVIEWER_HANDOFF.md` (the
-standing mandate), `REVIEWER_HANDOFF_2.md` (its status reconciliation), the live workstreams
-`IFFT_SYNTHESIS_PLAN.md` and `EMBEDDED_RESOURCE_SEPARATION_PLAN.md` (the S1 embedded
-FPU/ALU-separation, cache-coherency, bandwidth & arch-separation ledger; principles canonized as
-`AI_CANON.md` 21–25), and `PLAN_CLOSURE_LEDGER.md` (full per-plan accounting: every plan item's
-disposition — done / declined / gated / closed — and the gates that block the remainder).
+`docs/core_audit/active/`: the actively-worked plans + handoffs — `REVIEWER_HANDOFF.md` (the
+standing mandate, now RECONCILED), `REVIEWER_HANDOFF_2.md` (a SUPERSEDED status snapshot), the live
+workstreams `IFFT_SYNTHESIS_PLAN.md` (the renderer freq-domain substrate; its "512 needs IFFT"
+premise revised — 512 now fits the exact bank), `EMBEDDED_RESOURCE_SEPARATION_PLAN.md` (the S1
+embedded FPU/ALU-separation, cache-coherency, bandwidth & arch-separation ledger; principles canonized
+as `AI_CANON.md` 21–25), `RENDERER_ABSTRACTION_PLAN.md` (synthesis reframed as rendering: one scene
+model × renderer × domain × device, `AI_CANON.md` #31 + CORE_CONTRACTS), and `PLAN_CLOSURE_LEDGER.md`
+(full per-plan accounting: every item's disposition — done / declined / gated / closed — and the gates
+that block the remainder).
 `docs/core_audit/reference/`: canon + contracts + guidelines only — **no plans** — `AI_CANON.md`
 (rules), `CORE_CONTRACTS.md`, `ACADEMIC_SOURCES.md` (paper-backed methods), `CHANGELOG.md`,
 `DISCIPLINE_FINDINGS.md`, `KERNEL_PATCHING_GUIDELINES.md`, `VALIDATION_OWNERSHIP.md`,
 `FULL_FUSED_PARITY_HARNESS.md`.
 `docs/core_audit/archive/`: completed/superseded campaigns — incl. `M7_PERF_MODEL_PLAN.md` (the
-perf-model stack, cited for provenance), the optimisation plans, and the Campaign-2 master plan.
+perf-model stack, cited for provenance), the optimisation plans, the Campaign-2 master plan, and
+`KERNEL_HARDENING_PLAN.md` (CLOSED 2026-06-21 — done-or-gated-with-rationale).
