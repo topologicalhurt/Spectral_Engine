@@ -12,38 +12,75 @@
 #include "spectral_endian.h"
 #include "spectral_hash_xx32_xx3.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include "spectral_log.h"
-
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 /* --- Key computation ----------------------------------------------------- */
 
-uint64_t spectral_seg_cache_key(const char* stem,
+static int seg_cache_scale_to_i32(float value, double scale, int* out)
+{
+    double scaled = 0.0;
+
+    if (!out || !spectral_is_finite_f32(value) || !isfinite(scale)) return 0;
+
+    scaled = (double)value * scale;
+    if (!isfinite(scaled) || scaled < (double)INT_MIN || scaled > (double)INT_MAX) {
+        return 0;
+    }
+
+    *out = (int)scaled;
+    return 1;
+}
+
+uint64_t spectral_seg_cache_key(const char* input_id,
                                 int n_fft, int hop,
                                 float db_thresh,
                                 float start_sec, float end_sec,
                                 float stretch,
                                 uint32_t tile_size)
 {
-    /* Hash text form of analysis/render params for deterministic keys. */
+    /* Hash text form of input identity + analysis/render params for deterministic
+     * keys.  The caller-provided input_id must already identify the audio input
+     * content, not just its basename. */
     char buf[512];
-    int len = snprintf(buf, sizeof(buf),
-                       "%s|%d|%d|%d|%d|%d|%d|%u",
-                       stem ? stem : "",
-                       n_fft, hop,
-                       (int)(db_thresh * 10.0f),
-                       (int)(start_sec * 1000.0f),
-                       (int)(end_sec * 1000.0f),
-                       (int)(stretch * 1000000.0f),
-                       tile_size);
-    if (len <= 0) return 0;
-    if ((size_t)len >= sizeof(buf)) len = (int)(sizeof(buf) - 1);
+    int len = 0;
+    int db_thresh_i = 0;
+    int start_ms_i = 0;
+    int end_ms_i = 0;
+    int stretch_ppm_i = 0;
+
+    if (spectral_is_empty_string(input_id) ||
+        n_fft <= 0 || hop <= 0 || tile_size == 0u ||
+        !spectral_is_finite_positive_f32(stretch) ||
+        stretch > SPECTRAL_MAX_STRETCH ||
+        !seg_cache_scale_to_i32(db_thresh, 10.0, &db_thresh_i) ||
+        !seg_cache_scale_to_i32(start_sec, 1000.0, &start_ms_i) ||
+        !seg_cache_scale_to_i32(end_sec, 1000.0, &end_ms_i) ||
+        !seg_cache_scale_to_i32(stretch, 1000000.0, &stretch_ppm_i)) {
+        return 0;
+    }
+
+    len = snprintf(buf, sizeof(buf),
+                   "%s|%d|%d|%d|%d|%d|%d|%u",
+                   input_id,
+                   n_fft, hop,
+                   db_thresh_i,
+                   start_ms_i,
+                   end_ms_i,
+                   stretch_ppm_i,
+                   tile_size);
+    if (len <= 0 || (size_t)len >= sizeof(buf)) {
+        return 0;
+    }
     return (uint64_t)spectral_hash_oneshot(buf, (size_t)len);
 }
+
+
 
 /* --- Binary search (Java binarySearch convention: ~insertion_point) ----- */
 
@@ -85,6 +122,65 @@ static int seg_cache_tile_blob_bytes(uint32_t tile_count,
     return 1;
 }
 
+static int seg_cache_entry_metadata_valid(const SpectralSegCacheEntry* e)
+{
+    if (!e) return 0;
+
+    /* All fields below come from disk.  Validate before narrowing uint32_t to
+     * int, uint64_t to size_t, or trusting tile metadata to describe a blob. */
+    if (e->sample_rate < (uint32_t)SPECTRAL_MIN_SAMPLE_RATE ||
+        e->sample_rate > (uint32_t)SPECTRAL_MAX_SAMPLE_RATE) {
+        return 0;
+    }
+    if (!spectral_is_finite_positive_f32(e->stretch) ||
+        e->stretch > SPECTRAL_MAX_STRETCH) {
+        return 0;
+    }
+    if (!spectral_is_finite_f32(e->pitch) ||
+        e->pitch < SPECTRAL_MIN_PITCH ||
+        e->pitch > SPECTRAL_MAX_PITCH) {
+        return 0;
+    }
+    if ((uint64_t)(size_t)e->output_length != e->output_length) {
+        return 0;
+    }
+    if (e->seg_count == 0 && (e->tile_count != 0 || e->tile_total_refs != 0)) {
+        return 0;
+    }
+    if ((e->tile_count == 0) != (e->tile_total_refs == 0)) {
+        return 0;
+    }
+    return 1;
+}
+
+static SpectralError seg_cache_validate_data_extent(const char* cache_dir,
+                                                    uint64_t data_offset,
+                                                    size_t total_data_bytes)
+{
+    uint64_t data_file_size = 0;
+    uint64_t total_data_bytes_u64 = 0;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!cache_dir) return SPECTRAL_ERR_PARAM;
+    if (total_data_bytes == 0u) return SPECTRAL_OK;
+
+    total_data_bytes_u64 = (uint64_t)total_data_bytes;
+    if ((size_t)total_data_bytes_u64 != total_data_bytes) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    err = spectral_seg_cache_fs_data_file_size(cache_dir, &data_file_size);
+    if (err != SPECTRAL_OK) return err;
+
+    if (total_data_bytes_u64 > UINT64_MAX - data_offset ||
+        data_file_size < data_offset + total_data_bytes_u64) {
+        return SPECTRAL_ERR_FILE_CORRUPT;
+    }
+
+    return SPECTRAL_OK;
+}
+
+
 static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
                                         const char* tile_base,
                                         size_t tile_data_bytes,
@@ -92,6 +188,9 @@ static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
 {
     SpectralSegCacheTileHeader th;
     size_t expected_bytes = 0;
+    size_t ranges_bytes = 0;
+    const char* ranges_base = NULL;
+    const char* refs_base = NULL;
 
     if (!e || !tile_base || !result) return 0;
     if (e->tile_count == 0 || e->tile_total_refs == 0) return 0;
@@ -114,14 +213,30 @@ static int seg_cache_validate_tile_blob(const SpectralSegCacheEntry* e,
         return 0;
     }
 
+    if (!spectral_array_bytes((size_t)th.num_tiles, sizeof(uint32_t) * 2u, &ranges_bytes)) {
+        return 0;
+    }
+
+    ranges_base = tile_base + sizeof(SpectralSegCacheTileHeader);
+    refs_base = ranges_base + ranges_bytes;
+
+    if (!spectral_gpu_tile_layout_words_valid(ranges_base,
+                                               (const uint32_t*)refs_base,
+                                               th.num_tiles,
+                                               th.total_refs,
+                                               e->seg_count)) {
+        SPECTRAL_LOG_WARN("Segment cache tile references invalid — skipping tile cache data");
+        return 0;
+    }
+
     result->tile_size = th.tile_size;
     result->tile_count = th.num_tiles;
     result->tile_total_refs = th.total_refs;
-    result->tile_ranges = (void*)(tile_base + sizeof(SpectralSegCacheTileHeader));
-    result->tile_segment_ids = (uint32_t*)(tile_base + sizeof(SpectralSegCacheTileHeader)
-                                           + (size_t)th.num_tiles * (sizeof(uint32_t) * 2u));
+    result->tile_ranges = (void*)ranges_base;
+    result->tile_segment_ids = (uint32_t*)refs_base;
     return 1;
 }
+
 
 /* --- Public API ---------------------------------------------------------- */
 
@@ -159,6 +274,11 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
         size_t tile_data_bytes = 0;
         size_t total_data_bytes = 0;
 
+        if (!seg_cache_entry_metadata_valid(e)) {
+            free(entries);
+            return SPECTRAL_ERR_FILE_CORRUPT;
+        }
+
         result->sample_rate = (int)e->sample_rate;
         result->stretch = e->stretch;
         result->pitch = e->pitch;
@@ -180,6 +300,12 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
             return SPECTRAL_ERR_OVERFLOW;
         }
 
+        err = seg_cache_validate_data_extent(cache_dir, e->data_offset, total_data_bytes);
+        if (err != SPECTRAL_OK) {
+            free(entries);
+            return err;
+        }
+
         /* Fast path: mmap the data region read-only (little-endian hosts). */
         if (!spectral_is_big_endian() && spectral_seg_cache_fs_has_mmap()) {
             SpectralSegCacheFsMapView mv = {0};
@@ -187,13 +313,35 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
                 cache_dir, e->data_offset, total_data_bytes, &mv);
             if (map_err == SPECTRAL_OK) {
                 char* data_ptr = (char*)mv.base + mv.page_offset;
+                /* The data file is appended with no inter-entry padding, so data_ptr can
+                 * land off the 64-byte Segment alignment; forming a Segment* there is UB.
+                 * On a misaligned offset, unmap and fall through to the heap-copy path
+                 * below (it re-reads the region into a naturally-aligned buffer). The
+                 * common aligned case (first entry, or a 64-multiple offset) keeps the
+                 * zero-copy mmap. */
+                if (((uintptr_t)data_ptr % _Alignof(Segment)) != 0u) {
+                    spectral_seg_cache_fs_data_unmap(&mv);
+                    goto seg_cache_heap_fallback;
+                }
+                Segment* mapped_segments = (Segment*)data_ptr;
+                const SegmentGpu* mapped_gpu_segs = (const SegmentGpu*)(data_ptr + seg_bytes);
+                uint32_t bad_payload_idx = 0;
 
-                result->segments.segs = (Segment*)data_ptr;
+                if (!spectral_segment_array_payload_valid(mapped_segments, e->seg_count, &bad_payload_idx) ||
+                    !spectral_segment_gpu_array_matches_segments(mapped_segments, mapped_gpu_segs, e->seg_count, &bad_payload_idx)) {
+                    SPECTRAL_LOG_WARN("Segment cache payload corrupt at segment %u — rejecting cache hit",
+                                      bad_payload_idx);
+                    spectral_seg_cache_fs_data_unmap(&mv);
+                    free(entries);
+                    return SPECTRAL_ERR_FILE_CORRUPT;
+                }
+
+                result->segments.segs = mapped_segments;
                 result->segments.count = e->seg_count;
                 result->segments.capacity = 0; /* mmap-owned */
 
                 /* Pre-packed GPU segments follow Segment data. */
-                result->gpu_segs = (const SegmentGpu*)(data_ptr + seg_bytes);
+                result->gpu_segs = mapped_gpu_segs;
 
                 if (tile_data_bytes > 0) {
                     const char* tile_base = data_ptr + seg_bytes + gpu_seg_bytes;
@@ -214,7 +362,9 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
             /* mmap unavailable/failed — fall through to heap path. */
         }
 
-        /* Fallback: heap allocation + read (big-endian or mmap unavailable). */
+        /* Fallback: heap allocation + read (big-endian, mmap unavailable, or a misaligned
+         * mmap offset for the over-aligned Segment type). */
+    seg_cache_heap_fallback:
         {
             Segment* segs = (Segment*)spectral_malloc_array((size_t)e->seg_count, sizeof(Segment));
             if (!segs) {
@@ -233,6 +383,12 @@ SpectralError spectral_seg_cache_lookup(const char* cache_dir,
                 for (uint32_t i = 0; i < e->seg_count; i++) {
                     spectral_segment_swap_endian(&segs[i]);
                 }
+            }
+
+            if (!spectral_segment_array_payload_valid(segs, e->seg_count, NULL)) {
+                free(segs);
+                free(entries);
+                return SPECTRAL_ERR_FILE_CORRUPT;
             }
 
             result->hit = 1;
@@ -285,6 +441,33 @@ void spectral_seg_cache_result_free(SpectralSegCacheLookupResult* r)
     memset(r, 0, sizeof(*r));
 }
 
+static int seg_cache_store_metadata_valid(uint64_t key,
+                                          const SegmentArray* sa,
+                                          int sample_rate,
+                                          float stretch,
+                                          float pitch,
+                                          size_t output_length)
+{
+    uint64_t output_length_u64 = 0;
+
+    if (key == 0u || !sa) return 0;
+    if (sa->count > 0 && !sa->segs) return 0;
+    if (sample_rate < SPECTRAL_MIN_SAMPLE_RATE || sample_rate > SPECTRAL_MAX_SAMPLE_RATE) return 0;
+    if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) return 0;
+    if (!spectral_is_finite_f32(pitch) ||
+        pitch < SPECTRAL_MIN_PITCH ||
+        pitch > SPECTRAL_MAX_PITCH) {
+        return 0;
+    }
+
+    output_length_u64 = (uint64_t)output_length;
+    if ((size_t)output_length_u64 != output_length) {
+        return 0;
+    }
+
+    return 1;
+}
+
 SpectralError spectral_seg_cache_store(const char* cache_dir,
                                        uint64_t key,
                                        const SegmentArray* sa,
@@ -301,13 +484,47 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
     SpectralError err;
     uint64_t data_offset = 0;
     int needs_swap = spectral_is_big_endian();
+    int has_tile_blob = (tile_count > 0u && tile_total_refs > 0u &&
+                         tile_ranges && tile_segment_ids);
 
     if (!cache_dir || !sa) return SPECTRAL_ERR_PARAM;
-    if (sa->count > 0 && !sa->segs) return SPECTRAL_ERR_PARAM;
+    if (!seg_cache_store_metadata_valid(key, sa, sample_rate, stretch, pitch, output_length)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (!spectral_segment_array_payload_valid(sa->segs, sa->count, NULL)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (has_tile_blob &&
+        !spectral_gpu_tile_layout_words_valid(tile_ranges,
+                                           tile_segment_ids,
+                                           tile_count,
+                                           tile_total_refs,
+                                           sa->count)) {
+        return SPECTRAL_ERR_PARAM;
+    }
 
     /* 1. Append segment data (+ optional tile data) to data file. */
     {
         SpectralSegCacheFsAppendWriter w = {0};
+        size_t seg_bytes = 0;
+        size_t gpu_seg_bytes = 0;
+        size_t tile_ranges_bytes = 0;
+        size_t tile_refs_bytes = 0;
+
+        if (sa->count > 0) {
+            if (!spectral_array_bytes((size_t)sa->count, sizeof(Segment), &seg_bytes) ||
+                !spectral_array_bytes((size_t)sa->count, sizeof(SegmentGpu), &gpu_seg_bytes)) {
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+        }
+
+        if (has_tile_blob) {
+            if (!spectral_array_bytes((size_t)tile_count, sizeof(uint32_t) * 2u, &tile_ranges_bytes) ||
+                !spectral_array_bytes((size_t)tile_total_refs, sizeof(uint32_t), &tile_refs_bytes)) {
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+        }
+
         err = spectral_seg_cache_fs_data_append_begin(cache_dir, &w);
         if (err != SPECTRAL_OK) return err;
 
@@ -322,7 +539,7 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                         scratch[i] = sa->segs[i];
                         spectral_segment_swap_endian(&scratch[i]);
                     }
-                    err = spectral_seg_cache_fs_data_append_write(&w, scratch, (size_t)sa->count * sizeof(Segment));
+                    err = spectral_seg_cache_fs_data_append_write(&w, scratch, seg_bytes);
                     free(scratch);
                     if (err != SPECTRAL_OK) goto append_error;
                 } else {
@@ -334,12 +551,7 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                     }
                 }
             } else {
-                size_t bytes = 0;
-                if (!spectral_array_bytes((size_t)sa->count, sizeof(Segment), &bytes)) {
-                    err = SPECTRAL_ERR_OVERFLOW;
-                    goto append_error;
-                }
-                err = spectral_seg_cache_fs_data_append_write(&w, sa->segs, bytes);
+                err = spectral_seg_cache_fs_data_append_write(&w, sa->segs, seg_bytes);
                 if (err != SPECTRAL_OK) goto append_error;
             }
         }
@@ -354,7 +566,7 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                         spectral_segment_gpu_swap_endian(&scratch[i]);
                     }
                 }
-                err = spectral_seg_cache_fs_data_append_write(&w, scratch, (size_t)sa->count * sizeof(SegmentGpu));
+                err = spectral_seg_cache_fs_data_append_write(&w, scratch, gpu_seg_bytes);
                 free(scratch);
                 if (err != SPECTRAL_OK) goto append_error;
             } else {
@@ -370,7 +582,7 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
         }
 
         /* Write tile data (header + ranges + segment IDs). */
-        if (tile_count > 0 && tile_total_refs > 0 && tile_ranges && tile_segment_ids) {
+        if (has_tile_blob) {
             SpectralSegCacheTileHeader th = {0};
             th.tile_size = SPECTRAL_GPU_TILE_SIZE;
             th.num_tiles = tile_count;
@@ -388,28 +600,35 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                 uint32_t* ranges_scratch = (uint32_t*)spectral_malloc_array((size_t)tile_count, sizeof(uint32_t) * 2u);
                 uint32_t* refs_scratch = (uint32_t*)spectral_malloc_array((size_t)tile_total_refs, sizeof(uint32_t));
                 if (ranges_scratch && refs_scratch) {
+                    const char* range_src = (const char*)tile_ranges;
+                    uint32_t* range_dst = ranges_scratch;
+
                     for (uint32_t i = 0; i < tile_count; i++) {
-                        memcpy(&ranges_scratch[i * 2], (const char*)tile_ranges + (size_t)i * (sizeof(uint32_t) * 2u), sizeof(uint32_t) * 2u);
-                        ranges_scratch[i * 2] = spectral_swap_u32(ranges_scratch[i * 2]);
-                        ranges_scratch[i * 2 + 1] = spectral_swap_u32(ranges_scratch[i * 2 + 1]);
+                        memcpy(range_dst, range_src, sizeof(uint32_t) * 2u);
+                        range_dst[0] = spectral_swap_u32(range_dst[0]);
+                        range_dst[1] = spectral_swap_u32(range_dst[1]);
+                        range_dst += 2u;
+                        range_src += sizeof(uint32_t) * 2u;
                     }
                     for (uint32_t i = 0; i < tile_total_refs; i++) {
                         refs_scratch[i] = spectral_swap_u32(tile_segment_ids[i]);
                     }
-                    err = spectral_seg_cache_fs_data_append_write(&w, ranges_scratch, (size_t)tile_count * sizeof(uint32_t) * 2u);
+                    err = spectral_seg_cache_fs_data_append_write(&w, ranges_scratch, tile_ranges_bytes);
                     if (err == SPECTRAL_OK) {
-                        err = spectral_seg_cache_fs_data_append_write(&w, refs_scratch, (size_t)tile_total_refs * sizeof(uint32_t));
+                        err = spectral_seg_cache_fs_data_append_write(&w, refs_scratch, tile_refs_bytes);
                     }
                     free(ranges_scratch);
                     free(refs_scratch);
                     if (err != SPECTRAL_OK) goto append_error;
                 } else {
+                    const char* range_src = (const char*)tile_ranges;
+
                     free(ranges_scratch);
                     free(refs_scratch);
                     for (uint32_t i = 0; i < tile_count; i++) {
                         uint32_t buf[2];
-                        memcpy(buf, (const char*)tile_ranges + (size_t)i * (sizeof(uint32_t) * 2u),
-                               sizeof(buf));
+                        memcpy(buf, range_src, sizeof(buf));
+                        range_src += sizeof(buf);
                         buf[0] = spectral_swap_u32(buf[0]);
                         buf[1] = spectral_swap_u32(buf[1]);
                         err = spectral_seg_cache_fs_data_append_write(&w, buf, sizeof(buf));
@@ -422,18 +641,10 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                     }
                 }
             } else {
-                size_t ranges_bytes = 0;
-                size_t refs_bytes = 0;
-                if (!spectral_array_bytes((size_t)tile_count, sizeof(uint32_t) * 2u, &ranges_bytes) ||
-                    !spectral_array_bytes((size_t)tile_total_refs, sizeof(uint32_t), &refs_bytes)) {
-                    err = SPECTRAL_ERR_OVERFLOW;
-                    goto append_error;
-                }
-
-                err = spectral_seg_cache_fs_data_append_write(&w, tile_ranges, ranges_bytes);
+                err = spectral_seg_cache_fs_data_append_write(&w, tile_ranges, tile_ranges_bytes);
                 if (err != SPECTRAL_OK) goto append_error;
 
-                err = spectral_seg_cache_fs_data_append_write(&w, tile_segment_ids, refs_bytes);
+                err = spectral_seg_cache_fs_data_append_write(&w, tile_segment_ids, tile_refs_bytes);
                 if (err != SPECTRAL_OK) goto append_error;
             }
         }
@@ -462,8 +673,8 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
     /* 3. Insert or update entry. */
     {
         int64_t pos = (count > 0) ? seg_cache_bsearch(entries, count, key) : ~(int64_t)0;
-        uint32_t tc = (tile_ranges && tile_segment_ids) ? tile_count : 0;
-        uint32_t tr = (tile_ranges && tile_segment_ids) ? tile_total_refs : 0;
+        uint32_t tc = has_tile_blob ? tile_count : 0;
+        uint32_t tr = has_tile_blob ? tile_total_refs : 0;
 
         if (pos >= 0) {
             entries[pos].sample_rate = (uint32_t)sample_rate;
@@ -476,15 +687,45 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
             entries[pos].tile_total_refs = tr;
         } else {
             uint32_t ins = (uint32_t)(~pos);
-            SpectralSegCacheEntry* new_entries = (SpectralSegCacheEntry*)spectral_malloc_array(
-                (size_t)(count + 1), sizeof(SpectralSegCacheEntry));
+            size_t new_count = 0;
+            size_t new_entries_bytes = 0;
+            size_t prefix_bytes = 0;
+            size_t suffix_count = 0;
+            size_t suffix_bytes = 0;
+            SpectralSegCacheEntry* new_entries = NULL;
+
+            if (ins > count) {
+                free(entries);
+                return SPECTRAL_ERR_FILE_CORRUPT;
+            }
+
+            /* Index insertion changes the persistent entry count.  This must be
+             * checked in size_t and against the uint32_t on-disk field before
+             * allocating or copying.  `(uint32_t)(count + 1)` would wrap at
+             * UINT32_MAX and create an undersized index buffer. */
+            if (!spectral_size_add((size_t)count, 1u, &new_count) ||
+                new_count > (size_t)UINT32_MAX ||
+                !spectral_array_bytes(new_count, sizeof(SpectralSegCacheEntry), &new_entries_bytes) ||
+                !spectral_array_bytes((size_t)ins, sizeof(SpectralSegCacheEntry), &prefix_bytes)) {
+                free(entries);
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+
+            suffix_count = (size_t)count - (size_t)ins;
+            if (!spectral_array_bytes(suffix_count, sizeof(SpectralSegCacheEntry), &suffix_bytes)) {
+                free(entries);
+                return SPECTRAL_ERR_OVERFLOW;
+            }
+
+            new_entries = (SpectralSegCacheEntry*)spectral_malloc_array(
+                new_count, sizeof(SpectralSegCacheEntry));
             if (!new_entries) {
                 free(entries);
                 return SPECTRAL_ERR_MEMORY;
             }
 
-            if (ins > 0 && entries) {
-                memcpy(new_entries, entries, ins * sizeof(SpectralSegCacheEntry));
+            if (prefix_bytes > 0u && entries) {
+                memcpy(new_entries, entries, prefix_bytes);
             }
 
             new_entries[ins] = (SpectralSegCacheEntry){
@@ -499,14 +740,13 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
                 .tile_total_refs = tr
             };
 
-            if (ins < count && entries) {
-                memcpy(&new_entries[ins + 1], &entries[ins],
-                       (count - ins) * sizeof(SpectralSegCacheEntry));
+            if (suffix_bytes > 0u && entries) {
+                memcpy(&new_entries[(size_t)ins + 1u], &entries[ins], suffix_bytes);
             }
 
             free(entries);
             entries = new_entries;
-            count++;
+            count = (uint32_t)new_count;
         }
     }
 
@@ -515,5 +755,3 @@ SpectralError spectral_seg_cache_store(const char* cache_dir,
     free(entries);
     return err;
 }
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */

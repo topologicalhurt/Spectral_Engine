@@ -9,58 +9,50 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
                                         size_t n_frames, size_t n_freqs,
                                         double* t_fft, double* t_track)
 {
-    size_t total_bins = 0;
-    size_t total_bytes = 0;
-    size_t n_fft_f32_bytes = 0;
     size_t fft_bytes = 0;
-    float* window_func = NULL;
-    float* magsq = NULL;
-    float* phases = NULL;
+    SpectralAnalysisWindowContext window_ctx = {0};
+    SpectralAnalysisStftMatrix stft = {0};
     float max_magsq = 0.0f;
-    SpectralFftResources res;
-    int n_threads = omp_get_max_threads();
+    SpectralFftResources res = {0};
+    int n_threads = spectral_omp_effective_thread_count();
 
     (void)n_samples;
 
-    if (!spectral_size_mul(n_frames, n_freqs, &total_bins) ||
-        !spectral_size_mul(total_bins, sizeof(float), &total_bytes) ||
-        !spectral_array_bytes((size_t)n_fft, sizeof(float), &n_fft_f32_bytes) ||
-        !spectral_analysis_estimate_fft_bytes(n_frames, (size_t)n_fft, n_freqs, &fft_bytes)) {
+    if (spectral_analysis_stft_matrix_alloc(&stft, n_frames, n_freqs) != SPECTRAL_OK ||
+        spectral_analysis_window_context_init(&window_ctx, (size_t)n_fft, SPECTRAL_WINDOW_HANN) != SPECTRAL_OK) {
+        spectral_analysis_stft_matrix_free(&stft);
+        spectral_analysis_window_context_free(&window_ctx);
         return spectral_analysis_return_empty(t_fft, t_track);
     }
-
-    window_func = spectral_aligned_alloc(n_fft_f32_bytes);
-    magsq = spectral_aligned_alloc(total_bytes);
-    phases = spectral_aligned_alloc(total_bytes);
-    if (!window_func || !magsq || !phases) {
-        free(window_func);
-        free(magsq);
-        free(phases);
-        return spectral_analysis_return_empty(t_fft, t_track);
-    }
-    spectral_window_hann(window_func, n_fft);
 
 #if defined(POSIX_MADV_SEQUENTIAL)
-    posix_madvise(magsq, total_bytes, POSIX_MADV_SEQUENTIAL);
-    posix_madvise(phases, total_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.magsq, stft.total_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.re, stft.reim_bytes, POSIX_MADV_SEQUENTIAL);
+    posix_madvise(stft.im, stft.reim_bytes, POSIX_MADV_SEQUENTIAL);
 #endif
 
     if (!spectral_fft_resources_alloc(&res, n_threads, (size_t)n_fft, n_freqs)) {
         spectral_fft_resources_free(&res);
-        free(magsq);
-        free(phases);
-        free(window_func);
+        spectral_analysis_stft_matrix_free(&stft);
+        spectral_analysis_window_context_free(&window_ctx);
         return spectral_analysis_return_empty(t_fft, t_track);
     }
+    spectral_analysis_window_context_apply_magsq_scales(&window_ctx, &res);
 
     {
         double fft_start = omp_get_wtime();
-        max_magsq = spectral_fft_frames(&res, audio, hop, window_func,
-                                        0, n_frames, magsq, phases, 0);
+        max_magsq = spectral_fft_frames(&res, audio, hop, window_ctx.samples,
+                                        0, n_frames, stft.magsq, stft.re, stft.im, 0);
         *t_fft = omp_get_wtime() - fft_start;
 
         {
-            double fft_bw_gibps = spectral_bandwidth_gibps(fft_bytes, *t_fft);
+            /* The byte estimate is for the bandwidth log line only; it must never
+             * gate the analysis. On size_t overflow it reports 0 (= unknown). */
+            double fft_bw_gibps = 0.0;
+            if (spectral_analysis_estimate_fft_bytes(n_frames, (size_t)n_fft, n_freqs, &fft_bytes))
+                fft_bw_gibps = spectral_bandwidth_gibps(fft_bytes, *t_fft);
+            else
+                fft_bytes = 0;
             SPECTRAL_LOG_INFO("Analysis full FFT: frames=%zu bytes=%.1fMiB time=%.3fms bw=%.2fGiB/s",
                               n_frames,
                               BYTES_TO_MB(fft_bytes),
@@ -70,15 +62,23 @@ SegmentArray spectral_analysis_run_full(const float* audio, size_t n_samples,
     }
 
     spectral_fft_resources_free(&res);
-    free(window_func);
 
     {
-        SegmentArray result = spectral_track_peaks(magsq, phases, max_magsq,
-                                                   n_frames, n_freqs,
-                                                   sr, n_fft, hop,
-                                                   db_thresh, t_track);
-        free(phases);
-        free(magsq);
+        /* window_ctx is freed AFTER this call: spectral_analysis_window_context_free
+         * zeroes the struct (descriptor -> NULL), so reading window_ctx.descriptor
+         * here would otherwise always take the fallback and silently substitute the
+         * HANN descriptor for whatever window was actually used. */
+        SegmentArray result = spectral_track_peaks_with_window_descriptor(
+            stft.magsq, stft.re, stft.im, max_magsq,
+            n_frames, n_freqs,
+            sr, n_fft, hop,
+            db_thresh,
+            window_ctx.descriptor ? window_ctx.descriptor : spectral_window_descriptor(SPECTRAL_WINDOW_HANN),
+            SPECTRAL_PEAK_ESTIMATOR_AUTO,
+            t_track);
+        spectral_analysis_window_context_free(&window_ctx);
+        spectral_analysis_stft_matrix_free(&stft);
         return result;
     }
 }
+

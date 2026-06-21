@@ -4,13 +4,19 @@
  * CPU, Metal, and CUDA synthesis backends via a vtable.
  */
 
-/* Include spectral_synth.h for HAS_METAL/HAS_CUDA definitions and
- * forward declarations of synth_cpu, synth_metal, synth_cuda, etc. */
+/* spectral_synth.h declares the CPU entry points; the driver headers carry
+ * each backend's HAS_* capability and externs. This registry TU is the ONE
+ * sanctioned core->driver include edge (the static vtable table must name
+ * the driver symbols; everything else reaches them through the vtable). */
 #include "spectral_synth.h"
 #include "spectral_backend.h"
 #include "spectral_synth_internal.h"
+#include "spectral_metal.h"
+#include "spectral_cuda.h"
 #include "spectral_utils.h"
 #include "spectral_log.h"
+#include "spectral_renderer.h"
+#include "spectral_wavetable.h"
 #include <stdio.h>
 
 static SpectralError cpu_synth_vtable(SegmentArray sa, float* buf, size_t len,
@@ -60,14 +66,14 @@ static const SpectralBackendVTable vtable_cpu = {
 
 #if HAS_METAL
 static const SpectralBackendVTable vtable_metal = {
-    BACKEND_METAL, "Metal", TIMBRE_PARABOLA, BACKEND_METAL_WAVETABLE_SUPPORT, 1,
+    BACKEND_METAL, "Metal", SPECTRAL_GPU_MAX_TIMBRE, BACKEND_METAL_WAVETABLE_SUPPORT, 1,
     metal_init, metal_available, synth_metal, metal_cleanup
 };
 #endif
 
 #if HAS_CUDA
 static const SpectralBackendVTable vtable_cuda = {
-    BACKEND_CUDA, "CUDA", TIMBRE_PARABOLA, BACKEND_CUDA_WAVETABLE_SUPPORT, 1,
+    BACKEND_CUDA, "CUDA", SPECTRAL_GPU_MAX_TIMBRE, BACKEND_CUDA_WAVETABLE_SUPPORT, 1,
     cuda_init, cuda_available, synth_cuda, cuda_cleanup
 };
 #endif
@@ -88,6 +94,16 @@ const SpectralBackendVTable* spectral_backend_vtable(SynthBackend backend) {
         case BACKEND_CUDA:  return &vtable_cuda;
 #endif
         default:            return &vtable_fallback;
+    }
+}
+
+void spectral_backend_cleanup_all(void) {
+    /* Real backends only: AUTO/EXPORT are virtual entries sharing the
+     * fallback vtable, and a backend missing from this build resolves to
+     * the fallback's no-op cleanup. */
+    static const SynthBackend real[] = { BACKEND_CPU, BACKEND_METAL, BACKEND_CUDA };
+    for (size_t i = 0; i < sizeof(real) / sizeof(real[0]); i++) {
+        spectral_backend_vtable(real[i])->cleanup();
     }
 }
 
@@ -120,19 +136,6 @@ int spectral_backend_available(SynthBackend backend) {
     const SpectralBackendVTable* vt = spectral_backend_vtable(backend);
     if (vt->id != backend) return 0;
     return vt->available();
-}
-
-SpectralBackendCaps spectral_backend_get_caps(SynthBackend backend) {
-    const SpectralBackendVTable* vt = spectral_backend_vtable(backend);
-    SpectralBackendCaps caps = {0};
-    caps.id = backend;
-    caps.name = spectral_backend_name(backend);
-    caps.available = spectral_backend_available(backend);
-    caps.max_timbre = vt->max_timbre;
-    caps.has_wavetable = vt->has_wavetable;
-    caps.is_gpu = vt->is_gpu;
-    caps.is_parallel = 1;
-    return caps;
 }
 
 SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu) {
@@ -184,6 +187,19 @@ SpectralError spectral_synth_dispatch_ex(
     if (n_threads < 1) n_threads = 1;
     synth_effective_timbre_reset(timbre);
     if (out_effective_timbre) *out_effective_timbre = timbre;
+
+    /* Renderer identity is a capability decision (AI_CANON #29): which synthesis strategy runs.
+     * The wavetable renderer is bank-selected, so consult the bank — a timbre served by the bank
+     * renders as wavetable, otherwise the timbre's classification. Host-only — the renderer
+     * registry is guarded out of the real firmware build. */
+#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
+    {
+        SpectralRendererId rid = (bank && spectral_wavetable_has_timbre(bank, (int)timbre))
+                                 ? SPECTRAL_RENDERER_WAVETABLE
+                                 : spectral_renderer_for_timbre(timbre);
+        SPECTRAL_LOG_INFO("Renderer: %s (timbre=%d)", spectral_renderer_name(rid), (int)timbre);
+    }
+#endif
 
     if (backend == BACKEND_AUTO || backend == BACKEND_EXPORT)
         backend = spectral_backend_select_for_timbre((int)timbre, 1);

@@ -1,5 +1,6 @@
-/* daisy_seed_spectral.c - Daisy Seed spectral synthesis wrapper */
+/* daisy_seed_spectral.c - Daisy Seed board API implementation */
 #include "daisy_seed_spectral.h"
+#include "daisy_seed_sdram.h"
 #include "spectral_lut.h"
 #include <string.h>
 #include <math.h>
@@ -9,11 +10,23 @@
 #include "ff.h"
 #endif
 
-/* Static memory pools */
-
+/* Static memory pools.
+ *
+ * s_segment_pool is the SDRAM-resident segment store (DAISY_SDRAM_BSS -> .sdram_bss
+ * @ 0xC0000000). Its L1 D-cache behaviour rides the MPU region attribute, which is
+ * libDaisy's default and is NOT configured in this tree -- the load-bearing assumption
+ * for sd-load coherency (see the f_read in daisy_spectral_load_sd). Normally write-back
+ * write-allocate, which is why a DMA fill of the pool would need an invalidate.
+ *
+ * s_osc_lut is the 8 KB sine LUT, consumed ONLY by the generic (non-M7) gather oscillator;
+ * the Daisy M7 build renders the gather-free coupled recurrence and never reads it during
+ * synthesis (bandwidth-01: reclaimable once process()'s non-null precondition is gated off
+ * the M7 path -- PERF-gated, maintainer-sequenced). */
 static SpectralSegmentQ15 s_segment_pool[DAISY_MAX_SEGMENTS_SAFE] DAISY_SDRAM_BSS;
+#if !SPECTRAL_ARM_M7   /* LUT oscillator (non-M7 builds); the M7 coupled osc reads no LUT (bandwidth-01) */
 static q15_t s_osc_lut[SPECTRAL_OSC_LUT_SIZE + 1] DAISY_SRAM;
 static uint8_t s_lut_initialized = 0;
+#endif
 static DaisySpectralCtx* s_active_ctx = NULL;
 
 #ifdef DAISY_HAS_FATFS
@@ -22,7 +35,11 @@ static uint8_t s_sd_mounted = 0;
 #endif
 
 static inline uint32_t daisy_base_memory_used(void) {
+#if !SPECTRAL_ARM_M7
     return (uint32_t)(sizeof(DaisySpectralCtx) + sizeof(s_osc_lut));
+#else
+    return (uint32_t)(sizeof(DaisySpectralCtx));   /* no LUT on the coupled-osc M7 build */
+#endif
 }
 
 /* Initialization */
@@ -31,23 +48,34 @@ DaisyResult daisy_spectral_init(DaisySpectralCtx* ctx, uint32_t sample_rate) {
     if (!ctx) return DAISY_ERR_PARAM;
     if (s_active_ctx && s_active_ctx != ctx) return DAISY_ERR_MEMORY;
     memset(ctx, 0, sizeof(DaisySpectralCtx));
-    
+
+    /* Replace libDaisy's debug-era FMC SDRAM timings with the chosen
+     * datasheet-derived set (daisy_seed_sdram.h). No-op off-target or under
+     * SPECTRAL_SDRAM_STOCK_TIMINGS; runs after the app's hw.Init(). */
+    daisy_spectral_sdram_apply_timings();
+
     /* Validate sample rate */
     if (sample_rate != DAISY_SAMPLE_RATE && sample_rate != DAISY_SAMPLE_RATE_96K) {
         sample_rate = DAISY_SAMPLE_RATE;
     }
     
-    /* Initialize oscillator LUT once */
+#if !SPECTRAL_ARM_M7
+    /* Initialize oscillator LUT once (LUT-gather path; the M7 coupled osc never reads it) */
     if (!s_lut_initialized) {
         spectral_lut_init_sine(s_osc_lut);
         s_lut_initialized = 1;
     }
-    
+#endif
+
     /* Initialize embedded synthesis context */
     spectral_arm32_init(&ctx->synth,
                            s_segment_pool,
                            DAISY_MAX_SEGMENTS_SAFE,
+#if !SPECTRAL_ARM_M7
                            s_osc_lut,
+#else
+                           (const q15_t*)0,   /* coupled osc: no LUT (bandwidth-01) */
+#endif
                            sample_rate);
     
     /* Set Daisy defaults */
@@ -120,23 +148,39 @@ DaisyResult daisy_spectral_load_sd(DaisySpectralCtx* ctx, const char* filename) 
     
     uint32_t seg_bytes = header.num_segments * sizeof(SpectralSegmentQ15);
     
-    /* Read directly into segment pool (segments is non-const in pool) */
-    if (f_read(&file, (void*)ctx->synth.segments, seg_bytes, &bytes_read) != FR_OK || 
+    /* Read directly into segment pool (segments is non-const in pool).
+     *
+     * CACHE-COHERENCY CONTRACT (sd-load): ctx->synth.segments is the SDRAM pool
+     * (s_segment_pool, DAISY_SDRAM_BSS). If FatFS/SDMMC services this f_read by DMA
+     * AND the MPU maps SDRAM write-back (libDaisy's default region attribute -- NOT
+     * set in this tree; see s_segment_pool), the DMA write bypasses the L1 D-cache and
+     * a later synthesis read can hit a STALE line. spectral_arm32_load_in_place() below
+     * issues a dsb (write-completion ordering) but NOT a cache invalidate. The fix when
+     * both conditions hold is a line-rounded SCB_InvalidateDCache_by_Addr over
+     * [segments, seg_bytes) here -- the recipe already exists in
+     * spectral_arm32_dma_rx_sync (spectral_cache_invalidate_range). Gated ON-TARGET:
+     * confirm the f_read DMAs and the SDRAM attribute on hardware first (an
+     * unconditional invalidate is wasted if f_read is CPU-copy or SDRAM non-cacheable). */
+    if (f_read(&file, (void*)ctx->synth.segments, seg_bytes, &bytes_read) != FR_OK ||
         bytes_read != seg_bytes) {
         f_close(&file);
         return DAISY_ERR_SD_READ;
     }
     
     f_close(&file);
-    
-    /* Update context state */
-    ctx->synth.num_segments = header.num_segments;
-    ctx->synth.output_length = header.output_length;
+
+    /* The .spq file is an untrusted input. Validate the in-place-loaded pool
+     * (per-segment bounds, monotonic ordering, simultaneous-active cap) and fence
+     * the SDRAM writes before the payload can reach synthesis — a malformed file
+     * must be rejected here, not overrun the fixed-size active[] array at render. */
+    SpectralError verr = spectral_arm32_load_in_place(&ctx->synth, header.num_segments,
+                                                      header.output_length);
+    if (verr != SPECTRAL_OK) {
+        return (verr == SPECTRAL_ERR_OVERFLOW || verr == SPECTRAL_ERR_MEMORY)
+                   ? DAISY_ERR_MEMORY : DAISY_ERR_FORMAT;
+    }
     ctx->total_memory_used = daisy_base_memory_used() + seg_bytes;
-    
-    /* Reset playback position */
-    spectral_arm32_reset(&ctx->synth);
-    
+
     return DAISY_OK;
 }
 

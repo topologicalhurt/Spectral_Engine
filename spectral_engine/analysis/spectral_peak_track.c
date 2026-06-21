@@ -1,29 +1,27 @@
-/* spectral_peak_track.c - Peak Tracking 
+/* spectral_peak_track.c - sinusoidal peak tracking: magnitude STFT -> segment list
  *
- * STRATEGY:
- * The Peak Tracking phase is the most mathematically dense stage of the engine.
- * To achieve multi-GiB/s bandwidth, it avoids scalar branching wherever possible.
+ * Third analysis stage. Reads the magnitude STFT and emits the sinusoidal
+ * segments (start, length, omega, phase, amp, da) that synthesis renders. One
+ * core serves two entry shapes: spectral_track_peaks() processes a whole STFT in
+ * one shot; the SpectralTracker API streams it chunk-by-chunk so memory stays
+ * bounded on large inputs.
  *
- * 1. Filtering: We use AVX2/SSE SIMD intrinsics to scan up to 8 bins per cycle.
- *    Instead of evaluating `sqrtf` on everything, we compare raw power (magnitude
- *    squared) against `threshsq`. The result is a hardware bitmask of valid peaks.
- * 2. Queueing: Rather than immediately allocating memory and calculating exact
- *    sub-bin interpolations per peak, we push raw candidate array indices into a
- *    small size-128 local execution batch (`candidate_batch`).
- * 3. Batch Emission: Once the batch fills, we loop over it. Because the STFT memory
- *    is accessed strictly sequentially by candidate index, this perfectly triggers
- *    the CPU's L1/L2 hardware prefetcher, completely hiding DRAM load latency.
- *    Only verified local-maximas are passed into the ALU-heavy `spectral_tracker_emit_segment`.
- *
- * Two modes:
- *   1. spectral_track_peaks()  — single-shot (processes entire STFT)
- *   2. SpectralTracker API     — incremental (processes chunks)
+ * The hot loop is pre-scan -> batched emit, so the costly per-peak work (sub-bin
+ * interpolation, segment continuation) runs only on bins that clear the threshold:
+ *   1. Pre-scan compares raw power (|X|^2, avoiding the per-bin sqrt) against
+ *      threshsq eight bins at a time with SIMD, yielding a candidate-bin mask.
+ *   2. Candidate indices accumulate into a fixed size-128 batch rather than being
+ *      emitted one at a time. The batch bounds the per-thread peak working set and
+ *      is visited in increasing bin order, so the drain walks the row front-to-back.
+ *   3. Only confirmed local maxima reach spectral_tracker_emit_segment().
  */
 
 #include "spectral_peak_track_internal.h"
 #include "spectral_log.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include <math.h>
+#include <float.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,9 +44,8 @@ static SegmentArray peak_track_return_empty(double* t_track) {
 static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(
     SpectralTracker* tracker, int tid,
     uint32_t* __restrict__ candidate_batch, size_t* candidate_batch_count,
-    const float* __restrict__ row, const float* __restrict__ next_row, const float* __restrict__ phase_row,
-    size_t f, int bits, float t_hop, float threshsq,
-    float freq_step_omega, float freq_step_df, float inv_hop, float hop_float,
+    const SpectralFrameContext* ctx,
+    size_t f, int bits,
     uint64_t* local_candidates, uint64_t* local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double* local_validate_time, double* local_emit_time, double* local_emit_alloc_time,
@@ -65,9 +62,124 @@ int spectral_tracker_has_failed(SpectralTracker* tracker) {
     return atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK;
 }
 
+void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error) {
+    SpectralError expected = SPECTRAL_OK;
+    if (!tracker || error == SPECTRAL_OK) return;
+
+    (void)atomic_compare_exchange_strong_explicit(
+        &tracker->last_error,
+        &expected,
+        error,
+        memory_order_relaxed,
+        memory_order_relaxed);
+}
+
 void spectral_tracker_set_failed(SpectralTracker* tracker) {
-    if (!tracker) return;
-    atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
+    spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);
+}
+
+
+static SpectralPeakModel spectral_tracker_current_peak_model(const SpectralTracker* tracker) {
+    if (!tracker || !tracker->peak_model.window) {
+        return spectral_peak_model_default();
+    }
+    return spectral_peak_model_from_resolved(&tracker->peak_model);
+}
+
+static void spectral_tracker_cache_resolved_peak_model(SpectralTracker* tracker,
+                                                       const SpectralResolvedPeakModel* resolved) {
+    if (!tracker || !resolved) return;
+
+    tracker->peak_model = *resolved;
+    tracker->interp_magsq = resolved->interp_magsq;
+    tracker->peak_magsq = resolved->peak_magsq;
+    tracker->peak_estimator = resolved->estimator;
+    tracker->phase_policy = resolved->phase_policy;
+    tracker->amplitude_policy = resolved->amplitude_policy;
+}
+
+static SpectralError spectral_tracker_apply_peak_model(SpectralTracker* tracker,
+                                                       const SpectralPeakModel* model) {
+    SpectralResolvedPeakModel resolved;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!tracker || !model) return SPECTRAL_ERR_PARAM;
+    err = spectral_peak_model_resolve(model, &resolved);
+    if (err != SPECTRAL_OK) return err;
+
+    spectral_tracker_cache_resolved_peak_model(tracker, &resolved);
+    return SPECTRAL_OK;
+}
+
+typedef enum SpectralTrackerModelField {
+    SPECTRAL_TRACKER_MODEL_FIELD_WINDOW,
+    SPECTRAL_TRACKER_MODEL_FIELD_ESTIMATOR,
+    SPECTRAL_TRACKER_MODEL_FIELD_PHASE_POLICY,
+    SPECTRAL_TRACKER_MODEL_FIELD_AMPLITUDE_POLICY
+} SpectralTrackerModelField;
+
+static SpectralError spectral_tracker_update_peak_model_field(SpectralTracker* tracker,
+                                                              SpectralTrackerModelField field,
+                                                              const void* value)
+{
+    SpectralPeakModel model;
+
+    if (!tracker || !value) return SPECTRAL_ERR_PARAM;
+
+    model = spectral_tracker_current_peak_model(tracker);
+    switch (field) {
+        case SPECTRAL_TRACKER_MODEL_FIELD_WINDOW:
+            model.window = *(const SpectralWindowDescriptor* const*)value;
+            if (!model.window) model.window = spectral_window_descriptor(SPECTRAL_WINDOW_HANN);
+            model.amplitude_policy = spectral_peak_model_for_window(model.window).amplitude_policy;
+            break;
+        case SPECTRAL_TRACKER_MODEL_FIELD_ESTIMATOR:
+            model.estimator = *(const SpectralPeakEstimatorType*)value;
+            break;
+        case SPECTRAL_TRACKER_MODEL_FIELD_PHASE_POLICY:
+            model.phase_policy = *(const SpectralPeakPhasePolicy*)value;
+            break;
+        case SPECTRAL_TRACKER_MODEL_FIELD_AMPLITUDE_POLICY:
+            model.amplitude_policy = *(const SpectralPeakAmplitudePolicy*)value;
+            break;
+        default:
+            return SPECTRAL_ERR_PARAM;
+    }
+
+    return spectral_tracker_set_peak_model(tracker, &model);
+}
+
+SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const SpectralPeakModel* model) {
+    if (!tracker || !model) return SPECTRAL_ERR_PARAM;
+    /* Apply only after the full model resolves. A failed mutation must not
+     * silently replace an existing Hamming/Blackman/rectangular/custom profile
+     * with the Hann compatibility default. */
+    return spectral_tracker_apply_peak_model(tracker, model);
+}
+
+
+void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc) {
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_WINDOW,
+                                                   &desc);
+}
+
+void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type) {
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_ESTIMATOR,
+                                                   &type);
+}
+
+void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy) {
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_PHASE_POLICY,
+                                                   &policy);
+}
+
+void spectral_tracker_set_amplitude_policy(SpectralTracker* tracker, SpectralPeakAmplitudePolicy policy) {
+    (void)spectral_tracker_update_peak_model_field(tracker,
+                                                   SPECTRAL_TRACKER_MODEL_FIELD_AMPLITUDE_POLICY,
+                                                   &policy);
 }
 
 float spectral_tracker_get_threshsq(const SpectralTracker* tracker) {
@@ -78,41 +190,81 @@ double spectral_tracker_get_process_time(const SpectralTracker* tracker) {
     return tracker ? tracker->process_time_total : 0.0;
 }
 
+static void spectral_tracker_accumulate_counter_checked(SpectralTracker* tracker,
+                                                        uint64_t* field,
+                                                        uint64_t delta)
+{
+    uint64_t next = 0;
+
+    if (!tracker || !field) return;
+    if (!spectral_u64_add_checked(*field, delta, &next)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+    *field = next;
+}
+
+static void spectral_tracker_accumulate_time_checked(SpectralTracker* tracker,
+                                                     double* field,
+                                                     double delta)
+{
+    double next = 0.0;
+
+    if (!tracker || !field) return;
+    if (!SPECTRAL_ISFINITE(delta) || delta < 0.0) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
+    if (!spectral_double_accumulate_nonnegative_checked(*field, delta, &next)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+    *field = next;
+}
+
 void spectral_tracker_accumulate_stats(
     SpectralTracker* tracker,
     uint64_t local_pairs, uint64_t local_candidates, uint64_t local_segments,
     double local_track_time
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double local_scan_time, double local_validate_time, double local_emit_time,
-    double local_emit_alloc_time, double local_emit_interp_time,
-    double local_emit_amp_time
+    double local_emit_alloc_time, double local_emit_interp_time, double local_emit_amp_time
 #endif
 ) {
     if (!tracker) return;
-    #pragma omp atomic update
-    tracker->process_time_total += local_track_time;
-    #pragma omp atomic update
-    tracker->total_pairs += local_pairs;
-    #pragma omp atomic update
-    tracker->total_candidates += local_candidates;
-    #pragma omp atomic update
-    tracker->total_segments += local_segments;
+    if (!SPECTRAL_ISFINITE(local_track_time) || local_track_time < 0.0) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
 #if SPECTRAL_TRACK_DEBUG_TIMING
-    #pragma omp atomic update
-    tracker->debug_scan_time_total += local_scan_time;
-    #pragma omp atomic update
-    tracker->debug_validate_time_total += local_validate_time;
-    #pragma omp atomic update
-    tracker->debug_emit_time_total += local_emit_time;
-    #pragma omp atomic update
-    tracker->debug_emit_alloc_time_total += local_emit_alloc_time;
-    #pragma omp atomic update
-    tracker->debug_emit_interp_time_total += local_emit_interp_time;
-    #pragma omp atomic update
-    tracker->debug_emit_amp_time_total += local_emit_amp_time;
+    if (!SPECTRAL_ISFINITE(local_scan_time) || local_scan_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_validate_time) || local_validate_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_time) || local_emit_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_alloc_time) || local_emit_alloc_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_interp_time) || local_emit_interp_time < 0.0 ||
+        !SPECTRAL_ISFINITE(local_emit_amp_time) || local_emit_amp_time < 0.0) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return;
+    }
 #endif
-}
 
+    #pragma omp critical(spectral_tracker_stats_accum)
+    {
+        spectral_tracker_accumulate_counter_checked(tracker, &tracker->total_pairs, local_pairs);
+        spectral_tracker_accumulate_counter_checked(tracker, &tracker->total_candidates, local_candidates);
+        spectral_tracker_accumulate_counter_checked(tracker, &tracker->total_segments, local_segments);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->process_time_total, local_track_time);
+
+#if SPECTRAL_TRACK_DEBUG_TIMING
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_scan_time_total, local_scan_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_validate_time_total, local_validate_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_time_total, local_emit_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_alloc_time_total, local_emit_alloc_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_interp_time_total, local_emit_interp_time);
+        spectral_tracker_accumulate_time_checked(tracker, &tracker->debug_emit_amp_time_total, local_emit_amp_time);
+#endif
+    }
+}
 void spectral_segment_array_free(SegmentArray* arr) {
     if (!arr) return;
     free(arr->segs);
@@ -121,22 +273,49 @@ void spectral_segment_array_free(SegmentArray* arr) {
     arr->capacity = 0;
 }
 
+static void spectral_tracker_free_segment_storage(SpectralTracker* tracker) {
+    if (!tracker) return;
+    if (tracker->seg_arrays) {
+        for (int t = 0; t < tracker->n_threads; t++) {
+            free(tracker->seg_arrays[t]);
+        }
+        free(tracker->seg_arrays);
+    }
+    if (tracker->thread_phase_scratch) {
+        for (int t = 0; t < tracker->n_threads; t++) {
+            free(tracker->thread_phase_scratch[t]);
+        }
+        free(tracker->thread_phase_scratch);
+    }
+    if (tracker->thread_next_phase_scratch) {
+        for (int t = 0; t < tracker->n_threads; t++) {
+            free(tracker->thread_next_phase_scratch[t]);
+        }
+        free(tracker->thread_next_phase_scratch);
+    }
+    free(tracker->seg_counts);
+    free(tracker->seg_capacities);
+    tracker->seg_arrays = NULL;
+    tracker->seg_counts = NULL;
+    tracker->seg_capacities = NULL;
+    tracker->thread_phase_scratch = NULL;
+    tracker->thread_next_phase_scratch = NULL;
+}
+
 /* ── End accessors ─────────────────────────────────────────────────── */
 
 
+/* The candidate chain (handle/process_batch/flush/queue/process_bitmask) carries
+ * the per-frame row bundle as a SpectralFrameContext*, exactly like the fused path
+ * (spectral_tracker_run_fused_frame), instead of threading the row/next_row/
+ * phase_row/next_phase_row/frame_start_sample/threshsq clump through every level.
+ * The frequency-step and hop scalars are loop-invariant tracker fields, so the
+ * leaf reads them straight off `tracker` rather than re-passing them. */
 static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
     SpectralTracker* tracker,
     int tid,
-    const float* __restrict__ row,
-    const float* __restrict__ next_row,
-    const float* __restrict__ phase_row,
+    const SpectralFrameContext* ctx,
     size_t cf,
-    float t_hop,
-    float threshsq,
-    float freq_step_omega,
-    float freq_step_df,
-    float inv_hop,
-    float hop_float,
     uint64_t* local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double* local_validate_time
@@ -151,11 +330,17 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
     float max_vsq = 0.0f;
     int best_next = 0;
     int validated = 0;
+
+    /* cf is a strict interior local max from the scan (1..n_freqs-2), so the
+     * cf-1/cf+1 phase reads below stay in range; guard defensively to mirror
+     * emit_segment's own boundary reject. */
+    if (cf == 0u || cf + 1u >= tracker->n_freqs) return 1;
+
 #if SPECTRAL_TRACK_DEBUG_TIMING
     double phase_start = omp_get_wtime();
 #endif
 
-    validated = spectral_tracker_validate_candidate(row, next_row, cf, threshsq,
+    validated = spectral_tracker_validate_candidate(ctx->row, ctx->next_row, cf, ctx->threshsq,
                                                     &curr, &max_vsq, &best_next);
 #if SPECTRAL_TRACK_DEBUG_TIMING
     *local_validate_time += omp_get_wtime() - phase_start;
@@ -165,9 +350,30 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_handle_candidate(
 #if SPECTRAL_TRACK_DEBUG_TIMING
     phase_start = omp_get_wtime();
 #endif
-    if (!spectral_tracker_emit_segment(tracker, tid, row, phase_row, cf, t_hop,
-                                       freq_step_omega, freq_step_df,
-                                       inv_hop, hop_float,
+    /* Phase-at-peaks: take atan2f(im,re) only at the bins this peak's estimator
+     * actually reads, into this thread's scratch. ps[cf] + nps[cf] are ALWAYS
+     * needed — ps[cf] feeds emit_segment's validity gate, seg->phase, and the
+     * phase-vocoder advance; nps[cf] is the next-frame phase for that advance.
+     *
+     * ps[cf-1]/ps[cf+1] are read ONLY by spectral_peak_reconstruct_triplet, i.e.
+     * ONLY by the complex estimators (jacobsen/candan/quinn). The default
+     * LOG_PARABOLIC path never touches them, so computing them there is two wasted
+     * atan2f per peak. Gate them on the SAME predicate that decides whether they
+     * are read — the resolved estimator's CAP_COMPLEX_TRIPLET capability — so the
+     * non-complex paths never feed (or read) stale scratch, and the complex paths
+     * still get an exact cf-1/cf+1 triplet. */
+    float* __restrict__ ps = tracker->thread_phase_scratch[tid];
+    float* __restrict__ nps = tracker->thread_next_phase_scratch[tid];
+    ps[cf]  = atan2f(ctx->im_row[cf],      ctx->re_row[cf]);
+    nps[cf] = atan2f(ctx->next_im_row[cf], ctx->next_re_row[cf]);
+    if (tracker->peak_model.capabilities & SPECTRAL_PEAK_MODEL_CAP_COMPLEX_TRIPLET) {
+        ps[cf - 1u] = atan2f(ctx->im_row[cf - 1u], ctx->re_row[cf - 1u]);
+        ps[cf + 1u] = atan2f(ctx->im_row[cf + 1u], ctx->re_row[cf + 1u]);
+    }
+
+    if (!spectral_tracker_emit_segment(tracker, tid, ctx->row, ctx->next_row, ps, nps, cf, ctx->frame_start_sample,
+                                       tracker->freq_step_omega, tracker->freq_step_df,
+                                       tracker->inv_hop, tracker->hop_float,
                                        curr, max_vsq, best_next,
                                        local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
@@ -192,15 +398,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
     int tid,
     const uint32_t* __restrict__ candidates,
     size_t candidate_count,
-    const float* __restrict__ row,
-    const float* __restrict__ next_row,
-    const float* __restrict__ phase_row,
-    float t_hop,
-    float threshsq,
-    float freq_step_omega,
-    float freq_step_df,
-    float inv_hop,
-    float hop_float,
+    const SpectralFrameContext* ctx,
     uint64_t* local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double* local_validate_time
@@ -216,17 +414,15 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
          * tends to pull contiguous cache lines for the validate/emit step. */
         if (i + SPECTRAL_TRACK_PREFETCH_LOOKAHEAD < candidate_count) {
             size_t pf = (size_t)candidates[i + SPECTRAL_TRACK_PREFETCH_LOOKAHEAD];
-            SPECTRAL_PREFETCH_READ_LOCALITY(next_row + pf - 1u, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
-            SPECTRAL_PREFETCH_READ_LOCALITY(row + pf - 1u, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
+            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->next_row + pf - 1u, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
+            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->row + pf - 1u, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
 #if SPECTRAL_TRACK_PREFETCH_PHASE
-            SPECTRAL_PREFETCH_READ_LOCALITY(phase_row + pf, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
+            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->re_row + pf, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
+            SPECTRAL_PREFETCH_READ_LOCALITY(ctx->im_row + pf, SPECTRAL_TRACK_PREFETCH_READ_LOCALITY);
 #endif
         }
 
-        if (!spectral_tracker_handle_candidate(tracker, tid, row, next_row, phase_row, (size_t)candidates[i],
-                                               t_hop, threshsq,
-                                               freq_step_omega, freq_step_df,
-                                               inv_hop, hop_float,
+        if (!spectral_tracker_handle_candidate(tracker, tid, ctx, (size_t)candidates[i],
                                                local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                                                , local_validate_time
@@ -242,20 +438,12 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_candidate_batch(
     return 1;
 }
 
-int spectral_tracker_flush_candidate_batch(
+static int spectral_tracker_flush_candidate_batch(
     SpectralTracker* tracker,
     int tid,
     uint32_t* __restrict__ candidate_batch,
     size_t* candidate_batch_count,
-    const float* __restrict__ row,
-    const float* __restrict__ next_row,
-    const float* __restrict__ phase_row,
-    float t_hop,
-    float threshsq,
-    float freq_step_omega,
-    float freq_step_df,
-    float inv_hop,
-    float hop_float,
+    const SpectralFrameContext* ctx,
     uint64_t* local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double* local_validate_time
@@ -266,22 +454,28 @@ int spectral_tracker_flush_candidate_batch(
 #endif
 )
 {
+    if (!tracker || tid < 0 || tid >= tracker->n_threads ||
+        !candidate_batch_count || !local_segments) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return 0;
+    }
     if (*candidate_batch_count == 0) return 1;
+    if (!candidate_batch || !ctx || !ctx->row || !ctx->next_row || !ctx->re_row || !ctx->im_row) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_PARAM);
+        return 0;
+    }
+    if (*candidate_batch_count > SPECTRAL_TRACK_CANDIDATE_BATCH) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        *candidate_batch_count = 0;
+        return 0;
+    }
 
     if (!spectral_tracker_process_candidate_batch(
             tracker,
             tid,
             candidate_batch,
             *candidate_batch_count,
-            row,
-            next_row,
-            phase_row,
-            t_hop,
-            threshsq,
-            freq_step_omega,
-            freq_step_df,
-            inv_hop,
-            hop_float,
+            ctx,
             local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
             , local_validate_time
@@ -291,12 +485,13 @@ int spectral_tracker_flush_candidate_batch(
             , local_emit_amp_time
 #endif
             )) {
-        atomic_store_explicit(&tracker->last_error, SPECTRAL_ERR_MEMORY, memory_order_relaxed);
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_MEMORY);
         return 0;
     }
     *candidate_batch_count = 0;
     return 1;
 }
+
 
 static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
     SpectralTracker* tracker,
@@ -304,15 +499,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
     uint32_t* __restrict__ candidate_batch,
     size_t* candidate_batch_count,
     uint32_t candidate,
-    const float* __restrict__ row,
-    const float* __restrict__ next_row,
-    const float* __restrict__ phase_row,
-    float t_hop,
-    float threshsq,
-    float freq_step_omega,
-    float freq_step_df,
-    float inv_hop,
-    float hop_float,
+    const SpectralFrameContext* ctx,
     uint64_t* local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double* local_validate_time
@@ -323,6 +510,31 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
 #endif
 )
 {
+    if (!tracker || !candidate_batch || !candidate_batch_count) return 0;
+    if (*candidate_batch_count >= SPECTRAL_TRACK_CANDIDATE_BATCH) {
+        if (!spectral_tracker_flush_candidate_batch(
+            tracker,
+            tid,
+            candidate_batch,
+            candidate_batch_count,
+            ctx,
+            local_segments
+#if SPECTRAL_TRACK_DEBUG_TIMING
+            , local_validate_time
+            , local_emit_time
+            , local_emit_alloc_time
+            , local_emit_interp_time
+            , local_emit_amp_time
+#endif
+        )) {
+            return 0;
+        }
+    }
+    if (*candidate_batch_count >= SPECTRAL_TRACK_CANDIDATE_BATCH) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return 0;
+    }
+
     candidate_batch[(*candidate_batch_count)++] = candidate;
     if (*candidate_batch_count < SPECTRAL_TRACK_CANDIDATE_BATCH) return 1;
 
@@ -331,15 +543,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_queue_candidate(
         tid,
         candidate_batch,
         candidate_batch_count,
-        row,
-        next_row,
-        phase_row,
-        t_hop,
-        threshsq,
-        freq_step_omega,
-        freq_step_df,
-        inv_hop,
-        hop_float,
+        ctx,
         local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
         , local_validate_time
@@ -396,10 +600,12 @@ static int spectral_tracker_estimate_bytes(const SpectralTracker* tracker, size_
 
     /* Fusion architecture memory access: FFT STFT data is also processed in this loop */
     size_t stft_writes = 0;
-    if (spectral_size_mul(pairs, tracker->n_freqs, &stft_writes)) {
+    {
         size_t fft_mags_phases = 0;
-        if (spectral_size_mul(stft_writes, 2u, &fft_mags_phases)) {
-            spectral_size_add(total_read_floats, fft_mags_phases, &total_read_floats);
+        if (!spectral_size_mul(pairs, tracker->n_freqs, &stft_writes) ||
+            !spectral_size_mul(stft_writes, 2u, &fft_mags_phases) ||
+            !spectral_size_add(total_read_floats, fft_mags_phases, &total_read_floats)) {
+            return 0;
         }
     }
 
@@ -417,21 +623,125 @@ static int spectral_tracker_estimate_bytes(const SpectralTracker* tracker, size_
     return 1;
 }
 
+static int spectral_tracker_derive_create_scalars(size_t n_freqs,
+                                                  int sr,
+                                                  int n_fft,
+                                                  int hop,
+                                                  float db_thresh,
+                                                  float max_magsq,
+                                                  float* out_thresh_linear_sq,
+                                                  float* out_threshsq,
+                                                  float* out_inv_hop,
+                                                  float* out_freq_step_omega,
+                                                  float* out_freq_step_df,
+                                                  float* out_hop_float)
+{
+    double thresh_linear_sq_d = 0.0;
+    double threshsq_d = 0.0;
+    double freq_step_d = 0.0;
+    double two_pi_ts_d = 0.0;
+    double inv_hop_d = 0.0;
+    double freq_step_omega_d = 0.0;
+    double freq_step_df_d = 0.0;
+
+    if (!out_thresh_linear_sq || !out_threshsq || !out_inv_hop ||
+        !out_freq_step_omega || !out_freq_step_df || !out_hop_float) {
+        return 0;
+    }
+
+    if (n_freqs < 3u ||
+        n_freqs > (size_t)INT_MAX ||
+        sr < SPECTRAL_MIN_SAMPLE_RATE || sr > SPECTRAL_MAX_SAMPLE_RATE ||
+        n_fft < SPECTRAL_MIN_FFT_SIZE ||
+        ((size_t)n_fft & ((size_t)n_fft - 1u)) != 0u ||
+        n_freqs != ((size_t)n_fft / 2u + 1u) ||
+        hop <= 0 ||
+        !SPECTRAL_ISFINITE(db_thresh) ||
+        !SPECTRAL_ISFINITE(max_magsq) || max_magsq < 0.0f) {
+        return 0;
+    }
+
+    thresh_linear_sq_d = pow(10.0, (double)db_thresh / 10.0);
+    if (!SPECTRAL_ISFINITE(thresh_linear_sq_d) ||
+        thresh_linear_sq_d < 0.0 ||
+        thresh_linear_sq_d > (double)FLT_MAX) {
+        return 0;
+    }
+
+    threshsq_d = thresh_linear_sq_d * (double)max_magsq;
+    if (!SPECTRAL_ISFINITE(threshsq_d) ||
+        threshsq_d < 0.0 ||
+        threshsq_d > (double)FLT_MAX) {
+        return 0;
+    }
+
+    freq_step_d = (double)sr / (double)n_fft;
+    two_pi_ts_d = (double)SPECTRAL_TWO_PI / (double)sr;
+    inv_hop_d = 1.0 / (double)hop;
+    freq_step_omega_d = freq_step_d * two_pi_ts_d;
+    freq_step_df_d = 0.5 * freq_step_d * inv_hop_d * two_pi_ts_d;
+
+    if (!SPECTRAL_ISFINITE(freq_step_omega_d) || freq_step_omega_d <= 0.0 ||
+        freq_step_omega_d > (double)FLT_MAX ||
+        !SPECTRAL_ISFINITE(freq_step_df_d) || freq_step_df_d <= 0.0 ||
+        freq_step_df_d > (double)FLT_MAX ||
+        !SPECTRAL_ISFINITE(inv_hop_d) || inv_hop_d <= 0.0 ||
+        inv_hop_d > (double)FLT_MAX ||
+        (double)hop > (double)FLT_MAX) {
+        return 0;
+    }
+
+    *out_thresh_linear_sq = (float)thresh_linear_sq_d;
+    *out_threshsq = (float)threshsq_d;
+    *out_inv_hop = (float)inv_hop_d;
+    *out_freq_step_omega = (float)freq_step_omega_d;
+    *out_freq_step_df = (float)freq_step_df_d;
+    *out_hop_float = (float)hop;
+    return 1;
+}
+
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,
                                           float db_thresh, float max_magsq) {
     int t = 0;
-    if (n_freqs < 3 || sr <= 0 || n_fft <= 0 || hop <= 0) return NULL;
+    float thresh_linear_sq = 0.0f;
+    float threshsq = 0.0f;
+    float inv_hop = 0.0f;
+    float freq_step_omega = 0.0f;
+    float freq_step_df = 0.0f;
+    float hop_float = 0.0f;
 
-    SpectralTracker* tracker = (SpectralTracker*)malloc(sizeof(SpectralTracker));
-    if (!tracker) return NULL;
+    if (!spectral_tracker_derive_create_scalars(n_freqs, sr, n_fft, hop, db_thresh, max_magsq,
+                                                &thresh_linear_sq, &threshsq, &inv_hop,
+                                                &freq_step_omega, &freq_step_df, &hop_float)) {
+        /* origin of a silent NULL on the direct tracker API (the analyze_audio path
+         * validates the same shape earlier); log the inputs so the bad constraint shows. */
+        SPECTRAL_LOG_ERROR("tracker_create: invalid params "
+                           "(n_freqs=%zu sr=%d n_fft=%d hop=%d thresh=%.1f max_magsq=%.3g)",
+                           n_freqs, sr, n_fft, hop, (double)db_thresh, (double)max_magsq);
+        return NULL;
+    }
 
     if (n_threads < 1) n_threads = 1;
+    if (n_threads > SPECTRAL_MAX_THREADS) {
+        SPECTRAL_LOG_ERROR("tracker_create: n_threads=%d exceeds SPECTRAL_MAX_THREADS=%d",
+                           n_threads, SPECTRAL_MAX_THREADS);
+        return NULL;
+    }
+
+    SpectralTracker* tracker = (SpectralTracker*)malloc(sizeof(SpectralTracker));
+    if (!tracker) {
+        SPECTRAL_LOG_ERROR("tracker_create: out of memory allocating SpectralTracker (%zu bytes)",
+                           sizeof(SpectralTracker));
+        return NULL;
+    }
+
     tracker->n_threads = n_threads;
     tracker->n_freqs = n_freqs;
     tracker->seg_arrays = NULL;
     tracker->seg_counts = NULL;
     tracker->seg_capacities = NULL;
+    tracker->peak_model = (SpectralResolvedPeakModel){0};
     atomic_init(&tracker->last_error, SPECTRAL_OK);
     tracker->process_time_total = 0.0;
     tracker->total_pairs = 0;
@@ -446,32 +756,62 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     tracker->debug_emit_amp_time_total = 0.0;
 #endif
 
-    float thresh_linear = powf(10.0f, db_thresh / 20.0f);
-    tracker->thresh_linear_sq = thresh_linear * thresh_linear;
-    tracker->threshsq = tracker->thresh_linear_sq * max_magsq;
+    tracker->thresh_linear_sq = thresh_linear_sq;
+    tracker->threshsq = threshsq;
+    tracker->inv_hop = inv_hop;
+    tracker->freq_step_omega = freq_step_omega;
+    tracker->freq_step_df = freq_step_df;
+    tracker->hop_float = hop_float;
+    tracker->peak_candan_correction = spectral_peak_candan_correction_for_n_freqs(n_freqs);
+    /* interp_magsq / peak_magsq / peak_estimator are set below by set_peak_model(default)
+     * via cache_resolved_peak_model — no manual pre-seed (it would be a dead, second source). */
+    {
+        SpectralPeakModel default_peak_model = spectral_peak_model_default();
+        if (spectral_tracker_set_peak_model(tracker, &default_peak_model) != SPECTRAL_OK) {
+            goto fail;
+        }
+    }
 
-    float freq_step = (float)sr / n_fft;
-    float two_pi_ts = SPECTRAL_TWO_PI / sr;
-    tracker->inv_hop = 1.0f / hop;
-    tracker->freq_step_omega = freq_step * two_pi_ts;
-    tracker->freq_step_df = 0.5f * freq_step * tracker->inv_hop * two_pi_ts;
-    tracker->hop_float = (float)hop;
+    /* Start with a bounded per-thread segment capacity and grow on demand.
+     * Capacity must not depend on virtual-memory overcommit (a worst-case-sized
+     * per-thread reservation), which is not a portable real-time contract. */
+    size_t init_cap = (size_t)SPECTRAL_TRACK_INITIAL_SEG_CAP;
+    size_t thread_slots = 0;
+    size_t thread_slots_bytes = 0;
+    size_t init_seg_bytes = 0;
+    size_t phase_scratch_bytes = 0;
 
-    /* Overallocate enormous virtual capacity to completely avoid hot-loop memcpy resizing.
-     * Linux overcommit guarantees physical pages are only faulted upon writing. */
-    size_t init_cap = 16777216; /* 16M segments = 512MB VM per thread */
-    tracker->seg_arrays = (TrackSegment**)spectral_malloc_array((size_t)n_threads, sizeof(TrackSegment*));
-    /* Pad heavily to 64-byte cache line stride to eliminate catastrophic False Sharing. */
-    tracker->seg_counts = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
-    tracker->seg_capacities = (size_t*)spectral_aligned_alloc((size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
-    if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities) {
+    if (init_cap == 0u ||
+        !spectral_size_mul((size_t)n_threads, (size_t)SPECTRAL_CACHE_LINE_STRIDE, &thread_slots) ||
+        !spectral_size_mul(thread_slots, sizeof(size_t), &thread_slots_bytes) ||
+        !spectral_size_mul(init_cap, sizeof(TrackSegment), &init_seg_bytes) ||
+        !spectral_array_bytes(n_freqs, sizeof(float), &phase_scratch_bytes)) {
         goto fail;
     }
-    memset(tracker->seg_counts, 0, (size_t)n_threads * SPECTRAL_CACHE_LINE_STRIDE * sizeof(size_t));
+
+    tracker->seg_arrays = (TrackSegment**)spectral_calloc_array((size_t)n_threads, sizeof(TrackSegment*));
+    /* Padded per-thread counters: only slot [tid * SPECTRAL_CACHE_LINE_STRIDE]
+     * is live, but the full padded allocation must be overflow-checked. */
+    tracker->seg_counts = (size_t*)spectral_aligned_alloc(thread_slots_bytes);
+    tracker->seg_capacities = (size_t*)spectral_aligned_alloc(thread_slots_bytes);
+    tracker->thread_phase_scratch = (float**)spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    tracker->thread_next_phase_scratch = (float**)spectral_calloc_array((size_t)n_threads, sizeof(float*));
+    if (!tracker->seg_arrays || !tracker->seg_counts || !tracker->seg_capacities ||
+        !tracker->thread_phase_scratch || !tracker->thread_next_phase_scratch) {
+        goto fail;
+    }
+    memset(tracker->seg_counts, 0, thread_slots_bytes);
+    memset(tracker->seg_capacities, 0, thread_slots_bytes);
     for (t = 0; t < n_threads; t++) {
         tracker->seg_capacities[t * SPECTRAL_CACHE_LINE_STRIDE] = init_cap;
-        tracker->seg_arrays[t] = (TrackSegment*)spectral_aligned_alloc(init_cap * sizeof(TrackSegment));
-        if (!tracker->seg_arrays[t]) {
+        tracker->seg_arrays[t] = (TrackSegment*)spectral_aligned_alloc(init_seg_bytes);
+        /* Phase scratch: only the ~4 bins around each peak are ever written/read,
+         * but a full n_freqs row lets emit_segment index phase_row[cf-1..cf+1]
+         * and next_phase_row[cf] directly. */
+        tracker->thread_phase_scratch[t] = (float*)spectral_aligned_alloc(phase_scratch_bytes);
+        tracker->thread_next_phase_scratch[t] = (float*)spectral_aligned_alloc(phase_scratch_bytes);
+        if (!tracker->seg_arrays[t] || !tracker->thread_phase_scratch[t] ||
+            !tracker->thread_next_phase_scratch[t]) {
             goto fail;
         }
     }
@@ -479,44 +819,44 @@ SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
     return tracker;
 
 fail:
-    if (tracker->seg_arrays) {
-        for (t = 0; t < n_threads; t++) {
-            free(tracker->seg_arrays[t]);
-        }
-        free(tracker->seg_arrays);
-    }
-    if (tracker->seg_counts) free(tracker->seg_counts);
-    if (tracker->seg_capacities) free(tracker->seg_capacities);
+    spectral_tracker_free_segment_storage(tracker);
     free(tracker);
     return NULL;
 }
 
-void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq) {
-    if (!tracker) return;
-    tracker->threshsq = tracker->thresh_linear_sq * new_max_magsq;
-}
-
 void spectral_tracker_process(SpectralTracker* tracker,
-                               const float* chunk_magsq, const float* chunk_phases,
-                               size_t chunk_n_frames, size_t global_frame_offset,
-                               const float* overlap_magsq_row) {
-    if (!tracker || chunk_n_frames < 1 || !chunk_magsq || !chunk_phases) return;
+                               const float* chunk_magsq,
+                               const SpectralHalf* chunk_re, const SpectralHalf* chunk_im,
+                               size_t chunk_n_frames, size_t global_frame_offset) {
+    if (!tracker || chunk_n_frames < 1 || !chunk_magsq || !chunk_re || !chunk_im) return;
     if (atomic_load_explicit(&tracker->last_error, memory_order_relaxed) != SPECTRAL_OK) return;
 
     const size_t n_freqs = tracker->n_freqs;
+    size_t chunk_bins = 0;
     const float threshsq = tracker->threshsq;
     const float freq_step_omega = tracker->freq_step_omega;
     const float freq_step_df = tracker->freq_step_df;
     const float inv_hop = tracker->inv_hop;
     const float hop_float = tracker->hop_float;
-    /* Number of frame-pairs we can process:
-     * - All internal pairs within this chunk (chunk_n_frames - 1)
-     * - Plus one extra pair if overlap_magsq_row is provided
-     *   (last chunk frame paired with first frame of next chunk) */
+
+    if (!SPECTRAL_ISFINITE(threshsq) || threshsq < 0.0f ||
+        !SPECTRAL_ISFINITE(freq_step_omega) || freq_step_omega <= 0.0f ||
+        !SPECTRAL_ISFINITE(freq_step_df) || freq_step_df <= 0.0f ||
+        !SPECTRAL_ISFINITE(inv_hop) || inv_hop <= 0.0f ||
+        !SPECTRAL_ISFINITE(hop_float) || hop_float <= 0.0f ||
+        !spectral_size_mul(chunk_n_frames, n_freqs, &chunk_bins)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
+    (void)chunk_bins;
+    /* One pair per internal frame boundary: pair t with t+1 over chunk_n_frames-1. */
     size_t n_pairs = chunk_n_frames - 1;
-    if (overlap_magsq_row) n_pairs = chunk_n_frames;
 
     if (n_pairs == 0) return;
+    if (global_frame_offset > SIZE_MAX - (n_pairs - 1u)) {
+        spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+        return;
+    }
     double process_start = omp_get_wtime();
 
     #pragma omp parallel num_threads(tracker->n_threads)
@@ -559,18 +899,20 @@ void spectral_tracker_process(SpectralTracker* tracker,
             }
             local_pairs++;
 
-            const float* __restrict__ phase_row = chunk_phases + t * n_freqs;
             const float* __restrict__ row = chunk_magsq + t * n_freqs;
-            const float* __restrict__ next_row;
+            /* t < n_pairs == chunk_n_frames - 1, so t+1 is always a valid frame. */
+            const float* __restrict__ next_row = chunk_magsq + (t + 1) * n_freqs;
+            const SpectralHalf* __restrict__ re_row = chunk_re + t * n_freqs;
+            const SpectralHalf* __restrict__ im_row = chunk_im + t * n_freqs;
+            const SpectralHalf* __restrict__ next_re_row = chunk_re + (t + 1) * n_freqs;
+            const SpectralHalf* __restrict__ next_im_row = chunk_im + (t + 1) * n_freqs;
 
-            if (t + 1 < chunk_n_frames) {
-                next_row = chunk_magsq + (t + 1) * n_freqs;
-            } else {
-                /* Last frame: use overlap row from next chunk */
-                next_row = overlap_magsq_row;
+            float frame_start_sample = 0.0f;
+            if (spectral_tracker_frame_time_from_index(global_frame_offset + t, hop_float, &frame_start_sample) != SPECTRAL_OK) {
+                spectral_tracker_set_error(tracker, SPECTRAL_ERR_OVERFLOW);
+                local_failed = 1;
+                continue;
             }
-
-            const float t_hop = (global_frame_offset + t) * hop_float;
 #if SPECTRAL_TRACK_DEBUG_TIMING
             double pair_start = omp_get_wtime();
             double pair_validate_time = 0.0;
@@ -580,28 +922,21 @@ void spectral_tracker_process(SpectralTracker* tracker,
             double pair_emit_amp_time = 0.0;
 #endif
 
+            /* Per-frame bundle for the candidate chain, mirroring the fused path's
+             * SpectralFrameContext. can_start_new is unused by this non-fused chain
+             * (the queued handle/emit path never reads it). */
+            const SpectralFrameContext frame_ctx = {
+                row, next_row, re_row, im_row, next_re_row, next_im_row, frame_start_sample, threshsq, 1
+            };
+
             size_t f = 1;
-            /* 
-             * =========================================================================
-             *  SIMD Peak Detection Strategy
-             * =========================================================================
-             * To avoid evaluating `sqrtf` or utilizing expensive branch prediction on
-             * every frequency bin (which stalls the CPU pipeline), we use AVX2/SSE 
-             * intrinsics to scan up to 8 bins in parallel.
-             * 
-             * A bin is considered a valid "peak candidate" if it satisfies 3 conditions:
-             *   1. center > threshsq   (It exceeds the absolute minimum noise floor power)
-             *   2. center > left       (It is strictly greater than its lower frequency neighbor)
-             *   3. center > right      (It is strictly greater than its upper frequency neighbor)
-             * 
-             * We calculate these 3 boolean masks using float comparisons (`cmp_gt`).
-             * We then mathematically AND them together: mask = (1) & (2) & (3).
-             * Finally, `movemask_ps` collapses the 32-bit SIMD lane outputs into a
-             * single integer bitmask. Each bit tells us if the bin at that lane index 
-             * is a peak. If the 8-bit integer is 0, we found no peaks and instantly 
-             * skip to the next 8 bins!
-             * =========================================================================
-             */
+            /* SIMD peak pre-scan. A bin is a candidate iff it is a strict local
+             * maximum above the noise floor:
+             *   center > threshsq && center > left && center > right
+             * Comparing raw power (|X|^2) skips the per-bin sqrtf and the data-
+             * dependent branch it would gate. The three float comparisons AND into
+             * one mask; movemask_ps collapses the lanes to an integer word, so a
+             * zero word advances past eight bins with no per-bin work. */
 #ifdef __AVX2__
             {
                 const simde__m256 vthresh = simde_mm256_set1_ps(threshsq);
@@ -621,8 +956,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                     
                     if (!spectral_tracker_process_bitmask(
                             tracker, tid, candidate_batch, &candidate_batch_count,
-                            row, next_row, phase_row, f, bits, t_hop, threshsq,
-                            freq_step_omega, freq_step_df, inv_hop, hop_float,
+                            &frame_ctx, f, bits,
                             &local_candidates, &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                             , &pair_validate_time, &pair_emit_time, &pair_emit_alloc_time,
@@ -654,8 +988,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                     
                     if (!spectral_tracker_process_bitmask(
                             tracker, tid, candidate_batch, &candidate_batch_count,
-                            row, next_row, phase_row, f, bits, t_hop, threshsq,
-                            freq_step_omega, freq_step_df, inv_hop, hop_float,
+                            &frame_ctx, f, bits,
                             &local_candidates, &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                             , &pair_validate_time, &pair_emit_time, &pair_emit_alloc_time,
@@ -680,15 +1013,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                             candidate_batch,
                             &candidate_batch_count,
                             (uint32_t)f,
-                            row,
-                            next_row,
-                            phase_row,
-                            t_hop,
-                            threshsq,
-                            freq_step_omega,
-                            freq_step_df,
-                            inv_hop,
-                            hop_float,
+                            &frame_ctx,
                             &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                             , &pair_validate_time
@@ -710,15 +1035,7 @@ void spectral_tracker_process(SpectralTracker* tracker,
                     tid,
                     candidate_batch,
                     &candidate_batch_count,
-                    row,
-                    next_row,
-                    phase_row,
-                    t_hop,
-                    threshsq,
-                    freq_step_omega,
-                    freq_step_df,
-                    inv_hop,
-                    hop_float,
+                    &frame_ctx,
                     &local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                     , &pair_validate_time
@@ -818,7 +1135,14 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
      * 63K+ individual minor page faults during the parallel copy. */
     if (total_segs > 0) {
         if (merge_bytes > SPECTRAL_PRETOUCH_THRESHOLD) {
-            if (posix_memalign((void**)&segs, SPECTRAL_PRETOUCH_PAGE_SIZE, merge_bytes) != 0) {
+            /* Use the true runtime page size for alignment and the fault stride;
+             * a hardcoded 4 KiB under-aligns and under-touches on 16 KiB-page
+             * hosts (e.g. Apple Silicon). Fall back to the compile-time default
+             * if sysconf is unavailable. */
+            long page_sz_l = sysconf(_SC_PAGESIZE);
+            size_t page_size = (page_sz_l > 0) ? (size_t)page_sz_l
+                                               : (size_t)SPECTRAL_PRETOUCH_PAGE_SIZE;
+            if (posix_memalign((void**)&segs, page_size, merge_bytes) != 0) {
                 segs = NULL;
                 goto fail;
             }
@@ -826,10 +1150,10 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
             if (madvise(segs, merge_bytes, SPECTRAL_TRACK_MADV_POPULATE_WRITE) != 0)
 #endif
             {
-                size_t n_pages = (merge_bytes + SPECTRAL_PRETOUCH_PAGE_SIZE - 1) / SPECTRAL_PRETOUCH_PAGE_SIZE;
+                size_t n_pages = (merge_bytes + page_size - 1) / page_size;
                 #pragma omp parallel for schedule(static)
                 for (size_t pg = 0; pg < n_pages; pg++) {
-                    ((volatile char*)segs)[pg * SPECTRAL_PRETOUCH_PAGE_SIZE] = 0;
+                    ((volatile char*)segs)[pg * page_size] = 0;
                 }
             }
         } else {
@@ -865,16 +1189,7 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
     
     /* Perform OS-level free sequentially to avoid massive mmap_sem lock
      * contention across 20 threads simultaneously unmapping 512MB allocations. */
-    for (int t = 0; t < n_threads; t++) {
-        free(tracker->seg_arrays[t]);
-    }
-    
-    free(tracker->seg_arrays);
-    free(tracker->seg_counts);
-    free(tracker->seg_capacities);
-    tracker->seg_arrays = NULL;
-    tracker->seg_counts = NULL;
-    tracker->seg_capacities = NULL;
+    spectral_tracker_free_segment_storage(tracker);
     free(offsets);
 
     track_total_time = (override_wall_time > 0.0) 
@@ -980,40 +1295,29 @@ SegmentArray spectral_tracker_finalize(SpectralTracker* tracker, double* t_track
 fail:
     free(segs);
     free(offsets);
-    if (tracker->seg_arrays) {
-        for (int t = 0; t < n_threads; t++) free(tracker->seg_arrays[t]);
-        free(tracker->seg_arrays);
-    }
-    free(tracker->seg_counts);
-    free(tracker->seg_capacities);
-    tracker->seg_arrays = NULL;
-    tracker->seg_counts = NULL;
-    tracker->seg_capacities = NULL;
+    spectral_tracker_free_segment_storage(tracker);
     return peak_track_return_empty(t_track);
 }
 
 void spectral_tracker_destroy(SpectralTracker* tracker) {
     if (!tracker) return;
-    /* Clean up any remaining internal state not freed by finalize */
-    if (tracker->seg_arrays) {
-        for (int t = 0; t < tracker->n_threads; t++) {
-            free(tracker->seg_arrays[t]);
-        }
-        free(tracker->seg_arrays);
-    }
-    free(tracker->seg_counts);
-    free(tracker->seg_capacities);
+    spectral_tracker_free_segment_storage(tracker);
     free(tracker);
 }
 
-/* spectral_track_peaks — single-shot wrapper around SpectralTracker */
+/* spectral_track_peaks_with_window_descriptor — single-shot wrapper around
+ * SpectralTracker with an explicit analysis-window/estimator contract. */
 
-SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
-                                  float max_magsq,
-                                  size_t n_frames, size_t n_freqs,
-                                  int sr, int n_fft, int hop,
-                                  float db_thresh, double* t_track) {
-    if (!magsq || !phases || !t_track || n_frames < 2 || n_freqs < 3) {
+SegmentArray spectral_track_peaks_with_window_descriptor(
+    const float* magsq, const SpectralHalf* re, const SpectralHalf* im,
+    float max_magsq,
+    size_t n_frames, size_t n_freqs,
+    int sr, int n_fft, int hop,
+    float db_thresh,
+    const SpectralWindowDescriptor* window_desc,
+    SpectralPeakEstimatorType estimator,
+    double* t_track) {
+    if (!magsq || !re || !im || !t_track || n_frames < 2 || n_freqs < 3) {
         return peak_track_return_empty(t_track);
     }
     /* Guard against NaN/Inf in float parameters at the public API boundary */
@@ -1024,7 +1328,9 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
         return peak_track_return_empty(t_track);
     }
 
-    int n_threads = omp_get_max_threads();
+    int n_threads = spectral_omp_effective_thread_count();
+    SpectralPeakModel peak_model = spectral_peak_model_for_window(
+        window_desc ? window_desc : spectral_window_descriptor(SPECTRAL_WINDOW_HANN));
 
     SpectralTracker* tracker = spectral_tracker_create(
         n_threads, n_freqs, sr, n_fft, hop, db_thresh, max_magsq);
@@ -1032,21 +1338,44 @@ SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
         return peak_track_return_empty(t_track);
     }
 
-    /* Process all frames in one shot — no overlap row (NULL for final chunk) */
-    spectral_tracker_process(tracker, magsq, phases,
-                              n_frames, 0, NULL);
+    peak_model.estimator = estimator;
+    if (spectral_tracker_set_peak_model(tracker, &peak_model) != SPECTRAL_OK) {
+        spectral_tracker_destroy(tracker);
+        return peak_track_return_empty(t_track);
+    }
+
+    /* Process all frames in one shot. */
+    spectral_tracker_process(tracker, magsq, re, im, n_frames, 0);
 
     SegmentArray result = spectral_tracker_finalize(tracker, t_track, 0.0);
     spectral_tracker_destroy(tracker);
     return result;
 }
 
+/* spectral_track_peaks — compatibility wrapper for the engine default
+ * Hann-windowed analysis path and AUTO estimator policy. */
+
+SegmentArray spectral_track_peaks(const float* magsq,
+                                  const SpectralHalf* re, const SpectralHalf* im,
+                                  float max_magsq,
+                                  size_t n_frames, size_t n_freqs,
+                                  int sr, int n_fft, int hop,
+                                  float db_thresh, double* t_track) {
+    return spectral_track_peaks_with_window_descriptor(
+        magsq, re, im, max_magsq,
+        n_frames, n_freqs,
+        sr, n_fft, hop,
+        db_thresh,
+        spectral_window_descriptor(SPECTRAL_WINDOW_HANN),
+        SPECTRAL_PEAK_ESTIMATOR_AUTO,
+        t_track);
+}
+
 static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(
     SpectralTracker* tracker, int tid,
     uint32_t* __restrict__ candidate_batch, size_t* candidate_batch_count,
-    const float* __restrict__ row, const float* __restrict__ next_row, const float* __restrict__ phase_row,
-    size_t f, int bits, float t_hop, float threshsq,
-    float freq_step_omega, float freq_step_df, float inv_hop, float hop_float,
+    const SpectralFrameContext* ctx,
+    size_t f, int bits,
     uint64_t* local_candidates, uint64_t* local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
     , double* local_validate_time, double* local_emit_time, double* local_emit_alloc_time,
@@ -1067,8 +1396,7 @@ static SPECTRAL_FORCEINLINE int spectral_tracker_process_bitmask(
         (*local_candidates)++;
         if (!spectral_tracker_queue_candidate(
                 tracker, tid, candidate_batch, candidate_batch_count,
-                (uint32_t)cf, row, next_row, phase_row, t_hop, threshsq,
-                freq_step_omega, freq_step_df, inv_hop, hop_float,
+                (uint32_t)cf, ctx,
                 local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                 , local_validate_time, local_emit_time, local_emit_alloc_time,
@@ -1098,17 +1426,13 @@ int spectral_tracker_run_fused_frame(
 #endif
 ) {
     int local_failed = 0;
+    /* The candidate chain reads the row bundle from ctx and the freq-step/hop
+     * scalars from tracker; this frame only needs row/threshsq for its own SIMD
+     * pre-scan and scalar tail, plus can_start_new to gate them. */
     const float* __restrict__ row = ctx->row;
-    const float* __restrict__ next_row = ctx->next_row;
-    const float* __restrict__ phase_row = ctx->phase_row;
-    float t_hop = ctx->t_hop;
     float threshsq = ctx->threshsq;
     int can_start_new = ctx->can_start_new;
     size_t n_freqs = tracker->n_freqs;
-    float freq_step_omega = tracker->freq_step_omega;
-    float freq_step_df = tracker->freq_step_df;
-    float inv_hop = tracker->inv_hop;
-    float hop_float = tracker->hop_float;
     size_t f = 1;
 
 #ifdef __AVX2__
@@ -1129,8 +1453,7 @@ int spectral_tracker_run_fused_frame(
                         simde_mm256_cmp_ps(window_center, window_right, SIMDE_CMP_GT_OQ))));
                 if (!spectral_tracker_process_bitmask(
                         tracker, tid, candidate_batch, candidate_batch_count,
-                        row, next_row, phase_row, f, bits, t_hop, threshsq,
-                        freq_step_omega, freq_step_df, inv_hop, hop_float,
+                        ctx, f, bits,
                         local_candidates, local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                         , pair_validate_time, pair_emit_time, pair_emit_alloc_time,
@@ -1163,8 +1486,7 @@ int spectral_tracker_run_fused_frame(
                 
                 if (!spectral_tracker_process_bitmask(
                         tracker, tid, candidate_batch, candidate_batch_count,
-                        row, next_row, phase_row, f, bits, t_hop, threshsq,
-                        freq_step_omega, freq_step_df, inv_hop, hop_float,
+                        ctx, f, bits,
                         local_candidates, local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                         , pair_validate_time, pair_emit_time, pair_emit_alloc_time,
@@ -1186,8 +1508,7 @@ int spectral_tracker_run_fused_frame(
                 (*local_candidates)++;
                 if (!spectral_tracker_queue_candidate(
                         tracker, tid, candidate_batch, candidate_batch_count,
-                        (uint32_t)f, row, next_row, phase_row, t_hop, threshsq,
-                        freq_step_omega, freq_step_df, inv_hop, hop_float,
+                        (uint32_t)f, ctx,
                         local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                         , pair_validate_time, pair_emit_time, pair_emit_alloc_time,
@@ -1203,8 +1524,7 @@ int spectral_tracker_run_fused_frame(
     if (!local_failed && *candidate_batch_count > 0) {
         if (!spectral_tracker_flush_candidate_batch(
                 tracker, tid, candidate_batch, candidate_batch_count,
-                row, next_row, phase_row, t_hop, threshsq,
-                freq_step_omega, freq_step_df, inv_hop, hop_float,
+                ctx,
                 local_segments
 #if SPECTRAL_TRACK_DEBUG_TIMING
                 , pair_validate_time, pair_emit_time, pair_emit_alloc_time,
@@ -1214,6 +1534,8 @@ int spectral_tracker_run_fused_frame(
             local_failed = 1;
         }
     }
-    
-    return local_failed;
+
+    /* Success-truthy, matching the sibling tracker helpers (queue/flush/
+     * process_bitmask): the fused caller does `if (!run_fused_frame(...))`. */
+    return !local_failed;
 }

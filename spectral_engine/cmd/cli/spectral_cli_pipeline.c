@@ -2,8 +2,10 @@
 #include "spectral_cli_pipeline.h"
 #include "spectral_cli.h"
 #include "spectral_synth.h"
+#include "spectral_oscillator.h"
 #include "spectral_segment_parser.h"
 #include "spectral_seg_cache.h"
+#include "spectral_hash_xx32_xx3.h"
 #include "spectral_synth_internal.h"
 #include "spectral_io.h"
 #include "spectral_utils.h"
@@ -24,6 +26,10 @@
 /* Perf tracking (includes spectral_get_time_sec) */
 #if !SPECTRAL_NO_PERF
 #include "spectral_perf.h"
+#include "spectral_cuda.h"
+#if SPECTRAL_IS_EMBEDDED_SIM
+#include "spectral_synth_arm32.h"
+#endif
 static inline void SPECTRAL_MAYBE_UNUSED pipeline_perf_free_input_bytes(size_t bytes) {
     if (bytes > 0) {
         perf_track_free(bytes);
@@ -42,11 +48,6 @@ typedef struct {
 
 static PipelineOutputPaths g_paths = {0};
 
-static char pipeline_ascii_tolower(char c) {
-    if (c >= 'A' && c <= 'Z') return (char)(c - 'A' + 'a');
-    return c;
-}
-
 static int pipeline_path_has_suffix_ci(const char* path, const char* suffix) {
     size_t path_len = 0;
     size_t suffix_len = 0;
@@ -60,7 +61,7 @@ static int pipeline_path_has_suffix_ci(const char* path, const char* suffix) {
 
     tail = path + (path_len - suffix_len);
     for (i = 0; i < suffix_len; i++) {
-        if (pipeline_ascii_tolower(tail[i]) != pipeline_ascii_tolower(suffix[i])) {
+        if (spectral_ascii_tolower(tail[i]) != spectral_ascii_tolower(suffix[i])) {
             return 0;
         }
     }
@@ -218,14 +219,92 @@ static PipelineError ensure_output_dir_exists(void) {
     return resolve_output_paths();
 }
 
+/* Give each run a UNIQUE output WAV name instead of clobbering one shared
+ * SPECTRAL_OUTPUT_WAV_NAME ("out_c.wav"). The output is named after the input file's stem
+ * (so different inputs land in different files), and if that name is already present the
+ * first free "<stem>_N.wav" is used (so re-running the same input never overwrites a prior
+ * render). Deterministic: the same input always tries the same base name first. Falls back
+ * to the default g_paths.output_wav (set by resolve_output_paths) if the stem cannot be
+ * derived or every candidate up to the cap is taken, so the write always has a valid path.
+ * Requires the output dir to be resolved first (caller runs ensure_output_dir_exists). */
+static void pipeline_unique_output_wav(const char* input_path) {
+    char stem[256];
+    if (!input_path || spectral_basename_no_ext(input_path, stem, sizeof(stem)) == NULL ||
+        stem[0] == '\0') {
+        return;  /* keep the resolved default name */
+    }
+    char name[300];
+    char candidate[SPECTRAL_PIPELINE_PATH_CAPACITY];
+    for (unsigned n = 0; n <= 9999u; n++) {
+        int w = (n == 0) ? snprintf(name, sizeof(name), "%s.wav", stem)
+                         : snprintf(name, sizeof(name), "%s_%u.wav", stem, n);
+        if (w <= 0 || (size_t)w >= sizeof(name)) return;
+        if (!spectral_path_join(candidate, sizeof(candidate), g_paths.output_dir, name)) return;
+        if (access(candidate, F_OK) != 0) {  /* first free name wins */
+            size_t len = strlen(candidate);
+            if (len < sizeof(g_paths.output_wav)) memcpy(g_paths.output_wav, candidate, len + 1);
+            return;
+        }
+    }
+}
+
 #if !SPECTRAL_RESTRICTED_MODE
+static int pipeline_hash_input_file(const char* path, SpectralHashDigest* out_digest)
+{
+    FILE* f = NULL;
+    SpectralHashFileMethod method = SPECTRAL_HASH_FILE_METHOD_ZERO_INIT;
+    SpectralError err = SPECTRAL_OK;
+
+    if (spectral_is_empty_string(path) || !out_digest) return 0;
+    *out_digest = 0;
+
+    err = spectral_hash_file_method_init(&method, SPECTRAL_HASH_FILE_STREAM);
+    if (err != SPECTRAL_OK) {
+        return 0;
+    }
+
+    f = fopen(path, "rb");
+    if (!f) {
+        spectral_hash_file_method_destroy(&method);
+        return 0;
+    }
+
+    err = spectral_hash_file_method_consume_file(&method, f);
+    if (fclose(f) != 0 && err == SPECTRAL_OK) {
+        err = SPECTRAL_ERR_FILE_READ;
+    }
+    if (err == SPECTRAL_OK) {
+        err = spectral_hash_file_method_digest(&method, out_digest);
+    }
+
+    spectral_hash_file_method_destroy(&method);
+    return err == SPECTRAL_OK;
+}
+
 static uint64_t build_cache_key(const SpectralCliOptions* opts) {
     char stem[192] = {0};
+    char input_id[256] = {0};
+    SpectralHashDigest input_digest = 0;
+    int len = 0;
+
     if (!opts || !spectral_basename_no_ext(opts->input_path, stem, sizeof(stem))
         || spectral_is_empty_string(stem)) {
         return 0;
     }
-    return spectral_seg_cache_key(stem, opts->n_fft, opts->hop,
+    if (!pipeline_hash_input_file(opts->input_path, &input_digest)) {
+        return 0;
+    }
+
+    /* Basename is retained only as a readable namespace hint.  The digest is
+     * the cache identity.  Without content identity, two different inputs named
+     * "song.wav" collide when their analysis parameters match. */
+    len = snprintf(input_id, sizeof(input_id), "%s|xxh=%016llx",
+                   stem, (unsigned long long)input_digest);
+    if (len <= 0 || (size_t)len >= sizeof(input_id)) {
+        return 0;
+    }
+
+    return spectral_seg_cache_key(input_id, opts->n_fft, opts->hop,
                                   opts->db_thresh, opts->start_sec, opts->end_sec,
                                   opts->stretch, SPECTRAL_GPU_TILE_SIZE);
 }
@@ -300,12 +379,23 @@ static PipelineError load_wavetable(const char* path, SpectralWavetableBank* ban
                                     SpectralTimbre timbre);
 static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray sa,
                                    float* out_buf, size_t out_len,
-                                   SpectralWavetableBank* wt_bank, double* t_synth);
+                                   SpectralWavetableBank* wt_bank, double* t_synth,
+                                   SpectralTimingResults* paths);
+static void pipeline_print_paths(const SpectralTimingResults* t);
 
 /* Analysis is only available when NOT in restricted mode */
 #if !SPECTRAL_RESTRICTED_MODE
 #include "spectral_analysis.h"
 #endif
+
+/* Guarded (double)n*stretch -> size_t. Returns 0 (caller skips/rejects) when the product
+ * is non-finite, <= 0, or > SIZE_MAX, avoiding the UB of an out-of-range float->integer
+ * cast (C11 6.3.1.4). One conversion shared by the render path and the cache-mode sites. */
+static size_t pipeline_stretched_len(size_t n_samples, float stretch) {
+    double v = (double)n_samples * (double)stretch;
+    if (!(v > 0.0) || v > (double)SIZE_MAX) return 0;
+    return (size_t)v;
+}
 
 static PipelineError pipeline_render_and_write(
     const SpectralCliOptions* opts,
@@ -315,7 +405,6 @@ static PipelineError pipeline_render_and_write(
     SpectralWavetableBank* wt_bank,
     SpectralTimingResults* timing)
 {
-    double out_len_f = 0.0;
     size_t out_len = 0;
     size_t out_bytes = 0;
 
@@ -323,11 +412,7 @@ static PipelineError pipeline_render_and_write(
         return PIPELINE_ERR_INPUT;
     }
 
-    out_len_f = (double)n_samples * (double)opts->stretch;
-    if (out_len_f <= 0.0 || out_len_f > (double)SIZE_MAX) {
-        return PIPELINE_ERR_INPUT;
-    }
-    out_len = (size_t)out_len_f;
+    out_len = pipeline_stretched_len(n_samples, opts->stretch);
     if (out_len == 0 || !spectral_size_mul(out_len, sizeof(float), &out_bytes)) {
         return PIPELINE_ERR_INPUT;
     }
@@ -341,10 +426,11 @@ static PipelineError pipeline_render_and_write(
     pipeline_resources_track_render(resources, resources->segments.count, out_bytes);
 #endif
 
+    uint64_t synth_begin_ns = spectral_log_get_monotonic_ns();  /* II.3 per-stage wall */
     SPECTRAL_STAGE_BEGIN("synth");
     {
         SpectralError synth_err = run_synthesis(opts, resources->segments, resources->output,
-                                                out_len, wt_bank, &timing->t_synth);
+                                                out_len, wt_bank, &timing->t_synth, timing);
         if (synth_err != SPECTRAL_OK) {
             spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, synth_err,
                                      "Synthesis failed (backend=%s/%d, timbre=%s/%d, segments=%u, out_len=%zu, stretch=%.6g, pitch=%.6g)",
@@ -356,6 +442,11 @@ static PipelineError pipeline_render_and_write(
         }
     }
     SPECTRAL_STAGE_END("synth");
+    {
+        uint64_t synth_end_ns = spectral_log_get_monotonic_ns();
+        timing->synth_wall = (synth_end_ns > synth_begin_ns)
+            ? (double)(synth_end_ns - synth_begin_ns) / 1e9 : 0.0;
+    }
 
     SPECTRAL_STAGE_BEGIN("norm");
     {
@@ -370,6 +461,8 @@ static PipelineError pipeline_render_and_write(
                            g_paths.resolved ? g_paths.output_dir : SPECTRAL_OUTPUT_DIR_PRIMARY);
         return PIPELINE_ERR_OUTPUT;
     }
+    /* Name the output after this input so successive runs don't all clobber one out_c.wav. */
+    pipeline_unique_output_wav(opts->input_path);
 
     SPECTRAL_STAGE_BEGIN("write");
     {
@@ -547,6 +640,8 @@ static PipelineError pipeline_analyze_input_to_segments(
                                         &timing->t_fft, &timing->t_track);
     analysis_end_ns = spectral_log_get_monotonic_ns();
     SPECTRAL_STAGE_END_AT("analysis", analysis_end_ns);
+    timing->analysis_wall = (analysis_end_ns > analysis_begin_ns)
+        ? (double)(analysis_end_ns - analysis_begin_ns) / 1e9 : 0.0;  /* II.3 per-stage wall */
     if (emit_split_analysis_markers) {
         pipeline_emit_split_analysis_markers(analysis_begin_ns, analysis_end_ns, timing);
     }
@@ -585,14 +680,17 @@ static PipelineError pipeline_analyze_from_input(
 static PipelineError pipeline_apply_processing_mask(
     SegmentArray* segments,
     int sample_rate,
-    uint32_t processing_mask)
+    int hop,
+    int n_fft,
+    uint32_t processing_mask,
+    SpectralTimingResults* paths)
 {
     SpectralProcessReport proc_report = {0};
     SpectralError proc_err = SPECTRAL_OK;
 
     if (!segments) return PIPELINE_ERR_INPUT;
 
-    proc_err = spectral_process_chain_apply(segments, sample_rate, processing_mask, &proc_report);
+    proc_err = spectral_process_chain_apply(segments, sample_rate, hop, n_fft, processing_mask, &proc_report);
     if (proc_err != SPECTRAL_OK) {
         spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, proc_err,
                                  "Processing chain failed (sample_rate=%d, mask=0x%08x)",
@@ -600,6 +698,9 @@ static PipelineError pipeline_apply_processing_mask(
         return PIPELINE_ERR_ANALYSIS;
     }
     print_processing_mask_report(&proc_report);
+    if (paths) {  /* which adaptive fixtures actually ran, for the consolidated Paths line */
+        paths->proc_applied = (uint32_t)proc_report.applied;
+    }
     return PIPELINE_OK;
 }
 
@@ -638,7 +739,7 @@ static PipelineError pipeline_run_synthesis_stage(
     result = pipeline_maybe_load_wavetable(opts, &wt_bank, &wt_bank_ptr);
     if (result != PIPELINE_OK) return result;
 
-    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->processing_mask);
+    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->hop, opts->n_fft, opts->processing_mask, timing);
     if (result != PIPELINE_OK) return result;
 
     if (n_samples == 0) {
@@ -702,7 +803,7 @@ static PipelineError pipeline_try_run_export_backend(
     if (!opts || !resources || !timing || !out_handled) return PIPELINE_ERR_INPUT;
     if (opts->backend != BACKEND_EXPORT) return PIPELINE_OK;
 
-    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->processing_mask);
+    result = pipeline_apply_processing_mask(&resources->segments, sample_rate, opts->hop, opts->n_fft, opts->processing_mask, timing);
     if (result != PIPELINE_OK) return result;
     result = pipeline_export_segments(opts, &resources->segments, sample_rate);
     if (result != PIPELINE_OK) return result;
@@ -885,7 +986,7 @@ static PipelineError pipeline_execute_cache_mode(
             /* Pre-compute GPU tile data for cache storage + this-run synth. */
 #if !SPECTRAL_EMBEDDED
             {
-                size_t out_len = (size_t)((double)*out_n_samples * (double)opts->stretch);
+                size_t out_len = pipeline_stretched_len(*out_n_samples, opts->stretch);
                 if (out_len > 0) {
                     SpectralError te = gpu_tile_preprocess(
                         resources->segments, opts->stretch,
@@ -922,7 +1023,7 @@ static PipelineError pipeline_execute_cache_mode(
          * Processing stages may mutate segments before synth, which would
          * invalidate pre-packed/tiled cache payloads. */
         if (can_reuse_gpu_aux) {
-            size_t out_len = (size_t)((double)*out_n_samples * (double)opts->stretch);
+            size_t out_len = pipeline_stretched_len(*out_n_samples, opts->stretch);
 
             /* Set the global GPU tile cache so GPU backends (CUDA / Metal)
              * skip tile preprocessing.  Prefer mmap'd tile data (cache hit)
@@ -998,7 +1099,12 @@ static PipelineError pipeline_execute_cache_mode(
                     timing, cache_was_loaded, cache_built_this_run,
                     cache_state->t_lookup,
                     cached_render_total, cache_mode_total);
+                /* Cache mode reports the render wall span as both busy and wall total
+                 * (it is end-to-end render time, not a kernel sum). */
                 timing->t_total = cache_mode_total;
+                timing->wall_total = cache_mode_total;
+                timing->cache_hit = cache_was_loaded;
+                timing->cache_built = cache_built_this_run;
 
                 pipeline_release_resources(&synth_res);
 
@@ -1099,27 +1205,94 @@ static PipelineError load_wavetable(const char* path, SpectralWavetableBank* ban
 /* Run synthesis with appropriate backend via engine dispatch */
 static SpectralError run_synthesis(const SpectralCliOptions* opts, SegmentArray sa,
                                    float* out_buf, size_t out_len,
-                                   SpectralWavetableBank* wt_bank, double* t_synth) {
+                                   SpectralWavetableBank* wt_bank, double* t_synth,
+                                   SpectralTimingResults* paths) {
     SynthBackend effective_backend = BACKEND_CPU;
     SpectralTimbre effective_timbre = opts->timbre;
+    int q15_active = 0;  /* Q15 compute domain actually engaged (vs requested-but-fell-back) */
+
+    /* Anti-alias oscillator quality is a CPU-float-path feature; the GPU (Metal/
+     * CUDA) and Q15-native backends ignore spectral_osc_get_quality().  To let the user
+     * actually audition a non-naive mode, force the CPU backend for it.  NAIVE
+     * leaves the requested backend untouched (and renders bit-identically). */
+    spectral_osc_set_quality(opts->osc_quality);
+
+    /* CPU oscillator execution strategy: SIMD by default (~1.8x on saw/square,
+     * <=1 ULP vs scalar), scalar reference on --scalar.  Only affects the CPU
+     * float path; GPU and Q15-native backends have their own kernels. */
+    spectral_osc_set_dispatch(opts->osc_force_scalar ? OSC_DISPATCH_ALL_SCALAR
+                                            : OSC_DISPATCH_ALL_SIMD);
+
+    SynthBackend req_backend = opts->backend;
+    if (opts->osc_quality != SPECTRAL_OSC_QUALITY_NAIVE) {
+        req_backend = BACKEND_CPU;
+        SPECTRAL_LOG_INFO("Oscillator quality: %s (CPU float path; forcing CPU backend)",
+                          spectral_osc_quality_name(opts->osc_quality));
+    }
+
+    /* Opt-in Q15 fixed-point compute domain (--q15). The Q15 kernels (packed
+     * 8xQ15 SIMD, or scalar Q15 under --scalar) live on the CPU float-synth
+     * dispatch — GPU backends have their own kernels and ignore the mask — so,
+     * like the quality modes, enabling it forces the CPU backend. A render uses a
+     * single timbre, so only that timbre's bit matters; timbres without a Q15
+     * path (asin/quantized/pwm) stay on float. */
+    if (opts->enable_q15) {
+        if (spectral_osc_q15_available(opts->timbre)) {
+            spectral_osc_set_q15_enable(OSC_Q15_BIT(opts->timbre));
+            req_backend = BACKEND_CPU;
+            q15_active = 1;
+            int packed = 0;
+#if defined(OSC_SIMD_GENERIC)
+            packed = !opts->osc_force_scalar && spectral_osc_simd_q15_available(opts->timbre);
+#endif
+            SPECTRAL_LOG_INFO("Q15 compute domain: ENABLED for %s (%s; forcing CPU backend)",
+                              timbre_name(opts->timbre),
+                              packed ? "packed 8-wide SIMD Q15" : "scalar Q15");
+        } else {
+            SPECTRAL_LOG_INFO("Q15 compute domain requested but unavailable for %s; rendering float",
+                              timbre_name(opts->timbre));
+        }
+    }
+
     SPECTRAL_LOG_INFO("Rendering request=%s (%u segs, timbre=%s, threads=%d)%s...",
-                      spectral_backend_name(opts->backend), sa.count, timbre_name(opts->timbre),
+                      spectral_backend_name(req_backend), sa.count, timbre_name(opts->timbre),
                       opts->n_threads, wt_bank ? " (wavetable)" : "");
 
     SpectralError err = spectral_synth_dispatch_ex(sa, out_buf, out_len,
                                                    opts->stretch, opts->pitch, opts->timbre,
-                                                   opts->backend, wt_bank,
+                                                   req_backend, wt_bank,
                                                    opts->n_threads, t_synth,
                                                    &effective_backend, &effective_timbre);
     if (err == SPECTRAL_OK) {
+#if SPECTRAL_IS_EMBEDDED_SIM && !SPECTRAL_NO_PERF
+        {
+            EmbeddedTargetConfig sim_cfg;
+            EmbeddedPerfEstimate sim_est;
+            EmbeddedMemoryUsage sim_mem;
+            if (embedded_sim_last_report(&sim_cfg, &sim_est, &sim_mem)) {
+                embedded_perf_print(&sim_cfg, &sim_est);
+                embedded_memory_print(&sim_mem);
+            }
+        }
+#endif
         SPECTRAL_LOG_INFO("Backend used: %s", spectral_backend_name(effective_backend));
         SPECTRAL_LOG_INFO("Timbre used: %s", timbre_name(effective_timbre));
 #if HAS_CUDA
         if (effective_backend == BACKEND_CUDA) {
             size_t vram = cuda_vram_usage_bytes();
-            SPECTRAL_LOG_INFO("VRAM used: %.1f MB", (double)vram / (1024.0 * 1024.0));
+            SPECTRAL_LOG_INFO("VRAM used: %.1f MB", BYTES_TO_MB(vram));
         }
 #endif
+    }
+    /* Record the paths actually taken for the consolidated "Paths:" line (II.5). req_backend
+     * is the user's ACTUAL request (opts->backend), not the local req_backend that --quality
+     * /--q15 force to CPU above — otherwise the "(req X)" suffix would hide those GPU->CPU
+     * forcings (e.g. `--quality high -b 2` would print backend=CPU with no "(req Metal)"). */
+    if (paths) {
+        paths->req_backend = (int)opts->backend;
+        paths->eff_backend = (int)effective_backend;
+        paths->q15_requested = opts->enable_q15 ? 1 : 0;
+        paths->q15_active = q15_active;
     }
     return err;
 }
@@ -1145,9 +1318,10 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     int sample_rate = 0;
     size_t n_samples = 0;
 
-#if !SPECTRAL_NO_PERF
+    /* Declared unconditionally: it is the basis for the honest wall Total (see
+     * SpectralTimingResults.wall_total), which is reported in every build mode, not only
+     * when the !SPECTRAL_NO_PERF process-metrics block below is compiled in. */
     double wall_start = omp_get_wtime();
-#endif
 
     omp_set_num_threads(run_opts->n_threads);
     prewarm_backend_if_requested(run_opts);
@@ -1188,6 +1362,10 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     if (cache_mode_handled) {
         if (timing) *timing = t;
         result = PIPELINE_OK;
+        /* Cache mode prints its own timing summary (pipeline_print_cache_mode_summary), not
+         * the normal Timing block, but the Paths record is where cache=hit|built is meaningful
+         * — so surface it here too. */
+        pipeline_print_paths(&t);
 #if !SPECTRAL_NO_PERF
         {
             PerfMetrics perf_end = perf_snapshot(wall_start);
@@ -1222,9 +1400,10 @@ PipelineError spectral_pipeline_run(const SpectralCliOptions* opts,
     result = pipeline_run_synthesis_stage(run_opts, &resources, sample_rate, n_samples, &t);
     if (result != PIPELINE_OK) goto cleanup;
 
-    t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm + t.t_write;
+    t.t_total = t.t_fft + t.t_track + t.t_synth + t.t_norm + t.t_write;  /* busy sum */
+    t.wall_total = omp_get_wtime() - wall_start;                          /* honest wall span */
     t.audio_dur = (double)n_samples / sample_rate;
-    t.realtime_x = (t.t_total > 0) ? (t.audio_dur / t.t_total) : 0.0;
+    t.realtime_x = (t.wall_total > 0) ? (t.audio_dur / t.wall_total) : 0.0;
     spectral_pipeline_print_timing(&t, resources.segments.count);
 
 #if !SPECTRAL_NO_PERF
@@ -1248,16 +1427,69 @@ cleanup:
 void spectral_pipeline_print_timing(const SpectralTimingResults* t, uint32_t segment_count) {
     if (!t) return;
     
+    /* "Total" is the honest WALL span; the per-stage figures are BUSY (kernel) times whose
+     * sum (t_total) is shown as Busy, with Idle = wall - busy (alloc / backend-init / gaps). */
+    double busy = t->t_total, wall = t->wall_total;
+    double idle = (wall > busy) ? (wall - busy) : 0.0;
 #if SPECTRAL_RESTRICTED_MODE
     SPECTRAL_LOG_INFO("\n--- Timing ---");
     SPECTRAL_LOG_INFO("Synth: %.1fms Norm: %.1fms Write: %.1fms Total: %.1fms",
-                      t->t_synth*1000, t->t_norm*1000, t->t_write*1000, t->t_total*1000);
+                      t->t_synth*1000, t->t_norm*1000, t->t_write*1000, wall*1000);
 #else
     SPECTRAL_LOG_INFO("\n--- Timing ---");
     SPECTRAL_LOG_INFO("FFT: %.1fms Track: %.1fms Synth: %.1fms Norm: %.1fms Write: %.1fms Total: %.1fms",
-                      t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_write*1000, t->t_total*1000);
+                      t->t_fft*1000, t->t_track*1000, t->t_synth*1000, t->t_norm*1000, t->t_write*1000, wall*1000);
 #endif
+    SPECTRAL_LOG_INFO("Busy: %.1fms Idle: %.1fms (wall - kernel: alloc / backend-init / gaps)",
+                      busy*1000, idle*1000);
+    /* Per-stage idle (II.3) = stage wall - stage kernel busy: where each stage's hidden time
+     * is. analysis idle = STFT/FFT-resource alloc; synth idle = backend init (e.g. Metal
+     * first-dispatch). norm/write are pure-kernel (idle ~ 0), so not broken out. */
+    {
+        double a_busy = t->t_fft + t->t_track;
+        double a_idle = (t->analysis_wall > a_busy) ? (t->analysis_wall - a_busy) : 0.0;
+        double s_idle = (t->synth_wall > t->t_synth) ? (t->synth_wall - t->t_synth) : 0.0;
+        if (t->analysis_wall > 0.0) {
+            SPECTRAL_LOG_INFO("Stage idle: analysis %.1fms (alloc/setup)  synth %.1fms (backend-init)",
+                              a_idle*1000, s_idle*1000);
+        } else {
+            SPECTRAL_LOG_INFO("Stage idle: synth %.1fms (backend-init)", s_idle*1000);
+        }
+    }
     SPECTRAL_LOG_INFO("Audio: %.2fs Realtime: %.1fx Segs/sec: %.0fK",
                       t->audio_dur, t->realtime_x,
-                      (t->t_total > 0) ? (segment_count / t->t_total / 1000) : 0.0);
+                      (wall > 0) ? (segment_count / wall / 1000) : 0.0);
+    pipeline_print_paths(t);
+}
+
+/* Consolidated "Paths:" record (II.5): which paths ACTUALLY ran. backend shows the effective
+ * backend + "(req X)" when it fell back from the requested one; q15 shows on / fell-back-to-
+ * float / off; proc lists the adaptive fixtures that applied. Shared by the normal-mode and
+ * cache-mode renders (cache=hit|built is only meaningful in cache mode). */
+static void pipeline_print_paths(const SpectralTimingResults* t) {
+    char backend_str[80];
+    char proc_buf[256];
+    const char* q15s;
+    const char* caches;
+    const char* procs = "none";
+
+    if (!t) return;
+    q15s = t->q15_active ? "on" : (t->q15_requested ? "fell-back-to-float" : "off");
+    caches = t->cache_hit ? "hit" : (t->cache_built ? "built" : "none");
+    if (t->proc_applied) {
+        spectral_process_mask_to_string(t->proc_applied, proc_buf, sizeof(proc_buf));
+        procs = proc_buf;
+    }
+    if (t->eff_backend == 0) {
+        snprintf(backend_str, sizeof(backend_str), "n/a");
+    } else if (t->req_backend != t->eff_backend && t->req_backend != 0) {
+        snprintf(backend_str, sizeof(backend_str), "%s (req %s)",
+                 spectral_backend_name((SynthBackend)t->eff_backend),
+                 spectral_backend_name((SynthBackend)t->req_backend));
+    } else {
+        snprintf(backend_str, sizeof(backend_str), "%s",
+                 spectral_backend_name((SynthBackend)t->eff_backend));
+    }
+    SPECTRAL_LOG_INFO("Paths: backend=%s  q15=%s  cache=%s  hybrid=%s  proc=%s",
+                      backend_str, q15s, caches, t->hybrid_engaged ? "on" : "off", procs);
 }

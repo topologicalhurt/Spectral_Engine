@@ -27,7 +27,8 @@ NO_COLOR_ENV = "NO_COLOR"
 REPO_ROOT_ENV = "SPECTRAL_REPO_ROOT"
 
 DEFAULT_BUILD_TARGET = "desktop"
-DEFAULT_BENCHMARK_BINARY_GLOB = "spectral_*_desktop"
+# Output-binary names are a CMake fact: globs are DERIVED per measurement
+# target by performance.matrix.binary_glob(), never restated here.
 
 # Stage marker protocol regex — shared by perf_profile and benchmark_parsing.
 STAGE_MARKER_LINE_RE = re.compile(

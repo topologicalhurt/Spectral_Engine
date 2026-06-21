@@ -1,8 +1,9 @@
 /* spectral_windows.h - Window Functions for Spectral Analysis
  * 
  * Provides common window functions for FFT analysis and synthesis.
- * All windows are normalized such that their sum equals 1.0 (for analysis)
- * or their RMS equals 1.0 (for synthesis), depending on the function used.
+ * These functions generate conventional, unnormalized sample-domain
+ * window shapes. Apply coherent-gain or RMS normalization explicitly at
+ * the call site when amplitude calibration requires it.
  * 
  * Supported Windows:
  *   - Hann (raised cosine): Good frequency resolution, moderate leakage
@@ -19,6 +20,7 @@
 #define SPECTRAL_WINDOWS_H
 
 #include <stddef.h>
+#include "spectral_error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +34,39 @@ typedef enum {
     SPECTRAL_WINDOW_RECTANGULAR,
     SPECTRAL_WINDOW_COUNT
 } SpectralWindowType;
+
+typedef enum {
+    SPECTRAL_WINDOW_METRIC_POSITIVE_BIN_SCALE_VALID = 1u << 0,
+    SPECTRAL_WINDOW_METRIC_ENDPOINT_BIN_SCALE_VALID = 1u << 1,
+    SPECTRAL_WINDOW_METRIC_ENBW_VALID = 1u << 2
+} SpectralWindowMetricFlags;
+
+typedef void (*SpectralWindowGenerateFn)(float* window, size_t length);
+typedef float (*SpectralWindowInterpMagsqFn)(float left_sq, float center_sq, float right_sq);
+typedef int (*SpectralWindowPeakMagsqFn)(float left_sq, float center_sq, float right_sq,
+                                           float bin_offset, float* out_peak_magsq);
+
+typedef struct {
+    SpectralWindowType type;
+    const char* id;
+    const char* display_name;
+    SpectralWindowGenerateFn generate;
+    SpectralWindowInterpMagsqFn interp_magsq;
+    SpectralWindowPeakMagsqFn peak_magsq;
+} SpectralWindowDescriptor;
+
+typedef struct {
+    float sum;
+    float energy;
+    float coherent_gain;
+    float rms_gain;
+    float enbw_bins;
+    float positive_bin_amp_scale;
+    float positive_bin_magsq_scale;
+    float endpoint_bin_amp_scale;
+    float endpoint_bin_magsq_scale;
+    unsigned flags;
+} SpectralWindowMetrics;
 
 /*
  * spectral_window_hann: Generate a Hann (raised cosine) window
@@ -75,27 +110,60 @@ void spectral_window_blackman(float* window, size_t length);
  */
 void spectral_window_rectangular(float* window, size_t length);
 
+const SpectralWindowDescriptor* spectral_window_descriptor(SpectralWindowType type);
+size_t spectral_window_descriptor_count(void);
+
 /*
  * spectral_window_generate: Generate window by type
  * 
  * Convenience function for selecting window type at runtime.
  */
-void spectral_window_generate(float* window, size_t length, SpectralWindowType type);
+SpectralError spectral_window_generate(float* window, size_t length, SpectralWindowType type);
 
 /*
- * spectral_window_name: Get human-readable window name
+ * Window calibration helpers.
+ *
+ * coherent_gain = sum(window) / length
+ * rms_gain      = sqrt(sum(window^2) / length)
+ *
+ * For real-valued STFT analysis, a bin-centered sinusoid of peak amplitude A
+ * appears in an interior positive-frequency DFT bin with magnitude
+ * approximately A * sum(window) / 2. DC and Nyquist are unpaired one-sided
+ * endpoints and use A * sum(window) instead. This follows the one-sided
+ * spectrum convention used by periodogram implementations and real-DFT
+ * endpoint packing:
+ *   https://scipy.github.io/devdocs/reference/generated/scipy.signal.periodogram.html
+ *   https://www.fftw.org/doc/The-1d-Real_002ddata-DFT.html
+ *
+ * Window coherent-gain and ENBW definitions follow the conventional window
+ * metric treatment summarized by Harris 1978:
+ *   https://www.site2241.net/sdr/Use-of-Windows-for-Harmonic-Analysis-Harris-1978.pdf
  */
-const char* spectral_window_name(SpectralWindowType type);
+float spectral_window_sum(const float* window, size_t length);
+float spectral_window_energy(const float* window, size_t length);
+SpectralWindowMetrics spectral_window_metrics(const float* window, size_t length);
 
 /*
  * Computes the sub-bin frequency offset for a detected peak based on the
  * power spectrum (magnitude squared), adapted for the window function.
  *
- * For a Hann window, using parabolic interpolation directly on power bins 
- * heavily biases the shift towards 0. A near-exact estimator without logarithms
- * is given by Candan (2011) or a modified Jacobsen estimator.
+ * Default implementation uses parabolic interpolation on log-power bins:
+ *   p = 0.5 * (log(left) - log(right)) /
+ *       (log(left) - 2*log(center) + log(right))
+ * The output is a dimensionless bin offset clamped to [-0.5, 0.5].
+ * This follows the local quadratic spectral-peak model documented by
+ * J. O. Smith, Spectral Audio Signal Processing:
+ *   https://www.dsprelated.com/freebooks/sasp/quadratic_interpolation_spectral_peaks.html
+ * Window-shape assumptions follow Harris 1978:
+ *   https://doi.org/10.1109/PROC.1978.10837
+ * Non-log rational estimators must be separately derived and validated for the
+ * exact window and spectrum representation used here.
  */
 float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, float right_sq);
+int spectral_window_peak_magsq_center(float left_sq, float center_sq, float right_sq,
+                                      float bin_offset, float* out_peak_magsq);
+int spectral_window_peak_magsq_log_parabolic(float left_sq, float center_sq, float right_sq,
+                                             float bin_offset, float* out_peak_magsq);
 
 #ifdef __cplusplus
 }

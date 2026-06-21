@@ -7,11 +7,100 @@
 #include "spectral_analysis_internal.h"
 #include "spectral_log.h"
 
+SpectralError spectral_analysis_window_context_init(SpectralAnalysisWindowContext* ctx,
+                                                    size_t n_fft,
+                                                    SpectralWindowType type)
+{
+    size_t bytes = 0;
+    const SpectralWindowDescriptor* desc = NULL;
+
+    if (!ctx || n_fft == 0u) return SPECTRAL_ERR_PARAM;
+    *ctx = (SpectralAnalysisWindowContext){0};
+
+    desc = spectral_window_descriptor(type);
+    if (!desc) return SPECTRAL_ERR_PARAM;
+
+    if (!spectral_array_bytes(n_fft, sizeof(float), &bytes)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    ctx->samples = (float*)spectral_aligned_alloc(bytes);
+    if (!ctx->samples) return SPECTRAL_ERR_MEMORY;
+
+    if (spectral_window_generate(ctx->samples, n_fft, type) != SPECTRAL_OK) {
+        spectral_analysis_window_context_free(ctx);
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    ctx->metrics = spectral_window_metrics(ctx->samples, n_fft);
+    ctx->descriptor = desc;
+    ctx->bytes = bytes;
+    return SPECTRAL_OK;
+}
+
+void spectral_analysis_window_context_free(SpectralAnalysisWindowContext* ctx)
+{
+    if (!ctx) return;
+    free(ctx->samples);
+    *ctx = (SpectralAnalysisWindowContext){0};
+}
+
+void spectral_analysis_window_context_apply_magsq_scales(const SpectralAnalysisWindowContext* ctx,
+                                                         SpectralFftResources* res)
+{
+    if (!ctx || !res) return;
+    spectral_fft_resources_set_magsq_scales(res,
+                                            ctx->metrics.endpoint_bin_magsq_scale,
+                                            ctx->metrics.positive_bin_magsq_scale);
+}
+
 SegmentArray spectral_analysis_return_empty(double* t_fft, double* t_track)
 {
     if (t_fft) *t_fft = 0;
     if (t_track) *t_track = 0;
     return (SegmentArray)SEGMENT_ARRAY_EMPTY;
+}
+
+SpectralError spectral_analysis_stft_matrix_alloc(SpectralAnalysisStftMatrix* matrix,
+                                                  size_t n_frames,
+                                                  size_t n_freqs)
+{
+    size_t total_bins = 0;
+    size_t total_bytes = 0;
+    size_t half_bytes = 0;
+
+    if (!matrix || n_frames == 0u || n_freqs == 0u) return SPECTRAL_ERR_PARAM;
+    *matrix = (SpectralAnalysisStftMatrix){0};
+
+    if (!spectral_size_mul(n_frames, n_freqs, &total_bins) ||
+        !spectral_size_mul(total_bins, sizeof(float), &total_bytes) ||
+        !spectral_size_mul(total_bins, sizeof(SpectralHalf), &half_bytes)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    /* magsq stays fp32 (the double-scaled peak-scan key); re/im are fp16 so the
+     * layout is memory-neutral vs the old magsq+phase (8 bytes/bin). */
+    matrix->magsq = (float*)spectral_aligned_alloc(total_bytes);
+    matrix->re = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
+    matrix->im = (SpectralHalf*)spectral_aligned_alloc(half_bytes);
+    if (!matrix->magsq || !matrix->re || !matrix->im) {
+        spectral_analysis_stft_matrix_free(matrix);
+        return SPECTRAL_ERR_MEMORY;
+    }
+
+    matrix->total_bins = total_bins;
+    matrix->total_bytes = total_bytes;
+    matrix->reim_bytes = half_bytes;
+    return SPECTRAL_OK;
+}
+
+void spectral_analysis_stft_matrix_free(SpectralAnalysisStftMatrix* matrix)
+{
+    if (!matrix) return;
+    free(matrix->magsq);
+    free(matrix->re);
+    free(matrix->im);
+    *matrix = (SpectralAnalysisStftMatrix){0};
 }
 
 int spectral_analysis_estimate_fft_bytes(size_t frame_count,
@@ -51,38 +140,121 @@ int spectral_analysis_estimate_fft_bytes(size_t frame_count,
     return spectral_size_mul(total_floats, sizeof(float), out_bytes);
 }
 
-SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
-                           int n_fft, int hop, float db_thresh,
-                           double* t_fft, double* t_track)
+const char* spectral_analysis_path_name(int use_fused_path)
 {
+    return use_fused_path ? "spsc_pipeline" : "full_matrix";
+}
+
+SpectralAnalysisPathDecision spectral_analysis_path_decide(size_t total_bins,
+                                                           SpectralAnalysisPathMode mode)
+{
+    SpectralAnalysisPathDecision decision = {0};
+
+    decision.total_bins = total_bins;
+    decision.threshold_bins = (size_t)SPECTRAL_STFT_CHUNK_THRESHOLD;
+    decision.mode = mode;
+
+    switch (mode) {
+        case SPECTRAL_ANALYSIS_PATH_FULL:
+            decision.use_fused_path = 0;
+            break;
+        case SPECTRAL_ANALYSIS_PATH_FUSED:
+            decision.use_fused_path = 1;
+            break;
+        case SPECTRAL_ANALYSIS_PATH_AUTO:
+        default:
+            decision.mode = SPECTRAL_ANALYSIS_PATH_AUTO;
+            decision.use_fused_path = (total_bins > decision.threshold_bins);
+            break;
+    }
+
+    decision.name = spectral_analysis_path_name(decision.use_fused_path);
+    return decision;
+}
+
+
+SpectralError spectral_analysis_shape_init(SpectralAnalysisShape* shape,
+                                           size_t n_samples,
+                                           int sr,
+                                           int n_fft,
+                                           int hop,
+                                           float db_thresh)
+{
+    size_t n_fft_size = 0;
     size_t n_frames = 0;
     size_t n_freqs = 0;
     size_t total_bins = 0;
-    int use_fused_path = 0;
+
+    if (!shape) return SPECTRAL_ERR_PARAM;
+    *shape = (SpectralAnalysisShape){0};
+
+    if (sr < SPECTRAL_MIN_SAMPLE_RATE || sr > SPECTRAL_MAX_SAMPLE_RATE ||
+        n_fft < SPECTRAL_MIN_FFT_SIZE || hop <= 0 ||
+        !isfinite(db_thresh) || n_samples < (size_t)n_fft) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    n_fft_size = (size_t)n_fft;
+    if ((n_fft_size & (n_fft_size - 1u)) != 0u) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    n_frames = (n_samples - n_fft_size) / (size_t)hop + 1u;
+    n_freqs = n_fft_size / 2u + 1u;
+    if (n_freqs < 3u ||
+        !spectral_size_mul(n_frames, n_freqs, &total_bins)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    shape->n_fft_size = n_fft_size;
+    shape->n_frames = n_frames;
+    shape->n_freqs = n_freqs;
+    shape->total_bins = total_bins;
+    shape->path = spectral_analysis_path_decide(total_bins, SPECTRAL_ANALYSIS_PATH_AUTO);
+    return SPECTRAL_OK;
+}
+
+SegmentArray analyze_audio_with_path_mode(const float* audio, size_t n_samples, int sr,
+                                        int n_fft, int hop, float db_thresh,
+                                        SpectralAnalysisPathMode path_mode,
+                                        double* t_fft, double* t_track)
+{
+    SpectralAnalysisShape shape = {0};
     SegmentArray result = (SegmentArray)SEGMENT_ARRAY_EMPTY;
 
-    if (!audio || !t_fft || !t_track || n_fft <= 0 || hop <= 0 || n_samples < (size_t)n_fft) {
+    if (!audio || !t_fft || !t_track) {
+        spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, SPECTRAL_ERR_PARAM,
+                                 "analyze_audio: null argument (audio=%p t_fft=%p t_track=%p)",
+                                 (const void*)audio, (void*)t_fft, (void*)t_track);
         return spectral_analysis_return_empty(t_fft, t_track);
     }
-
-    n_frames = (n_samples - (size_t)n_fft) / (size_t)hop + 1;
-    n_freqs = (size_t)n_fft / 2u + 1u;
-    if (n_freqs < 3u || !spectral_size_mul(n_frames, n_freqs, &total_bins)) {
-        return spectral_analysis_return_empty(t_fft, t_track);
+    {
+        SpectralError shape_err =
+            spectral_analysis_shape_init(&shape, n_samples, sr, n_fft, hop, db_thresh);
+        if (shape_err != SPECTRAL_OK) {
+            /* shape_init validates sr range / n_fft>0 / hop>0 / overflow; log the params so the
+             * specific failing constraint is visible (was a silent empty result). */
+            spectral_log_error_codef(SPECTRAL_ERROR_DOMAIN_CORE, shape_err,
+                                     "analyze_audio: invalid analysis shape "
+                                     "(n_samples=%zu sr=%d n_fft=%d hop=%d thresh=%.1f)",
+                                     n_samples, sr, n_fft, hop, (double)db_thresh);
+            return spectral_analysis_return_empty(t_fft, t_track);
+        }
     }
 
-    use_fused_path = (total_bins > SPECTRAL_STFT_CHUNK_THRESHOLD);
+    shape.path = spectral_analysis_path_decide(shape.total_bins, path_mode);
+
     SPECTRAL_LOG_INFO("Analysis crossover: bins=%zu threshold=%zu path=%s",
-                      total_bins,
-                      (size_t)SPECTRAL_STFT_CHUNK_THRESHOLD,
-                      use_fused_path ? "spsc_pipeline" : "full_matrix");
+                      shape.path.total_bins,
+                      shape.path.threshold_bins,
+                      shape.path.name);
 
-    if (use_fused_path) {
+    if (shape.path.use_fused_path) {
         result = spectral_analysis_run_fused(audio, n_samples, sr, n_fft, hop, db_thresh,
-                                             n_frames, n_freqs, t_fft, t_track);
+                                             shape.n_frames, shape.n_freqs, t_fft, t_track);
     } else {
         result = spectral_analysis_run_full(audio, n_samples, sr, n_fft, hop, db_thresh,
-                                            n_frames, n_freqs, t_fft, t_track);
+                                            shape.n_frames, shape.n_freqs, t_fft, t_track);
     }
 
     {
@@ -90,7 +262,7 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
         double fft_share_pct = (analysis_total > 0.0) ? (100.0 * (*t_fft) / analysis_total) : 0.0;
         double track_share_pct = (analysis_total > 0.0) ? (100.0 * (*t_track) / analysis_total) : 0.0;
         SPECTRAL_LOG_INFO("Analysis summary: path=%s fft=%.3fms track=%.3fms total=%.3fms fft_share=%.1f%% track_share=%.1f%% segments=%u",
-                          use_fused_path ? "spsc_pipeline" : "full_matrix",
+                          shape.path.name,
                           (*t_fft) * SPECTRAL_MILLIS_PER_SECOND_D,
                           (*t_track) * SPECTRAL_MILLIS_PER_SECOND_D,
                           analysis_total * SPECTRAL_MILLIS_PER_SECOND_D,
@@ -101,3 +273,13 @@ SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
 
     return result;
 }
+
+SegmentArray analyze_audio(const float* audio, size_t n_samples, int sr,
+                           int n_fft, int hop, float db_thresh,
+                           double* t_fft, double* t_track)
+{
+    return analyze_audio_with_path_mode(audio, n_samples, sr, n_fft, hop, db_thresh,
+                                        SPECTRAL_ANALYSIS_PATH_AUTO, t_fft, t_track);
+}
+
+

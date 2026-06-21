@@ -4,6 +4,13 @@ include("${SPECTRAL_ENGINE_ROOT}/cmake/python_env.cmake")
 
 set(SPECTRAL_RESOURCE_HASH_SCRIPT "${SPECTRAL_REPO_ROOT}/tools/spectral_tools/generators/resource_hashes.py")
 set(SPECTRAL_RESOURCE_HASH_OUTPUT "${SPECTRAL_CORE_DIR}/spectral_hash_resources_xx32_xx3.c")
+# The generated table is COMMITTED in-source (a clean checkout builds without running
+# the generator). So the custom command's OUTPUT must NOT be the committed file itself:
+# CMake adds every custom-command OUTPUT to the `clean` file list, which would make
+# `cmake --build . --target clean` delete a git-tracked source. The OUTPUT is therefore
+# a build-tree stamp; the generator still rewrites the committed .c in place as a side
+# effect (invisible to clean), gated on the same DEPENDS for incremental rebuilds.
+set(SPECTRAL_RESOURCE_HASH_STAMP "${CMAKE_CURRENT_BINARY_DIR}/generate_resource_hashes.stamp")
 set(SPECTRAL_RESOURCE_HASH_RUNNER "${CMAKE_CURRENT_BINARY_DIR}/run_resource_hashes.cmake")
 configure_file(
     "${SPECTRAL_ENGINE_ROOT}/cmake/scripts/run_resource_hashes.cmake.in"
@@ -13,25 +20,31 @@ file(GLOB_RECURSE SPECTRAL_FIRMWARE_RESOURCE_FILES CONFIGURE_DEPENDS
     "${SPECTRAL_REPO_ROOT}/resources/*")
 
 add_custom_command(
-    OUTPUT "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
+    OUTPUT "${SPECTRAL_RESOURCE_HASH_STAMP}"
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_HASH_MODE=generate
             -P "${SPECTRAL_RESOURCE_HASH_RUNNER}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${SPECTRAL_RESOURCE_HASH_STAMP}"
     DEPENDS
         "${SPECTRAL_PYTHON_ENV_STAMP}"
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
         "${SPECTRAL_RESOURCE_HASH_RUNNER}"
         ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
+    COMMENT "Generating committed resource-hash table (${SPECTRAL_RESOURCE_HASH_OUTPUT})"
     VERBATIM)
 
 add_custom_target(generate_resource_hashes
-    DEPENDS "${SPECTRAL_RESOURCE_HASH_OUTPUT}")
+    DEPENDS "${SPECTRAL_RESOURCE_HASH_STAMP}")
 add_dependencies(generate_resource_hashes prepare_python_tools spectral_resource_bridge)
 
 set_source_files_properties(
     "${SPECTRAL_RESOURCE_HASH_OUTPUT}"
     PROPERTIES GENERATED TRUE)
 
+# verify deliberately does NOT depend on generate_resource_hashes: generate would rewrite
+# the committed table in place before verify ran, masking drift (verify would always pass).
+# verify reads the AS-COMMITTED table and FATALs on drift ("drift becomes impossible");
+# regenerating is the explicit generate_resource_hashes target.
 add_custom_target(verify_resource_hashes
     COMMAND ${CMAKE_COMMAND}
             -DSPECTRAL_HASH_MODE=verify
@@ -39,7 +52,6 @@ add_custom_target(verify_resource_hashes
     DEPENDS
         prepare_python_tools
         spectral_resource_bridge
-        generate_resource_hashes
         "${SPECTRAL_RESOURCE_HASH_SCRIPT}"
         "${SPECTRAL_RESOURCE_HASH_RUNNER}"
         ${SPECTRAL_FIRMWARE_RESOURCE_FILES}
@@ -72,6 +84,13 @@ endif()
 
 set(SPECTRAL_LOG_CHECK_FILES
     ${SPECTRAL_SOURCES_CORE}
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_EMBEDDED}
+    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_EMBEDDED}
+    ${SPECTRAL_SOURCES_CORE_GPU_TILE_HOST}
+    ${SPECTRAL_SOURCES_CORE_GPU_TILE_EMBEDDED}
     ${SPECTRAL_SOURCES_MONITORING}
     ${SPECTRAL_SOURCES_RUNTIME_PERF_MODEL}
     ${SPECTRAL_SOURCES_ANALYSIS}
@@ -140,6 +159,27 @@ add_custom_target(bench_cache
 add_custom_target(bench_all DEPENDS bench bench_cache)
 add_custom_target(pgo_collect DEPENDS bench bench_cache)
 
+# Embedded M7 measurement stack (M7_PERF_MODEL_PLAN): same harness module,
+# embedded subcommands. Census = codegen [measured] + llvm-mca [modeled];
+# counts = dynamic insn/byte counts under qemu mps2-an500 [measured].
+add_custom_target(m7_census
+    COMMAND ${CMAKE_COMMAND} -E env
+            LC_ALL=C
+            "PYTHONPATH=${SPECTRAL_TOOLS_PYTHONPATH}"
+            "${SPECTRAL_PYTHON}" -m "${SPECTRAL_BENCH_MODULE}"
+            m7-census
+    DEPENDS prepare_python_tools
+    WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
+
+add_custom_target(m7_counts
+    COMMAND ${CMAKE_COMMAND} -E env
+            LC_ALL=C
+            "PYTHONPATH=${SPECTRAL_TOOLS_PYTHONPATH}"
+            "${SPECTRAL_PYTHON}" -m "${SPECTRAL_BENCH_MODULE}"
+            m7-counts
+    DEPENDS prepare_python_tools
+    WORKING_DIRECTORY "${SPECTRAL_REPO_ROOT}")
+
 if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     find_program(SPECTRAL_LLVM_PROFDATA_EXECUTABLE llvm-profdata)
     if(SPECTRAL_LLVM_PROFDATA_EXECUTABLE)
@@ -195,7 +235,8 @@ add_custom_target(info
     COMMAND ${CMAKE_COMMAND} -E echo "| simulate                | YES      | Q15 sim    | NO    | Q15    | Desk  |"
     COMMAND ${CMAKE_COMMAND} -E echo "| simulate_daisy          | NO       | Q15 sim    | NO    | Q15    | Desk  |"
     COMMAND ${CMAKE_COMMAND} -E echo "| embedded_arm            | YES      | Embedded   | NO    | Q15    | Host  |"
-    COMMAND ${CMAKE_COMMAND} -E echo "| embedded_arm_float      | YES      | Embedded   | NO    | float  | Host  |"
+    COMMAND ${CMAKE_COMMAND} -E echo "| embedded_arm_float      | YES      | Embedded   | NO    | Q15(*) | Host  |"
+    COMMAND ${CMAKE_COMMAND} -E echo "|   (*) SPECTRAL_EMBEDDED_FLOAT is reserved; float synth not yet wired -> == embedded_arm |"
     COMMAND ${CMAKE_COMMAND} -E echo "| embedded_arm_restricted | NO       | Embedded   | NO    | Q15    | Host  |"
     COMMAND ${CMAKE_COMMAND} -E echo "| daisy                   | NO       | (api/)     | NO    | Q15    | ARM   |"
     COMMAND ${CMAKE_COMMAND} -E echo "| daisy_example           | NO       | (examples) | NO    | Q15    | ARM   |"

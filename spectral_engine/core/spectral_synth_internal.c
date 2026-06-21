@@ -3,24 +3,88 @@
 #include "spectral_synth_internal.h"
 #include "spectral_synth.h"
 #include "spectral_utils.h"
+#include "spectral_contracts.h"
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+#include <float.h>
 
 #include "spectral_omp.h"
 
+static SpectralError synth_derive_param_scalars(float stretch, float pitch,
+                                               float* out_inv_stretch,
+                                               float* out_inv_stretch_sq,
+                                               float* out_pitch_factor)
+{
+    float stretch_sq = 0.0f;
+    float inv_stretch = 0.0f;
+    float inv_stretch_sq = 0.0f;
+    float pitch_factor = 0.0f;
+
+    if (!spectral_is_finite_positive_f32(stretch) || stretch > SPECTRAL_MAX_STRETCH) {
+        return SPECTRAL_ERR_PARAM;
+    }
+    if (!spectral_is_finite_f32(pitch) ||
+        pitch < SPECTRAL_MIN_PITCH || pitch > SPECTRAL_MAX_PITCH) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    /* The public domain is not just "stretch is positive".  Backends consume
+     * these derived scalars directly; tiny positive stretch values can make
+     * stretch * stretch underflow to zero and expose Inf in inv_stretch_sq. */
+    stretch_sq = stretch * stretch;
+    if (!spectral_is_finite_f32(stretch_sq) || stretch_sq <= 0.0f) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    inv_stretch = 1.0f / stretch;
+    inv_stretch_sq = 1.0f / stretch_sq;
+    pitch_factor = spectral_pitch_factor(pitch);
+
+    if (!spectral_is_finite_positive_f32(inv_stretch) ||
+        !spectral_is_finite_positive_f32(inv_stretch_sq) ||
+        !spectral_is_finite_positive_f32(pitch_factor)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    if (out_inv_stretch) *out_inv_stretch = inv_stretch;
+    if (out_inv_stretch_sq) *out_inv_stretch_sq = inv_stretch_sq;
+    if (out_pitch_factor) *out_pitch_factor = pitch_factor;
+    return SPECTRAL_OK;
+}
+
+SpectralError synth_validate_params(float stretch, float pitch) {
+    return synth_derive_param_scalars(stretch, pitch, NULL, NULL, NULL);
+}
+
+
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs) {
+    float inv_stretch = 0.0f;
+    float inv_stretch_sq = 0.0f;
+    float pitch_factor = 0.0f;
+
+    if (num_segs > (size_t)UINT32_MAX ||
+        synth_derive_param_scalars(stretch, pitch,
+                                   &inv_stretch,
+                                   &inv_stretch_sq,
+                                   &pitch_factor) != SPECTRAL_OK) {
+        return (SynthParams){0};
+    }
+
     return (SynthParams){
         .stretch = stretch,
-        .inv_stretch = 1.0f / stretch,
-        .inv_stretch_sq = 1.0f / (stretch * stretch),
-        .pitch_factor = SPECTRAL_PITCH_FACTOR(pitch),
+        .inv_stretch = inv_stretch,
+        .inv_stretch_sq = inv_stretch_sq,
+        .pitch_factor = pitch_factor,
         .out_len = out_len,
         .num_segments = (uint32_t)num_segs
     };
 }
 
-static double g_synth_timing_dummy = 0;
+
+/* Discard sink for callers that pass a NULL t_synth (preflight/driver redirect *t_synth
+ * here). Thread-local to match the sibling synth globals so concurrent NULL-timing calls
+ * don't race on it, even though nothing reads it back. */
+static SPECTRAL_THREAD_LOCAL double g_synth_timing_dummy = 0;
 static SPECTRAL_THREAD_LOCAL int g_effective_timbre_tls = TIMBRE_SINE;
 
 void synth_effective_timbre_reset(SpectralTimbre requested_timbre) {
@@ -38,46 +102,77 @@ SpectralTimbre synth_effective_timbre_get(void) {
 }
 
 /* Validate synth inputs. All backends call this first. */
-SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size_t elem_size,
-                                          SegmentArray sa, double** t_synth_ptr) {
-    size_t out_bytes = 0;
-    if (!t_synth_ptr) {
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-
-    if (!*t_synth_ptr) {
-        *t_synth_ptr = &g_synth_timing_dummy;
-    }
-
-    if (elem_size == 0 || !spectral_size_mul(out_len, elem_size, &out_bytes)) {
-        **t_synth_ptr = 0;
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-    
-    if (!out_buffer || out_len == 0) {
-        **t_synth_ptr = 0;
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-    
-    if (sa.count == 0 || !sa.segs) {
-        memset(out_buffer, 0, out_bytes);
-        **t_synth_ptr = 0;
-        return SYNTH_VALIDATE_EARLY_EXIT;
-    }
-    
-    return SYNTH_VALIDATE_OK;
-}
-
-SynthPreflight synth_preflight_float(
-    float* out_buffer, size_t out_len, SegmentArray sa,
+static SynthPreflight synth_preflight_common(
+    void* out_buffer, size_t out_len, size_t elem_size, SegmentArray sa,
     float stretch, float pitch, double** t_synth)
 {
     SynthPreflight pf = {0};
-    if (!SYNTH_VALIDATE_FLOAT(out_buffer, out_len, sa, t_synth)) return pf;
+    size_t preflight_out_bytes = 0;
+
+    pf.error = SPECTRAL_OK;
+
+    if (!t_synth) {
+        pf.error = SPECTRAL_ERR_PARAM;
+        return pf;
+    }
+    if (!*t_synth) {
+        *t_synth = &g_synth_timing_dummy;
+    }
+
+    if (elem_size == 0u) {
+        **t_synth = 0;
+        pf.error = SPECTRAL_ERR_PARAM;
+        return pf;
+    }
+    if (!spectral_size_mul(out_len, elem_size, &preflight_out_bytes)) {
+        **t_synth = 0;
+        pf.error = SPECTRAL_ERR_OVERFLOW;
+        return pf;
+    }
+
+    if (!out_buffer || out_len == 0u) {
+        **t_synth = 0;
+        return pf;
+    }
+
+    if (sa.count == 0u || !sa.segs) {
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
+        return pf;
+    }
+
+    pf.error = synth_validate_params(stretch, pitch);
+    if (pf.error != SPECTRAL_OK) {
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
+        return pf;
+    }
+
+    if (sa.count > UINT32_MAX) {
+        pf.error = SPECTRAL_ERR_OVERFLOW;
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
+        return pf;
+    }
+
+    if (!spectral_segment_array_valid_for_synth(&sa)) {
+        pf.error = SPECTRAL_ERR_PARAM;
+        memset(out_buffer, 0, preflight_out_bytes);
+        **t_synth = 0;
+        return pf;
+    }
+
     pf.params = make_synth_params(stretch, pitch, out_len, sa.count);
     pf.start_time = omp_get_wtime();
     pf.ok = 1;
     return pf;
+}
+SynthPreflight synth_preflight_float(
+    float* out_buffer, size_t out_len, SegmentArray sa,
+    float stretch, float pitch, double** t_synth)
+{
+    return synth_preflight_common(out_buffer, out_len, sizeof(float),
+                                  sa, stretch, pitch, t_synth);
 }
 
 SpectralError spectral_handle_unsupported_timbre(
@@ -148,7 +243,7 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
                                            int* out_continue_backend) {
     return spectral_handle_unsupported_timbre(
         backend_name,
-        TIMBRE_PARABOLA,
+        SPECTRAL_GPU_MAX_TIMBRE,
         timbre,
         timbre,
         SPECTRAL_RESOLUTION_REASON_GPU_TIMBRE_LIMIT,
@@ -157,37 +252,129 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
         synth_cpu_fallback_invoke, NULL, out_continue_backend);
 }
 
-SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
+/* Cheap span-only init: the start_idx / length / valid that the span pre-pass needs, without
+ * the alpha/beta/cubic/endpoint derivations. segment_loop_params_init layers the full work on
+ * top (it calls this first), so the two agree on the span exactly. A segment that passes the
+ * span clamp here but is later rejected by an endpoint-finiteness check is over-included in the
+ * pre-pass span only — safe: the index-based partitioning is unchanged, the render loop skips
+ * the segment, and the unwritten thread-buffer region stays zero, so the reduced output is
+ * bit-identical. */
+SegmentLoopParams segment_span_init(const Segment* s, const SynthParams* p, size_t out_len) {
     SegmentLoopParams lp = {0};
+    double start_d = 0.0;
+    double length_d = 0.0;
+    double last_offset_d = 0.0;
+
     if (!s || !p || out_len == 0) return lp;
 
+    if (!spectral_segment_valid_for_synth(s)) {
+        return lp;
+    }
+
     /* Overflow-safe: clamp negative/huge float products before casting to size_t */
-    double start_d = (double)s->start * (double)p->stretch;
-    double length_d = (double)s->length * (double)p->stretch;
+    start_d = (double)s->start * (double)p->stretch;
+    length_d = (double)s->length * (double)p->stretch;
     if (!spectral_is_finite_f64(start_d) || start_d < 0.0 || start_d >= (double)out_len || start_d > (double)SIZE_MAX) {
-        lp.valid = 0;
         return lp;
     }
     if (!spectral_is_finite_f64(length_d) || length_d < 0.0 || length_d > (double)SIZE_MAX) {
-        lp.valid = 0;
         return lp;
     }
 
     lp.start_idx = (size_t)start_d;
     lp.length = (size_t)length_d;
 
-    if (lp.start_idx >= out_len) {
-        lp.valid = 0;
+    if (lp.start_idx >= out_len || lp.length == 0) {
         return lp;
     }
     /* Overflow-safe comparison: rearranged to avoid size_t addition overflow */
     if (lp.length > out_len - lp.start_idx) {
         lp.length = out_len - lp.start_idx;
     }
-    
-    lp.alpha = spectral_segment_alpha_f32(s->omega, p->pitch_factor, p->inv_stretch);
-    lp.beta = spectral_segment_beta_f32(s->df, p->pitch_factor, p->inv_stretch_sq);
-    lp.d_amp = spectral_segment_d_amp_f32(s->da, p->inv_stretch);
+    if (lp.length == 0) {
+        return lp;
+    }
+
+    /* Hot loops cast sample offsets to float.  Prove the final offset is
+     * representable before later `(float)j` conversions in CPU/native callbacks
+     * and before endpoint validation in segment_loop_params_init. */
+    last_offset_d = (double)(lp.length - 1u);
+    if (!spectral_is_finite_f64(last_offset_d) || last_offset_d > (double)FLT_MAX) {
+        return lp;
+    }
+
+    lp.valid = 1;
+    return lp;
+}
+
+/* Full init = span_init + the derived hot-loop scalars (alpha/beta/cubic) and the endpoint
+ * finiteness validation. The span pre-pass calls segment_span_init directly to skip this tail,
+ * which it does not consume. */
+SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len) {
+    SegmentLoopParams lp = segment_span_init(s, p, out_len);
+    float alpha = 0.0f;
+    float beta = 0.0f;
+    float d_amp = 0.0f;
+    double last_offset_d = 0.0;
+
+    if (!lp.valid) return lp;
+    lp.valid = 0;   /* re-established only after the derived-scalar + endpoint checks pass */
+    last_offset_d = (double)(lp.length - 1u);   /* span_init proved this finite and <= FLT_MAX */
+
+    alpha = spectral_segment_alpha_f32(s->omega, p->pitch_factor, p->inv_stretch);
+    beta = spectral_segment_beta_f32(s->df, p->pitch_factor, p->inv_stretch_sq);
+    d_amp = spectral_segment_d_amp_f32(s->da, p->inv_stretch);
+
+    /* Segment fields and SynthParams can each be finite while their derived
+     * hot-loop scalars overflow.  Reject before the backend loop consumes
+     * alpha/beta/d_amp or endpoint phase/amplitude state. */
+    if (!spectral_is_finite_f32(alpha) ||
+        !spectral_is_finite_f32(beta) ||
+        !spectral_is_finite_f32(d_amp)) {
+        lp.valid = 0;
+        return lp;
+    }
+
+    /* Cubic phase coefficients.  Default is the quadratic model (c2=beta, c3=0)
+     * which makes the cubic evaluator bit-identical to the quadratic helper.
+     * When a track-linkage stage annotated this segment (and the precise-phase
+     * build is enabled) the analysis-domain cubic coeffs are transformed into
+     * the synth (pitch/stretch) domain the same way alpha/beta are. */
+    float c2 = beta;
+    float c3 = 0.0f;
+#if SPECTRAL_PRECISE_PHASE
+    if (spectral_segment_has_cubic(s)) {
+        const float inv_stretch_cubed = p->inv_stretch_sq * p->inv_stretch;
+        c2 = spectral_segment_beta_f32(spectral_segment_cubic_c2(s), p->pitch_factor, p->inv_stretch_sq);
+        c3 = spectral_segment_cubic_c3(s) * p->pitch_factor * inv_stretch_cubed;
+        if (!spectral_is_finite_f32(c2) || !spectral_is_finite_f32(c3)) {
+            lp.valid = 0;
+            return lp;
+        }
+    }
+#endif
+
+    {
+        const float last = (float)last_offset_d;
+        const float phase0 = spectral_segment_phase_at_cubic_f32(s->phase, alpha, c2, c3, 0.0f);
+        const float phase1 = spectral_segment_phase_at_cubic_f32(s->phase, alpha, c2, c3, last);
+        const float amp0 = spectral_segment_amp_at_f32(s->amp, d_amp, 0.0f);
+        const float amp1 = spectral_segment_amp_at_f32(s->amp, d_amp, last);
+
+        if (!spectral_is_finite_f32(phase0) ||
+            !spectral_is_finite_f32(phase1) ||
+            !spectral_is_finite_f32(amp0) ||
+            !spectral_is_finite_f32(amp1)) {
+            lp.valid = 0;
+            return lp;
+        }
+    }
+
+    lp.alpha = alpha;
+    lp.beta = beta;
+    lp.c2 = c2;
+    lp.c3 = c3;
+    lp.d_amp = d_amp;
     lp.phase = s->phase;
     lp.amp = s->amp;
     lp.width = s->width;
@@ -196,188 +383,13 @@ SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* 
     return lp;
 }
 
-/* GPU tile preprocessing - maps segments to tiles for Metal/CUDA dispatch */
-#if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
 
-SpectralError gpu_tile_preprocess(
-    SegmentArray sa, float stretch, uint32_t tile_size, size_t out_len,
-    GpuTileData* out
-) {
-    size_t bytes = 0;
-    size_t counts_bytes = 0;
-    size_t ids_bytes = 0;
-    size_t ranges_bytes = 0;
-    size_t cursors_bytes = 0;
 
-    if (!out || tile_size == 0 || out_len == 0) return SPECTRAL_ERR_PARAM;
-    if (sa.count > 0 && !sa.segs) return SPECTRAL_ERR_PARAM;
-
-    *out = (GpuTileData){0};
-    if (out_len > UINT32_MAX) return SPECTRAL_ERR_OVERFLOW;
-    uint32_t out_len_u32 = (uint32_t)out_len;
-    uint32_t num_tiles = out_len_u32 / tile_size + ((out_len_u32 % tile_size) ? 1u : 0u);
-    SpectralError return_err = SPECTRAL_OK;
-    int tile_overflow = 0;
-    uint32_t total_refs = 0;
-
-    uint32_t** thread_counts = NULL;
-    uint32_t* tile_counts = NULL;
-    TileRange* tile_ranges = NULL;
-    uint32_t* tile_segment_ids = NULL;
-    uint32_t* tile_cursors = NULL;
-
-#ifdef _OPENMP
-    int n_threads = omp_get_max_threads();
-#else
-    int n_threads = 1;
-#endif
-    if (n_threads < 1) n_threads = 1;
-
-    if (!spectral_size_mul((size_t)n_threads, sizeof(uint32_t*), &bytes)) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-    thread_counts = spectral_calloc_array((size_t)n_threads, sizeof(uint32_t*));
-    if (!thread_counts) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    if (!spectral_size_mul((size_t)num_tiles, sizeof(uint32_t), &counts_bytes)) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-    for (int t = 0; t < n_threads; t++) {
-        thread_counts[t] = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
-        if (!thread_counts[t]) {
-            return_err = SPECTRAL_ERR_MEMORY;
-            goto cleanup;
-        }
-    }
-
-    #pragma omp parallel
-    {
-#ifdef _OPENMP
-        int tid = omp_get_thread_num();
-#else
-        int tid = 0;
-#endif
-        uint32_t* my_counts = thread_counts[tid];
-
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < sa.count; i++) {
-            float start = sa.segs[i].start * stretch;
-            float end = start + sa.segs[i].length * stretch;
-            if (!spectral_is_finite_f32(start) || !spectral_is_finite_f32(end) || end <= start) continue;
-
-            int start_tile = (int)(start / tile_size);
-            int end_tile = (int)(end / tile_size);
-            if (start_tile < 0) start_tile = 0;
-            if (start_tile >= (int)num_tiles) continue;
-            if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
-
-            for (int tt = start_tile; tt <= end_tile; tt++) {
-                my_counts[tt]++;
-            }
-        }
-    }
-
-    tile_counts = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
-    if (!tile_counts) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    for (int t = 0; t < n_threads; t++) {
-        for (uint32_t i = 0; i < num_tiles; i++) {
-            uint32_t sum = tile_counts[i] + thread_counts[t][i];
-            if (sum < tile_counts[i]) { tile_overflow = 1; break; }
-            tile_counts[i] = sum;
-        }
-        if (tile_overflow) break;
-    }
-    if (tile_overflow) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-
-    if (!spectral_size_mul((size_t)num_tiles, sizeof(TileRange), &ranges_bytes)) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-    tile_ranges = spectral_malloc_array((size_t)num_tiles, sizeof(TileRange));
-    if (!tile_ranges) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    total_refs = 0;
-    for (uint32_t t = 0; t < num_tiles; t++) {
-        tile_ranges[t].start = total_refs;
-        tile_ranges[t].count = tile_counts[t];
-        if (total_refs > UINT32_MAX - tile_counts[t]) {
-            return_err = SPECTRAL_ERR_OVERFLOW;
-            goto cleanup;
-        }
-        total_refs += tile_counts[t];
-    }
-
-    if (!spectral_size_mul((size_t)total_refs, sizeof(uint32_t), &ids_bytes) ||
-        !spectral_size_mul((size_t)num_tiles, sizeof(uint32_t), &cursors_bytes)) {
-        return_err = SPECTRAL_ERR_OVERFLOW;
-        goto cleanup;
-    }
-
-    tile_segment_ids = spectral_malloc_array((size_t)total_refs, sizeof(uint32_t));
-    tile_cursors = spectral_calloc_array((size_t)num_tiles, sizeof(uint32_t));
-    if (!tile_segment_ids || !tile_cursors) {
-        return_err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-
-    #pragma omp parallel for schedule(static)
-    for (size_t i = 0; i < sa.count; i++) {
-        float start = sa.segs[i].start * stretch;
-        float end = start + sa.segs[i].length * stretch;
-        if (!spectral_is_finite_f32(start) || !spectral_is_finite_f32(end) || end <= start) continue;
-
-        int start_tile = (int)(start / tile_size);
-        int end_tile = (int)(end / tile_size);
-        if (start_tile < 0) start_tile = 0;
-        if (start_tile >= (int)num_tiles) continue;
-        if (end_tile >= (int)num_tiles) end_tile = num_tiles - 1;
-
-        for (int tt = start_tile; tt <= end_tile; tt++) {
-            uint32_t pos;
-            #pragma omp atomic capture
-            pos = tile_cursors[tt]++;
-            tile_segment_ids[tile_ranges[tt].start + pos] = (uint32_t)i;
-        }
-    }
-
-    free(tile_counts);
-    free(tile_cursors);
-    if (thread_counts) {
-        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
-        free(thread_counts);
-    }
-
-    out->ranges = tile_ranges;
-    out->segment_ids = tile_segment_ids;
-    out->num_tiles = num_tiles;
-    out->total_refs = total_refs;
-    return SPECTRAL_OK;
-
-cleanup:
-    free(tile_counts);
-    free(tile_cursors);
-    free(tile_ranges);
-    free(tile_segment_ids);
-    if (thread_counts) {
-        for (int t = 0; t < n_threads; t++) free(thread_counts[t]);
-        free(thread_counts);
-    }
-    return return_err;
-}
-
-#endif /* !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE */
+/* GPU tile preprocessing (gpu_tile_preprocess) is profile-divergent and lives
+ * in build-selected port files behind the spectral_synth_internal.h interface:
+ * arch/simd/spectral_gpu_tile.c (real Metal/CUDA-oriented mapping) and
+ * arch/ref/spectral_gpu_tile.c (SPECTRAL_ERR_BACKEND_UNAVAIL stub,
+ * no GPU backend). The cache below is device-agnostic and always compiled. */
 
 /* --- GPU tile cache (process-global, single-slot) -----------------------
  * Always compiled (trivial, no GPU dependency) so the pipeline can call
@@ -389,6 +401,7 @@ static SPECTRAL_THREAD_LOCAL struct {
     uint32_t*   segment_ids;
     uint32_t    num_tiles;
     uint32_t    total_refs;
+    uint32_t    tile_size;
     float       stretch;
     size_t      out_len;
     int         valid;
@@ -398,10 +411,15 @@ void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
                         uint32_t num_tiles, uint32_t total_refs,
                         float stretch, size_t out_len)
 {
+    if (num_tiles == 0u || (total_refs > 0u && (!ranges || !segment_ids))) {
+        gpu_tile_cache_clear();
+        return;
+    }
     g_gpu_tile_cache.ranges      = (TileRange*)ranges;
     g_gpu_tile_cache.segment_ids = (uint32_t*)segment_ids;
     g_gpu_tile_cache.num_tiles   = num_tiles;
     g_gpu_tile_cache.total_refs  = total_refs;
+    g_gpu_tile_cache.tile_size   = (uint32_t)SPECTRAL_GPU_TILE_SIZE;
     g_gpu_tile_cache.stretch     = stretch;
     g_gpu_tile_cache.out_len     = out_len;
     g_gpu_tile_cache.valid       = 1;
@@ -409,14 +427,31 @@ void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
 
 int gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out)
 {
+    GpuTileData td = {0};
+
     if (!g_gpu_tile_cache.valid || !out) return 0;
-    if (g_gpu_tile_cache.stretch != stretch || g_gpu_tile_cache.out_len != out_len) return 0;
-    out->ranges      = g_gpu_tile_cache.ranges;
-    out->segment_ids = g_gpu_tile_cache.segment_ids;
-    out->num_tiles   = g_gpu_tile_cache.num_tiles;
-    out->total_refs  = g_gpu_tile_cache.total_refs;
+    if (g_gpu_tile_cache.tile_size != (uint32_t)SPECTRAL_GPU_TILE_SIZE ||
+        g_gpu_tile_cache.stretch != stretch ||
+        g_gpu_tile_cache.out_len != out_len) {
+        gpu_tile_cache_clear();
+        return 0;
+    }
+
+    td.ranges      = g_gpu_tile_cache.ranges;
+    td.segment_ids = g_gpu_tile_cache.segment_ids;
+    td.num_tiles   = g_gpu_tile_cache.num_tiles;
+    td.total_refs  = g_gpu_tile_cache.total_refs;
+
+    /* Tile layout depends on segment start/length as well as output shape.
+     * Since this cache key does not encode segment identity, it is a one-shot
+     * handoff from the analysis/cache path to the immediately following GPU
+     * synthesis call. */
+    gpu_tile_cache_clear();
+
+    *out = td;
     return 1;
 }
+
 
 void gpu_tile_cache_clear(void)
 {
@@ -425,6 +460,7 @@ void gpu_tile_cache_clear(void)
     g_gpu_tile_cache.segment_ids = NULL;
     g_gpu_tile_cache.num_tiles = 0;
     g_gpu_tile_cache.total_refs = 0;
+    g_gpu_tile_cache.tile_size = 0;
 }
 
 SpectralError gpu_tile_preprocess_cached(
@@ -433,18 +469,24 @@ SpectralError gpu_tile_preprocess_cached(
 {
     if (!out_td || !out_owns_data) return SPECTRAL_ERR_PARAM;
     *out_owns_data = 0;
-    if (gpu_tile_cache_try_get(stretch, out_len, out_td)) {
-        return SPECTRAL_OK;
+    if (tile_size == (uint32_t)SPECTRAL_GPU_TILE_SIZE &&
+        gpu_tile_cache_try_get(stretch, out_len, out_td)) {
+        if (sa.count <= (size_t)UINT32_MAX &&
+            spectral_gpu_tile_layout_words_valid((const void*)out_td->ranges,
+                                             out_td->segment_ids,
+                                             out_td->num_tiles,
+                                             out_td->total_refs,
+                                             (uint32_t)sa.count)) {
+            return SPECTRAL_OK;
+        }
+        gpu_tile_cache_clear();
+        *out_td = (GpuTileData){0};
     }
-#if !SPECTRAL_EMBEDDED && !SPECTRAL_RESTRICTED_MODE
     SpectralError tile_err = gpu_tile_preprocess(sa, stretch, tile_size, out_len, out_td);
     if (tile_err == SPECTRAL_OK) {
         *out_owns_data = 1;
     }
     return tile_err;
-#else
-    return SPECTRAL_ERR_BACKEND_UNAVAIL;
-#endif
 }
 
 /* ---------- GPU segment cache (pre-packed SegmentGpu from seg cache) ----- */
@@ -464,11 +506,24 @@ void gpu_seg_cache_set(const SegmentGpu* segs, uint32_t count)
 
 int gpu_seg_cache_try_get(uint32_t count, const SegmentGpu** out)
 {
+    const SegmentGpu* segs = NULL;
+
     if (!g_gpu_seg_cache.valid || !out) return 0;
-    if (g_gpu_seg_cache.count != count) return 0;
-    *out = g_gpu_seg_cache.segs;
+    if (g_gpu_seg_cache.count != count || !g_gpu_seg_cache.segs) {
+        gpu_seg_cache_clear();
+        return 0;
+    }
+
+    segs = g_gpu_seg_cache.segs;
+    *out = segs;
+
+    /* Process-local cache entries are scoped to the immediately following
+     * backend invocation.  A count-only cache key is not a segment identity, so
+     * never allow a previous call's SegmentGpu pointer to be reused implicitly. */
+    gpu_seg_cache_clear();
     return 1;
 }
+
 
 void gpu_seg_cache_clear(void)
 {
@@ -476,3 +531,61 @@ void gpu_seg_cache_clear(void)
     g_gpu_seg_cache.segs  = NULL;
     g_gpu_seg_cache.count = 0;
 }
+
+SpectralError spectral_gpu_dispatch_plan_init(SpectralGpuDispatchPlan* plan,
+                                              SegmentArray sa,
+                                              const SynthParams* params,
+                                              float stretch,
+                                              SpectralTimbre timbre,
+                                              size_t out_len)
+{
+    SpectralError err = SPECTRAL_OK;
+    const SegmentGpu* cached_gpu_segs = NULL;
+
+    if (!plan || !params) return SPECTRAL_ERR_PARAM;
+    *plan = (SpectralGpuDispatchPlan){0};
+
+    if (!spectral_array_bytes((size_t)sa.count, sizeof(SegmentGpu), &plan->segment_bytes)) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    if (gpu_seg_cache_try_get(sa.count, &cached_gpu_segs)) {
+        plan->segment_source = cached_gpu_segs;
+    }
+
+    err = gpu_tile_preprocess_cached(sa, stretch, SPECTRAL_GPU_TILE_SIZE,
+                                     out_len, &plan->tiles, &plan->owns_tile_data);
+    if (err != SPECTRAL_OK) {
+        spectral_gpu_dispatch_plan_free(plan);
+        return err;
+    }
+
+    err = gpu_synth_params_pack_checked(params, SPECTRAL_GPU_TILE_SIZE, timbre, &plan->params);
+    if (err != SPECTRAL_OK) {
+        spectral_gpu_dispatch_plan_free(plan);
+        return err;
+    }
+
+    if (plan->tiles.total_refs == 0u) {
+        plan->zero_output = 1;
+        return SPECTRAL_OK;
+    }
+
+    if (!spectral_array_bytes((size_t)plan->tiles.total_refs, sizeof(uint32_t), &plan->tile_ids_bytes) ||
+        !spectral_array_bytes((size_t)plan->tiles.num_tiles, sizeof(TileRange), &plan->tile_ranges_bytes)) {
+        spectral_gpu_dispatch_plan_free(plan);
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    return SPECTRAL_OK;
+}
+
+void spectral_gpu_dispatch_plan_free(SpectralGpuDispatchPlan* plan)
+{
+    if (!plan) return;
+    if (plan->owns_tile_data) {
+        gpu_tile_data_free(&plan->tiles);
+    }
+    *plan = (SpectralGpuDispatchPlan){0};
+}
+

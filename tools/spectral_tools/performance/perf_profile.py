@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark_types import TestStatus
-from ..core.constants import DEFAULT_PEEK_TAIL_LINES, STAGE_MARKER_LINE_RE
+from ..core.constants import (
+    DEFAULT_PEEK_TAIL_LINES,
+    DEFAULT_SUITE_BENCH_ARGS,
+    STAGE_MARKER_LINE_RE,
+)
 from ..core.process import run
 from ..core.utils import tail_lines
 
@@ -31,7 +35,8 @@ RENDER_TIMING_RE = re.compile(
 MARKER_LINE_RE = STAGE_MARKER_LINE_RE  # module-local alias for readability
 MARKER_STRICT_STAGES = ("fft", "track", "synth", "norm", "write")
 MARKER_FALLBACK_STAGES = ("analysis", "synth", "norm", "write")
-DEFAULT_PERF_CLI_ARGS = ["0", "1", "0", "4096", "128", "-85", "20", "0"]
+# Same positional CLI contract as the suite default, in list form (single source).
+DEFAULT_PERF_CLI_ARGS = DEFAULT_SUITE_BENCH_ARGS.split()
 
 
 @dataclass(slots=True)
@@ -278,9 +283,12 @@ def _run_perf_stat(
     }
 
 
-# Positional argument names matching DEFAULT_PERF_CLI_ARGS layout.
-PERF_ARG_NAMES = ("verbose", "format", "threads", "fft_size", "hop_size", "db_thresh", "min_dur_ms", "backend_id")
-_BACKEND_IDX = PERF_ARG_NAMES.index("backend_id")
+# Positional argument names matching DEFAULT_PERF_CLI_ARGS layout. This is the
+# REAL CLI contract (spectral_cli_print_usage): timbre stretch pitch n_fft hop
+# db_thresh threads backend — the previous names (verbose/format/min_dur_ms)
+# documented a contract that does not exist.
+PERF_ARG_NAMES = ("timbre", "stretch", "pitch", "n_fft", "hop", "db_thresh", "threads", "backend")
+_BACKEND_IDX = PERF_ARG_NAMES.index("backend")
 
 
 def _with_backend(cli_args: list[str], backend_id: int) -> list[str]:

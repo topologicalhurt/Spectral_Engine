@@ -4,9 +4,10 @@
  *   macOS: mach_task_info(), getrusage(), sysctlbyname()
  *   Linux: /proc/self/statm, getrusage(), sysconf()
  *
- * Allocation Tracking:
- *   perf_track_alloc/free maintain running total and peak
- *   Used to measure actual memory consumption vs theoretical
+ * Memory + fault reporting (perf_print): real RSS + resident delta, getrusage major
+ *   page-faults / context-switches, and the realloc counter (g_realloc_count). The
+ *   perf_track_alloc/free running-total machinery is retained substrate for the deferred
+ *   full alloc-byte routing (II.4 non-minimal variant); it is not currently displayed.
  *
  * Embedded estimation is in runtime/spectral_perf_embedded.c
  */
@@ -27,6 +28,7 @@
 /* Global allocation tracking state */
 size_t g_peak_alloc = 0;
 size_t g_current_alloc = 0;
+size_t g_realloc_count = 0;
 
 #ifdef __APPLE__
 
@@ -38,18 +40,6 @@ void perf_get_memory(size_t* resident_kb, size_t* virtual_kb) {
         *virtual_kb = (size_t)(info.virtual_size / SPECTRAL_BYTES_PER_KIB);
     } else {
         *resident_kb = *virtual_kb = 0;
-    }
-}
-
-void perf_get_cpu_time(double* user_ms, double* sys_ms) {
-    struct rusage usage;
-    if (getrusage(RUSAGE_SELF, &usage) == 0) {
-        *user_ms = usage.ru_utime.tv_sec * SPECTRAL_MILLIS_PER_SECOND_D +
-                   usage.ru_utime.tv_usec / SPECTRAL_MILLIS_PER_SECOND_D;
-        *sys_ms = usage.ru_stime.tv_sec * SPECTRAL_MILLIS_PER_SECOND_D +
-                  usage.ru_stime.tv_usec / SPECTRAL_MILLIS_PER_SECOND_D;
-    } else {
-        *user_ms = *sys_ms = 0;
     }
 }
 
@@ -82,6 +72,8 @@ void perf_get_memory(size_t* resident_kb, size_t* virtual_kb) {
     }
 }
 
+#endif /* __APPLE__ */
+
 void perf_get_cpu_time(double* user_ms, double* sys_ms) {
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage) == 0) {
@@ -94,12 +86,26 @@ void perf_get_cpu_time(double* user_ms, double* sys_ms) {
     }
 }
 
+#ifndef __APPLE__
 int perf_get_num_cores(void) {
     int cores = (int)sysconf(_SC_NPROCESSORS_ONLN);
     return (cores > 0) ? cores : 1;
 }
+#endif
 
-#endif /* __APPLE__ */
+void perf_get_rusage_counts(long* major_faults, long* vol_ctx, long* invol_ctx) {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        /* ru_majflt (major page faults, the costly-paging proxy) is Linux-meaningful; Darwin
+         * does not maintain it for RUSAGE_SELF, so on macOS it reads 0 regardless of real
+         * page-in I/O. The context-switch counts are populated on both. */
+        *major_faults = (long)usage.ru_majflt;
+        *vol_ctx = (long)usage.ru_nvcsw;
+        *invol_ctx = (long)usage.ru_nivcsw;
+    } else {
+        *major_faults = *vol_ctx = *invol_ctx = 0;
+    }
+}
 
 void perf_track_alloc(size_t bytes) {
     #pragma omp critical
@@ -117,9 +123,15 @@ void perf_track_free(size_t bytes) {
     }
 }
 
+void perf_track_realloc(void) {
+    #pragma omp atomic
+    g_realloc_count++;
+}
+
 void perf_reset_tracking(void) {
     g_peak_alloc = 0;
     g_current_alloc = 0;
+    g_realloc_count = 0;
 }
 
 PerfMetrics perf_snapshot(double wall_start) {
@@ -127,14 +139,11 @@ PerfMetrics perf_snapshot(double wall_start) {
     size_t res_kb, virt_kb;
     perf_get_memory(&res_kb, &virt_kb);
     perf_get_cpu_time(&m.user_time_ms, &m.sys_time_ms);
+    perf_get_rusage_counts(&m.major_faults, &m.vol_ctx_switches, &m.invol_ctx_switches);
     m.current_resident_mb = res_kb / SPECTRAL_BYTES_PER_KIB;
-    m.virtual_mb = virt_kb / SPECTRAL_BYTES_PER_KIB;
+    (void)virt_kb;  /* virtual size is not reported; perf_get_memory fills it anyway */
     m.num_cores = perf_get_num_cores();
     m.wall_time_ms = (omp_get_wtime() - wall_start) * SPECTRAL_MILLIS_PER_SECOND_D;
-    m.tracked_allocs = g_peak_alloc;
-    m.peak_resident_mb = m.current_resident_mb;
-    m.cpu_utilization = (m.wall_time_ms > 0) ?
-        100.0 * (m.user_time_ms + m.sys_time_ms) / (m.wall_time_ms * m.num_cores) : 0;
     return m;
 }
 
@@ -145,10 +154,19 @@ void perf_print(PerfMetrics* start, PerfMetrics* end, int n_threads) {
     double total_cpu = user_delta + sys_delta;
     double utilization = (wall_delta > 0) ? 100.0 * total_cpu / (wall_delta * n_threads) : 0;
     double parallelism = (wall_delta > 0) ? (total_cpu / wall_delta) : 0.0;
+    /* Real resident growth this run — replaces the old "Peak tracked" figure, which summed a
+     * handful of instrumented sites (perf_track_alloc, wired almost nowhere) and read ~3% of
+     * RSS, a naming lie. RSS delta is the honest memory cost. */
+    long rss_delta_mb = (long)end->current_resident_mb - (long)start->current_resident_mb;
 
     SPECTRAL_LOG_INFO("\n--- Performance Metrics ---");
-    SPECTRAL_LOG_INFO("Memory:  RSS %zu MB, Peak tracked %.1f MB",
-                      end->current_resident_mb, BYTES_TO_MB(g_peak_alloc));
+    SPECTRAL_LOG_INFO("Memory:  RSS %zu MB (%+ld MB this run)",
+                      end->current_resident_mb, rss_delta_mb);
+    SPECTRAL_LOG_INFO("Faults:  major %ld, ctx-switch %ld vol / %ld invol, reallocs %zu",
+                      end->major_faults - start->major_faults,
+                      end->vol_ctx_switches - start->vol_ctx_switches,
+                      end->invol_ctx_switches - start->invol_ctx_switches,
+                      g_realloc_count);
     SPECTRAL_LOG_INFO("CPU:     User %.1f ms, Sys %.1f ms, Total %.1f ms",
                       user_delta, sys_delta, total_cpu);
     SPECTRAL_LOG_INFO("Threads: %d / %d cores, Util %.1f%%, Parallelism %.2fx",

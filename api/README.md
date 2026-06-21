@@ -4,7 +4,6 @@ Platform-specific API wrappers for spectral_engine.
 
 ## Structure
 
-    spectral_api.h      Platform-agnostic C API
     daisy_seed/         Daisy Seed ARM embedded port
 
 ## Backends
@@ -52,8 +51,11 @@ Optional Daisy example firmware:
 
 ## API status
 
-`api/spectral_api.h` is a draft generic interface and is not wired to a complete implementation in this repository.  
-For release builds, use `api/daisy_seed/daisy_seed_spectral.h`.
+Two versioned public surfaces (SemVer, currently 0.0.1 — earliest WIP, the
+surface changes freely until it is deliberately frozen):
+
+    spectral_engine/core/spectral_synth.h        Desktop synthesis (float)
+    api/daisy_seed/daisy_seed_spectral.h          Daisy Seed (Q15, Cortex-M7)
 
 
 ## Realtime notice

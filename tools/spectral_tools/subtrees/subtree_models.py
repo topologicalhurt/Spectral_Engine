@@ -30,7 +30,7 @@ TRACK_MASK_PUSH = "push"
 TRACK_MASK_NONE = "none"
 TRACK_MASK_VALUES = {TRACK_MASK_BOTH, TRACK_MASK_PULL, TRACK_MASK_PUSH, TRACK_MASK_NONE}
 TRACK_UPDATE_MASK_VALUES = {TRACK_MASK_BOTH, TRACK_MASK_PULL, TRACK_MASK_PUSH}
-LIBS_RELATIVE_PATH = Path("third_party/libs.txt")
+LIBS_RELATIVE_PATH = Path("third_party/libs.yaml")
 UPDATE_PY_RELATIVE_PATH = Path("tools/spectral_tools/subtrees/subtree_manager.py")
 CLI_PROG = "python -m spectral_tools.subtrees.subtree_manager"
 DEFAULT_PRINT_BRANCH = False
@@ -108,7 +108,7 @@ def entry_allows(entry: "LibEntry", action: str) -> bool:
 
 
 def entry_to_line(entry: "LibEntry") -> str:
-    """Serialize a :class:`LibEntry` to its ``libs.txt`` line representation."""
+    """Render a :class:`LibEntry` in the engine-internal legacy line format."""
     base = f"{entry.repo}, {entry.local_path}, {entry.branch}"
     return base if entry.track_mask == TRACK_MASK_BOTH else f"{base}, {entry.track_mask}"
 

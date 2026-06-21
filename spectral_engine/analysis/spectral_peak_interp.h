@@ -25,9 +25,10 @@ extern "C" {
  * 
  * 1. Validation: Ensures a candidate peak is a true local maximum comparing
  *    its magnitude against immediately adjacent frequency bins.
- * 2. Emission: Calculates the exact frequency (omega), delta frequency (df),
- *    and amplitude (amp/da) using rational mathematical approximations
- *    that avoid costly transcendental functions like log() or sqrt() when possible.
+ * 2. Emission: Estimates sub-bin frequency (omega), delta frequency (df),
+ *    and amplitude slope (amp/da) through the window-aware estimator module.
+ *    Advanced estimators are explicit policies, while AUTO preserves the
+ *    current log-power parabolic baseline for Hann-windowed magnitude spectra.
  */
 
 int spectral_tracker_validate_candidate(
@@ -43,9 +44,11 @@ int spectral_tracker_emit_segment(
     SpectralTracker* tracker,
     int tid,
     const float* __restrict__ row,
+    const float* __restrict__ next_row,
     const float* __restrict__ phase_row,
+    const float* __restrict__ next_phase_row,
     size_t cf,
-    float t_hop,
+    float frame_start_sample,
     float freq_step_omega,
     float freq_step_df,
     float inv_hop,

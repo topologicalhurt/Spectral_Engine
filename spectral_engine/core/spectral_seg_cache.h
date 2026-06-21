@@ -46,7 +46,8 @@ typedef struct {
     float    pitch;
     uint32_t seg_count;
     uint64_t data_offset;      /* byte offset into data file      */
-    uint64_t output_length;    /* pre-computed max(start+length)   */
+    uint64_t output_length;    /* analyzed pre-stretch sample count (sizes the synth buffer:
+                                * render len = output_length * stretch); round-trips verbatim */
     uint32_t tile_count;       /* GPU tiles stored; 0 = none       */
     uint32_t tile_total_refs;  /* total segment-ID refs in tiles   */
 } SpectralSegCacheEntry;
@@ -80,8 +81,8 @@ typedef struct {
     size_t       _mmap_len;
 } SpectralSegCacheLookupResult;
 
-/* Compute cache key from analysis/render parameters. */
-uint64_t spectral_seg_cache_key(const char* stem,
+/* Compute cache key from audio input identity string and analysis/render parameters. */
+uint64_t spectral_seg_cache_key(const char* input_id,
                                 int n_fft, int hop,
                                 float db_thresh,
                                 float start_sec, float end_sec,
@@ -107,7 +108,8 @@ SegmentArray spectral_seg_cache_result_take_segments(
     SpectralSegCacheLookupResult* result);
 
 /* Append segment + tile data then insert a sorted index entry.
- * output_length: pre-computed max(start+length) to avoid re-scanning.
+ * output_length: caller's analyzed pre-stretch sample count, stored opaquely and
+ *   replayed on lookup to size the synthesis buffer (render len = output_length * stretch).
  * tile_ranges / tile_segment_ids: pre-computed GPU tile data (NULL to skip). */
 SpectralError spectral_seg_cache_store(const char* cache_dir,
                                        uint64_t key,

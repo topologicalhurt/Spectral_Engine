@@ -24,7 +24,6 @@ from ..core.console import Console
 from .benchmark_runner import BenchmarkRunner
 from ..performance.benchmark_types import BenchMode, PerfStrategy, TestStatus
 from ..core.constants import (
-    DEFAULT_BENCHMARK_BINARY_GLOB,
     DEFAULT_BENCH_MODE,
     DEFAULT_BENCH_RUNS,
     DEFAULT_BUILD_TARGET,
@@ -136,13 +135,21 @@ class Performance:
         cmd = ["cmake", "--build", str(build_dir), "--target", target, "--parallel"]
         return self._must_run(cmd, cwd=self.repo_root)
 
-    def resolve_desktop_binary(self, build_dir: Path) -> Path:
+    def resolve_target_binary(self, build_dir: Path, target_name: str) -> Path:
+        """Resolve the output binary for a measurement-matrix target by the
+        glob derived from the CMake naming SSOT (per-target: the desktop and
+        simulate binaries coexist in bin/ and must never cross-match)."""
+        from ..performance import matrix
+
+        profile = matrix.target(target_name)
+        pattern = matrix.binary_glob(profile, self.repo_root)
         bin_dir = (build_dir / "bin").resolve()
-        candidates = sorted(bin_dir.glob(DEFAULT_BENCHMARK_BINARY_GLOB))
+        candidates = sorted(bin_dir.glob(pattern))
         for path in candidates:
             if is_executable(path):
                 return path
-        raise RuntimeError(f"unable to resolve desktop binary in {bin_dir}")
+        raise RuntimeError(
+            f"unable to resolve '{target_name}' binary ({pattern}) in {bin_dir}")
 
     def collect_context(self) -> dict[str, Any]:
         context: dict[str, Any] = {
@@ -194,11 +201,15 @@ class Performance:
         }
 
         if self.dry_run:
+            from ..performance import matrix
+
+            planned_glob = matrix.binary_glob(
+                matrix.target(DEFAULT_BUILD_TARGET), self.repo_root)
             details["planned"] = {
                 "configure_cmd": ["cmake", "-S", ".", "-B", str(build_dir), *cmake_args],
                 "build_cmd": ["cmake", "--build", str(build_dir), "--target", DEFAULT_BUILD_TARGET, "--parallel"],
                 "benchmark_cmd": [
-                    str(build_dir / "bin" / "spectral_*_desktop"),
+                    str(build_dir / "bin" / planned_glob),
                     str(benchmark_input),
                     *benchmark_cli_args,
                     *(["--cache"] if benchmark_mode == BenchMode.CACHE.value else []),
@@ -214,7 +225,7 @@ class Performance:
         try:
             self.configure_build(build_dir, cmake_args)
             self.build_target(build_dir)
-            binary = self.resolve_desktop_binary(build_dir)
+            binary = self.resolve_target_binary(build_dir, DEFAULT_BUILD_TARGET)
             details["binary"] = str(binary)
 
             bench = self.run_benchmark(
@@ -509,6 +520,383 @@ def run_suite(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if any(t.get("status") == TestStatus.FAILED.value for t in tests) else 0
 
 
+def run_m7_census(args: argparse.Namespace, perf: Performance) -> int:
+    """Embedded Layer 0/2: codegen census [measured] + mca loop cycles [modeled]."""
+    from ..performance.embedded import codegen, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca"}))
+        result = codegen.codegen_report(tc, out_dir=out_dir)
+        status = TestStatus.OK.value if not result.failed_regions else TestStatus.BLOCKED.value
+        loops_summary = ", ".join(
+            f"{loop.kernel}/{loop.label}={loop.cycles_per_iter:.1f}cyc" for loop in result.loops
+        )
+        test = {
+            "name": "m7-census",
+            "status": status,
+            "summary": loops_summary or "census only",
+            "details": result.as_dict(),
+        }
+    except (toolchain.ToolchainError, codegen.CodegenError) as exc:
+        test = {
+            "name": "m7-census",
+            "status": TestStatus.FAILED.value,
+            "summary": "census failed",
+            "details": {"error": str(exc)},
+        }
+
+    report = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_m7_mca_validate(args: argparse.Namespace, perf: Performance) -> int:
+    """Layer 2 validation: mca CortexM7Model vs hand-derived expectations."""
+    from ..performance.embedded import codegen, mca_validation, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca"}))
+        report = mca_validation.validate(tc, out_dir=out_dir)
+        summary = (
+            f"max body delta {report.max_abs_body_delta * 100:.1f}% over "
+            f"{len(report.results)} cases; back-edge divergence "
+            f"+{report.mean_backedge_divergence:.1f} cyc/iter"
+        )
+        test = {
+            "name": "m7-mca-validate",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": report.as_dict(),
+        }
+    except (toolchain.ToolchainError, codegen.CodegenError) as exc:
+        test = {
+            "name": "m7-mca-validate",
+            "status": TestStatus.FAILED.value,
+            "summary": "validation failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_m7_counts(args: argparse.Namespace, perf: Performance) -> int:
+    """Embedded Layer 1: dynamic instruction/byte counts under QEMU [measured]."""
+    from ..performance.embedded import counts, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"qemu"}))
+        result = counts.measure(
+            tc, out_dir=out_dir, verify_reproducible=not args.no_verify
+        )
+        process_counts = result.range("spectral_arm32_process")
+        summary = (
+            f"process: {process_counts.insns} insns, "
+            f"{process_counts.load_bytes}B ld / {process_counts.store_bytes}B st"
+            if process_counts
+            else "counts collected"
+        )
+        test = {
+            "name": "m7-counts",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": result.as_dict(),
+        }
+    except (toolchain.ToolchainError, counts.CountsError) as exc:
+        test = {
+            "name": "m7-counts",
+            "status": TestStatus.FAILED.value,
+            "summary": "counts failed",
+            "details": {"error": str(exc)},
+        }
+
+    report = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_m7_bootstrap(args: argparse.Namespace, perf: Performance) -> int:
+    """Download + sha-verify + extract the pinned newlib toolchain."""
+    from ..performance.embedded import toolchain
+
+    console = Console(use_color=not bool(args.no_color))
+    try:
+        path = toolchain.bootstrap(perf.repo_root, force=bool(args.force))
+    except toolchain.ToolchainError as exc:
+        console.print_error(str(exc))
+        return 1
+    print(f"toolchain ready: {path}")
+    return 0
+
+
+def run_m7_stalls(args: argparse.Namespace, perf: Performance) -> int:
+    """Layer 3 (P4): memory-stall bounds modeled over the measured trace."""
+    from ..performance.embedded import counts, memory_model, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"qemu"}))
+        trace_path = out_dir / "qemu_trace.txt"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # The trace run is slower; counts determinism is m7-counts' contract.
+        counts.measure(tc, out_dir=out_dir, verify_reproducible=False,
+                       trace_path=trace_path)
+        report = memory_model.analyze_trace(trace_path)
+        doc = report.as_dict()
+        mean = doc["per_block_mean_stalls"]
+        summary = (
+            f"{doc['n_blocks']} epochs; mean stalls/block "
+            f"[{mean['bandwidth_bound']}, {mean['serial_bound']}] cyc; "
+            f"fills {report.total.fills_row_hit}+{report.total.fills_row_miss}rm"
+        )
+        test = {
+            "name": "m7-stalls",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": doc,
+        }
+    except (toolchain.ToolchainError, counts.CountsError, OSError) as exc:
+        test = {
+            "name": "m7-stalls",
+            "status": TestStatus.FAILED.value,
+            "summary": "memory model failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_m7_wcet(args: argparse.Namespace, perf: Performance) -> int:
+    """P5: per-block WCET upper bound composed from the validated stack."""
+    from ..performance.embedded import codegen, counts, toolchain, wcet
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca", "qemu"}))
+        report = wcet.wcet(
+            tc, out_dir=out_dir, active=args.active,
+            scan_segments=args.scan_segments, block=args.block,
+        )
+        doc = report.as_dict()
+        summary = (
+            f"WCET {doc['wcet_block_cycles']:.0f} cyc/block "
+            f"({args.active} active, {args.scan_segments} scanned) = "
+            f"{doc['budget_fraction'] * 100:.1f}% of the 48k block budget"
+        )
+        test = {
+            "name": "m7-wcet",
+            "status": TestStatus.OK.value,
+            "summary": summary,
+            "details": doc,
+        }
+    except (toolchain.ToolchainError, codegen.CodegenError,
+            counts.CountsError, wcet.WcetError) as exc:
+        test = {
+            "name": "m7-wcet",
+            "status": TestStatus.FAILED.value,
+            "summary": "wcet failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_m7_baseline(args: argparse.Namespace, perf: Performance) -> int:
+    """Performance baseline: --generate freezes; default verifies (the gate)."""
+    from ..performance.embedded import codegen, counts, expectations, toolchain, wcet
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca", "qemu"}))
+        if args.generate:
+            path = expectations.generate(tc, out_dir=out_dir)
+            test = {
+                "name": "m7-baseline",
+                "status": TestStatus.OK.value,
+                "summary": f"baseline re-signed: {path.relative_to(perf.repo_root)}",
+                "details": {"path": str(path)},
+            }
+        else:
+            fails = expectations.verify(tc, out_dir=out_dir)
+            test = {
+                "name": "m7-baseline",
+                "status": TestStatus.OK.value if not fails else TestStatus.FAILED.value,
+                "summary": ("gate PASS: live stack within tolerances + stone ceilings"
+                            if not fails else f"gate FAIL: {len(fails)} quantities moved"),
+                "details": {"failures": fails},
+            }
+    except (toolchain.ToolchainError, codegen.CodegenError, counts.CountsError,
+            wcet.WcetError, expectations.ExpectationsError) as exc:
+        test = {
+            "name": "m7-baseline",
+            "status": TestStatus.FAILED.value,
+            "summary": "baseline failed",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_deterministic(args: argparse.Namespace, perf: Performance) -> int:
+    """The CANONICAL determinism gate: does the device deterministically render
+    the voice target at its rated clock? (default 512 voices @ 480 MHz)."""
+    from ..performance.embedded import codegen, counts, expectations, toolchain, wcet
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca", "qemu"}))
+        voices = args.voices if args.voices is not None else expectations.DETERMINISM_VOICES
+        v = expectations.deterministic(tc, out_dir=out_dir, voices=voices, block=args.block)
+        status = TestStatus.OK.value if v["verdict"] == "PASS" else TestStatus.FAILED.value
+        summary = (
+            f"{v['verdict']}: {v['workload_voices']} voices @ {v['clock_hz'] / 1e6:.0f} MHz "
+            f"= {v['budget_fraction'] * 100:.0f}% of budget (gate <= {(1 - v['margin']) * 100:.0f}%); "
+            f"deterministic ceiling {v['deterministic_ceiling_voices']} voices"
+        )
+        test = {"name": "deterministic", "status": status, "summary": summary, "details": v}
+    except (toolchain.ToolchainError, codegen.CodegenError, counts.CountsError,
+            wcet.WcetError, expectations.ExpectationsError) as exc:
+        test = {
+            "name": "deterministic",
+            "status": TestStatus.FAILED.value,
+            "summary": "determinism gate could not run",
+            "details": {"error": str(exc)},
+        }
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_hotspots(args: argparse.Namespace, perf: Performance) -> int:
+    """Hottest functions and lines: per-PC instruction histogram -> source attribution."""
+    from ..performance.embedded import counts, fixture, hotspots, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"qemu"}))
+        spec = fixture.sustained_fixture(args.voices) if args.voices else None
+        rep = hotspots.analyze(tc, out_dir=out_dir, fixture=spec, top=args.top)
+        hot = rep["hottest_functions"][0] if rep["hottest_functions"] else {"name": "?", "pct": 0}
+        summary = (f"{rep['total_insns']:,} insns / {rep['unique_pcs']} PCs; "
+                   f"hottest {hot['name']} {hot['pct']:.0f}%")
+        test = {"name": "hotspots", "status": TestStatus.OK.value, "summary": summary, "details": rep}
+    except (toolchain.ToolchainError, counts.CountsError) as exc:
+        test = {"name": "hotspots", "status": TestStatus.FAILED.value,
+                "summary": "hotspots failed", "details": {"error": str(exc)}}
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_saturation(args: argparse.Namespace, perf: Performance) -> int:
+    """Modeled functional-unit saturation (llvm-mca port pressure / iteration cycles)."""
+    from ..performance.embedded import codegen, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"mca"}))
+        rep = codegen.saturation_report(tc, out_dir=out_dir)
+        busiest = max(
+            ((f"{k}:{u}={s:.0%}", s) for k, v in rep["kernels"].items()
+             for u, s in v["saturation"].items()),
+            key=lambda x: x[1], default=("none", 0.0))
+        summary = f"{len(rep['kernels'])} kernels (modeled); busiest unit {busiest[0]}"
+        test = {"name": "saturation", "status": TestStatus.OK.value, "summary": summary, "details": rep}
+    except (toolchain.ToolchainError, codegen.CodegenError) as exc:
+        test = {"name": "saturation", "status": TestStatus.FAILED.value,
+                "summary": "saturation failed", "details": {"error": str(exc)}}
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
+def run_measure(args: argparse.Namespace, perf: Performance) -> int:
+    """Matrix-driven orchestration: probe or run the instruments for a target.
+
+    `measure --list` shows the full target×instrument matrix with live
+    availability probes. `measure --target <name>` runs every available
+    instrument for that target (building first where the profile names a
+    cmake target and --build is given) and emits one combined report.
+    """
+    from ..performance import matrix
+
+    if args.list or args.target is None:
+        probed = matrix.probe_matrix()
+        report = {
+            "suite": "measurement-matrix",
+            "context": perf.collect_context(),
+            "tests": [
+                {
+                    "name": name,
+                    "status": TestStatus.OK.value,
+                    "summary": entry["description"],
+                    "details": {
+                        "build_target": entry["build_target"],
+                        "instruments": entry["instruments"],
+                    },
+                }
+                for name, entry in probed.items()
+            ],
+        }
+        emit_report(args, report)
+        return 0
+
+    try:
+        profile = matrix.target(args.target)
+    except KeyError as exc:
+        Console(use_color=not bool(args.no_color)).print_error(str(exc))
+        return 2
+
+    if args.build and profile.build_target is not None:
+        build_dir = perf.repo_root / "build"
+        perf.configure_build(build_dir, ["-DCMAKE_BUILD_TYPE=Release"])
+        perf.build_target(build_dir, profile.build_target)
+
+    if profile.name == "m7":
+        rc_census = run_m7_census(args, perf)
+        rc_counts = run_m7_counts(args, perf)
+        return rc_census or rc_counts
+
+    if profile.name in {"desktop", "simulate"}:
+        if not args.input:
+            Console(use_color=not bool(args.no_color)).print_error(
+                f"measure --target {profile.name} needs --input <wav> (and a built binary)"
+            )
+            return 2
+        build_dir = perf.repo_root / "build"
+        binary = perf.resolve_target_binary(build_dir, profile.name)
+        args.binary = str(binary)
+        args.binary_cli_args = []
+        return run_single_bench(args, perf)
+
+    Console(use_color=not bool(args.no_color)).print_error(
+        f"target '{profile.name}' has no runnable instruments yet (all planned)"
+    )
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Spectral benchmark workflows.")
     add_dry_run_flag(parser, short="-d")
@@ -585,6 +973,130 @@ def build_parser() -> argparse.ArgumentParser:
     suite.add_argument("--skip-prefetch-sweep", action="store_true", help="Skip prefetch profile sweep")
     add_output_options(suite)
 
+    m7_census = sub.add_parser(
+        "m7-census",
+        help="Embedded M7: codegen instruction census [measured] + llvm-mca loop cycles [modeled]",
+    )
+    m7_census.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_census)
+
+    m7_validate = sub.add_parser(
+        "m7-mca-validate",
+        help="Embedded M7: validate the llvm-mca CortexM7Model against hand-derived "
+             "TRM + community-measured timings (P3 microbench set)",
+    )
+    m7_validate.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_validate)
+
+    m7_counts = sub.add_parser(
+        "m7-counts",
+        help="Embedded M7: dynamic instruction/byte counts under QEMU mps2-an500 [measured]",
+    )
+    m7_counts.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    m7_counts.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the duplicate run that asserts bit-identical counts",
+    )
+    add_output_options(m7_counts)
+
+    m7_baseline = sub.add_parser(
+        "m7-baseline",
+        help="Embedded M7: verify the live stack against the frozen performance "
+             "baseline + set-in-stone capacity ceilings; --generate re-signs it",
+    )
+    m7_baseline.add_argument("--generate", action="store_true",
+                             help="Freeze current live numbers as the baseline (deliberate act)")
+    m7_baseline.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_baseline)
+
+    m7_wcet = sub.add_parser(
+        "m7-wcet",
+        help="Embedded M7: parametric per-block WCET upper bound [modeled+measured] "
+             "composed from the validated stack (P5)",
+    )
+    m7_wcet.add_argument("--active", type=int, default=64, help="Worst-case active voices")
+    m7_wcet.add_argument("--scan-segments", type=int, default=1024,
+                         help="Worst-case segments scanned per block")
+    m7_wcet.add_argument("--block", type=int, default=256, help="Block size in samples")
+    m7_wcet.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_wcet)
+
+    deterministic = sub.add_parser(
+        "deterministic",
+        help="THE canonical determinism gate: does the device deterministically render the "
+             "voice target at its rated clock? (default 512 voices @ 480 MHz). PASS/FAIL.",
+    )
+    deterministic.add_argument("--voices", type=int, default=None,
+                               help="Voice target (default 512, the intelligibility target)")
+    deterministic.add_argument("--block", type=int, default=48,
+                               help="Block size in samples (default 48, the Daisy codec callback)")
+    deterministic.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(deterministic)
+
+    hotspots = sub.add_parser(
+        "hotspots",
+        help="Hottest functions and lines: per-PC instruction histogram (QEMU) mapped to "
+             "inlined function + source line via addr2line.",
+    )
+    hotspots.add_argument("--voices", type=int, default=None,
+                          help="Profile a sustained N-voice fixture (default: the stagger fixture)")
+    hotspots.add_argument("--top", type=int, default=20, help="How many hot functions/lines to show")
+    hotspots.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(hotspots)
+
+    saturation = sub.add_parser(
+        "saturation",
+        help="Modeled FPU/MAC/ALU/SIMD-DSP functional-unit saturation per kernel "
+             "(llvm-mca port pressure / iteration cycles; the M7 has no PMU).",
+    )
+    saturation.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(saturation)
+
+    m7_stalls = sub.add_parser(
+        "m7-stalls",
+        help="Embedded M7: memory-stall bounds [modeled] from the QEMU address trace "
+             "(P4 layer; constants calibrated from libDaisy-as-shipped + TRM + AN4891)",
+    )
+    m7_stalls.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(m7_stalls)
+
+    measure = sub.add_parser(
+        "measure",
+        help="Matrix-driven measurement: --list shows target×instrument availability; "
+             "--target runs every available instrument for one build target",
+    )
+    measure.add_argument("--list", action="store_true", help="Probe and show the measurement matrix")
+    measure.add_argument("--target", default=None, help="Measurement target (see --list)")
+    measure.add_argument("--build", action="store_true", help="Configure+build the target's cmake target first")
+    measure.add_argument("-i", "--input", default=None, help="WAV input (desktop/simulate targets)")
+    measure.add_argument("-n", "--runs", type=int, default=DEFAULT_BENCH_RUNS, help="Benchmark run count")
+    measure.add_argument("-m", "--mode", default=DEFAULT_BENCH_MODE,
+                         choices=[mode.value for mode in BenchMode], help="Benchmark mode")
+    measure.add_argument("-a", "--bench-args", default=DEFAULT_BENCH_ARGS,
+                         help="Binary args as a shell-quoted string")
+    measure.add_argument("-c", "--cache-dir", default=DEFAULT_CACHE_DIR, help="Cache directory for cache mode")
+    measure.add_argument("--reset-cache", action="store_true", help="Reset cache files before cache benchmark")
+    measure.add_argument("-P", "--perf", action="store_true", help="Collect Linux perf statistics (desktop)")
+    measure.add_argument("--perf-strategy", default=PerfStrategy.MARKERS.value,
+                         choices=[strategy.value for strategy in PerfStrategy], help="Perf profiling strategy")
+    measure.add_argument("--perf-events", default=DEFAULT_PERF_EVENTS, help="Comma-separated perf events list")
+    measure.add_argument("--perf-include-full", action="store_true",
+                         help="Include an extra full-pipeline perf run in matrix mode")
+    measure.add_argument("--perf-timeout-sec", type=int, default=DEFAULT_PERF_TIMEOUT_SEC,
+                         help="Timeout for each perf-instrumented run (0 disables timeout)")
+    measure.add_argument("--out-dir", default=None, help="Artifact dir for m7 instruments")
+    measure.add_argument("--no-verify", action="store_true",
+                         help="m7: skip the duplicate run that asserts bit-identical counts")
+    add_output_options(measure)
+
+    m7_bootstrap = sub.add_parser(
+        "m7-bootstrap",
+        help="Download + sha-verify the pinned newlib arm-none-eabi toolchain into tools/toolchains/",
+    )
+    m7_bootstrap.add_argument("--force", action="store_true", help="Re-download even if present")
+    add_output_options(m7_bootstrap)
+
     return parser
 
 
@@ -599,6 +1111,28 @@ def main(argv: list[str] | None = None) -> int:
         return run_single_bench(args, perf)
     if args.command == "suite":
         return run_suite(args, perf)
+    if args.command == "m7-census":
+        return run_m7_census(args, perf)
+    if args.command == "m7-mca-validate":
+        return run_m7_mca_validate(args, perf)
+    if args.command == "m7-counts":
+        return run_m7_counts(args, perf)
+    if args.command == "m7-stalls":
+        return run_m7_stalls(args, perf)
+    if args.command == "m7-wcet":
+        return run_m7_wcet(args, perf)
+    if args.command == "deterministic":
+        return run_deterministic(args, perf)
+    if args.command == "hotspots":
+        return run_hotspots(args, perf)
+    if args.command == "saturation":
+        return run_saturation(args, perf)
+    if args.command == "m7-baseline":
+        return run_m7_baseline(args, perf)
+    if args.command == "measure":
+        return run_measure(args, perf)
+    if args.command == "m7-bootstrap":
+        return run_m7_bootstrap(args, perf)
 
     parser.error(f"unsupported command: {args.command}")
     return 2

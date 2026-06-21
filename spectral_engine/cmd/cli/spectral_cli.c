@@ -3,6 +3,8 @@
  * Handles parsing for desktop, simulation, and restricted build modes.
  */
 #include "spectral_cli.h"
+#include "spectral_metal.h"
+#include "spectral_cuda.h"
 #include "spectral_synth.h"
 #include "spectral_utils.h"
 #include "spectral_log.h"
@@ -385,6 +387,9 @@ void spectral_cli_init(SpectralCliOptions* opts) {
     opts->db_thresh = SPECTRAL_DEFAULT_DB_THRESH;
     opts->n_threads = omp_get_max_threads();
     opts->backend = BACKEND_AUTO;
+    opts->osc_quality = SPECTRAL_OSC_QUALITY_NAIVE;
+    opts->osc_force_scalar = 0;   /* SIMD is the default CPU oscillator path */
+    opts->enable_q15 = 0;         /* float is the default compute domain */
     opts->processing_mask = SPECTRAL_PROC_NONE;
     opts->enable_cache = 0;
     opts->start_sec = 0.0f;
@@ -465,6 +470,35 @@ int spectral_cli_parse(SpectralCliOptions* opts, int argc, char** argv) {
             skip[i] = 1;
             continue;
         }
+        if (strcmp(argv[i], "--scalar") == 0) {
+            opts->osc_force_scalar = 1;   /* force the scalar reference oscillator */
+            skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--simd") == 0 || strcmp(argv[i], "-S") == 0) {
+            opts->osc_force_scalar = 0;   /* explicit affirmative of the SIMD default */
+            skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--q15") == 0) {
+            opts->enable_q15 = 1;   /* opt into the Q15 fixed-point compute domain */
+            skip[i] = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quality") == 0) {
+            if (i + 1 >= argc) {
+                cli_fail(opts, "Missing mode after -q/--quality");
+                goto fail;
+            }
+            if (!spectral_osc_quality_parse(argv[i + 1], &opts->osc_quality)) {
+                cli_fail(opts, "Invalid oscillator quality. Use naive|polyblep|additive|oversample (aliases blep/add/os) or 0..3");
+                goto fail;
+            }
+            skip[i] = 1;
+            skip[i + 1] = 1;
+            i++;
+            continue;
+        }
     }
 
     /* Use stack buffer if it fits, else heap-allocate */
@@ -538,6 +572,18 @@ int spectral_cli_validate(SpectralCliOptions* opts) {
         1, SPECTRAL_MIN_PITCH, SPECTRAL_MAX_PITCH);
     if (!cli_fail_common_validation(opts, common_validation)) {
         return 0;
+    }
+
+    /* Mirror spectral_config_validate(): every stretch consumer (synth dispatch,
+     * seg-cache, segment parser, gpu_tile) rejects stretch > SPECTRAL_MAX_STRETCH,
+     * so reject it at the CLI boundary too — otherwise an over-cap stretch passes
+     * validation, wastes the full analysis pass, then fails deep in synthesis. */
+    if (opts->stretch > SPECTRAL_MAX_STRETCH) {
+        char expected[CLI_VALUE_MESSAGE_MAX] = {0};
+        snprintf(expected, sizeof(expected), "finite float in (0, %.0f]",
+                 (double)SPECTRAL_MAX_STRETCH);
+        snprintf(actual, sizeof(actual), "%.6g", (double)opts->stretch);
+        return cli_fail_expected_actual(opts, "stretch", expected, actual);
     }
 
     if (!spectral_is_finite_f32(opts->start_sec)) {
@@ -636,12 +682,24 @@ void spectral_cli_print_usage(void) {
     SPECTRAL_LOG_INFO("  -w <file>  Use wavetable file (.spwt/.bin/.raw/.hex)");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("  -pm, --proc-mask <spec>  Processing chain mask (comma-separated names or integer bitmask)");
-    SPECTRAL_LOG_INFO("      Names: serra_smith_1990, johnston_1988, adaptive_track_density, reassigned,");
-    SPECTRAL_LOG_INFO("             hybrid_render, event_bucket, higher_order_interp, qnoise_shaping");
+    SPECTRAL_LOG_INFO("      Experimental (active only in a SPECTRAL_PRECISE_PHASE=1 build; fails loudly otherwise): adaptive_track_density");
+    SPECTRAL_LOG_INFO("      Reserved (parse but fail loudly until implemented): serra_smith_1990,");
+    SPECTRAL_LOG_INFO("             johnston_1988, reassigned, hybrid_render, event_bucket,");
+    SPECTRAL_LOG_INFO("             higher_order_interp, qnoise_shaping");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("      Special: none, default, all");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("  --cache                   Prewarm backend and cache analyzed segments for this input");
+    SPECTRAL_LOG_INFO("");
+    SPECTRAL_LOG_INFO("  -q, --quality <mode>      Anti-alias ('musical') oscillator quality (CPU float path)");
+    SPECTRAL_LOG_INFO("      Modes: naive (default), polyblep, additive, oversample (aliases: blep, add, os; 0..3)");
+    SPECTRAL_LOG_INFO("      Non-naive modes force the CPU backend; default is bit-identical to the point-sampled path");
+    SPECTRAL_LOG_INFO("");
+    SPECTRAL_LOG_INFO("  -S, --simd                CPU oscillator uses SIMD (default; ~1.8x on saw/square, <=1 ULP vs scalar)");
+    SPECTRAL_LOG_INFO("  --scalar                  Force the scalar reference oscillator (parity/debug)");
+    SPECTRAL_LOG_INFO("");
+    SPECTRAL_LOG_INFO("  --q15                     Opt into the Q15 fixed-point compute domain (CPU path; forces CPU backend)");
+    SPECTRAL_LOG_INFO("      Packed 8-wide SIMD Q15 on sine + saw/square/triangle/parabola (~1.3-1.6x over float-SIMD); scalar Q15 under --scalar");
     SPECTRAL_LOG_INFO("");
     SPECTRAL_LOG_INFO("Defaults: timbre=0 stretch=1.0 pitch=0 n_fft=%d hop=%d thresh=%.1f",
                       SPECTRAL_DEFAULT_N_FFT, SPECTRAL_DEFAULT_HOP, SPECTRAL_DEFAULT_DB_THRESH);
@@ -704,11 +762,6 @@ SpectralError spectral_config_validate(const SpectralConfigParams* cfg,
                                "n_threads %d out of range", cfg->n_threads);
     }
 #endif
-    
-    return SPECTRAL_OK;
-}
 
-int spectral_config_is_valid(const SpectralConfigParams* cfg)
-{
-    return spectral_config_validate(cfg, NULL, 0) == SPECTRAL_OK;
+    return SPECTRAL_OK;
 }

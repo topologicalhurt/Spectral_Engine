@@ -10,6 +10,7 @@
 #include "spectral_error.h"
 #include "spectral_backend.h"
 #include "spectral_processing_chain.h"
+#include "spectral_osc_bandlimited.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,9 @@ typedef struct SpectralCliOptions {
     float          db_thresh;
     int            n_threads;
     SynthBackend   backend;
+    SpectralOscQuality osc_quality;   /* anti-alias mode: naive (default)/polyblep/additive/oversample */
+    int            osc_force_scalar;  /* 1 = force scalar CPU oscillator; 0 (default) = SIMD where available */
+    int            enable_q15;        /* 1 = opt-in Q15 fixed-point compute domain (--q15); 0 (default) = float */
     SpectralProcessMask processing_mask;
     int            enable_cache;
     float          start_sec;
@@ -63,7 +67,6 @@ typedef struct SpectralConfigParams {
 
 SpectralError spectral_config_validate(const SpectralConfigParams* cfg,
                                        char* error_msg, size_t error_msg_size);
-int spectral_config_is_valid(const SpectralConfigParams* cfg);
 
 #ifdef __cplusplus
 }

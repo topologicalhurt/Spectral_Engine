@@ -1,10 +1,9 @@
 /* spectral_processing_chain.c - Optional segment processing mask pipeline */
 #include "spectral_processing_chain.h"
-#include "spectral_proc_serra_smith_1990.h"
-#include "spectral_proc_johnston_1988.h"
 #include "spectral_proc_adaptive_track_density.h"
+#include "spectral_utils.h"
+#include "spectral_log.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,23 +32,24 @@ static const ProcessMethod k_methods[] = {
     { SPECTRAL_PROC_QNOISE_SHAPING,       "qnoise_shaping" }
 };
 
+/* Stages with a REAL implementation. Every other named token parses (mask
+ * values stay stable) but has no stage: requesting one fails loudly below —
+ * a processing method that silently does nothing is worse than an error. */
 static const ProcessStage k_stages[] = {
-    { SPECTRAL_PROC_SERRA_SMITH_1990,      "serra_smith_1990",      spectral_proc_serra_smith_1990_apply },
-    { SPECTRAL_PROC_JOHNSTON_1988,         "johnston_1988",         spectral_proc_johnston_1988_apply },
     { SPECTRAL_PROC_ADAPTIVE_TRACK_DENSITY,"adaptive_track_density",spectral_proc_adaptive_track_density_apply }
 };
 
 void spectral_process_params_default(SpectralProcessParams* params) {
     if (!params) return;
-    params->deterministic_residual_db = -60.0f;
-    params->psychoacoustic_margin_db = 3.0f;
     params->adaptive_max_segments = 0;
     params->adaptive_keep_ratio = 1.0f;
+    params->hop = 0;
+    params->n_fft = 0;
 }
 
 static int token_equal_ci(const char* a, const char* b) {
     while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        if (spectral_ascii_tolower(*a) != spectral_ascii_tolower(*b)) return 0;
         a++;
         b++;
     }
@@ -126,9 +126,11 @@ int spectral_process_mask_parse(const char* spec, SpectralProcessMask* out_mask)
     }
 
     size_t n = strlen(spec);
-    char* buf = (char*)malloc(n + 1);
+    size_t buf_len = 0;
+    if (!spectral_size_add(n, 1u, &buf_len)) return 0;
+    char* buf = (char*)spectral_malloc_array(buf_len, sizeof(char));
     if (!buf) return 0;
-    memcpy(buf, spec, n + 1);
+    memcpy(buf, spec, buf_len);
 
     SpectralProcessMask mask = 0;
     int saw_none = 0;
@@ -189,6 +191,8 @@ void spectral_process_mask_to_string(SpectralProcessMask mask, char* out, size_t
 SpectralError spectral_process_chain_apply(
     SegmentArray* sa,
     int sample_rate,
+    int hop,
+    int n_fft,
     SpectralProcessMask mask,
     SpectralProcessReport* report)
 {
@@ -197,6 +201,8 @@ SpectralError spectral_process_chain_apply(
 
     SpectralProcessParams params;
     spectral_process_params_default(&params);
+    params.hop = hop;
+    params.n_fft = n_fft;
 
     SpectralProcessReport local = {0};
     local.requested = mask;
@@ -211,8 +217,13 @@ SpectralError spectral_process_chain_apply(
     local.pending = mask & ~local.applied;
 
     if (report) *report = local;
-#if SPECTRAL_PROCESS_STRICT
-    if (local.pending != SPECTRAL_PROC_NONE) return SPECTRAL_ERR_PARAM;
-#endif
+    if (local.pending != SPECTRAL_PROC_NONE) {
+        char pending_buf[192] = {0};
+        spectral_process_mask_to_string(local.pending, pending_buf,
+                                        sizeof(pending_buf));
+        SPECTRAL_LOG_ERROR_STDERR(
+            "Processing stage(s) not implemented: %s", pending_buf);
+        return SPECTRAL_ERR_PARAM;
+    }
     return SPECTRAL_OK;
 }

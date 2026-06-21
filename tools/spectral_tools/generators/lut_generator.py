@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
     __package__ = "spectral_tools.generators"  # noqa: A001
 
 from ..core.console import Console
-from ..core.utils import write_utf8_lf
+from ..core.utils import read_utf8_lf, write_utf8_lf
 
 DEFAULT_BITS = 12
 MIN_BITS = 6
@@ -84,7 +84,14 @@ def format_c_array(lut: list[int], bits: int) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate Q15 sine LUT for flash storage")
+    parser = argparse.ArgumentParser(description="Generate or verify the Q15 sine LUT for flash storage")
+    parser.add_argument(
+        "--mode",
+        choices=("generate", "verify"),
+        default="generate",
+        help="generate: (re)write the committed header. verify: fail if the committed "
+        "header is not byte-identical to what this generator produces (drift guard).",
+    )
     parser.add_argument(
         "--bits",
         type=int,
@@ -110,10 +117,23 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     output_path = args.output.resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    lut = generate_lut(args.bits)
-    write_utf8_lf(output_path, format_c_array(lut, args.bits))
+    content = format_c_array(generate_lut(args.bits), args.bits)
 
+    if args.mode == "verify":
+        if not output_path.exists():
+            console.print_error(f"{output_path} is missing; run --mode generate")
+            return 1
+        if read_utf8_lf(output_path) != content:
+            console.print_error(
+                f"{output_path} has DRIFTED from lut_generator.py "
+                f"({args.bits}-bit) -- regenerate via --mode generate"
+            )
+            return 1
+        print(f"Verified {output_path}: matches the {args.bits}-bit generator")
+        return 0
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_utf8_lf(output_path, content)
     size = 1 << args.bits
     mem_bytes = (size + 1) * 2  # q15_t = 2 bytes
     print(f"Generated {output_path}: {size + 1} entries, {mem_bytes} bytes")

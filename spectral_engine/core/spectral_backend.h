@@ -50,25 +50,15 @@ typedef struct SpectralBackendVTable {
 
 const SpectralBackendVTable* spectral_backend_vtable(SynthBackend backend);
 
-/* Backend capability query */
-typedef struct {
-    SynthBackend id;
-    const char*  name;
-    int          available;
-    int          max_timbre;
-    int          has_wavetable;
-    int          is_gpu;
-    int          is_parallel;
-    int          max_segments;
-    size_t       max_output_len;
-} SpectralBackendCaps;
+/* Release every compiled backend's cached resources (idempotent; the only
+ * teardown entry callers need — no per-backend build-flag sniffing). */
+void spectral_backend_cleanup_all(void);
 
 /* Backend queries */
 int spectral_backend_supports_timbre(SynthBackend backend, int timbre_id);
 int spectral_backend_max_timbre(SynthBackend backend);
 const char* spectral_backend_name(SynthBackend backend);
 int spectral_backend_supports_wavetable(SynthBackend backend);
-SpectralBackendCaps spectral_backend_get_caps(SynthBackend backend);
 SynthBackend spectral_backend_select_for_timbre(int timbre_id, int prefer_gpu);
 int spectral_backend_available(SynthBackend backend);
 

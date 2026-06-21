@@ -1,26 +1,21 @@
 # Shared host build configuration and target helper functions.
 
+# HOST profile flag list, assembled from the groups in profiles.cmake (the SSOT).
+# The host-embedded-sim and CUDA lists below assemble the same way.
 set(SPECTRAL_COMMON_COMPILE_OPTIONS
-    -O3
-    -Wall
-    -Wextra
+    ${SPECTRAL_FLAGS_O3}
+    ${SPECTRAL_FLAGS_WALL_WEXTRA}
     -Wno-unknown-pragmas
-    -funroll-loops
-    -ftree-vectorize
-    -fomit-frame-pointer)
+    ${SPECTRAL_FLAGS_HOST_VECTORIZE}
+    ${SPECTRAL_FLAGS_OMIT_FP})
 
+# Math precision is ONE knob: SPECTRAL_REPRO_BUILD ON => bit-reproducible (no fast-math,
+# no native ISA); OFF => the host fast-math + native-ISA groups (the default speed path).
 if(NOT SPECTRAL_REPRO_BUILD)
+    spectral_profile_host_native_isa(_spectral_host_isa)
     list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-        -ffast-math
-        -fno-signed-zeros
-        -fno-trapping-math
-        -fassociative-math
-        -freciprocal-math
-        -ffp-contract=fast
-        -march=native
-        -mtune=native
-        -mavx2
-        -mno-avx512f)
+        ${SPECTRAL_FLAGS_HOST_FASTMATH}
+        ${_spectral_host_isa})
 endif()
 
 set(SPECTRAL_COMMON_LINK_OPTIONS)
@@ -48,12 +43,7 @@ if(APPLE)
         message(WARNING "libsndfile not found at ${SNDFILE_PREFIX}. Install with: brew install libsndfile")
     endif()
 
-    list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-        -flto=thin
-        -fvectorize
-        -fslp-vectorize
-        -Xpreprocessor
-        -fopenmp)
+    list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS ${SPECTRAL_FLAGS_APPLE_HOST_EXTRA})
     list(APPEND SPECTRAL_COMMON_LINK_OPTIONS -flto=thin)
     list(APPEND SPECTRAL_PLATFORM_INCLUDE_DIRS
         "${OMP_PREFIX}/include"
@@ -69,6 +59,10 @@ if(APPLE)
         set(SPECTRAL_SNDFILE_LIB sndfile)
     endif()
 
+    # REQUIRED at configure time is deliberate: the desktop target (which
+    # links all three) is unconditionally defined on Apple, and every macOS
+    # SDK ships these frameworks — a miss means a broken SDK, best surfaced
+    # at configure, not at link.
     find_library(SPECTRAL_ACCELERATE_FRAMEWORK Accelerate REQUIRED)
     find_library(SPECTRAL_METAL_FRAMEWORK Metal REQUIRED)
     find_library(SPECTRAL_FOUNDATION_FRAMEWORK Foundation REQUIRED)
@@ -88,10 +82,7 @@ else()
     find_package(OpenMP REQUIRED)
 
     list(APPEND SPECTRAL_COMMON_COMPILE_OPTIONS
-        -flto=auto
-        -floop-nest-optimize
-        -fgraphite-identity
-        -fipa-pta
+        ${SPECTRAL_FLAGS_LINUX_HOST_EXTRA}
         ${OpenMP_C_FLAGS})
     list(APPEND SPECTRAL_COMMON_LINK_OPTIONS -flto=auto ${OpenMP_C_FLAGS})
 
@@ -130,25 +121,20 @@ elseif(SPECTRAL_PGO STREQUAL "use")
     endif()
 endif()
 
-set(SPECTRAL_CUDA_COMPILE_OPTIONS
-    -O3
-    --use_fast_math
-    --fmad=true
-    -Xcompiler=-fPIC
-    -Xcompiler=-ffast-math
-    -Xcompiler=-funroll-loops
-    -Xcompiler=-fno-lto)
+# CUDA profile (groups in profiles.cmake).
+set(SPECTRAL_CUDA_COMPILE_OPTIONS ${SPECTRAL_FLAGS_CUDA})
 
+# Host-embedded SIMULATION profile (the desktop mirror of the firmware): same EMBEDDED
+# philosophy (section GC + minimal) but built with the host toolchain. Shares the
+# SPECTRAL_REPRO_BUILD math knob with the host profile.
 set(SPECTRAL_EMBEDDED_COMPILE_OPTIONS
-    -O3
-    -Wall
-    -Wextra
+    ${SPECTRAL_FLAGS_O3}
+    ${SPECTRAL_FLAGS_WALL_WEXTRA}
     -Wno-unknown-pragmas
-    -fdata-sections
-    -ffunction-sections
-    -fomit-frame-pointer)
+    ${SPECTRAL_FLAGS_SECTION_GC}
+    ${SPECTRAL_FLAGS_OMIT_FP})
 if(NOT SPECTRAL_REPRO_BUILD)
-    list(APPEND SPECTRAL_EMBEDDED_COMPILE_OPTIONS -ffast-math -funsafe-math-optimizations)
+    list(APPEND SPECTRAL_EMBEDDED_COMPILE_OPTIONS ${SPECTRAL_FLAGS_EMBEDDED_FASTMATH})
 endif()
 
 function(spectral_apply_common_target target_name)

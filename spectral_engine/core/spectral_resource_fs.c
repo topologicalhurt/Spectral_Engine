@@ -23,8 +23,10 @@ static inline char spectral_hex_nibble(unsigned n)
 }
 
 /* ---------------------------------------------------------------------------
- * Path canonicalization — must match compress_path() in
- * tools/spectral_tools/generators/resource_hashes.py.
+ * Path canonicalization — the single source of truth. compress_path() in
+ * tools/spectral_tools/generators/resource_hashes.py calls this function through
+ * the ctypes bridge (native_bridge.py), so byte-parity is structural, not
+ * hand-maintained.
  *
  * Five transforms in order:
  *   (1) Lowercase
@@ -41,13 +43,10 @@ static inline char spectral_hex_nibble(unsigned n)
  *       token: \x01 <byte> <hi_nibble_hex> <lo_nibble_hex> (lowercase hex).
  *       Runs > 255 are split into chained tokens; single chars pass through.
  *
- * Both sides must produce the identical byte sequence or embedded ID lookups
- * will silently fail.  Any change here must be reflected in compress_path().
+ * Because the Python side computes the forward canonical form through this same C
+ * code, the two cannot diverge; a change here is automatically the change on both
+ * sides. (Python keeps an independent reverse decoder for its own self-check only.)
  * ---------------------------------------------------------------------------*/
-
-/* Worst-case RLE expansion is 2x (a run-of-2 encodes as 4 bytes).
- * A 512-byte normalized path produces at most a 1024-byte canonical form. */
-#define SPECTRAL_CANONICAL_PATH_SIZE 1024u
 
 /* Phase 1+2+3: lowercase, strip controls, normalize separators into scratch[]. */
 static size_t spectral_path_p1(const char* path, char* scratch, size_t sz)

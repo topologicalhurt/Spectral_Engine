@@ -1,2 +1,0 @@
-https://github.com/simd-everywhere/simde, third_party/simde, master
-https://github.com/Cyan4973/xxHash, third_party/xxHash, dev

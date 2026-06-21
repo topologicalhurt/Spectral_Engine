@@ -11,8 +11,9 @@
 #include <string.h>
 
 #include "spectral_config.h"
-#include "spectral_q15.h"
+#include "spectral_q.h"
 #include "spectral_segment_parser.h"
+#include "spectral_endian.h"
 #include "spectral_common.h"
 #include "spectral_log.h"
 #include "spectral_utils.h"
@@ -33,7 +34,7 @@ typedef struct ConvertStats {
     uint32_t invalid_bounds;
     uint32_t invalid_fields;
     uint32_t end_saturated;
-    uint32_t high_freq;
+    uint32_t high_omega;
 } ConvertStats;
 
 static size_t default_pool_max_segments(void) {
@@ -92,6 +93,10 @@ static int load_and_validate_header(FILE* fin, SegmentFileHeader* header) {
         SPECTRAL_LOG_ERROR_STDERR("Error: invalid format (expected %s)", SEGMENT_FILE_MAGIC);
         return 0;
     }
+    /* The .bin (SPEC) format is stored little-endian; convert the header to
+     * native order before validating its fields (magic is endian-independent).
+     * No-op on little-endian hosts. */
+    spectral_segment_file_header_swap_le(header);
     if (header->version != SEGMENT_FILE_VERSION) {
         SPECTRAL_LOG_ERROR_STDERR("Error: unsupported segment version %u (expected %u)",
                                   header->version, (unsigned)SEGMENT_FILE_VERSION);
@@ -271,6 +276,8 @@ int main(int argc, char** argv) {
     }
     if ((size_t)requested_count > opts.pool_max_segments) {
         SPECTRAL_LOG_WARN("Warning: truncating to %zu (pool limit)", opts.pool_max_segments);
+        /* Safe narrowing: this branch only runs when pool_max_segments < requested_count,
+         * and requested_count is uint32_t, so pool_max_segments < UINT32_MAX here. */
         requested_count = (uint32_t)opts.pool_max_segments;
     }
 
@@ -295,6 +302,14 @@ int main(int argc, char** argv) {
                 SPECTRAL_LOG_WARN("Warning: read %zu of %u segments", read_count, requested_count);
             }
             stats.output_count = (uint32_t)read_count;
+
+            /* Segments are stored little-endian on disk; convert to native order
+             * before reading their float fields. No-op on little-endian hosts. */
+            if (spectral_is_big_endian()) {
+                for (size_t i = 0; i < read_count; i++) {
+                    spectral_segment_swap_endian(&float_segs[i]);
+                }
+            }
         }
     }
 
@@ -305,7 +320,7 @@ int main(int argc, char** argv) {
         const Segment* src = &float_segs[i];
         SpectralSegmentQ15* dst = &q15_segs[i];
         uint32_t seg_end;
-        float omega, phase, amp, da, df;
+        float omega, phase, amp, da;
 
         dst->start = clamp_start_sample(src->start, &stats);
         dst->length = clamp_length_sample(src->length, &stats);
@@ -321,16 +336,19 @@ int main(int argc, char** argv) {
         omega = sanitize_clamped_field(src->omega, -INFINITY, INFINITY, 0.0f, &stats);
         phase = sanitize_clamped_field(src->phase, -INFINITY, INFINITY, 0.0f, &stats);
         amp = sanitize_clamped_field(src->amp, -1.0f, 1.0f, 0.0f, &stats);
-        da = sanitize_clamped_field(src->da / SPECTRAL_MILLIS_PER_SECOND_F, -1.0f, 1.0f, 0.0f, &stats);
+        /* da/df are PER-SAMPLE end to end (analysis writes (next-amp)*inv_hop,
+         * the kernel applies amp_q15 + da_q15*offset per sample): encode them
+         * unscaled. The units are pinned by the convert_segments_units test. */
+        da = sanitize_clamped_field(src->da, -1.0f, 1.0f, 0.0f, &stats);
 
-        if (omega > 255.0f) stats.high_freq++;
+        if (omega > 255.0f) stats.high_omega++;
         dst->freq_q88 = OMEGA_TO_Q88(omega);
         dst->phase_q15 = PHASE_RAD_TO_Q15(phase);
         dst->amp_q15 = FLOAT_TO_Q15(amp);
         dst->da_q15 = FLOAT_TO_Q15(da);
 
 #if SPECTRAL_HAS_CHIRP
-        df = sanitize_clamped_field(src->df / SPECTRAL_MILLIS_PER_SECOND_F, -1.0f, 1.0f, 0.0f, &stats);
+        float df = sanitize_clamped_field(src->df, -1.0f, 1.0f, 0.0f, &stats);
         dst->df_q15 = FLOAT_TO_Q15(df);
 #endif
     }
@@ -348,8 +366,8 @@ int main(int argc, char** argv) {
     if (stats.end_saturated) {
         SPECTRAL_LOG_INFO("  %u segments had end overflow (saturated)", stats.end_saturated);
     }
-    if (stats.high_freq) {
-        SPECTRAL_LOG_INFO("  %u segments freq > 255 Hz (encoded /4)", stats.high_freq);
+    if (stats.high_omega) {
+        SPECTRAL_LOG_INFO("  %u segments omega > 255 rad/sample (pre-scaled /4 for Q8.8)", stats.high_omega);
     }
 #if !SPECTRAL_HAS_CHIRP
     SPECTRAL_LOG_INFO("  Note: df (chirp) values ignored in compact mode");

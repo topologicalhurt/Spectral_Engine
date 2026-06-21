@@ -1,5 +1,12 @@
 # Canonical source manifest for Spectral engine modules.
 #
+# Path-selection mechanism (when to add a _HOST/_EMBEDDED file pair here vs. a whole-file #if vs.
+# an in-body capability #if): see AI_CANON #20 (docs/core_audit/reference/AI_CANON.md), with the full
+# verified census in docs/core_audit/archive/ARCH_PATH_SELECTION.md. Rule of thumb — mutually-exclusive
+# port bodies chosen by a PROFILE decision (host vs embedded) belong here as a CMake file-selected pair
+# with zero in-body profile #if; a platform-resolved capability that must co-link for a parity test
+# (e.g. the iFFT vDSP/ref pair) stays a whole-file self-#if instead.
+#
 # Required input:
 #   SPECTRAL_ENGINE_ROOT - absolute or relative path to spectral_engine/
 
@@ -11,26 +18,25 @@ get_filename_component(SPECTRAL_ENGINE_ROOT "${SPECTRAL_ENGINE_ROOT}" ABSOLUTE)
 get_filename_component(SPECTRAL_MANIFEST_REPO_ROOT "${SPECTRAL_ENGINE_ROOT}/.." ABSOLUTE)
 
 set(SPECTRAL_CORE_DIR "${SPECTRAL_ENGINE_ROOT}/core")
+set(SPECTRAL_ARCH_REF_DIR "${SPECTRAL_ENGINE_ROOT}/arch/ref")
+set(SPECTRAL_ARCH_ARM_DIR "${SPECTRAL_ENGINE_ROOT}/arch/arm")
+set(SPECTRAL_ARCH_SIMD_DIR "${SPECTRAL_ENGINE_ROOT}/arch/simd")
+set(SPECTRAL_DRIVERS_VDSP_DIR "${SPECTRAL_ENGINE_ROOT}/drivers/vdsp")
 set(SPECTRAL_CMD_DIR "${SPECTRAL_ENGINE_ROOT}/cmd")
 set(SPECTRAL_CMD_CLI_DIR "${SPECTRAL_ENGINE_ROOT}/cmd/cli")
 set(SPECTRAL_ANALYSIS_DIR "${SPECTRAL_ENGINE_ROOT}/analysis")
 set(SPECTRAL_RUNTIME_DIR "${SPECTRAL_ENGINE_ROOT}/runtime")
-set(SPECTRAL_SYNTH_API_DIR "${SPECTRAL_ENGINE_ROOT}/synth/api")
-set(SPECTRAL_SYNTH_BACKEND_CPU_DIR "${SPECTRAL_ENGINE_ROOT}/synth/backends/cpu")
-set(SPECTRAL_SYNTH_BACKEND_ARM_DIR "${SPECTRAL_ENGINE_ROOT}/synth/backends/arm")
-set(SPECTRAL_SYNTH_BACKEND_SIM_DIR "${SPECTRAL_ENGINE_ROOT}/synth/backends/sim")
-set(SPECTRAL_SYNTH_BACKEND_GPU_CUDA_DIR "${SPECTRAL_ENGINE_ROOT}/synth/backends/gpu/cuda")
-set(SPECTRAL_SYNTH_BACKEND_GPU_METAL_DIR "${SPECTRAL_ENGINE_ROOT}/synth/backends/gpu/metal")
-set(SPECTRAL_SYNTH_MATH_DIR "${SPECTRAL_ENGINE_ROOT}/synth/math")
+set(SPECTRAL_DRIVERS_CUDA_DIR "${SPECTRAL_ENGINE_ROOT}/drivers/cuda")
+set(SPECTRAL_DRIVERS_METAL_DIR "${SPECTRAL_ENGINE_ROOT}/drivers/metal")
 
 set(SPECTRAL_SOURCE_ENTRY_MAIN "${SPECTRAL_CMD_CLI_DIR}/main.c")
 set(SPECTRAL_SOURCE_CONVERT_SEGMENTS_ENTRY "${SPECTRAL_CMD_DIR}/convert_segments.c")
 
 set(SPECTRAL_SOURCES_CORE
-    "${SPECTRAL_CORE_DIR}/spectral_segment_math.c"
-    "${SPECTRAL_CORE_DIR}/oscillator.c"
-    "${SPECTRAL_CORE_DIR}/oscillator_simd.c"
+    "${SPECTRAL_CORE_DIR}/spectral_oscillator.c"
+    "${SPECTRAL_CORE_DIR}/spectral_osc_bandlimited.c"
     "${SPECTRAL_CORE_DIR}/spectral_backend.c"
+    "${SPECTRAL_CORE_DIR}/spectral_renderer.c"
     "${SPECTRAL_CORE_DIR}/spectral_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_common.c"
     "${SPECTRAL_CORE_DIR}/spectral_envelope.c"
@@ -44,13 +50,56 @@ set(SPECTRAL_SOURCES_CORE
     "${SPECTRAL_CORE_DIR}/spectral_resource_fs.c"
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache.c"
     "${SPECTRAL_CORE_DIR}/spectral_seg_cache_fs.c"
-    "${SPECTRAL_CORE_DIR}/spectral_segment_mt.c"
     "${SPECTRAL_CORE_DIR}/spectral_segment_parser.c"
-    "${SPECTRAL_CORE_DIR}/spectral_segment_pool.c"
     "${SPECTRAL_CORE_DIR}/spectral_synth_internal.c"
-    "${SPECTRAL_CORE_DIR}/spectral_vector_ops.c"
     "${SPECTRAL_CORE_DIR}/spectral_wavetable.c"
     "${SPECTRAL_CORE_DIR}/spectral_windows.c")
+
+# Per-profile SIMD oscillator implementation. The device-agnostic dispatch state
+# lives in core/spectral_oscillator.c; the SIMD segment bodies are build-selected here
+# behind spectral_oscillator_dispatch.h.
+# Every current target is a host (SIMDe) build, so each picks the HOST set; the
+# CMSIS-DSP body is selected only by a real Cortex-M cross-build.
+set(SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST
+    "${SPECTRAL_ARCH_SIMD_DIR}/spectral_oscillator_simd.c")
+set(SPECTRAL_SOURCES_CORE_OSC_SIMD_EMBEDDED
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_oscillator_cmsis.c")
+
+# Per-profile SIMD vector ops (Phase E port-layer split). The host (SIMDe) impl is
+# build-selected onto every host/simulation target — exactly where the former in-file
+# guard (!EMBEDDED || EMBEDDED_SIM) && !CMSIS evaluated true. All current targets are
+# host or simulation builds (the embedded_arm* targets compile with SPECTRAL_EMBEDDED_
+# SIMULATION, i.e. SPECTRAL_IS_EMBEDDED_SIM), so this set rides with the host CLI stack
+# and desktop, mirroring SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST. A real bare-metal Cortex-M
+# CMSIS vector-ops impl, when it exists, would live alongside as the EMBEDDED set; until
+# then CMSIS callers take scalar fallbacks gated by spectral_vector_ops.h.
+set(SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST
+    "${SPECTRAL_ARCH_SIMD_DIR}/spectral_vector_ops.c")
+
+# Per-profile audio-output kernels (Phase E port-layer split): the float
+# normalization + Q15 stereo bodies that formerly diverged by #if inside
+# core/spectral_out.c. Host (SIMDe / scalar) rides with the host CLI stack +
+# desktop, exactly like the other host port files; the bare-metal Cortex-M
+# (scalar / CMSIS / M7-DSP) counterpart is build-selectable but not compiled by
+# any current target (no green target builds spectral_out.c on real hardware).
+set(SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST
+    "${SPECTRAL_ARCH_SIMD_DIR}/spectral_out_kernels.c")
+set(SPECTRAL_SOURCES_CORE_OUT_KERNELS_EMBEDDED
+    "${SPECTRAL_ARCH_REF_DIR}/spectral_out_kernels.c")
+
+# Per-profile GPU tile preprocessing (Phase E port-layer split): the segment->tile
+# mapping for Metal/CUDA dispatch that formerly lived behind #if !SPECTRAL_EMBEDDED
+# && !SPECTRAL_RESTRICTED_MODE inside core/spectral_synth_internal.c. Unlike the
+# other port files, the profile split here is host-only-capability, not host-vs-sim:
+# the real implementation rides ONLY with desktop (the sole target where the former
+# guard evaluated true — every simulation/embedded target defines SPECTRAL_EMBEDDED
+# and took the #else BACKEND_UNAVAIL arm). The embedded set is the stub returning
+# SPECTRAL_ERR_BACKEND_UNAVAIL and rides with the host CLI stack, covering every
+# non-desktop target that compiles spectral_synth_internal.c.
+set(SPECTRAL_SOURCES_CORE_GPU_TILE_HOST
+    "${SPECTRAL_ARCH_SIMD_DIR}/spectral_gpu_tile.c")
+set(SPECTRAL_SOURCES_CORE_GPU_TILE_EMBEDDED
+    "${SPECTRAL_ARCH_REF_DIR}/spectral_gpu_tile.c")
 
 set(SPECTRAL_SOURCES_RUNTIME
     "${SPECTRAL_RUNTIME_DIR}/spectral_utils.c"
@@ -60,20 +109,19 @@ set(SPECTRAL_SOURCES_MONITORING
     "${SPECTRAL_RUNTIME_DIR}/spectral_perf.c")
 
 set(SPECTRAL_SOURCES_RUNTIME_PERF_MODEL
-    "${SPECTRAL_RUNTIME_DIR}/spectral_perf_embedded.c"
-    "${SPECTRAL_RUNTIME_DIR}/spectral_perf_model.c")
+    "${SPECTRAL_RUNTIME_DIR}/spectral_perf_embedded.c")
 
 set(SPECTRAL_SOURCES_ANALYSIS_PROC
     "${SPECTRAL_ANALYSIS_DIR}/spectral_processing_chain.c"
-    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_adaptive_track_density.c"
-    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_johnston_1988.c"
-    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_serra_smith_1990.c")
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_proc_adaptive_track_density.c")
 
 set(SPECTRAL_SOURCES_ANALYSIS
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_fft.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_full.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_analysis_fused.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_model.c"
+    "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_estimator.c"
     "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_interp.c"
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
     "${SPECTRAL_ANALYSIS_DIR}/spectral_peak_track.c")
@@ -83,25 +131,33 @@ set(SPECTRAL_SOURCES_CLI
     "${SPECTRAL_CMD_CLI_DIR}/spectral_cli_pipeline.c"
     ${SPECTRAL_SOURCES_RUNTIME})
 
-set(SPECTRAL_SOURCES_SYNTH_CPU "${SPECTRAL_SYNTH_BACKEND_CPU_DIR}/spectral_synth_cpu.c")
+set(SPECTRAL_SOURCES_SYNTH_CPU "${SPECTRAL_CORE_DIR}/spectral_synth_cpu.c")
 set(SPECTRAL_SOURCES_SYNTH_EMBEDDED
-    "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_synth_arm32.c"
-    "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_debug_embedded_arm.c"
-    "${SPECTRAL_SYNTH_MATH_DIR}/spectral_q15.c")
-set(SPECTRAL_SOURCES_SYNTH_SIMULATION "${SPECTRAL_SYNTH_BACKEND_SIM_DIR}/spectral_synth_simulation.c")
-set(SPECTRAL_SOURCES_SYNTH_METAL "${SPECTRAL_SYNTH_BACKEND_GPU_METAL_DIR}/spectral_synth_metal.m")
-set(SPECTRAL_SOURCES_SYNTH_CUDA "${SPECTRAL_SYNTH_BACKEND_GPU_CUDA_DIR}/spectral_synth_cuda.cu")
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_arm32.c"
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_debug_embedded_arm.c"
+    "${SPECTRAL_CORE_DIR}/spectral_q.c")
+set(SPECTRAL_SOURCES_SYNTH_SIMULATION
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_simulation.c"
+    "${SPECTRAL_CORE_DIR}/spectral_segment_convert.c")
+set(SPECTRAL_SOURCES_SYNTH_METAL
+    "${SPECTRAL_DRIVERS_METAL_DIR}/spectral_synth_metal.m"
+    "${SPECTRAL_DRIVERS_METAL_DIR}/spectral_osc_metal_payload.c")
+set(SPECTRAL_SOURCES_SYNTH_CUDA "${SPECTRAL_DRIVERS_CUDA_DIR}/spectral_synth_cuda.cu")
 
 set(SPECTRAL_SOURCES_DAISY_ENGINE
-    "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_synth_arm32.c"
-    "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}/spectral_debug_embedded_arm.c"
-    "${SPECTRAL_SYNTH_MATH_DIR}/spectral_q15.c"
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_synth_arm32.c"
+    "${SPECTRAL_ARCH_ARM_DIR}/spectral_debug_embedded_arm.c"
+    "${SPECTRAL_CORE_DIR}/spectral_q.c"
     "${SPECTRAL_CORE_DIR}/spectral_wavetable.c")
 
 set(SPECTRAL_SOURCES_HOST_CLI_STACK
     ${SPECTRAL_SOURCE_ENTRY_MAIN}
     ${SPECTRAL_SOURCES_CLI}
-    ${SPECTRAL_SOURCES_CORE})
+    ${SPECTRAL_SOURCES_CORE}
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
+    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
+    ${SPECTRAL_SOURCES_CORE_GPU_TILE_EMBEDDED})
 
 set(SPECTRAL_SOURCES_HOST_Q15_STACK
     ${SPECTRAL_SOURCES_ANALYSIS_PROC}
@@ -120,6 +176,10 @@ set(SPECTRAL_SOURCES_TARGET_DESKTOP
     ${SPECTRAL_SOURCES_ANALYSIS}
     ${SPECTRAL_SOURCES_SYNTH_CPU}
     ${SPECTRAL_SOURCES_CORE}
+    ${SPECTRAL_SOURCES_CORE_OSC_SIMD_HOST}
+    ${SPECTRAL_SOURCES_CORE_VECTOR_OPS_HOST}
+    ${SPECTRAL_SOURCES_CORE_OUT_KERNELS_HOST}
+    ${SPECTRAL_SOURCES_CORE_GPU_TILE_HOST}
     ${SPECTRAL_SOURCES_MONITORING})
 
 set(SPECTRAL_SOURCES_TARGET_SIMULATE
@@ -144,9 +204,9 @@ set(SPECTRAL_ENGINE_INCLUDE_DIRS
     "${SPECTRAL_CMD_CLI_DIR}"
     "${SPECTRAL_ANALYSIS_DIR}"
     "${SPECTRAL_RUNTIME_DIR}"
-    "${SPECTRAL_SYNTH_API_DIR}"
-    "${SPECTRAL_SYNTH_BACKEND_ARM_DIR}"
-    "${SPECTRAL_SYNTH_MATH_DIR}")
+    "${SPECTRAL_ARCH_ARM_DIR}"
+    "${SPECTRAL_DRIVERS_METAL_DIR}"
+    "${SPECTRAL_DRIVERS_CUDA_DIR}")
 
 set(SPECTRAL_SIMDE_INCLUDE_DIR  "${SPECTRAL_MANIFEST_REPO_ROOT}/third_party/simde")
 set(SPECTRAL_XXHASH_INCLUDE_DIR "${SPECTRAL_MANIFEST_REPO_ROOT}/third_party/xxHash")

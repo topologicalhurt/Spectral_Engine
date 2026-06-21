@@ -25,6 +25,9 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
 
 set(SPECTRAL_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 get_filename_component(SPECTRAL_REPO_ROOT "${SPECTRAL_ENGINE_ROOT}/.." ABSOLUTE)
+# options.cmake includes profiles.cmake (the build-flag SSOT) first, so the
+# SPECTRAL_FLAGS_* groups are available to host-config.cmake and daisy-config.cmake
+# in BOTH this host configure and the Daisy-firmware sub-configure.
 include("${SPECTRAL_ENGINE_ROOT}/cmake/options.cmake")
 
 if(SPECTRAL_DEBUG_LOGGING)
@@ -131,52 +134,22 @@ set(SPECTRAL_SIMULATION_DEFINES
 
 set(SPECTRAL_SIMULATION_DAISY_DEFINES
     ${SPECTRAL_SIMULATION_DEFINES}
+    SPECTRAL_RESTRICTED_MODE=1)
+
+# Extra defines layered on top of SPECTRAL_SIMULATION_DEFINES for the embedded
+# host variants (see cmake/targets/embedded.cmake). SPECTRAL_EMBEDDED_FLOAT is a
+# RESERVED gate -- no code branches on it yet, so embedded_arm_float currently
+# builds identically to embedded_arm (the -D is plumbed ahead of the float
+# synthesis path that will consume it). The restricted defines DO change linkage:
+# embedded_arm_restricted would otherwise pull in analyze_audio and perf_* that
+# RESTRICTED_MODE/NO_PERF guard out, and fail to link.
+set(SPECTRAL_EMBEDDED_FLOAT_DEFINES
+    SPECTRAL_EMBEDDED_FLOAT=1)
+
+set(SPECTRAL_EMBEDDED_RESTRICTED_DEFINES
     SPECTRAL_RESTRICTED_MODE=1
-    SPECTRAL_SIMULATION_TARGET_DAISY=1)
+    SPECTRAL_NO_PERF=1)
 
-# --- CACHE HEURISTICS ---
-set(L3_SIZE_KB 0)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
-    execute_process(
-        COMMAND sh -c "cat /sys/devices/system/cpu/cpu0/cache/index3/size 2>/dev/null | sed 's/K//'"
-        OUTPUT_VARIABLE L3_SYSFS_OUT
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(L3_SYSFS_OUT MATCHES "^[0-9]+$")
-        set(L3_SIZE_KB ${L3_SYSFS_OUT})
-    endif()
-elseif(APPLE)
-    execute_process(
-        COMMAND sysctl -n hw.l3cachesize
-        OUTPUT_VARIABLE L3_SYSCTL_OUT
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(L3_SYSCTL_OUT MATCHES "^[0-9]+$")
-        # hw.l3cachesize is in bytes
-        math(EXPR L3_SIZE_KB "${L3_SYSCTL_OUT} / 1024")
-    endif()
-endif()
-
-set(COMPUTED_STFT_CHUNK_FRAMES 512)
-if(L3_SIZE_KB GREATER 0)
-    # L3_SIZE_KB is e.g. 16384 (16MB). Target 50% of L3 cache to avoid thrashing, divided by 4 threads.
-    # 50% of L3 (KB) = L3_SIZE_KB / 2. Per thread = L3_SIZE_KB / 8.
-    # For a 4096 FFT, 2049 bins * 8 bytes (magsq+phase) = ~16 KB per frame.
-    # frames = (L3_SIZE_KB / 8) / 16 = L3_SIZE_KB / 128
-    math(EXPR COMPUTED_STFT_CHUNK_FRAMES "${L3_SIZE_KB} / 128")
-endif()
-
-# Clamp bounds (64 to 4096)
-if(COMPUTED_STFT_CHUNK_FRAMES LESS 64)
-    set(COMPUTED_STFT_CHUNK_FRAMES 64)
-elseif(COMPUTED_STFT_CHUNK_FRAMES GREATER 4096)
-    set(COMPUTED_STFT_CHUNK_FRAMES 4096)
-endif()
-
-add_compile_definitions(SPECTRAL_STFT_CHUNK_FRAMES=${COMPUTED_STFT_CHUNK_FRAMES})
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/host-config.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/desktop.cmake")
@@ -186,6 +159,112 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/cuda.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/convert-segments.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/utilities.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/metal-osc-codegen.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/lut-codegen.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/arm-core-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/arm-admission-cap-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/core-contracts-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/core-guarantees-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-width-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q-domain-contract-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-backend-contract-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q-ladder-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-compute-precision-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-production-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-simd-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-throughput-bench.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/q15-pack8-bench.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/metal-q15pack-bench.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/ifft-synth-bench.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/phase-nco-precision-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-recursive-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-sin-init-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/proc-mask-honesty-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/resource-path-canonical-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/full-fused-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/error-origin-logs-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/renderer-dispatch-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/wavetable-harmonics-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/wavetable-render-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/filter-envelope-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/subtractive-filter-render-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/synth-hybrid-wavetable-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/kernel-api-freeze-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-formulas-domain-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/window-backend-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/peak-interp-parabolic-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-endian-roundtrip-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-payload-bounds-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/ifft-synth-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/synth-hybrid-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/wavetable-q15-load-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/osc-bandlimited-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/segment-q15-convert-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/simulate-smoke-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/gpu-backend-parity-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/daisy-config-layout-test.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/convert-segments-units-test.cmake")
+
+# Test/bench targets that compile core/spectral_oscillator.c also #include the generated
+# spectral_osc_metal_generated.h. They are defined AFTER metal-osc-codegen.cmake,
+# so its own foreach (over the main build targets) cannot reach them — without
+# this, a parallel `tests_all` can compile spectral_oscillator.c while the codegen custom
+# command is mid-regeneration of the header into the source tree (a known flake).
+# Gate each on generate_metal_osc so the header is present before they compile.
+foreach(_spectral_osc_test_target
+        osc_parity_test osc_width_parity_test
+        q15_production_parity_test q15_simd_parity_test
+        full_fused_parity_test error_origin_logs_test kernel_api_freeze_test
+        bench_q15_pack8 bench_q15_throughput)
+    if(TARGET ${_spectral_osc_test_target})
+        add_dependencies(${_spectral_osc_test_target} generate_metal_osc)
+    endif()
+endforeach()
+
+# Build every compiled CTest executable at once. All test exes are
+# EXCLUDE_FROM_ALL, so a plain build skips them; CI uses this before ctest.
+# The cmake -P source-scan tests (q_domain_contract, osc_backend_contract) need
+# no build. Usage: cmake --build build --target tests_all && ctest --test-dir build
+add_custom_target(tests_all)
+add_dependencies(tests_all
+    simulate
+    arm_core_test
+    core_contracts_test
+    core_guarantees_test
+    core_guarantees_drift_test
+    osc_parity_test
+    osc_width_parity_test
+    q_ladder_parity_test
+    q15_compute_precision_test
+    q15_production_parity_test
+    q15_simd_parity_test
+    phase_nco_precision_test
+    osc_recursive_test
+    osc_sin_init_parity_test
+    proc_mask_honesty_test
+    resource_path_canonical_test
+    full_fused_parity_test
+    error_origin_logs_test
+    renderer_dispatch_test
+    wavetable_harmonics_test
+    wavetable_render_parity_test
+    filter_envelope_test
+    subtractive_filter_render_test
+    synth_hybrid_wavetable_parity_test
+    kernel_api_freeze_test
+    osc_formulas_domain_test
+    window_backend_parity_test
+    peak_interp_parabolic_test
+    segment_endian_roundtrip_test
+    segment_payload_bounds_test
+    ifft_synth_parity_test
+    synth_hybrid_parity_test
+    wavetable_q15_load_test
+    osc_bandlimited_parity_test
+    segment_q15_convert_test
+    daisy_config_layout_test
+    convert_segments)
 
 message(STATUS "Configured Spectral Engine")
 message(STATUS "  desktop target: ${TARGET_DESKTOP}")
@@ -200,4 +279,3 @@ message(STATUS "  reproducible profile: ${SPECTRAL_REPRO_BUILD}")
 message(STATUS "  debug logging: ${SPECTRAL_DEBUG_LOGGING}")
 message(STATUS "  custom fast math mode: ${SPECTRAL_CUSTOM_FAST_MATH_MODE_STATUS}")
 message(STATUS "  track pair omp chunk: ${SPECTRAL_TRACK_PAIR_OMP_CHUNK_CANONICAL}")
-message(STATUS "  stft cache chunk frames: ${COMPUTED_STFT_CHUNK_FRAMES}")

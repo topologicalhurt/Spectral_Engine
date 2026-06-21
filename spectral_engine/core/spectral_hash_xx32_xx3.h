@@ -82,9 +82,11 @@ struct SpectralHashFileMethodDescriptor {
      * unavailable (e.g. mmap on non-POSIX, full_direct on embedded).
      *
      * Note for SPECTRAL_HASH_FILE_STREAM: available=1 on all targets, meaning
-     * the reset/update/digest lifecycle API is fully functional.  However,
-     * consume_file() on embedded targets will return SPECTRAL_ERR_BACKEND_UNAVAIL.
-     * Callers on embedded feed data through update() directly. */
+     * the reset/update/digest lifecycle API is fully functional.  The convenience
+     * wrapper spectral_hash_file_method_consume_file() is part of the host-file-API
+     * surface (compiled under SPECTRAL_HASH_HAS_HOST_FILE_API, which is 1 on every
+     * host and simulation build and 0 only on a no-stdio bare-metal cross-build);
+     * a target without host stdio drives the same hash through update() directly. */
     int                        available;
 };
 

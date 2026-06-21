@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import tempfile
@@ -21,10 +22,11 @@ from ..core.utils import fmt_float, is_executable, tail_lines
 
 PROC_STATUS_ROOT = Path("/proc")
 PROCFS_SAMPLE_ENV = "SPECTRAL_BENCH_PROCFS_SAMPLE_SEC"
-GNU_TIME_CANDIDATES = (Path("/usr/bin/time"), Path("/bin/time"))
+TIME_CANDIDATES = (Path("/usr/bin/time"), Path("/bin/time"))
+BSD_TIME_RSS_RE = re.compile(r"^\s*(\d+)\s+maximum resident set size", re.MULTILINE)
 CACHE_FLAG = "--cache"
 CACHE_FILES = ("seg_cache_index.bin", "seg_cache_data.bin")
-METRIC_SECTION_KEYS = ("summary", "stage_medians", "bandwidth_medians", "memory", "track_series")
+METRIC_SECTION_KEYS = ("summary", "stage_medians", "stage_spread", "bandwidth_medians", "memory", "track_series")
 
 
 @dataclass(slots=True)
@@ -44,25 +46,57 @@ class _RunAccumulator:
     first_total: float | None = None
 
 
+def _detect_time_flavor() -> tuple[str | None, str | None]:
+    """Return (path, flavor) for the system time binary.
+
+    flavor is "gnu" (supports ``-f %M``, RSS in KB) or "bsd" (macOS, supports
+    ``-l``, RSS in bytes). Executability alone does not imply GNU: macOS ships
+    a BSD time at /usr/bin/time that rejects ``-f`` — probe, don't assume.
+    """
+    for candidate in TIME_CANDIDATES:
+        if not is_executable(candidate):
+            continue
+        try:
+            probe = subprocess.run(
+                [str(candidate), "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except OSError:
+            continue
+        if "GNU" in (probe.stdout + probe.stderr):
+            return str(candidate), "gnu"
+        try:
+            probe = subprocess.run(
+                [str(candidate), "-l", "true"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except OSError:
+            continue
+        if probe.returncode == 0 and "maximum resident set size" in probe.stderr:
+            return str(candidate), "bsd"
+    return None, None
+
+
 @dataclass(slots=True)
 class BenchmarkRunner:
     repo_root: Path
     dry_run: bool = False
     parser: BenchmarkOutputParser = field(init=False)
     time_bin: str | None = field(init=False, default=None)
+    time_flavor: str | None = field(init=False, default=None)
     have_procfs: bool = field(init=False, default=False)
     procfs_sample_sec: float = field(init=False, default=DEFAULT_PROCFS_SAMPLE_SEC)
 
     def __post_init__(self) -> None:
         self.repo_root = self.repo_root.resolve()
         self.parser = BenchmarkOutputParser()
-
-        self.time_bin = None
-        for time_bin in GNU_TIME_CANDIDATES:
-            if is_executable(time_bin):
-                self.time_bin = str(time_bin)
-                break
-
+        self.time_bin, self.time_flavor = _detect_time_flavor()
         self.have_procfs = PROC_STATUS_ROOT.is_dir()
         try:
             self.procfs_sample_sec = float(environ.get(PROCFS_SAMPLE_ENV, str(DEFAULT_PROCFS_SAMPLE_SEC)))
@@ -78,6 +112,29 @@ class BenchmarkRunner:
     @staticmethod
     def _fmt_ms_cell(value: float | None) -> str:
         return f"{(value if value is not None else float('nan')):8.2f}"
+
+    @staticmethod
+    def _warm(values: list[float], empty_on_single: bool = False) -> list[float]:
+        """Steady-state view: drop the cold first run when there is more than
+        one sample. The first run pays one-off costs the steady state never
+        repeats — first-touch paging, the FFT/vDSP plan build, dyld bind — so
+        folding it into a per-stage median misreports the kernel under test.
+
+        A single run has nothing to warm. The per-stage breakdown keeps that lone
+        sample (empty_on_single=False) so a 1-run bench still shows a value; the
+        headline Total/RSS use empty_on_single=True so their warm_* read 'nan'
+        rather than re-reporting the cold run as if it were the warm steady state."""
+        if len(values) > 1:
+            return values[1:]
+        return [] if empty_on_single else values
+
+    @staticmethod
+    def _fmt_spread(values: list[float]) -> str:
+        """min..max band so a median's run-to-run jitter is legible (a lone
+        median hides whether 7ms is steady or the midpoint of 6..11)."""
+        if not values:
+            return "nan..nan"
+        return f"{min(values):.2f}..{max(values):.2f}"
 
     @staticmethod
     def _kb_to_mb(kb: float | None) -> str:
@@ -107,7 +164,7 @@ class BenchmarkRunner:
         return hwm if hwm is not None else rss
 
     def _run_with_metrics(self, cmd: list[str], *, cwd: Path, log_file: Path, mem_file: Path) -> tuple[int, float | None]:
-        if self.time_bin is not None:
+        if self.time_bin is not None and self.time_flavor == "gnu":
             with log_file.open("w", encoding=DEFAULT_UTF8_ENCODING) as handle:
                 proc = subprocess.run(
                     [self.time_bin, "-f", "%M", "-o", str(mem_file), *cmd],
@@ -130,6 +187,29 @@ class BenchmarkRunner:
                         mem_kb = float(line)
                     except ValueError:
                         continue
+            except OSError:
+                mem_kb = None
+
+            return proc.returncode, mem_kb
+
+        if self.time_bin is not None and self.time_flavor == "bsd":
+            with log_file.open("w", encoding=DEFAULT_UTF8_ENCODING) as handle:
+                proc = subprocess.run(
+                    [self.time_bin, "-l", "-o", str(mem_file), *cmd],
+                    cwd=str(cwd),
+                    env={**environ, "LC_ALL": "C"},
+                    text=True,
+                    encoding=DEFAULT_UTF8_ENCODING,
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+
+            mem_kb = None
+            try:
+                match = BSD_TIME_RSS_RE.search(mem_file.read_text(encoding=DEFAULT_UTF8_ENCODING))
+                if match:
+                    mem_kb = float(match.group(1)) / 1024.0   # BSD reports bytes
             except OSError:
                 mem_kb = None
 
@@ -436,7 +516,7 @@ class BenchmarkRunner:
         all_median = self.parser.median(data.totals)
         all_mean = self.parser.mean(data.totals)
 
-        warm_totals = data.totals[1:] if len(data.totals) > 1 else []
+        warm_totals = self._warm(data.totals, empty_on_single=True)
         warm_median = self.parser.median(warm_totals)
         warm_mean = self.parser.mean(warm_totals)
 
@@ -452,30 +532,45 @@ class BenchmarkRunner:
         )
 
         if mode == BenchMode.CACHE.value:
-            seg_median = self.parser.median(data.segbin_totals)
-            synth_kernel_median = self.parser.median(data.synth_kernels)
-            synth_wall_median = self.parser.median(data.synth_walls)
-            norm_median = self.parser.median(data.norms)
+            warm_segbin = self._warm(data.segbin_totals)
+            warm_synth_kernels = self._warm(data.synth_kernels)
+            warm_synth_walls = self._warm(data.synth_walls)
+            warm_norms = self._warm(data.norms)
             lines.append(
-                "Segment-binary ms: "
-                f"total_median={self._fmt_stat(seg_median)} "
-                f"synth_kernel_median={self._fmt_stat(synth_kernel_median)} "
-                f"synth_wall_median={self._fmt_stat(synth_wall_median)} "
-                f"norm_median={self._fmt_stat(norm_median)}"
+                "Segment-binary warm medians ms: "
+                f"total_median={self._fmt_stat(self.parser.median(warm_segbin))} "
+                f"synth_kernel_median={self._fmt_stat(self.parser.median(warm_synth_kernels))} "
+                f"synth_wall_median={self._fmt_stat(self.parser.median(warm_synth_walls))} "
+                f"norm_median={self._fmt_stat(self.parser.median(warm_norms))}"
+            )
+            lines.append(
+                "Segment-binary warm spread ms (min..max): "
+                f"total={self._fmt_spread(warm_segbin)} "
+                f"synth_kernel={self._fmt_spread(warm_synth_kernels)} "
+                f"synth_wall={self._fmt_spread(warm_synth_walls)} "
+                f"norm={self._fmt_spread(warm_norms)}"
             )
         else:
-            fft_median = self.parser.median(data.ffts)
-            track_median = self.parser.median(data.tracks)
-            synth_kernel_median = self.parser.median(data.synth_kernels)
-            synth_wall_median = self.parser.median(data.synth_walls)
-            norm_median = self.parser.median(data.norms)
+            warm_ffts = self._warm(data.ffts)
+            warm_tracks = self._warm(data.tracks)
+            warm_synth_kernels = self._warm(data.synth_kernels)
+            warm_synth_walls = self._warm(data.synth_walls)
+            warm_norms = self._warm(data.norms)
             lines.append(
-                "Stage medians ms: "
-                f"fft={self._fmt_stat(fft_median)} "
-                f"track={self._fmt_stat(track_median)} "
-                f"synth_kernel={self._fmt_stat(synth_kernel_median)} "
-                f"synth_wall={self._fmt_stat(synth_wall_median)} "
-                f"norm={self._fmt_stat(norm_median)}"
+                "Stage warm medians ms: "
+                f"fft={self._fmt_stat(self.parser.median(warm_ffts))} "
+                f"track={self._fmt_stat(self.parser.median(warm_tracks))} "
+                f"synth_kernel={self._fmt_stat(self.parser.median(warm_synth_kernels))} "
+                f"synth_wall={self._fmt_stat(self.parser.median(warm_synth_walls))} "
+                f"norm={self._fmt_stat(self.parser.median(warm_norms))}"
+            )
+            lines.append(
+                "Stage warm spread ms (min..max): "
+                f"fft={self._fmt_spread(warm_ffts)} "
+                f"track={self._fmt_spread(warm_tracks)} "
+                f"synth_kernel={self._fmt_spread(warm_synth_kernels)} "
+                f"synth_wall={self._fmt_spread(warm_synth_walls)} "
+                f"norm={self._fmt_spread(warm_norms)}"
             )
 
             if (
@@ -484,16 +579,12 @@ class BenchmarkRunner:
                 and data.fft_bandwidth_rel_pcts
                 and data.track_bandwidth_rel_pcts
             ):
-                fft_bw_median = self.parser.median(data.fft_bandwidths)
-                fft_bw_rel_pct_median = self.parser.median(data.fft_bandwidth_rel_pcts)
-                track_bw_median = self.parser.median(data.track_bandwidths)
-                track_bw_rel_pct_median = self.parser.median(data.track_bandwidth_rel_pcts)
                 lines.append(
-                    "Stage bandwidth medians: "
-                    f"fft={self._fmt_stat(fft_bw_median)}GiB/s "
-                    f"({self._fmt_stat(fft_bw_rel_pct_median)}% of faster stage) "
-                    f"track={self._fmt_stat(track_bw_median)}GiB/s "
-                    f"({self._fmt_stat(track_bw_rel_pct_median)}% of faster stage)"
+                    "Stage bandwidth warm medians: "
+                    f"fft={self._fmt_stat(self.parser.median(self._warm(data.fft_bandwidths)))}GiB/s "
+                    f"({self._fmt_stat(self.parser.median(self._warm(data.fft_bandwidth_rel_pcts)))}% of faster stage) "
+                    f"track={self._fmt_stat(self.parser.median(self._warm(data.track_bandwidths)))}GiB/s "
+                    f"({self._fmt_stat(self.parser.median(self._warm(data.track_bandwidth_rel_pcts)))}% of faster stage)"
                 )
                 lines.append(
                     "Bandwidth percentages are relative between FFT and track "
@@ -503,7 +594,7 @@ class BenchmarkRunner:
         if data.rss_kb:
             rss_median_kb = self.parser.median(data.rss_kb)
             rss_mean_kb = self.parser.mean(data.rss_kb)
-            warm_rss = data.rss_kb[1:] if len(data.rss_kb) > 1 else []
+            warm_rss = self._warm(data.rss_kb, empty_on_single=True)
             warm_rss_median_kb = self.parser.median(warm_rss)
             warm_rss_mean_kb = self.parser.mean(warm_rss)
 

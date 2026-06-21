@@ -2,8 +2,14 @@
 #ifndef DAISY_SEED_SPECTRAL_H
 #define DAISY_SEED_SPECTRAL_H
 
+/* Public Daisy Seed (Cortex-M7) synthesis API. SemVer; this is the earliest WIP
+ * surface (0.0.x) — it is expected to change freely until deliberately frozen. */
+#define DAISY_SPECTRAL_API_VERSION_MAJOR 0
+#define DAISY_SPECTRAL_API_VERSION_MINOR 0
+#define DAISY_SPECTRAL_API_VERSION_PATCH 1
+
 #include "daisy_seed_config.h"
-#include "../../spectral_engine/synth/backends/arm/spectral_synth_arm32.h"
+#include "../../spectral_engine/arch/arm/spectral_synth_arm32.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,6 +166,10 @@ public:
 
     DaisyResult LoadFromSD(const char* filename) {
         return daisy_spectral_load_sd(&ctx_, filename);
+    }
+    DaisyResult LoadFromBuffer(const DaisySegmentQ15* data, uint32_t num_segments,
+                               uint32_t output_len) {
+        return daisy_spectral_load_buffer(&ctx_, data, num_segments, output_len);
     }
 
     void SetStretch(float stretch) { daisy_spectral_set_stretch(&ctx_, stretch); }

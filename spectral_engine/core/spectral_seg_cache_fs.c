@@ -3,8 +3,6 @@
 #include "spectral_endian.h"
 #include "spectral_utils.h"
 
-#if !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -81,20 +79,47 @@ SpectralError spectral_seg_cache_fs_index_load(const char* cache_dir,
         goto cleanup;
     }
     if (hdr.count == 0) {
+        uint64_t file_size = 0;
+        err = spectral_fs_file_size(f, &file_size);
+        if (err != SPECTRAL_OK) goto cleanup;
+        if (file_size != (uint64_t)sizeof(SpectralSegCacheHeader)) {
+            err = SPECTRAL_ERR_FILE_CORRUPT;
+            goto cleanup;
+        }
         err = SPECTRAL_OK;
         goto cleanup;
+    }
+
+    if (!spectral_array_bytes((size_t)hdr.count, sizeof(SpectralSegCacheEntry), &entries_bytes)) {
+        err = SPECTRAL_ERR_OVERFLOW;
+        goto cleanup;
+    }
+
+    {
+        uint64_t file_size = 0;
+        size_t expected_index_bytes = 0;
+
+        if (!spectral_size_add(sizeof(SpectralSegCacheHeader), entries_bytes, &expected_index_bytes)) {
+            err = SPECTRAL_ERR_OVERFLOW;
+            goto cleanup;
+        }
+        err = spectral_fs_file_size(f, &file_size);
+        if (err != SPECTRAL_OK) goto cleanup;
+
+        /* The index file is rewritten with "wb", so its exact length is part
+         * of the persistence contract. Validate the count-derived byte length
+         * before allocating; otherwise a corrupt header can request a huge
+         * allocation even when the file cannot contain that many entries. */
+        if (file_size != (uint64_t)expected_index_bytes) {
+            err = SPECTRAL_ERR_FILE_CORRUPT;
+            goto cleanup;
+        }
     }
 
     entries = (SpectralSegCacheEntry*)spectral_malloc_array(
         (size_t)hdr.count, sizeof(SpectralSegCacheEntry));
     if (!entries) {
         err = SPECTRAL_ERR_MEMORY;
-        goto cleanup;
-    }
-    if (!spectral_array_bytes((size_t)hdr.count, sizeof(SpectralSegCacheEntry), &entries_bytes)) {
-        free(entries);
-        entries = NULL;
-        err = SPECTRAL_ERR_OVERFLOW;
         goto cleanup;
     }
 
@@ -109,6 +134,19 @@ SpectralError spectral_seg_cache_fs_index_load(const char* cache_dir,
 
     for (uint32_t i = 0; i < hdr.count; i++) {
         seg_cache_entry_swap(&entries[i]);
+    }
+
+    /* The index must be strictly increasing by key: both lookup and store binary-search it.
+     * A corrupt or externally-tampered file that is unsorted or has duplicate keys would
+     * silently miss hits and let store re-persist the disorder. Reject it like any other
+     * corruption (the format already enforces magic/version/exact-length). */
+    for (uint32_t i = 1; i < hdr.count; i++) {
+        if (!(entries[i - 1].key < entries[i].key)) {
+            free(entries);
+            entries = NULL;
+            err = SPECTRAL_ERR_FILE_CORRUPT;
+            goto cleanup;
+        }
     }
 
     *out_entries = entries;
@@ -313,5 +351,3 @@ void spectral_seg_cache_fs_data_unmap(SpectralSegCacheFsMapView* view)
 {
     spectral_fs_unmap(view);
 }
-
-#endif /* !SPECTRAL_EMBEDDED || SPECTRAL_IS_EMBEDDED_SIM */

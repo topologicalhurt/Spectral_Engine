@@ -1,0 +1,874 @@
+/* spectral_peak_estimator.c - Peak frequency/amplitude estimation policies
+ *
+ * Estimator source basis:
+ * - F. J. Harris, "On the Use of Windows for Harmonic Analysis with the
+ *   Discrete Fourier Transform," Proc. IEEE, 1978.
+ *   https://doi.org/10.1109/PROC.1978.10837
+ * - J. O. Smith, "Quadratic Interpolation of Spectral Peaks,"
+ *   Spectral Audio Signal Processing.
+ *   https://www.dsprelated.com/freebooks/sasp/quadratic_interpolation_spectral_peaks.html
+ * - B. G. Quinn, "Estimating Frequency by Interpolation Using Fourier
+ *   Coefficients," IEEE Trans. Signal Processing, 1994.
+ *   https://doi.org/10.1109/78.295186
+ * - E. Jacobsen and P. Kootsookos, "Fast, Accurate Frequency Estimators,"
+ *   IEEE Signal Processing Magazine, 2007.
+ *   https://doi.org/10.1109/MSP.2007.361611
+ * - C. Candan, "A Method for Fine Resolution Frequency Estimation from
+ *   Three DFT Samples," IEEE Signal Processing Letters, 2011.
+ *   https://doi.org/10.1109/LSP.2011.2136378
+ * - D. C. Rife and R. R. Boorstyn, "Single Tone Parameter Estimation
+ *   from Discrete-Time Observations," IEEE Trans. Information Theory, 1974.
+ *   https://doi.org/10.1109/TIT.1974.1055282
+ */
+#include "spectral_peak_estimator.h"
+#include "spectral_fast_math.h"
+#include "spectral_utils.h"
+#include <limits.h>
+#include <float.h>
+#include <math.h>
+#include <string.h>
+
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
+typedef struct SpectralComplexF32 {
+    float re;
+    float im;
+    float mag;
+} SpectralComplexF32;
+
+static int spectral_peak_finite_positive(float v) {
+    return SPECTRAL_ISFINITE(v) && v > 0.0f;
+}
+
+static int spectral_peak_finite_nonnegative(float v) {
+    return SPECTRAL_ISFINITE(v) && v >= 0.0f;
+}
+
+static int spectral_peak_store_clamped_offset_d(float* out_offset, double offset_d)
+{
+    if (!out_offset || !SPECTRAL_ISFINITE(offset_d)) return 0;
+
+    if (offset_d > SPECTRAL_PEAK_BIN_OFFSET_MAX) {
+        *out_offset = SPECTRAL_PEAK_BIN_OFFSET_MAX;
+    } else if (offset_d < -SPECTRAL_PEAK_BIN_OFFSET_MAX) {
+        *out_offset = -SPECTRAL_PEAK_BIN_OFFSET_MAX;
+    } else {
+        *out_offset = (float)offset_d;
+    }
+    return 1;
+}
+
+
+static float spectral_peak_clamp_offset(float p) {
+    /* Callers reject non-finite estimator output before clamping. */
+    if (p > SPECTRAL_PEAK_BIN_OFFSET_MAX) return SPECTRAL_PEAK_BIN_OFFSET_MAX;
+    if (p < -SPECTRAL_PEAK_BIN_OFFSET_MAX) return -SPECTRAL_PEAK_BIN_OFFSET_MAX;
+    return p;
+}
+
+static int spectral_peak_best_next_valid(const SpectralPeakEstimateInput* input) {
+    size_t best_next = 0u;
+
+    if (!input || input->bin > (size_t)INT_MAX || input->best_next_bin < 0) {
+        return 0;
+    }
+
+    best_next = (size_t)input->best_next_bin;
+    if (best_next >= input->n_freqs) {
+        return 0;
+    }
+
+    /* best_next is the winner from next_frame[bin-1..bin+1]. Keep this check
+     * here as well as in tracker validation because spectral_peak_estimate()
+     * is a public-safe wrapper and the int subtraction for df would otherwise
+     * have undefined behavior on hostile inputs such as INT_MIN. */
+    if (best_next + 1u < input->bin || best_next > input->bin + 1u) {
+        return 0;
+    }
+    return 1;
+}
+
+static void spectral_peak_sincosf(float phase, float* out_sin, float* out_cos) {
+    /* Reconstructing complex DFT bins needs both sin and cos of the stored
+     * analysis phase. Exact builds use libm/builtin sincos. Approx builds
+     * intentionally reuse the central fast_sin() path so oscillator and peak
+     * code do not carry divergent polynomial trig copies. */
+#if defined(SPECTRAL_ENABLE_APPROX_TRIG) && SPECTRAL_ENABLE_APPROX_TRIG
+    *out_sin = fast_sin(phase);
+    *out_cos = fast_sin(phase + SPECTRAL_HALF_PI);
+#elif __has_builtin(__builtin_sincosf)
+    __builtin_sincosf(phase, out_sin, out_cos);
+#else
+    *out_sin = sinf(phase);
+    *out_cos = cosf(phase);
+#endif
+}
+
+const char* spectral_peak_estimator_name(SpectralPeakEstimatorType type) {
+    switch (type) {
+        case SPECTRAL_PEAK_ESTIMATOR_AUTO:             return "auto";
+        case SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC:    return "log-parabolic";
+        case SPECTRAL_PEAK_ESTIMATOR_MAG_PARABOLIC:    return "magnitude-parabolic";
+        case SPECTRAL_PEAK_ESTIMATOR_JACOBSEN_COMPLEX: return "jacobsen-complex";
+        case SPECTRAL_PEAK_ESTIMATOR_CANDAN_COMPLEX:   return "candan-complex";
+        case SPECTRAL_PEAK_ESTIMATOR_QUINN_SECOND:     return "quinn-second";
+        default:                                       return "unknown";
+    }
+}
+
+int spectral_peak_estimator_type_supported(SpectralPeakEstimatorType type) {
+    return type >= SPECTRAL_PEAK_ESTIMATOR_AUTO &&
+           type < SPECTRAL_PEAK_ESTIMATOR_COUNT;
+}
+
+SpectralPeakEstimatorType spectral_peak_estimator_resolve_default(SpectralPeakEstimatorType type) {
+    if (!spectral_peak_estimator_type_supported(type)) {
+        return SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+    }
+    if (type == SPECTRAL_PEAK_ESTIMATOR_AUTO) {
+        /* Conservative default: current analysis emits Hann-windowed
+         * magnitude-squared spectra. A log-power quadratic fit is a local
+         * three-bin peak approximation in the Smith/Harris window-analysis
+         * model and has bounded contract tests for the engine's Hann path.
+         * Jacobsen, Candan and Quinn are exposed explicitly because their
+         * complex-DFT assumptions need separate caller intent. */
+        return SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+    }
+    return type;
+}
+
+float spectral_peak_candan_correction_for_n_freqs(size_t n_freqs) {
+    size_t n_fft = 0u;
+    float alpha = 0.0f;
+    float correction = 1.0f;
+
+    if (n_freqs < 2u) return 1.0f;
+    if (n_freqs - 1u > ((size_t)-1) / 2u) return 1.0f;
+    n_fft = (n_freqs - 1u) * 2u;
+    if (n_fft == 0u) return 1.0f;
+
+    /* Candan's correction depends only on FFT length. In the tracker hot path
+     * it is cached once in SpectralTracker; this fallback keeps standalone
+     * public estimator calls correct when the field is left at zero. */
+    alpha = SPECTRAL_PI / (float)n_fft;
+    if (SPECTRAL_ISFINITE(alpha) && alpha > 0.0f) {
+        correction = tanf(alpha) / alpha;
+        if (!SPECTRAL_ISFINITE(correction) || correction <= 0.0f) correction = 1.0f;
+    }
+    return correction;
+}
+
+typedef struct SpectralPeakMagsqTriplet {
+    float left;
+    float center;
+    float right;
+} SpectralPeakMagsqTriplet;
+
+static int spectral_peak_load_magsq_triplet(const float* row,
+                                            size_t n_freqs,
+                                            size_t center_bin,
+                                            int center_must_be_positive,
+                                            SpectralPeakMagsqTriplet* out)
+{
+    SpectralPeakMagsqTriplet triplet = {0};
+
+    if (!row || !out || center_bin == 0u || center_bin + 1u >= n_freqs) {
+        return 0;
+    }
+
+    triplet.left = row[center_bin - 1u];
+    triplet.center = row[center_bin];
+    triplet.right = row[center_bin + 1u];
+
+    if (!spectral_peak_finite_nonnegative(triplet.left) ||
+        !spectral_peak_finite_nonnegative(triplet.right)) {
+        return 0;
+    }
+    if (center_must_be_positive) {
+        if (!spectral_peak_finite_positive(triplet.center)) return 0;
+    } else {
+        if (!spectral_peak_finite_nonnegative(triplet.center)) return 0;
+    }
+
+    *out = triplet;
+    return 1;
+}
+
+static int spectral_peak_reconstruct_complex(const SpectralPeakEstimateInput* input,
+                                             size_t idx,
+                                             int neighborhood_validated,
+                                             SpectralComplexF32* out) {
+    float magsq = 0.0f;
+    float mag = 0.0f;
+    float phase = 0.0f;
+    float sin_phase = 0.0f;
+    float cos_phase = 0.0f;
+
+    (void)neighborhood_validated;
+
+    if (!input || !input->magsq_row || !input->phase_row || !out) return 0;
+    if (idx >= input->n_freqs) return 0;
+
+    magsq = input->magsq_row[idx];
+    phase = input->phase_row[idx];
+
+    /* Keep these scalar-contract checks unconditional. The tracker
+     * proves the local candidate neighborhood when called through
+     * spectral_tracker_emit_segment(), but spectral_peak_estimate_validated()
+     * is still a separately callable internal API.  Keeping finite/nonnegative
+     * guards here prevents NaN/negative magnitudes from being converted into
+     * complex coefficients when a future caller misuses the fast path. */
+    if (!spectral_peak_finite_nonnegative(magsq) || !SPECTRAL_ISFINITE(phase)) {
+        return 0;
+    }
+
+    /* Complex estimators are defined on three neighboring complex DFT
+     * coefficients. The tracker stores magnitude-squared and phase separately,
+     * so this reconstructs X[k] = sqrt(|X[k]|^2) * exp(j*phase[k]).
+     * fast_sqrt() is exact unless SPECTRAL_ENABLE_APPROX_INV_SQRT is enabled. */
+    mag = fast_sqrt(magsq);
+    spectral_peak_sincosf(phase, &sin_phase, &cos_phase);
+    out->mag = mag;
+    out->re = mag * cos_phase;
+    out->im = mag * sin_phase;
+    return SPECTRAL_ISFINITE(out->re) && SPECTRAL_ISFINITE(out->im);
+}
+
+
+static int spectral_peak_reconstruct_triplet(const SpectralPeakEstimateInput* input,
+                                             int neighborhood_validated,
+                                             SpectralComplexF32* xm,
+                                             SpectralComplexF32* x0,
+                                             SpectralComplexF32* xp,
+                                             float* out_center_mag) {
+    if (!input || !xm || !x0 || !xp ||
+        input->bin == 0u || input->bin + 1u >= input->n_freqs) {
+        return 0;
+    }
+    if (!spectral_peak_reconstruct_complex(input, input->bin - 1u, neighborhood_validated, xm) ||
+        !spectral_peak_reconstruct_complex(input, input->bin, neighborhood_validated, x0) ||
+        !spectral_peak_reconstruct_complex(input, input->bin + 1u, neighborhood_validated, xp)) {
+        return 0;
+    }
+    if (out_center_mag) *out_center_mag = x0->mag;
+    return 1;
+}
+
+static int spectral_peak_complex_offset_jacobsen(const SpectralPeakEstimateInput* input,
+                                                 int neighborhood_validated,
+                                                 float* out_offset,
+                                                 float* out_center_mag) {
+    SpectralComplexF32 xm, x0, xp;
+    double num_re = 0.0, num_im = 0.0;
+    double den_re = 0.0, den_im = 0.0;
+    double den_mag2 = 0.0;
+    double offset_d = 0.0;
+
+    if (!input || !out_offset || input->bin == 0u || input->bin + 1u >= input->n_freqs) return 0;
+    if (!spectral_peak_reconstruct_triplet(input, neighborhood_validated,
+                                           &xm, &x0, &xp, out_center_mag)) {
+        return 0;
+    }
+
+    num_re = (double)xm.re - (double)xp.re;
+    num_im = (double)xm.im - (double)xp.im;
+    den_re = 2.0 * (double)x0.re - (double)xm.re - (double)xp.re;
+    den_im = 2.0 * (double)x0.im - (double)xm.im - (double)xp.im;
+    den_mag2 = den_re * den_re + den_im * den_im;
+    if (!SPECTRAL_ISFINITE(den_mag2) || den_mag2 < 1.0e-30) return 0;
+
+    /* Jacobsen/Kootsookos:
+     *   delta = Re{(X[k-1] - X[k+1]) / (2X[k] - X[k-1] - X[k+1])}
+     * Use double for the quotient products.  Finite reconstructed bins can
+     * still overflow float-domain dot products before the denominator guard. */
+    offset_d = (num_re * den_re + num_im * den_im) / den_mag2;
+    if (!SPECTRAL_ISFINITE(offset_d)) return 0;
+
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
+}
+
+
+static int spectral_peak_offset_log_parabolic(const SpectralPeakEstimateInput* input,
+                                              int neighborhood_validated,
+                                              float* out_offset) {
+    SpectralPeakMagsqTriplet triplet = {0};
+    float raw_offset = 0.0f;
+    SpectralWindowInterpMagsqFn interp = NULL;
+
+    (void)neighborhood_validated;
+
+    if (!input || !out_offset) return 0;
+    if (!spectral_peak_load_magsq_triplet(input->magsq_row, input->n_freqs,
+                                          input->bin, 0, &triplet)) {
+        return 0;
+    }
+
+    interp = input->interp_magsq ? input->interp_magsq
+                                 : spectral_window_interp_magsq_parabolic;
+    raw_offset = interp(triplet.left, triplet.center, triplet.right);
+    if (!SPECTRAL_ISFINITE(raw_offset)) return 0;
+
+    *out_offset = spectral_peak_clamp_offset(raw_offset);
+    return 1;
+}
+static int spectral_peak_offset_mag_parabolic(const SpectralPeakEstimateInput* input,
+                                              int neighborhood_validated,
+                                              float* out_offset,
+                                              float* out_center_mag) {
+    SpectralPeakMagsqTriplet triplet = {0};
+    float left = 0.0f, center = 0.0f, right = 0.0f;
+    double denom = 0.0;
+    double numer = 0.0;
+    double offset_d = 0.0;
+
+    (void)neighborhood_validated;
+
+    if (!input || !out_offset) return 0;
+    if (!spectral_peak_load_magsq_triplet(input->magsq_row, input->n_freqs,
+                                          input->bin, 0, &triplet)) {
+        return 0;
+    }
+
+    left = fast_sqrt(triplet.left);
+    center = fast_sqrt(triplet.center);
+    right = fast_sqrt(triplet.right);
+    if (!SPECTRAL_ISFINITE(left) || !SPECTRAL_ISFINITE(center) || !SPECTRAL_ISFINITE(right)) return 0;
+    if (out_center_mag) *out_center_mag = center;
+
+    denom = (double)left - 2.0 * (double)center + (double)right;
+    if (!SPECTRAL_ISFINITE(denom) || fabs(denom) < (double)SPECTRAL_TRACK_PARABOLIC_DENOM_EPS) {
+        *out_offset = 0.0f;
+        return 1;
+    }
+
+    numer = 0.5 * ((double)left - (double)right);
+    offset_d = numer / denom;
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
+}
+static int spectral_peak_offset_candan(const SpectralPeakEstimateInput* input,
+                                       int neighborhood_validated,
+                                       float* out_offset,
+                                       float* out_center_mag) {
+    float offset = 0.0f;
+    float correction = 1.0f;
+
+    if (!spectral_peak_complex_offset_jacobsen(input, neighborhood_validated,
+                                               &offset, out_center_mag)) {
+        return 0;
+    }
+    if (!input || input->n_freqs < 2u) return 0;
+
+    correction = input->candan_correction;
+    if (!SPECTRAL_ISFINITE(correction) || correction <= 0.0f) {
+        correction = spectral_peak_candan_correction_for_n_freqs(input->n_freqs);
+    }
+
+    /* Candan applies a finite-N correction to the Jacobsen offset. The factor
+     * is precomputed per tracker because it depends only on n_fft/n_freqs. */
+    offset *= correction;
+    if (!SPECTRAL_ISFINITE(offset)) return 0;
+
+    *out_offset = spectral_peak_clamp_offset(offset);
+    return 1;
+}
+
+static float spectral_peak_quinn_tau(float x) {
+    const float sqrt_6 = 2.449489742783178f;
+    const float sqrt_2_over_3 = 0.816496580927726f;
+    float a = 0.0f;
+    float b_num = 0.0f;
+    float b_den = 0.0f;
+    float b_ratio = 0.0f;
+
+    if (!SPECTRAL_ISFINITE(x) || x < 0.0f) return 0.0f;
+
+    a = 3.0f * x * x + 6.0f * x + 1.0f;
+    b_num = x + 1.0f - sqrt_2_over_3;
+    b_den = x + 1.0f + sqrt_2_over_3;
+    if (a <= 0.0f || b_num <= 0.0f || b_den <= 0.0f) return 0.0f;
+
+    b_ratio = b_num / b_den;
+    if (!spectral_peak_finite_positive(b_ratio)) return 0.0f;
+
+    /* Quinn second estimator's tau term. Logs route through fast_peak_log()
+     * so any approximation is controlled by one project-level peak-log gate. */
+    return 0.25f * fast_peak_log(a) - (sqrt_6 / 24.0f) * fast_peak_log(b_ratio);
+}
+
+static int spectral_peak_offset_quinn_second(const SpectralPeakEstimateInput* input,
+                                             int neighborhood_validated,
+                                             float* out_offset,
+                                             float* out_center_mag) {
+    SpectralComplexF32 xm, x0, xp;
+    double mag0 = 0.0;
+    double ap = 0.0, am = 0.0;
+    double dp = 0.0, dm = 0.0;
+    double den_p = 0.0, den_m = 0.0;
+    double dp2 = 0.0, dm2 = 0.0;
+    float tau_p = 0.0f, tau_m = 0.0f;
+    double offset_d = 0.0;
+
+    if (!input || !out_offset || input->bin == 0u || input->bin + 1u >= input->n_freqs) return 0;
+    if (!spectral_peak_reconstruct_triplet(input, neighborhood_validated,
+                                           &xm, &x0, &xp, out_center_mag)) {
+        return 0;
+    }
+
+    mag0 = (double)input->curr_magsq;
+    if (!SPECTRAL_ISFINITE(mag0) || mag0 <= 0.0) return 0;
+
+    ap = ((double)xp.re * (double)x0.re + (double)xp.im * (double)x0.im) / mag0;
+    am = ((double)xm.re * (double)x0.re + (double)xm.im * (double)x0.im) / mag0;
+    den_p = 1.0 - ap;
+    den_m = 1.0 - am;
+    if (!SPECTRAL_ISFINITE(ap) || !SPECTRAL_ISFINITE(am) ||
+        fabs(den_p) < 1.0e-12 || fabs(den_m) < 1.0e-12) {
+        return 0;
+    }
+
+    dp = -ap / den_p;
+    dm =  am / den_m;
+    if (!SPECTRAL_ISFINITE(dp) || !SPECTRAL_ISFINITE(dm)) return 0;
+
+    dp2 = dp * dp;
+    dm2 = dm * dm;
+    if (!SPECTRAL_ISFINITE(dp2) || !SPECTRAL_ISFINITE(dm2) ||
+        dp2 > (double)FLT_MAX || dm2 > (double)FLT_MAX) {
+        return 0;
+    }
+
+    tau_p = spectral_peak_quinn_tau((float)dp2);
+    tau_m = spectral_peak_quinn_tau((float)dm2);
+    if (!SPECTRAL_ISFINITE(tau_p) || !SPECTRAL_ISFINITE(tau_m)) return 0;
+
+    offset_d = 0.5 * (dp + dm) + (double)tau_p - (double)tau_m;
+    if (!SPECTRAL_ISFINITE(offset_d)) return 0;
+
+    return spectral_peak_store_clamped_offset_d(out_offset, offset_d);
+}
+
+static int spectral_peak_estimate_phase_advance(const SpectralPeakEstimateInput* input,
+                                                float model_omega,
+                                                float* out_phase_bin_offset,
+                                                float* out_phase_omega,
+                                                float* out_phase_error) {
+    float phase0 = 0.0f;
+    float phase1 = 0.0f;
+    float phase_delta = 0.0f;
+    double expected_center_d = 0.0;
+    double residual_arg_d = 0.0;
+    float residual = 0.0f;
+    double denom_d = 0.0;
+    float phase_bin_offset = 0.0f;
+    double phase_omega_d = 0.0;
+    double phase_error_arg_d = 0.0;
+    float phase_omega = 0.0f;
+    float phase_error = 0.0f;
+
+    if (!input || !input->phase_row || !input->next_phase_row ||
+        !out_phase_bin_offset || !out_phase_omega || !out_phase_error) {
+        return 0;
+    }
+    if (input->bin >= input->n_freqs ||
+        (double)input->bin > (double)FLT_MAX ||
+        !SPECTRAL_ISFINITE(input->hop_float) || input->hop_float <= 0.0f ||
+        !SPECTRAL_ISFINITE(input->freq_step_omega) || input->freq_step_omega <= 0.0f ||
+        !SPECTRAL_ISFINITE(model_omega)) {
+        return 0;
+    }
+
+    phase0 = input->phase_row[input->bin];
+    phase1 = input->next_phase_row[input->bin];
+    if (!SPECTRAL_ISFINITE(phase0) || !SPECTRAL_ISFINITE(phase1)) {
+        return 0;
+    }
+
+    phase_delta = phase1 - phase0;
+    if (!SPECTRAL_ISFINITE(phase_delta)) {
+        return 0;
+    }
+
+    /* Phase-vocoder instantaneous-frequency relation:
+     *
+     *   residual = princarg(phi[t+1,k] - phi[t,k] - omega_bin_center * hop)
+     *   bin_offset_from_phase = residual / (bin_step_omega * hop)
+     *
+     * The products are derived in double before narrowing into the float-domain
+     * phase wrapper.  Without this, large finite bin/hop values can overflow
+     * the intermediate float product and still look like a phase-policy result. */
+    expected_center_d = (double)input->bin *
+                        (double)input->freq_step_omega *
+                        (double)input->hop_float;
+    residual_arg_d = (double)phase_delta - expected_center_d;
+    denom_d = (double)input->freq_step_omega * (double)input->hop_float;
+
+    if (!SPECTRAL_ISFINITE(expected_center_d) ||
+        !SPECTRAL_ISFINITE(residual_arg_d) ||
+        fabs(residual_arg_d) > (double)FLT_MAX ||
+        !SPECTRAL_ISFINITE(denom_d) ||
+        fabs(denom_d) < 1.0e-12 ||
+        fabs(denom_d) > (double)FLT_MAX) {
+        return 0;
+    }
+
+    residual = spectral_wrap_phase_pi((float)residual_arg_d);
+    phase_bin_offset = residual / (float)denom_d;
+    if (!SPECTRAL_ISFINITE(phase_bin_offset)) {
+        return 0;
+    }
+
+    phase_omega_d = ((double)input->bin + (double)phase_bin_offset) *
+                    (double)input->freq_step_omega;
+    phase_error_arg_d = (double)phase_delta -
+                        ((double)model_omega * (double)input->hop_float);
+
+    if (!SPECTRAL_ISFINITE(phase_omega_d) ||
+        fabs(phase_omega_d) > (double)FLT_MAX ||
+        !SPECTRAL_ISFINITE(phase_error_arg_d) ||
+        fabs(phase_error_arg_d) > (double)FLT_MAX) {
+        return 0;
+    }
+
+    phase_omega = (float)phase_omega_d;
+    phase_error = spectral_wrap_phase_pi((float)phase_error_arg_d);
+    if (!SPECTRAL_ISFINITE(phase_omega) || !SPECTRAL_ISFINITE(phase_error)) {
+        return 0;
+    }
+
+    *out_phase_bin_offset = phase_bin_offset;
+    *out_phase_omega = phase_omega;
+    *out_phase_error = phase_error;
+    return 1;
+}
+
+
+
+static int spectral_peak_estimate_next_offset_magsq(const SpectralPeakEstimateInput* input,
+                                                   float* out_next_offset) {
+    size_t next_bin = 0u;
+    SpectralPeakMagsqTriplet triplet = {0};
+    float raw_offset = 0.0f;
+    SpectralWindowInterpMagsqFn interp = NULL;
+
+    if (!input || !input->next_magsq_row || !out_next_offset) return 0;
+    if (input->best_next_bin < 0) return 0;
+
+    next_bin = (size_t)input->best_next_bin;
+    if (!spectral_peak_load_magsq_triplet(input->next_magsq_row, input->n_freqs,
+                                          next_bin, 0, &triplet)) {
+        return 0;
+    }
+
+    if (triplet.center < triplet.left || triplet.center < triplet.right) {
+        return 0;
+    }
+
+    interp = input->interp_magsq ? input->interp_magsq
+                                 : spectral_window_interp_magsq_parabolic;
+    raw_offset = interp(triplet.left, triplet.center, triplet.right);
+    if (!SPECTRAL_ISFINITE(raw_offset)) return 0;
+
+    *out_next_offset = spectral_peak_clamp_offset(raw_offset);
+    return 1;
+}
+static int spectral_peak_bounded_magsq_gain_ok(float center_magsq, float peak_magsq) {
+    float max_gain = SPECTRAL_PEAK_AMP_MAX_GAIN;
+    double gain_limit = 0.0;
+
+    if (!spectral_peak_finite_positive(center_magsq) ||
+        !spectral_peak_finite_positive(peak_magsq)) {
+        return 0;
+    }
+    if (!SPECTRAL_ISFINITE(max_gain) || max_gain < 1.0f) {
+        max_gain = 1.0f;
+    }
+
+    /* Do not compute the gain limit in float.  If center_magsq is large,
+     * center_magsq * max_gain can overflow to Inf and every finite candidate
+     * would pass the bound. */
+    gain_limit = (double)center_magsq * (double)max_gain;
+    if (!SPECTRAL_ISFINITE(gain_limit) || gain_limit <= 0.0) {
+        return 0;
+    }
+
+    return (double)peak_magsq <= gain_limit;
+}
+
+
+static int spectral_peak_window_peak_magsq(const SpectralPeakEstimateInput* input,
+                                           size_t center_bin,
+                                           float offset,
+                                           float center_magsq,
+                                           float* out_peak_magsq) {
+    SpectralPeakMagsqTriplet triplet = {0};
+    float candidate = 0.0f;
+    SpectralWindowPeakMagsqFn peak_magsq = NULL;
+
+    if (!input || !out_peak_magsq || !SPECTRAL_ISFINITE(offset)) {
+        return 0;
+    }
+    if (!spectral_peak_finite_positive(center_magsq)) {
+        return 0;
+    }
+    if (!spectral_peak_load_magsq_triplet(input->magsq_row, input->n_freqs,
+                                          center_bin, 0, &triplet)) {
+        return 0;
+    }
+    triplet.center = center_magsq;
+
+    peak_magsq = input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
+    if (!peak_magsq(triplet.left, triplet.center, triplet.right, offset, &candidate)) {
+        return 0;
+    }
+
+    if (!spectral_peak_bounded_magsq_gain_ok(triplet.center, candidate)) {
+        return 0;
+    }
+
+    *out_peak_magsq = candidate;
+    return 1;
+}
+static int spectral_peak_current_window_magsq(const SpectralPeakEstimateInput* input,
+                                              float offset,
+                                              float* out_peak_magsq) {
+    if (!input || !out_peak_magsq) return 0;
+    return spectral_peak_window_peak_magsq(input, input->bin, offset,
+                                          input->curr_magsq, out_peak_magsq);
+}
+
+static int spectral_peak_next_window_magsq(const SpectralPeakEstimateInput* input,
+                                           float next_offset,
+                                           float* out_peak_magsq) {
+    size_t next_bin = 0u;
+    SpectralPeakMagsqTriplet triplet = {0};
+    float candidate = 0.0f;
+    SpectralWindowPeakMagsqFn peak_magsq = NULL;
+
+    if (!input || !out_peak_magsq || input->best_next_bin < 0 || !SPECTRAL_ISFINITE(next_offset)) {
+        return 0;
+    }
+    next_bin = (size_t)input->best_next_bin;
+    if (!spectral_peak_load_magsq_triplet(input->next_magsq_row, input->n_freqs,
+                                          next_bin, 1, &triplet)) {
+        return 0;
+    }
+
+    peak_magsq = input->peak_magsq ? input->peak_magsq : spectral_window_peak_magsq_center;
+    if (!peak_magsq(triplet.left, triplet.center, triplet.right, next_offset, &candidate)) {
+        return 0;
+    }
+    if (!spectral_peak_bounded_magsq_gain_ok(triplet.center, candidate)) {
+        return 0;
+    }
+    *out_peak_magsq = candidate;
+    return 1;
+}
+static int spectral_peak_estimate_offset(const SpectralPeakEstimateInput* input,
+                                         SpectralPeakEstimatorType type,
+                                         int neighborhood_validated,
+                                         float* out_offset,
+                                         float* out_center_mag,
+                                         unsigned* out_flags,
+                                         SpectralPeakEstimatorType* out_used_type) {
+    int ok = 0;
+    float offset = 0.0f;
+
+    if (!input || !out_offset || !out_flags || !out_used_type) return 0;
+
+    switch (type) {
+        case SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC:
+            ok = spectral_peak_offset_log_parabolic(input, neighborhood_validated, &offset);
+            break;
+        case SPECTRAL_PEAK_ESTIMATOR_MAG_PARABOLIC:
+            ok = spectral_peak_offset_mag_parabolic(input, neighborhood_validated,
+                                                    &offset, out_center_mag);
+            break;
+        case SPECTRAL_PEAK_ESTIMATOR_JACOBSEN_COMPLEX:
+            ok = spectral_peak_complex_offset_jacobsen(input, neighborhood_validated,
+                                                       &offset, out_center_mag);
+            if (ok) *out_flags |= SPECTRAL_PEAK_ESTIMATE_COMPLEX_USED;
+            break;
+        case SPECTRAL_PEAK_ESTIMATOR_CANDAN_COMPLEX:
+            ok = spectral_peak_offset_candan(input, neighborhood_validated,
+                                             &offset, out_center_mag);
+            if (ok) *out_flags |= SPECTRAL_PEAK_ESTIMATE_COMPLEX_USED;
+            break;
+        case SPECTRAL_PEAK_ESTIMATOR_QUINN_SECOND:
+            ok = spectral_peak_offset_quinn_second(input, neighborhood_validated,
+                                                   &offset, out_center_mag);
+            if (ok) *out_flags |= SPECTRAL_PEAK_ESTIMATE_COMPLEX_USED;
+            break;
+        case SPECTRAL_PEAK_ESTIMATOR_AUTO:
+        case SPECTRAL_PEAK_ESTIMATOR_COUNT:
+        default:
+            ok = spectral_peak_offset_log_parabolic(input, neighborhood_validated, &offset);
+            type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+            break;
+    }
+
+    if (!ok && type != SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC) {
+        ok = spectral_peak_offset_log_parabolic(input, neighborhood_validated, &offset);
+        if (ok) {
+            *out_flags |= SPECTRAL_PEAK_ESTIMATE_USED_FALLBACK;
+            type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+        }
+    }
+
+    if (!ok || !SPECTRAL_ISFINITE(offset)) return 0;
+
+    *out_offset = spectral_peak_clamp_offset(offset);
+    *out_used_type = type;
+    *out_flags |= SPECTRAL_PEAK_ESTIMATE_BIN_OFFSET_VALID;
+    return 1;
+}
+
+static int spectral_peak_estimate_impl(const SpectralPeakEstimateInput* input,
+                                       SpectralPeakEstimate* out,
+                                       int neighborhood_validated) {
+    SpectralPeakEstimatorType resolved_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+    SpectralPeakEstimatorType used_type = SPECTRAL_PEAK_ESTIMATOR_LOG_PARABOLIC;
+    SpectralPeakPhasePolicy phase_policy = SPECTRAL_PEAK_PHASE_POLICY_IGNORE;
+    SpectralPeakAmplitudePolicy amplitude_policy = SPECTRAL_PEAK_AMP_POLICY_CENTER;
+    float offset = 0.0f;
+    float next_offset = 0.0f;
+    float center_mag = -1.0f;
+    float amp_magsq = 0.0f;
+    float next_amp_magsq = 0.0f;
+    float amp = 0.0f;
+    float next_amp = 0.0f;
+    float bin_delta = 0.0f;
+    float phase_bin_offset = 0.0f;
+    float phase_omega = 0.0f;
+    float phase_error = 0.0f;
+    int phase_consistent = 0;
+    unsigned flags = 0u;
+
+    if (!input || !out || !input->magsq_row || input->n_freqs < 3u ||
+        input->bin == 0u || input->bin >= input->n_freqs - 1u) {
+        return 0;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->requested_type = input->type;
+
+    if (!spectral_peak_best_next_valid(input)) return 0;
+
+    if (!spectral_peak_finite_nonnegative(input->curr_magsq) ||
+        !spectral_peak_finite_nonnegative(input->next_max_magsq) ||
+        !SPECTRAL_ISFINITE(input->freq_step_omega) ||
+        !SPECTRAL_ISFINITE(input->freq_step_df) ||
+        !SPECTRAL_ISFINITE(input->inv_hop) || input->inv_hop <= 0.0f) {
+        /* inv_hop is 1/hop and must be strictly positive: it scales the amplitude slope
+         * da = (next_amp - amp) * inv_hop, so a non-positive value would emit a
+         * wrong-signed or zeroed (but finite, so otherwise-"valid") slope. The tracker
+         * path always passes inv_hop > 0; this guards the public standalone API. */
+        return 0;
+    }
+
+    resolved_type = spectral_peak_estimator_resolve_default(input->type);
+    if (!spectral_peak_estimate_offset(input, resolved_type, neighborhood_validated,
+                                       &offset, &center_mag, &flags, &used_type)) {
+        return 0;
+    }
+
+    amp_magsq = input->curr_magsq;
+    next_amp_magsq = input->next_max_magsq;
+    amplitude_policy = input->amplitude_policy;
+
+    /* Window-aware amplitude contract:
+     *
+     * The peak-height model belongs to the analysis window descriptor. Hann,
+     * Hamming and Blackman can use a log-parabolic local model; rectangular
+     * uses center-bin amplitude by default because its sinc main lobe is not a
+     * log parabola. Unknown/custom windows must provide their own callback or
+     * fall back to center-bin power. */
+    if (amplitude_policy == SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED) {
+        float corrected = 0.0f;
+        if (spectral_peak_current_window_magsq(input, offset, &corrected)) {
+            amp_magsq = corrected;
+            flags |= SPECTRAL_PEAK_ESTIMATE_AMP_INTERP_VALID;
+        }
+    }
+
+    bin_delta = (float)(input->best_next_bin - (int)input->bin);
+    if (spectral_peak_estimate_next_offset_magsq(input, &next_offset)) {
+        bin_delta = ((float)input->best_next_bin + next_offset) -
+                    ((float)input->bin + offset);
+        flags |= SPECTRAL_PEAK_ESTIMATE_NEXT_BIN_OFFSET_VALID |
+                 SPECTRAL_PEAK_ESTIMATE_TEMPORAL_DF_REFINED;
+
+        if (amplitude_policy == SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED) {
+            float corrected_next = 0.0f;
+            if (spectral_peak_next_window_magsq(input, next_offset, &corrected_next)) {
+                next_amp_magsq = corrected_next;
+                flags |= SPECTRAL_PEAK_ESTIMATE_NEXT_AMP_INTERP_VALID;
+            }
+        }
+    } else {
+        next_offset = 0.0f;
+    }
+
+    amp = (center_mag >= 0.0f && SPECTRAL_ISFINITE(center_mag) &&
+           !(flags & SPECTRAL_PEAK_ESTIMATE_AMP_INTERP_VALID))
+        ? center_mag
+        : fast_sqrt(amp_magsq);
+    next_amp = fast_sqrt(next_amp_magsq);
+    if (!SPECTRAL_ISFINITE(amp) || !SPECTRAL_ISFINITE(next_amp)) return 0;
+
+    out->bin_offset = offset;
+    out->next_bin_offset = next_offset;
+    out->peak_magsq = amp_magsq;
+    out->next_peak_magsq = next_amp_magsq;
+    out->amp = amp;
+    out->next_amp = next_amp;
+    out->da = (next_amp - amp) * input->inv_hop;
+    out->omega = ((float)input->bin + offset) * input->freq_step_omega;
+    out->df = bin_delta * input->freq_step_df;
+
+    phase_policy = input->phase_policy;
+    if (phase_policy != SPECTRAL_PEAK_PHASE_POLICY_IGNORE &&
+        spectral_peak_estimate_phase_advance(input, out->omega,
+                                             &phase_bin_offset,
+                                             &phase_omega,
+                                             &phase_error)) {
+        out->phase_bin_offset = phase_bin_offset;
+        out->phase_omega = phase_omega;
+        out->phase_error = phase_error;
+        flags |= SPECTRAL_PEAK_ESTIMATE_PHASE_ADVANCE_VALID;
+
+        phase_consistent = fabsf(phase_error) <= SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS;
+        if (phase_consistent) {
+            flags |= SPECTRAL_PEAK_ESTIMATE_PHASE_MODEL_CONSISTENT;
+        } else if (phase_policy == SPECTRAL_PEAK_PHASE_POLICY_REJECT_INCONSISTENT) {
+            return 0;
+        }
+    }
+
+    out->flags = flags | SPECTRAL_PEAK_ESTIMATE_AMP_VALID |
+                 SPECTRAL_PEAK_ESTIMATE_OMEGA_VALID |
+                 SPECTRAL_PEAK_ESTIMATE_DF_VALID;
+    out->used_type = used_type;
+
+    if (!SPECTRAL_ISFINITE(out->da) || !SPECTRAL_ISFINITE(out->omega) || !SPECTRAL_ISFINITE(out->df)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+
+
+
+
+
+int spectral_peak_estimate(const SpectralPeakEstimateInput* input,
+                           SpectralPeakEstimate* out) {
+    return spectral_peak_estimate_impl(input, out, 0);
+}
+
+int spectral_peak_estimate_validated(const SpectralPeakEstimateInput* input,
+                                     SpectralPeakEstimate* out) {
+    return spectral_peak_estimate_impl(input, out, 1);
+}

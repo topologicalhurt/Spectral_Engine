@@ -51,7 +51,7 @@ from .subtree_models import (
     normalize_track_mask,
 )
 from .subtree_reporting import render_dry_run_report
-from ..core.utils import read_utf8_lf, write_utf8_lf
+from ..core.utils import read_utf8_lf  # noqa: F401  (kept for subclass use)
 
 
 
@@ -101,9 +101,29 @@ class SubtreeOpsBase(GitSubtreeOps):
         return norm, full
 
     def _write_entries(self, entries: list[LibEntry]) -> None:
-        self.libs_file.parent.mkdir(parents=True, exist_ok=True)
-        content = "\n".join(entry_to_line(entry) for entry in entries).strip()
-        write_utf8_lf(self.libs_file, f"{content}\n" if content else "")
+        """Persist subtree entries through the shared YAML manifest.
+
+        Routed via replace_entries(kind=subtree) so the subtree engine can
+        never clobber submodule declarations (ADR-0003 kind separation)."""
+        from ..vendor import manifest as manifest_mod
+
+        # Derive the manifest name from the FULL path, not the basename: a
+        # basename ('foo' from 'lib/foo') could collide with a submodule named
+        # 'foo' and, via replace_entries -> save, silently erase it. The
+        # full-path slug is unique because paths are unique+validated, and
+        # save() raises on any residual collision (ADR-0003 kind separation).
+        specs = [
+            manifest_mod.DependencySpec(
+                name=entry.local_path.replace("/", "_"),
+                kind=manifest_mod.KIND_SUBTREE,
+                url=entry.repo,
+                path=entry.local_path,
+                ref=entry.branch,
+                track=entry.track_mask,
+            )
+            for entry in entries
+        ]
+        manifest_mod.replace_entries(self.repo_root, kind=manifest_mod.KIND_SUBTREE, new_entries=specs)
 
     def parse_lib_entry(self, line: str) -> LibEntry:
         parts = [part.strip() for part in line.split(",")]
@@ -125,15 +145,27 @@ class SubtreeOpsBase(GitSubtreeOps):
         return LibEntry(**entry_kwargs)
 
     def read_libs_file(self, *, allow_missing: bool = False) -> list[str]:
-        if not self.libs_file.exists():
-            if allow_missing:
-                return []
-            self.die(f"libs.txt not found at {self.libs_file}")
-        return [
-            line
-            for raw in read_utf8_lf(self.libs_file).splitlines()
-            if (line := raw.strip()) and not line.startswith("#")
-        ]
+        """Subtree entries from the shared YAML manifest, rendered in the
+        engine's legacy line format so every downstream consumer (including
+        the `add` CLI string path) keeps a single parser. Submodule entries
+        are invisible here by construction — kind separation lives in the
+        manifest, not in this engine."""
+        from ..vendor import manifest as manifest_mod
+
+        try:
+            mani = manifest_mod.load(self.repo_root, allow_missing=allow_missing)
+        except manifest_mod.ManifestError as exc:
+            self.die(str(exc))
+            return []
+        return [entry_to_line(
+            LibEntry(
+                raw=spec.name,
+                repo=spec.url,
+                local_path=spec.path,
+                branch=spec.ref,
+                track_mask=spec.track,
+            )
+        ) for spec in mani.subtrees()]
 
     def validate_entries(self, lines: list[str]) -> list[LibEntry]:
         entries: list[LibEntry] = []
@@ -168,11 +200,11 @@ class SubtreeOpsBase(GitSubtreeOps):
                 self.warn(f"'{entry.repo}' doesn't look like a URL (no :// or @)")
 
             if entry.local_path in seen_paths:
-                self.warn(f"duplicate path '{entry.local_path}' in libs.txt")
+                self.warn(f"duplicate path '{entry.local_path}' in the manifest")
             seen_paths.add(entry.local_path)
 
         if errors > 0:
-            self.die(f"{errors} invalid entries in libs.txt")
+            self.die(f"{errors} invalid subtree entries in the manifest")
 
         return entries
 
@@ -621,12 +653,15 @@ class SubtreeOpsBase(GitSubtreeOps):
             if key in self._count_fetch_cache:
                 return self._count_fetch_cache[key]
 
+            # '--' before the repo/branch positionals: manifest-validated
+            # upstream, separator is version-independent defense in depth.
             filtered_args = [
                 "fetch",
                 "--quiet",
                 "--no-tags",
                 f"--depth={COUNT_FETCH_DEPTH}",
                 f"--filter={COUNT_FETCH_FILTER}",
+                "--",
                 repo,
                 branch,
             ]
@@ -634,7 +669,7 @@ class SubtreeOpsBase(GitSubtreeOps):
             result = self.run(filtered_args, mutates_repo=False)
             note = ""
             if result.returncode != 0:
-                fallback_args = ["fetch", "--quiet", "--no-tags", f"--depth={COUNT_FETCH_DEPTH}", repo, branch]
+                fallback_args = ["fetch", "--quiet", "--no-tags", f"--depth={COUNT_FETCH_DEPTH}", "--", repo, branch]
                 fallback_result = self.run(fallback_args, mutates_repo=False)
                 if fallback_result.returncode != 0:
                     value = self._new_lookup_result(

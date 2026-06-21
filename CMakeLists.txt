@@ -9,4 +9,6 @@ endif()
 
 project(Spectral LANGUAGES C)
 
+enable_testing()
+
 add_subdirectory(spectral_engine)

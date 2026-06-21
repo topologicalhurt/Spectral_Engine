@@ -4,17 +4,92 @@
 #                                                                        #
 ##########################################################################
 
-Real-time spectral analysis and resynthesis engine for macOS/Linux & baremetal ARM Cortex-M/A targets, with acceleration support available for Metal & CUDA platforms.
+Real-time spectral analysis and resynthesis engine currently supporting macOS/Linux for x86 & ARM based architectures. 
+Intentionally targets ARM Cortex-M/A targets with acceleration support available for:
 
-With planned support for the following:
+[✓] Metal & CUDA platforms
+[✓] ARM, X86
+[✓] Linux (fftw3), MacOS (vDSP)
+[✓] SIMD support via. SIMDE
+[✓] OpenMP
 
-[] OpenGL
-[] Subset of RISC-V for baremetal embedded targets
-[] FreeRTOS
+With support eventually planned for the following:
+
+[X] OpenGL / Vulkan (GPU acceleration framework)
+[X] RISC-V          (Full support)
+[X] FreeRTOS        (For embedded platforms)
+[X] OpenBSD         (Full support)
 
 If you are interested in a more detailed project description see spectral_engine/README.md
 
+------------
+DEPENDENCIES
+------------
+
+The easiest way to get a reproducible build up & running is with nix, I.e, `nix develop`
+
+CORE:
+
+- CMake ≥ 3.21
+- GNU Make (optional) - Wraps CMake. E.g. see build section below
+- A C11 compiler — Clang (Apple/LLVM) or GCC
+- OpenMP runtime — libomp (macOS/Clang) or libgomp (Linux/GCC); CPU parallel synth
+- libsndfile - WAV/audio I/O
+
+PLATFORM ACCELERATION:
+
+- macOS: Accelerate / vDSP (FFT + atan2) and Metal + Foundation (GPU backend).
+  These ship standard with the Xcode Command Line Tools / macOS SDK.
+- Linux: FFTW3 (libfftw3-dev).
+- Optional GPU (Linux + NVIDIA): CUDA Toolkit / nvcc — build with
+  `-DSPECTRAL_USE_CUDA=ON` and target `cuda`.
+
+VENDORED / IN-SOURCE:
+
+- CMSIS-DSP   — Q15/Q31 FFT for the IFFT synthesis path
+- CMSIS_6     — Cortex-M core headers
+- simde       — header-only SIMD portability (SSE2 intrinsics -> NEON/AVX)
+- xxHash      — resource hash system (xx32/xx3)
+
+  See `third_party/libs.yaml` for the full manifest; patchsets are kept in-source as subtrees.
+  Git submodules are managed by `python -m spectral_tools.vendor`
+
+EMBEDDED ARM:
+
+- arm-none-eabi-gcc ≥ 15 with newlib — VENDORED in-tree at
+  `tools/toolchains/xpack-arm-none-eabi-gcc-<version>`
+- qemu-system-arm ≥ 11
+- llvm-mca (from LLVM)
+
+  llvm-mca and qemu are ONLY needed for the embedded perf model / `pytest tests/tools`;
+  the desktop build does not require them.
+
+DAISY SEED PORT:
+
+- dfu-util — `make daisy-flash` (flashing a Daisy Seed).
+- libDaisy + DaisySP — external board SDKs for `make daisy`, passed via
+  `-DSPECTRAL_DAISY_LIBDAISY_DIR=... -DSPECTRAL_DAISY_DAISYSP_DIR=...`.
+
+OPTIONAL DEV TOOLS:
+
+- ripgrep (rg)     — Log-discipline build check
+- llvm-profdata    — PGO profile merge
+
+  The build degrades gracefully if absent.
+
+QUICK INSTALL on host:
+
+- macOS:  ```brew install cmake libomp libsndfile llvm qemu dfu-util ripgrep```
+          + Xcode Command Line Tools for Accelerate/Metal
+- Debian/Ubuntu:
+          ```sudo apt-get install -y cmake build-essential libomp-dev \
+              libsndfile1-dev libfftw3-dev qemu-system-arm gcc-arm-none-eabi \
+              llvm dfu-util ripgrep```
+- Python (any OS):  ```pip install -r tools/requirements.txt```
+
+-----
 BUILD
+-----
 
 Run all build commands from the repository root.
 
@@ -37,19 +112,7 @@ make embedded_arm_restricted   # host build with embedded constraints
 make daisy                     # Cortex-M firmware build (Daisy Seed)
 ```
 
-We also support a very primitive simulator which is designed to give a *very* rough estimate of the ARM-M7 chip's
-performance on the native target.
-
-[!NOTE that In future releases this will be deprecated in favour of a much more reliable QEMU emulation of the cross-compiled code.!]
-
-Simulation build (for modeling cross-compiled code on desktop)
-```
-make configure
-make simulate          # generic profile
-make simulate_daisy    # Daisy profile
-```
-
-The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the devices' flash. E.g,
+The currently supported workflow on supported embedded devices is to build the segment binary offline & then either bake it into the firmware or upload it onto the device's flash. E.g,
 ```
 make configure
 make desktop daisy
@@ -57,7 +120,7 @@ make desktop daisy
 make daisy-flash       # Flash the target device with the segment binary
 ```
 
-Other useful commands
+An overview of the build system:
 ```
 make CMAKE_CONFIGURE_ARGS='-DCMAKE_BUILD_TYPE=Debug -DSPECTRAL_DEBUG_LOGGING=ON'  # Turn on debug logging
 
@@ -81,16 +144,29 @@ USAGE
   Timbres: 0=sine 1=saw 2=square 3=tri 4=asin 5=para 6=quant 7=pwm
   Backends: 0=auto 1=cpu 2=metal 3=cuda 4=export
 
+  Named options:
+  -w <file>              Use wavetable file (.spwt/.bin/.raw/.hex)
+  -pm, --proc-mask <s>   Processing chain mask (comma-separated names or integer bitmask)
+  --cache                Prewarm backend and cache analyzed segments for this input
+  -q, --quality <mode>   Anti-alias oscillator quality (CPU float path):
+                         naive (default), polyblep, additive, oversample
+  -S, --simd             CPU oscillator uses SIMD (default; ~1.8x on saw/square, <=1 ULP vs scalar)
+  --scalar               Force the scalar reference oscillator (parity/debug)
+  --q15                  Opt into the Q15 fixed-point compute domain (forces CPU backend):
+                         packed 8-wide SIMD Q15 on saw/square/tri/para (~1.4-1.6x over
+                         float-SIMD), scalar Q15 under --scalar; float is the default
+
 STRUCTURE
 
-  spectral_engine/    Core analysis and synthesis
-  api/                Platform-specific wrappers
+  spectral_engine/    Device agnostic core analysis, synthesis and runtime utilities
+  tests/              Self-explanitory
+  api/                Platform-specific wrappers or ports
   examples/           Example applications & Demo's
-  tools/              Useful scripts or toolings
+  tools/              Useful scripts, toolings, workflows & devops
   resources/          Location for auxiliary files
   build/bin/          Compiled binaries
 
 AUTHOR
 
   Connor Sinclair
-  csin0659@uni.sydney.edu.au
+  lospolloscarlos@gmail.com

@@ -9,7 +9,7 @@
  *
  * For math constants, see spectral_consts.h
  * For compiler hints/macros, see spectral_macros.h
- * For SIMD detection, see oscillator_dispatch.h
+ * For SIMD detection, see spectral_oscillator_dispatch.h
  */
 #ifndef SPECTRAL_CONFIG_H
 #define SPECTRAL_CONFIG_H
@@ -37,6 +37,63 @@
 #ifndef SPECTRAL_CUSTOM_FAST_MATH_MODE
 #define SPECTRAL_CUSTOM_FAST_MATH_MODE 0
 #endif
+
+/* Correctness-first approximation gates.
+ * Disabled by default, EXCEPT where a gated, error-bounded approximation is both faster
+ * and the only SIMD-vectorizable option AND there is no exact vectorized alternative:
+ * TRIG (always, the minimax sine) and ATAN2 (on non-vDSP hosts only — Apple keeps exact
+ * vvatan2f). Both carry an error budget asserted by core_guarantees_drift_test. The rest
+ * stay off; enable them only with dedicated error-bound + perceptual-regression tests.
+ */
+/* TRIG is the exception: the canonical sine is a degree-9 odd minimax fold
+ * (spectral_fast_sin_inline), default-ON because it is both faster and
+ * SIMD-vectorizable while staying within ~1.4 ULP of libm over the oscillator's
+ * operating range (8.3e-7 worst case over [-4pi,4pi]); see the EXACT_TRIG
+ * guarantee in spectral_guarantees.h. Set to 0 to
+ * restore exact libm sinf (reproducible/parity builds). */
+#ifndef SPECTRAL_ENABLE_APPROX_TRIG
+#define SPECTRAL_ENABLE_APPROX_TRIG 1
+#endif
+/* SPECTRAL_ENABLE_APPROX_ATAN2's default is backend-dependent and is resolved AFTER
+ * SPECTRAL_USE_VDSP is known (see below): Apple's analysis phase path uses Accelerate
+ * vvatan2f (exact + vectorized) so it stays exact, whereas a non-Apple build's only exact
+ * option is scalar libm atan2f — ~5x slower and the dominant cost of x86/Linux STFT phase
+ * extraction — so it defaults to the gated 2e-4 rad poly, mirroring TRIG above. A -D override
+ * is still honored. */
+#ifndef SPECTRAL_ENABLE_APPROX_INV_SQRT
+#define SPECTRAL_ENABLE_APPROX_INV_SQRT 0
+#endif
+#ifndef SPECTRAL_ENABLE_APPROX_PEAK_LOG
+#define SPECTRAL_ENABLE_APPROX_PEAK_LOG 0
+#endif
+/* Q15 oscillator phase-corner approximation. Default 0 = the packed 8x SIMD Q15
+ * triangle/parabola evaluators reproduce the scalar/float result exactly at the
+ * pq == Q15_MIN (phase = -pi) corner. Set to 1 in a fast/approximate build to skip
+ * the exact-corner correction and accept the cheap 1-LSB overflow-guard clamp there.
+ * This is the canonical example of the "exact default, cheap approximation only when
+ * gated" policy (see AI_CANON rule 3): the int16 SIMD ops overflow at -32768, so the
+ * default does a tiny masked corner fix-up while the gate trades 1 LSB for two fewer ops. */
+#ifndef SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY
+#define SPECTRAL_ENABLE_APPROX_Q15_BOUNDARY 0
+#endif
+#ifndef SPECTRAL_METAL_FAST_MATH
+#define SPECTRAL_METAL_FAST_MATH 0
+#endif
+/* Precise (cubic) MQ phase reconstruction gate. EXPERIMENTAL — NOT a
+ * supported path (policy: REVIEWER_HANDOFF_2 sec 4.3).
+ * When 0 (default) the synthesis phase model is the canonical per-interval
+ * quadratic phase (McAulay-Quatieri 1986 per-frame interpolation); the cubic
+ * coefficients reduce to (c2=beta, c3=0) so the synth path is bit-identical.
+ * When 1, the adaptive_track_density stage may annotate segments with
+ * cross-frame cubic phase coefficients (smooth C1 phase across hops) which the
+ * synth path consumes. No build target sets this flag: the cubic path is
+ * unbuilt and untested end-to-end (only its Segment serialization is covered,
+ * by segment_endian_roundtrip). Do not enable in production. Its fate is
+ * decided when the F synthesis-method stream is engaged (OPTIMISATION_PLAN
+ * F3 per-track cubic-phase interpolation): wire+golden-sign-off, or delete. */
+#ifndef SPECTRAL_PRECISE_PHASE
+#define SPECTRAL_PRECISE_PHASE 0
+#endif
 /* Restricted profiling gate (single ownership).
  * Enabled only when restricted mode is active and restricted debug profiling
  * has been explicitly enabled by the build. */
@@ -46,9 +103,12 @@
 #define SPECTRAL_RESTRICTED_PROFILE 0
 #endif
 
-/* Embedded float mode: use FPU instead of Q15 integer for synthesis.
- * Storage remains Q15 for memory efficiency, but synthesis uses float.
- * Requires FPU (Cortex-M4F/M7 with VFPv4). */
+/* Embedded float mode (RESERVED -- not yet implemented). Intended to use the FPU
+ * (Cortex-M4F/M7, VFPv4) for synthesis instead of Q15 integer, with storage kept
+ * in Q15 for memory efficiency. No code branches on this gate yet, so defining it
+ * changes nothing: the embedded_arm_float target currently compiles identically to
+ * embedded_arm. Wire an #if SPECTRAL_EMBEDDED_FLOAT synthesis path (with a
+ * divergence test) before treating the two targets as distinct. */
 #ifndef SPECTRAL_EMBEDDED_FLOAT
 #define SPECTRAL_EMBEDDED_FLOAT 0
 #endif
@@ -61,7 +121,7 @@
 #define SPECTRAL_DMA_BATCH      32  /* Segments per DMA transfer (~512 bytes) */
 #endif
 
-/* SoA active segment layout (phase_acc[], freq_inc[] as separate arrays) */
+/* SoA active segment layout (phase_acc[], phase_inc[] as separate arrays) */
 #ifndef SPECTRAL_SOA_ACTIVE
 #if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
 #define SPECTRAL_SOA_ACTIVE     1
@@ -113,21 +173,40 @@ typedef int32_t  spectral_acc_t;
 #define SPECTRAL_SAMPLE_MAX         32767
 #define SPECTRAL_SAMPLE_MIN         (-32768)
 #define SPECTRAL_SAMPLE_ZERO        0
-#define SPECTRAL_SAMPLE_HALF        16384
 
-#define SPECTRAL_SAMPLE_TO_FLOAT(s) ((float)(s) * SPECTRAL_INV_Q15_SCALE)
-#define FLOAT_TO_SPECTRAL_SAMPLE(f) \
-    ((spectral_sample_t)(!((f) == (f)) ? 0 : (f) >= 1.0f ? 32767 : (f) <= -1.0f ? -32768 : (int16_t)((f) * SPECTRAL_Q15_SCALE)))
+static inline float spectral_sample_to_float(spectral_sample_t s) {
+    return (float)s * SPECTRAL_INV_Q15_SCALE;
+}
+/* NaN -> silence; out-of-range saturates (the embedded contract everywhere). */
+static inline spectral_sample_t float_to_spectral_sample(float f) {
+    if (f != f) return 0;
+    if (f >= 1.0f) return SPECTRAL_SAMPLE_MAX;
+    if (f <= -1.0f) return SPECTRAL_SAMPLE_MIN;
+    return (spectral_sample_t)(f * SPECTRAL_Q15_SCALE);
+}
+static inline spectral_sample_t spectral_sample_add(spectral_sample_t a, spectral_sample_t b) {
+    int32_t sum = (int32_t)a + (int32_t)b;
+    if (sum > SPECTRAL_SAMPLE_MAX) return SPECTRAL_SAMPLE_MAX;
+    if (sum < SPECTRAL_SAMPLE_MIN) return SPECTRAL_SAMPLE_MIN;
+    return (spectral_sample_t)sum;
+}
+static inline spectral_sample_t spectral_sample_mul(spectral_sample_t a, spectral_sample_t b) {
+    int32_t prod = ((int32_t)a * (int32_t)b) >> 15;
+    if (prod > SPECTRAL_SAMPLE_MAX) return SPECTRAL_SAMPLE_MAX;
+    if (prod < SPECTRAL_SAMPLE_MIN) return SPECTRAL_SAMPLE_MIN;
+    return (spectral_sample_t)prod;
+}
 
-#define SPECTRAL_SAMPLE_ADD(a, b) \
-    ((spectral_sample_t)(((int32_t)(a) + (int32_t)(b)) > 32767 ? 32767 : \
-                         (((int32_t)(a) + (int32_t)(b)) < -32768 ? -32768 : \
-                          ((int32_t)(a) + (int32_t)(b)))))
+#define SPECTRAL_SAMPLE_IS_FIXED    1
+#define SPECTRAL_SAMPLE_SPAN_FINITE(s, n) ((void)(s), (void)(n), 1)
 
-#define SPECTRAL_SAMPLE_MUL(a, b) \
-    ((spectral_sample_t)((((int32_t)(a) * (int32_t)(b)) >> 15) > 32767 ? 32767 : \
-                         ((((int32_t)(a) * (int32_t)(b)) >> 15) < -32768 ? -32768 : \
-                          (((int32_t)(a) * (int32_t)(b)) >> 15))))
+static inline spectral_sample_t spectral_sample_lerp_f(spectral_sample_t s0, spectral_sample_t s1, float frac) {
+    int32_t fq8 = (int32_t)(frac * 256.0f);
+    return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * fq8) >> 8));
+}
+static inline spectral_sample_t spectral_sample_lerp_q8(spectral_sample_t s0, spectral_sample_t s1, uint32_t frac_q8) {
+    return (spectral_sample_t)(s0 + ((((int32_t)s1 - (int32_t)s0) * (int32_t)frac_q8) >> 8));
+}
 
 #else  /* Desktop: float samples */
 
@@ -137,12 +216,26 @@ typedef double   spectral_acc_t;
 #define SPECTRAL_SAMPLE_MAX         1.0f
 #define SPECTRAL_SAMPLE_MIN         (-1.0f)
 #define SPECTRAL_SAMPLE_ZERO        0.0f
-#define SPECTRAL_SAMPLE_HALF        0.5f
 
-#define SPECTRAL_SAMPLE_TO_FLOAT(s) (s)
-#define FLOAT_TO_SPECTRAL_SAMPLE(f) (f)
-#define SPECTRAL_SAMPLE_ADD(a, b)   ((a) + (b))
-#define SPECTRAL_SAMPLE_MUL(a, b)   ((a) * (b))
+static inline float spectral_sample_to_float(spectral_sample_t s) { return s; }
+static inline spectral_sample_t float_to_spectral_sample(float f) { return f; }
+static inline spectral_sample_t spectral_sample_add(spectral_sample_t a, spectral_sample_t b) {
+    return a + b;
+}
+static inline spectral_sample_t spectral_sample_mul(spectral_sample_t a, spectral_sample_t b) {
+    return a * b;
+}
+
+#define SPECTRAL_SAMPLE_IS_FIXED    0
+#define SPECTRAL_SAMPLE_SPAN_FINITE(s, n) spectral_f32_span_finite((s), (n))
+
+static inline spectral_sample_t spectral_sample_lerp_f(spectral_sample_t s0, spectral_sample_t s1, float frac) {
+    return s0 + (s1 - s0) * frac;
+}
+static inline spectral_sample_t spectral_sample_lerp_q8(spectral_sample_t s0, spectral_sample_t s1, uint32_t frac_q8) {
+    float frac_f = (float)frac_q8 / 256.0f;
+    return s0 + (s1 - s0) * frac_f;
+}
 
 #endif
 
@@ -241,15 +334,6 @@ typedef enum SpectralTimbre {
 #endif
 
 /* Canonical simulation environment keys */
-#ifndef SPECTRAL_ENV_SIM_PERF_PROFILE
-#define SPECTRAL_ENV_SIM_PERF_PROFILE "SPECTRAL_SIM_PERF_PROFILE"
-#endif
-#ifndef SPECTRAL_ENV_SIM_PESSIMISM
-#define SPECTRAL_ENV_SIM_PESSIMISM "SPECTRAL_SIM_PESSIMISM"
-#endif
-#ifndef SPECTRAL_ENV_SIM_PERF_COLD
-#define SPECTRAL_ENV_SIM_PERF_COLD "SPECTRAL_SIM_PERF_COLD"
-#endif
 /* Emit split analysis stage markers (fft/track) in addition to aggregate analysis markers. */
 #ifndef SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS
 #define SPECTRAL_ENV_STAGE_SPLIT_ANALYSIS "SPECTRAL_STAGE_SPLIT_ANALYSIS"
@@ -327,30 +411,45 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_DEFAULT_WIDTH
 #define SPECTRAL_TRACK_DEFAULT_WIDTH    0.5f
 #endif
-#ifndef SPECTRAL_TRACK_INTERP_LOG_DOMAIN
-#if SPECTRAL_CUSTOM_FAST_MATH_MODE
-#define SPECTRAL_TRACK_INTERP_LOG_DOMAIN 0
-#else
-#define SPECTRAL_TRACK_INTERP_LOG_DOMAIN 1
+/* Segment width domain bound, enforced by spectral_segment_payload_valid.
+ * width is a waveform shape parameter (quantized step density, pwm duty); the
+ * synth boundary computes rads*width with |rads| <= pi+ulp, which becomes
+ * int-conversion UB once width reaches ~2^31/pi (the INT_MAX defect class
+ * reproduced by test_segment_payload_bounds). 2^24 is the largest float with exactly
+ * representable unit steps -- a step count above it cannot be represented
+ * distinctly anyway -- and keeps pi*width ~40x under the UB envelope. The bound
+ * is on |width| so no future consumer inherits the boundary class. */
+#ifndef SPECTRAL_SEGMENT_WIDTH_MAX
+#define SPECTRAL_SEGMENT_WIDTH_MAX      16777216.0f
 #endif
-#endif
+/* Per-frame candidate scratch batch for peak tracking.
+ * [chosen: 128 entries keeps the candidate block cache-resident; the prefetch
+ * benchmark profiles (benchmark_workflow) sweep 64-256 for re-evaluation.] */
 #ifndef SPECTRAL_TRACK_CANDIDATE_BATCH
 #define SPECTRAL_TRACK_CANDIDATE_BATCH  128u
+#endif
+#ifndef SPECTRAL_TRACK_INITIAL_SEG_CAP
+#define SPECTRAL_TRACK_INITIAL_SEG_CAP  65536u
 #endif
 #ifndef SPECTRAL_TRACK_PREFETCH_LOOKAHEAD
 #define SPECTRAL_TRACK_PREFETCH_LOOKAHEAD 12u
 #endif
+/* Software-prefetch lookahead for the SIMD peak pre-scan over the float magsq
+ * spectrum (spectral_peak_track.c: prefetch row + f + 8/4 + DISTANCE).
+ * [chosen: 48 floats = 192 B ~= 3 x 64 B cache lines of read-ahead, enough to
+ *  cover the loadu/compare latency of the streaming scan.] */
 #ifndef SPECTRAL_TRACK_SCAN_PREFETCH_DISTANCE
 #define SPECTRAL_TRACK_SCAN_PREFETCH_DISTANCE 48u
 #endif
+/* `locality` argument of __builtin_prefetch(addr, 0, locality) (0..3 per the
+ * GCC/Clang builtin: 0 = no temporal reuse/NTA, 3 = keep in all cache levels).
+ * [chosen: 2 = moderate temporal locality; each magsq row is touched once in a
+ *  streaming scan, so it should land in L2/L3 without evicting hot L1 lines.] */
 #ifndef SPECTRAL_TRACK_PREFETCH_READ_LOCALITY
 #define SPECTRAL_TRACK_PREFETCH_READ_LOCALITY 2
 #endif
 #ifndef SPECTRAL_TRACK_PREFETCH_PHASE
 #define SPECTRAL_TRACK_PREFETCH_PHASE 1
-#endif
-#ifndef SPECTRAL_TRACK_PREFETCH_WRITE_LOCALITY
-#define SPECTRAL_TRACK_PREFETCH_WRITE_LOCALITY 2
 #endif
 #ifndef SPECTRAL_TRACK_ALLOC_FAILED_POLL_STRIDE
 #define SPECTRAL_TRACK_ALLOC_FAILED_POLL_STRIDE 16u
@@ -358,32 +457,46 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_TRACK_PAIR_OMP_CHUNK
 #define SPECTRAL_TRACK_PAIR_OMP_CHUNK 0u
 #endif
-#ifndef SPECTRAL_TRACK_SEG_PREFETCH_DISTANCE
-#define SPECTRAL_TRACK_SEG_PREFETCH_DISTANCE 16u
-#endif
 #ifndef SPECTRAL_TRACK_DEBUG_TIMING
 #define SPECTRAL_TRACK_DEBUG_TIMING 0
 #endif
-#ifndef SPECTRAL_STFT_CHUNK_FRAMES
-#define SPECTRAL_STFT_CHUNK_FRAMES      512u
+#ifndef SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS
+#define SPECTRAL_PEAK_PHASE_CONSISTENCY_TOL_RADS 0.39269908169872414f /* pi/8 */
 #endif
+#ifndef SPECTRAL_PEAK_PHASE_POLICY_DEFAULT
+#define SPECTRAL_PEAK_PHASE_POLICY_DEFAULT SPECTRAL_PEAK_PHASE_POLICY_OBSERVE
+#endif
+#ifndef SPECTRAL_PEAK_AMP_POLICY_DEFAULT
+#define SPECTRAL_PEAK_AMP_POLICY_DEFAULT SPECTRAL_PEAK_AMP_POLICY_INTERP_BOUNDED
+#endif
+#ifndef SPECTRAL_PEAK_AMP_MAX_GAIN
+#define SPECTRAL_PEAK_AMP_MAX_GAIN 8.0f
+#endif
+/* STFT-size trip point for AUTO path selection (spectral_analysis.c:
+ * use_fused_path = total_bins > THRESHOLD). Unit is BINS.
+ * [derived: the full-matrix path materializes 2 floats/bin (magsq + phase) = 8 B,
+ *  so 32 Mi bins x 8 B = 256 MiB STFT; above that the fused SPSC path is used to
+ *  avoid the full-matrix footprint.] */
 #ifndef SPECTRAL_STFT_CHUNK_THRESHOLD
 #define SPECTRAL_STFT_CHUNK_THRESHOLD   (32ul * 1024ul * 1024ul)
 #endif
+/* Segment-merge size above which the contiguous merge buffer is page-aligned and
+ * kernel pre-faulted (spectral_peak_track.c, compared to merge_bytes). Unit is
+ * BYTES. [chosen: 64 MiB; below it ordinary malloc is fine, above it the
+ * ~63K minor page faults of the parallel copy are worth the posix_memalign +
+ * MADV_POPULATE_WRITE / pre-touch path.] */
 #ifndef SPECTRAL_PRETOUCH_THRESHOLD
 #define SPECTRAL_PRETOUCH_THRESHOLD     (64ul * 1024ul * 1024ul)
 #endif
+/* Fallback page size for the pre-touch path. The merge code prefers the runtime
+ * sysconf(_SC_PAGESIZE) and only falls back to this macro if sysconf fails;
+ * 4096 is the classic 4 KiB page. [chosen: portable default for hosts without a
+ * usable sysconf; NOTE Apple Silicon uses 16 KiB pages, which is exactly why the
+ * runtime query is preferred over this literal.] */
 #ifndef SPECTRAL_PRETOUCH_PAGE_SIZE
 #define SPECTRAL_PRETOUCH_PAGE_SIZE     4096u
 #endif
-#ifndef SPECTRAL_SEGMENT_POOL_BLOCK_SIZE
-#define SPECTRAL_SEGMENT_POOL_BLOCK_SIZE 4096u
-#endif
 
-/* Canonical optional-processing policy flags */
-#ifndef SPECTRAL_PROCESS_STRICT
-#define SPECTRAL_PROCESS_STRICT         0
-#endif
 
 /* Canonical embedded debug LED timing defaults (milliseconds) */
 #ifndef SPECTRAL_ERROR_BLINK_ON_MS
@@ -391,9 +504,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #endif
 #ifndef SPECTRAL_ERROR_BLINK_OFF_MS
 #define SPECTRAL_ERROR_BLINK_OFF_MS     100u
-#endif
-#ifndef SPECTRAL_ERROR_BLINK_PAUSE_MS
-#define SPECTRAL_ERROR_BLINK_PAUSE_MS   500u
 #endif
 #ifndef SPECTRAL_LED_BLINK_PLAYING_MS
 #define SPECTRAL_LED_BLINK_PLAYING_MS   250u
@@ -433,7 +543,6 @@ static inline const char* spectral_exec_mode_name(void) {
 _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
                "SPECTRAL_WAVETABLE_BITS must match SPECTRAL_WAVETABLE_SIZE");
 #endif
-#define SPECTRAL_WAVETABLE_MASK         (SPECTRAL_WAVETABLE_SIZE - 1)
 #ifndef SPECTRAL_MAX_WAVETABLES
 #define SPECTRAL_MAX_WAVETABLES         8
 #endif
@@ -449,12 +558,20 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #ifndef SPECTRAL_FADE_SAMPLES_EMBEDDED
 #define SPECTRAL_FADE_SAMPLES_EMBEDDED 32
 #endif
-/* Optimization level: 0=safe, 1=balanced (default), 2=aggressive, 3=reserved. */
-#ifndef SPECTRAL_OPT_LEVEL
-#define SPECTRAL_OPT_LEVEL      1
+/* Active fade length for the current build profile. Profile selection lives here
+ * (the canonical profile header), not in each synthesis source, so the synthesis
+ * files stay free of SPECTRAL_EMBEDDED branching. */
+#ifndef SPECTRAL_FADE_SAMPLES_ACTIVE
+#if SPECTRAL_EMBEDDED
+#define SPECTRAL_FADE_SAMPLES_ACTIVE SPECTRAL_FADE_SAMPLES_EMBEDDED
+#else
+#define SPECTRAL_FADE_SAMPLES_ACTIVE SPECTRAL_FADE_SAMPLES_DESKTOP
 #endif
-
-/* GPU/compute block size for Metal/CUDA backends */
+#endif
+/* GPU/compute block size for Metal/CUDA backends.
+ * [chosen: a multiple of the 32-wide SIMD-group/warp on both backends, at
+ * half the common 1024 threads/group ceiling for register headroom; not yet
+ * swept on hardware — revisit if a GPU profile shows occupancy pressure.] */
 #ifndef SPECTRAL_GPU_TILE_SIZE
 #define SPECTRAL_GPU_TILE_SIZE          512
 #endif
@@ -465,12 +582,17 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_SYNTH_DETERMINISTIC_PARTITIONS 0
 #endif
 
-/* Headroom factor for normalization (0.95 = -0.45dB) */
+/* Headroom factor for normalization (0.95 = -0.45 dB).
+ * [chosen: keeps reconstructed inter-sample peaks from clipping after
+ * normalization to the sample-domain max.] */
 #ifndef SPECTRAL_NORMALIZE_HEADROOM
 #define SPECTRAL_NORMALIZE_HEADROOM     0.95f
 #endif
 
-/* Embedded simulation headroom for Q15 amplitude scaling */
+/* Embedded simulation headroom for Q15 amplitude scaling.
+ * [chosen: scales the peak segment amplitude to just under Q15 full scale so
+ * float_to_spectral_sample saturation never engages on the nominal peak; the
+ * 1% margin absorbs envelope/rounding overshoot.] */
 #define SPECTRAL_SIMULATION_HEADROOM    0.99f
 
 /* GPU segment cache size (threadgroup / shared memory).
@@ -481,16 +603,40 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 
 /* Platform Detection */
 
+/* Overridable so a host build can force the M7 codepath for host-sim/testing
+ * (-DSPECTRAL_ARM_M7=1). Defaults to real-hardware detection otherwise. */
+#ifndef SPECTRAL_ARM_M7
 #if defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7M__)
 #define SPECTRAL_ARM_M7         1
 #else
 #define SPECTRAL_ARM_M7         0
 #endif
+#endif
 
+/* Default: Accelerate/vDSP on Apple, portable elsewhere. A build may force the
+ * portable path by pre-defining SPECTRAL_USE_VDSP=0 (e.g. to exercise the
+ * source-visible window/FFT formulas without linking Accelerate). */
+#ifndef SPECTRAL_USE_VDSP
 #ifdef __APPLE__
 #define SPECTRAL_USE_VDSP       1
 #else
 #define SPECTRAL_USE_VDSP       0
+#endif
+#endif
+
+/* Gate for the spectral_magsq_phase / spectral_atan2_poly primitive (used by the
+ * vDSP-audit bench and exposed via the SPECTRAL_GUARANTEE_EXACT_ATAN2 guarantee).
+ * NOTE: as of the phase-at-peaks refactor the ANALYSIS path no longer computes dense
+ * phase at all — it stores the fp16 complex spectrum and takes libm atan2f only at the
+ * tracked peak bins (exact there, on every backend), so this flag no longer affects
+ * analysis. It still selects the poly-vs-exact behaviour of the magsq_phase primitive
+ * for any remaining caller; default to the SIMD-vectorized ~2e-4 rad poly off vDSP. */
+#ifndef SPECTRAL_ENABLE_APPROX_ATAN2
+#if SPECTRAL_USE_VDSP
+#define SPECTRAL_ENABLE_APPROX_ATAN2 0
+#else
+#define SPECTRAL_ENABLE_APPROX_ATAN2 1
+#endif
 #endif
 /* CMSIS-DSP availability (arm_math.h expected when enabled). */
 #ifndef SPECTRAL_USE_CMSIS
@@ -501,46 +647,65 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #endif
 #endif
 
-/* ARM32 Embedded Configuration */
+/* ---- Hardware capability flags --------------------------------------------------------
+ * Core kernels gate on CAPABILITIES, never on a specific CPU. The platform detection above
+ * is the ONLY place that maps a device/arch to capabilities; downstream code asks "do I have
+ * capability X?". This is the Linux-kernel model: optimize the bulk target first (here the
+ * low-level ARM A/M profile), then add a per-arch hierarchy of overrides. A new arch (another
+ * ARM profile, later RISC-V) is supported by extending THIS mapping, not by editing kernels.
+ * Define a capability =1 only where the operation has a MEASURED benefit on that arch.
+ *
+ * Capability candidates as the embedded surface grows (add when there is a real benefit, and
+ * route the kernels through them rather than through CPU macros): SPECTRAL_HAS_DUAL_MAC (done),
+ * a packed-SIMD capability (NEON / MVE / RVV) for the float and 8xQ15 kernels, a hardware-FPU
+ * capability, and a fast-tightly-coupled-memory capability (DTCM/ITCM presence). Until verified,
+ * those stay expressed by their existing CPU/feature macros; do not add speculative ones. */
 
-#if SPECTRAL_ARM_M7
-
-/* STM32H7 Memory Regions:
- *   DTCM: 128KB @ 0x20000000 - Zero wait states
- *   ITCM: 64KB @ 0x00000000 - Instruction TCM
- *   AXI SRAM: 512KB - Cached */
-#define SPECTRAL_DTCM_SIZE_KB   128
-#define SPECTRAL_DTCM_SIZE      (SPECTRAL_DTCM_SIZE_KB * 1024)
-#define SPECTRAL_CACHE_LINE     32
-
-#endif /* SPECTRAL_ARM_M7 */
-
-/* Linker Section Annotations
- * SPECTRAL_DTCM  — Zero wait-state data memory (128KB on STM32H7)
- * SPECTRAL_ITCM  — Zero wait-state instruction memory (64KB)
- * SPECTRAL_SDRAM — External SDRAM (large, higher latency, prefetchable)
- * On non-embedded targets these expand to nothing. */
-#if SPECTRAL_ARM_M7 && SPECTRAL_EMBEDDED
-#define SPECTRAL_DTCM   __attribute__((section(".dtcm_data")))
-#define SPECTRAL_ITCM   __attribute__((section(".itcm_text")))
-#define SPECTRAL_SDRAM  __attribute__((section(".sdram_data")))
+/* Dual 16-bit MAC: two Q15 products into one accumulate (ARM DSP-extension SMLAD/SMLALD).
+ * Verified benefit on Cortex-M7: halves the additive-synth MAC instructions (smlald codegen-
+ * confirmed). Derived from the ARM ACLE feature macro; another arch would set it from its own
+ * detection. Kernels gate the voice-pairing dual-MAC path on this, not on SPECTRAL_ARM_M7. */
+#ifndef SPECTRAL_HAS_DUAL_MAC
+#if defined(__ARM_FEATURE_DSP) && __ARM_FEATURE_DSP
+#define SPECTRAL_HAS_DUAL_MAC   1
 #else
-#define SPECTRAL_DTCM
-#define SPECTRAL_ITCM
-#define SPECTRAL_SDRAM
+#define SPECTRAL_HAS_DUAL_MAC   0
+#endif
 #endif
 
-/* Fallback defaults for non-ARM platforms */
-#ifndef SPECTRAL_CACHE_LINE
-#define SPECTRAL_CACHE_LINE     64
-#endif
-#define SPECTRAL_CACHE_LINE_STRIDE (SPECTRAL_CACHE_LINE / sizeof(size_t))
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
-               "cache line must be multiple of size_t");
-#endif
+/* ARM32 embedded configuration */
+
+/* Memory-class placement (device-agnostic intent; the concrete device binding
+ * lives in a BSP, not here). Defines SPECTRAL_MEM_FAST / SPECTRAL_MEM_FAST_CODE /
+ * SPECTRAL_MEM_BULK / SPECTRAL_CACHE_LINE. */
+#include "spectral_mem.h"
+/* Static bound on the arm32 kernel's active-voice state arrays. The REAL-TIME
+ * cap is the WCET-gated DAISY_MAX_ACTIVE (128, capacity table in
+ * M7_PERF_MODEL_PLAN.md); this only sizes storage. [chosen: 4x the runtime
+ * cap so batch/offline use is not storage-bound.] */
 #ifndef SPECTRAL_ARM32_MAX_ACTIVE
 #define SPECTRAL_ARM32_MAX_ACTIVE    512
+#endif
+
+/* Real-time admission cap: the MOST voices the per-block activation scan admits
+ * (the loop in spectral_synth_arm32.c). DISTINCT from the storage bound above —
+ * storage sizes the active-state arrays; this bounds per-block render WORK so a
+ * dense .spq cannot exceed the WCET budget and overrun the audio deadline.
+ * Defaults to the storage bound (admit up to capacity, the historical
+ * behaviour); a real-time profile lowers it to its measured WCET ceiling. Excess
+ * segments are NOT dropped — they defer to later blocks as active voices expire
+ * and free slots (natural backpressure). Decoupling work from storage means a
+ * future storage bump cannot silently raise the per-block render cost.
+ * (Measured oscillator-bank ceiling ≈ 520 voices @400 MHz / ~625 @480 MHz at the
+ * 16 cyc/voice-sample kernel, so the 512 storage default is itself within
+ * budget; DAISY_MAX_ACTIVE=128 is a stale legacy reference, not this cap.) */
+#ifndef SPECTRAL_ARM32_ACTIVE_CAP
+#define SPECTRAL_ARM32_ACTIVE_CAP    SPECTRAL_ARM32_MAX_ACTIVE
+#endif
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(SPECTRAL_ARM32_ACTIVE_CAP >= 1 &&
+               SPECTRAL_ARM32_ACTIVE_CAP <= SPECTRAL_ARM32_MAX_ACTIVE,
+               "active-voice admission cap must be in [1, storage bound]");
 #endif
 
 /* Analysis Defaults */
@@ -555,9 +720,6 @@ _Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
 #ifndef SPECTRAL_DEFAULT_DB_THRESH
 #define SPECTRAL_DEFAULT_DB_THRESH  (-70.0f)
 #endif
-#ifndef SPECTRAL_CACHE_ALIGN
-#define SPECTRAL_CACHE_ALIGN        32
-#endif
 #else
 #ifndef SPECTRAL_DEFAULT_N_FFT
 #define SPECTRAL_DEFAULT_N_FFT      4096
@@ -568,9 +730,13 @@ _Static_assert(SPECTRAL_CACHE_LINE % sizeof(size_t) == 0,
 #ifndef SPECTRAL_DEFAULT_DB_THRESH
 #define SPECTRAL_DEFAULT_DB_THRESH  (-85.0f)
 #endif
-#ifndef SPECTRAL_CACHE_ALIGN
-#define SPECTRAL_CACHE_ALIGN        64
 #endif
+
+/* Allocation alignment follows the cache-line SSOT (spectral_mem.h, included
+ * above): one quantity, so the simulate host (cache-line 64) cannot disagree with
+ * a 32-byte alloc alignment. A BSP that overrides SPECTRAL_CACHE_LINE moves both. */
+#ifndef SPECTRAL_CACHE_ALIGN
+#define SPECTRAL_CACHE_ALIGN        SPECTRAL_CACHE_LINE
 #endif
 
 #endif /* SPECTRAL_CONFIG_H */

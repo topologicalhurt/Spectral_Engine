@@ -122,7 +122,7 @@ help:
 	@echo "  simulate                analysis=YES synth=Q15-sim     gpu=NO  run=desktop"
 	@echo "  simulate_daisy          analysis=NO  synth=Q15-sim     gpu=NO  run=desktop"
 	@echo "  embedded_arm            analysis=YES synth=embedded    gpu=NO  run=host-built"
-	@echo "  embedded_arm_float      analysis=YES synth=embedded-fp gpu=NO  run=host-built"
+	@echo "  embedded_arm_float      analysis=YES synth=embedded    gpu=NO  run=host-built  (SPECTRAL_EMBEDDED_FLOAT reserved; float synth not yet wired -> == embedded_arm)"
 	@echo "  embedded_arm_restricted analysis=NO  synth=embedded    gpu=NO  run=host-built"
 	@echo "  cuda                    alias for desktop (CUDA backend when enabled)"
 	@echo "  daisy                   analysis=NO  synth=api/daisy   gpu=NO  run=arm"

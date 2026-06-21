@@ -1,4 +1,4 @@
-/* spectral_common.c - Core Utilities */
+/* spectral_common.c - cache-aligned host allocation */
 #include "spectral_common.h"
 #include <stdlib.h>
 

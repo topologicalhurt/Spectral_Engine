@@ -90,6 +90,11 @@ function(spectral_daisy_collect_compile_definitions out_var)
         SPECTRAL_EMBEDDED=1
         SPECTRAL_NO_PERF=1
         SPECTRAL_COMPACT_SEG=1
+        # Daisy codec block is DAISY_AUDIO_BLOCK_SIZE=48; tighten the arm32 block cap from the
+        # generic 256 default to 64 (>=48, with headroom) so accum[]/temp[] in DTCM aren't
+        # over-allocated. Must stay >= DAISY_AUDIO_BLOCK_SIZE (arm32 _Static_assert bounds it).
+        SPECTRAL_EMBEDDED_DEFAULT_BLOCK_SIZE=64
+        SPECTRAL_BSP_MEM_HEADER=\"daisy_seed_mem.h\"
         HSE_VALUE=16000000
         DAISY_HAS_FATFS=1)
 
@@ -138,20 +143,21 @@ function(spectral_daisy_collect_include_dirs out_var)
 endfunction()
 
 function(spectral_daisy_collect_common_compile_options out_var)
+    # FIRMWARE profile, assembled from the groups in profiles.cmake (the SSOT). The
+    # firmware uses the board opt level and its own -Wno; the section-GC, omit-fp,
+    # no-unwind, and embedded fast-math groups are shared with the host-sim mirror.
     set(_options
         "-O${SPECTRAL_DAISY_OPTIMIZE}"
-        -Wall
-        -Wextra
+        ${SPECTRAL_FLAGS_WALL_WEXTRA}
         -Wno-missing-field-initializers
-        -fdata-sections
-        -ffunction-sections
-        -fomit-frame-pointer
-        -fno-unwind-tables
-        -fno-asynchronous-unwind-tables)
+        ${SPECTRAL_FLAGS_SECTION_GC}
+        ${SPECTRAL_FLAGS_OMIT_FP}
+        ${SPECTRAL_FLAGS_FIRMWARE_NO_UNWIND})
 
+    # Firmware math knob (SPECTRAL_DAISY_SAFE_MATH ON => deterministic, no unsafe math).
     spectral_daisy_parse_bool("${SPECTRAL_DAISY_SAFE_MATH}" _daisy_safe_math)
     if(NOT _daisy_safe_math)
-        list(APPEND _options -ffast-math -funsafe-math-optimizations)
+        list(APPEND _options ${SPECTRAL_FLAGS_EMBEDDED_FASTMATH})
     endif()
 
     spectral_daisy_parse_bool("${SPECTRAL_DAISY_DEBUG}" _daisy_debug_enabled)

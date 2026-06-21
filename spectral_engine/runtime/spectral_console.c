@@ -25,14 +25,6 @@ static void spectral_console_writeln(const char* fmt, ...) {
     va_end(args);
 }
 
-const BoxChars BOX_ASCII = {
-    .top_left = '+', .top_right = '+',
-    .bottom_left = '+', .bottom_right = '+',
-    .horizontal = '-', .vertical = '|',
-    .cross = '+', .t_down = '+', .t_up = '+',
-    .t_left = '+', .t_right = '+'
-};
-
 void print_padded_str(const char* str, int width, TableAlign align) {
     int len = (int)strlen(str);
     int pad = width - len;
@@ -130,16 +122,6 @@ void table_print_footer(const TableConfig* cfg) {
     table_print_separator(cfg);
 }
 
-void table_print_row_str(const TableConfig* cfg, const char** values) {
-    if (cfg->border) spectral_console_write("|");
-    for (int i = 0; i < cfg->num_columns; i++) {
-        print_padded_str(values[i], cfg->columns[i].width, cfg->columns[i].align);
-        if (cfg->border) spectral_console_write("|");
-        else if (i < cfg->num_columns - 1) spectral_console_write(" ");
-    }
-    spectral_console_writeln("");
-}
-
 void table_print_row(const TableConfig* cfg, ...) {
     va_list args;
     va_start(args, cfg);
@@ -188,23 +170,4 @@ void status_print(StatusLevel level, const char* fmt, ...) {
     spectral_log(log_level, stdout, 0, 0, "%s", prefix);
     spectral_console_vwrite(log_level, 1, fmt, args);
     va_end(args);
-}
-
-void progress_bar_print(double fraction, int width, const char* label) {
-    if (fraction < 0.0) fraction = 0.0;
-    if (fraction > 1.0) fraction = 1.0;
-
-    int filled = (int)(fraction * width);
-
-    spectral_console_write("[");
-    for (int i = 0; i < width; i++) {
-        if (i < filled) spectral_console_write("=");
-        else if (i == filled) spectral_console_write(">");
-        else spectral_console_write(" ");
-    }
-    spectral_console_write("] %5.1f%%", fraction * 100.0);
-
-    if (label) spectral_console_write(" %s", label);
-    spectral_console_write("\r");
-    fflush(stdout);
 }

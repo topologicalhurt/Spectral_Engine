@@ -9,6 +9,8 @@
 #ifndef SPECTRAL_OMP_H
 #define SPECTRAL_OMP_H
 
+#include "spectral_config.h"
+
 #ifdef _OPENMP
 #include <omp.h>
 #else
@@ -21,10 +23,22 @@ static inline void   omp_set_num_threads(int n) { (void)n; }
 
 static inline double omp_get_wtime(void) {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec * 1e-9;
+#ifdef CLOCK_MONOTONIC
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+        return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+#endif
+    return 0.0;
 }
 
 #endif /* _OPENMP */
+
+static inline int spectral_omp_effective_thread_count(void)
+{
+    int n_threads = omp_get_max_threads();
+
+    if (n_threads < 1) return 1;
+    if (n_threads > SPECTRAL_MAX_THREADS) return SPECTRAL_MAX_THREADS;
+    return n_threads;
+}
 
 #endif /* SPECTRAL_OMP_H */

@@ -7,13 +7,15 @@
 #define SPECTRAL_PEAK_TRACK_INTERNAL_H
 
 #include "spectral_peak_track.h"
+#include "spectral_windows.h"
 
 #include <limits.h>
+#include <float.h>
+#include <math.h>
 #include <stdatomic.h>
 #include "spectral_error.h"
 #include <sys/mman.h>
-
-/* Removed force-define */
+#include <unistd.h>   /* sysconf(_SC_PAGESIZE) for the merge pre-touch path */
 
 /* MADV_POPULATE_WRITE is Linux 5.14+. Keep a local fallback constant to
  * preserve compatibility with older libc headers. */
@@ -21,6 +23,8 @@
   #if defined(MADV_POPULATE_WRITE)
     #define SPECTRAL_TRACK_MADV_POPULATE_WRITE MADV_POPULATE_WRITE
   #else
+    /* Linux UAPI value from asm-generic/mman-common.h; used only when libc
+     * headers predate the macro. */
     #define SPECTRAL_TRACK_MADV_POPULATE_WRITE 23
   #endif
 #endif
@@ -51,6 +55,12 @@ struct SpectralTracker {
     TrackSegment** seg_arrays;
     size_t* seg_counts;
     size_t* seg_capacities;
+    /* Per-thread phase scratch (n_freqs floats each). Phase-at-peaks fills only
+     * the tracked peak bins via atan2f(im,re) here, then hands these to
+     * emit_segment exactly like the old dense phase rows — so the estimator and
+     * its tests stay byte-identical while the all-bins producer atan2 is gone. */
+    float** thread_phase_scratch;
+    float** thread_next_phase_scratch;
     int n_threads;
     _Atomic SpectralError last_error;
 
@@ -62,6 +72,13 @@ struct SpectralTracker {
     float freq_step_df;
     float inv_hop;
     float hop_float;
+    float peak_candan_correction;
+    SpectralWindowInterpMagsqFn interp_magsq;
+    SpectralWindowPeakMagsqFn peak_magsq;
+    SpectralPeakEstimatorType peak_estimator;
+    SpectralPeakPhasePolicy phase_policy;
+    SpectralPeakAmplitudePolicy amplitude_policy;
+    SpectralResolvedPeakModel peak_model;
 
     double process_time_total;
     uint64_t total_pairs;
@@ -77,28 +94,106 @@ struct SpectralTracker {
 #endif
 };
 
-int spectral_tracker_flush_candidate_batch(
-    SpectralTracker* tracker,
-    int tid,
-    uint32_t* __restrict__ candidate_batch,
-    size_t* candidate_batch_count,
-    const float* __restrict__ row,
-    const float* __restrict__ next_row,
-    const float* __restrict__ phase_row,
-    float t_hop,
-    float threshsq,
-    float freq_step_omega,
-    float freq_step_df,
-    float inv_hop,
+typedef struct SpectralTrackerCandidateBatch {
+    uint32_t ids[SPECTRAL_TRACK_CANDIDATE_BATCH];
+    size_t count;
+} SpectralTrackerCandidateBatch;
+
+static inline void spectral_tracker_candidate_batch_reset(SpectralTrackerCandidateBatch* batch)
+{
+    if (batch) batch->count = 0u;
+}
+
+static inline SpectralError spectral_tracker_frame_time_from_index(size_t frame_index,
+                                                                  float hop_float,
+                                                                  float* out_t_hop)
+{
+    double t_hop_d = 0.0;
+
+    if (!out_t_hop || !isfinite(hop_float) || hop_float <= 0.0f) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    t_hop_d = (double)frame_index * (double)hop_float;
+    if (!isfinite(t_hop_d) || t_hop_d < 0.0 || t_hop_d > (double)FLT_MAX) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    *out_t_hop = (float)t_hop_d;
+    return SPECTRAL_OK;
+}
+
+static inline SpectralError spectral_tracker_frame_context_init(
+    SpectralFrameContext* ctx,
+    const float* row,
+    const float* next_row,
+    const SpectralHalf* re_row,
+    const SpectralHalf* im_row,
+    const SpectralHalf* next_re_row,
+    const SpectralHalf* next_im_row,
+    size_t frame_index,
     float hop_float,
-    uint64_t* local_segments
+    float threshsq,
+    int can_start_new)
+{
+    float frame_start_sample = 0.0f;
+    SpectralError err = SPECTRAL_OK;
+
+    if (!ctx || !row || !next_row || !re_row || !im_row) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    err = spectral_tracker_frame_time_from_index(frame_index, hop_float, &frame_start_sample);
+    if (err != SPECTRAL_OK) return err;
+
+    ctx->row = row;
+    ctx->next_row = next_row;
+    ctx->re_row = re_row;
+    ctx->im_row = im_row;
+    ctx->next_re_row = next_re_row;
+    ctx->next_im_row = next_im_row;
+    ctx->frame_start_sample = frame_start_sample;
+    ctx->threshsq = threshsq;
+    ctx->can_start_new = can_start_new;
+    return SPECTRAL_OK;
+}
+
+void spectral_tracker_set_error(SpectralTracker* tracker, SpectralError error);
+
+
+typedef struct SpectralTrackerWorkerStats {
+    uint64_t pairs;
+    uint64_t candidates;
+    uint64_t segments;
+    double track_time;
 #if SPECTRAL_TRACK_DEBUG_TIMING
-    , double* pair_validate_time
-    , double* pair_emit_time
-    , double* pair_emit_alloc_time
-    , double* pair_emit_interp_time
-    , double* pair_emit_amp_time
+    double scan_time;
+    double validate_time;
+    double emit_time;
+    double emit_alloc_time;
+    double emit_interp_time;
+    double emit_amp_time;
 #endif
-);
+} SpectralTrackerWorkerStats;
+
+static inline void spectral_tracker_worker_stats_commit(SpectralTracker* tracker,
+                                                        const SpectralTrackerWorkerStats* stats)
+{
+    if (!tracker || !stats) return;
+    spectral_tracker_accumulate_stats(tracker,
+                                      stats->pairs,
+                                      stats->candidates,
+                                      stats->segments,
+                                      stats->track_time
+#if SPECTRAL_TRACK_DEBUG_TIMING
+                                      , stats->scan_time,
+                                      stats->validate_time,
+                                      stats->emit_time,
+                                      stats->emit_alloc_time,
+                                      stats->emit_interp_time,
+                                      stats->emit_amp_time
+#endif
+                                      );
+}
 
 #endif /* SPECTRAL_PEAK_TRACK_INTERNAL_H */

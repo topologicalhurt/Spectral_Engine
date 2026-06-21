@@ -3,16 +3,20 @@
  * Extracts spectral peaks above a threshold from magnitude-squared and phase
  * matrices, creating Segment objects for resynthesis. Multi-threaded via OpenMP.
  *
- * Pre-allocates per-thread contiguous segment arrays with VM overcommit.
+ * Uses bounded per-thread segment buffers that grow on demand.
  *
  * Two modes of operation:
- *   1. spectral_track_peaks() — single-shot, processes entire STFT at once
- *   2. SpectralTracker API    — incremental, processes chunks for large datasets
+ *   1. spectral_track_peaks_with_window_descriptor() — single-shot with an
+ *      explicit analysis-window/interpolation contract
+ *   2. SpectralTracker API — incremental, processes chunks for large datasets
  */
 #ifndef SPECTRAL_PEAK_TRACK_H
 #define SPECTRAL_PEAK_TRACK_H
 
 #include "spectral_common.h"
+#include "spectral_windows.h"
+#include "spectral_peak_estimator.h"
+#include "spectral_peak_model.h"
 
 
 
@@ -20,12 +24,30 @@
 extern "C" {
 #endif
 
-/* Single-shot API: processes entire STFT matrices at once */
-SegmentArray spectral_track_peaks(const float* magsq, const float* phases,
+/* Compatibility wrapper for the engine default Hann/AUTO analysis contract.
+ * Call spectral_track_peaks_with_window_descriptor() for raw STFT matrices
+ * produced with any other window or estimator policy. */
+SegmentArray spectral_track_peaks(const float* magsq,
+                                  const SpectralHalf* re, const SpectralHalf* im,
                                   float max_magsq,
                                   size_t n_frames, size_t n_freqs,
                                   int sr, int n_fft, int hop,
                                   float db_thresh, double* t_track);
+
+/* Single-shot API: processes entire STFT matrices at once.
+ * `window_desc` must describe the analysis window used to create `magsq`.
+ * If NULL, the tracker falls back to the current Hann-compatible default.
+ * `estimator` selects the sub-bin estimator policy; AUTO resolves to the
+ * conservative log-power parabolic baseline. */
+SegmentArray spectral_track_peaks_with_window_descriptor(
+    const float* magsq, const SpectralHalf* re, const SpectralHalf* im,
+    float max_magsq,
+    size_t n_frames, size_t n_freqs,
+    int sr, int n_fft, int hop,
+    float db_thresh,
+    const SpectralWindowDescriptor* window_desc,
+    SpectralPeakEstimatorType estimator,
+    double* t_track);
 
 /* Incremental tracker API for chunked STFT processing */
 typedef struct SpectralTracker SpectralTracker;
@@ -35,8 +57,13 @@ typedef struct SpectralTracker SpectralTracker;
 typedef struct {
     const float* __restrict__ row;
     const float* __restrict__ next_row;
-    const float* __restrict__ phase_row;
-    float t_hop;
+    /* fp16 complex spectrum rows. Phase is taken via atan2f((float)im,(float)re)
+     * at the tracked peak bins only (phase-at-peaks), not densely in the producer. */
+    const SpectralHalf* __restrict__ re_row;
+    const SpectralHalf* __restrict__ im_row;
+    const SpectralHalf* __restrict__ next_re_row;
+    const SpectralHalf* __restrict__ next_im_row;
+    float frame_start_sample;
     float threshsq;
     int can_start_new;
 } SpectralFrameContext;
@@ -59,22 +86,23 @@ int spectral_tracker_run_fused_frame(
 #endif
 );
 
+SpectralError spectral_tracker_set_peak_model(SpectralTracker* tracker, const SpectralPeakModel* model);
+void spectral_tracker_set_window_descriptor(SpectralTracker* tracker, const SpectralWindowDescriptor* desc);
+void spectral_tracker_set_peak_estimator(SpectralTracker* tracker, SpectralPeakEstimatorType type);
+void spectral_tracker_set_phase_policy(SpectralTracker* tracker, SpectralPeakPhasePolicy policy);
+void spectral_tracker_set_amplitude_policy(SpectralTracker* tracker, SpectralPeakAmplitudePolicy policy);
+
 SpectralTracker* spectral_tracker_create(int n_threads, size_t n_freqs,
                                           int sr, int n_fft, int hop,
                                           float db_thresh, float max_magsq);
 
-/* Update threshold when a new global max is discovered across chunks.
- * Call before spectral_tracker_process() for each chunk with an updated max. */
-void spectral_tracker_update_threshold(SpectralTracker* tracker, float new_max_magsq);
-
-/* Process one chunk of STFT data.
- * overlap_magsq_row: pointer to the first magsq row of the NEXT chunk
- *                    (n_freqs floats) for look-ahead on the last frame pair.
- *                    Pass NULL for the final chunk (skips last frame pair). */
+/* Process the full STFT matrix in one shot: pairs each frame t with t+1 and links
+ * partials across the (chunk_n_frames - 1) pairs. global_frame_offset is the index
+ * of the first frame (0 for a single-shot run). */
 void spectral_tracker_process(SpectralTracker* tracker,
-                               const float* chunk_magsq, const float* chunk_phases,
-                               size_t chunk_n_frames, size_t global_frame_offset,
-                               const float* overlap_magsq_row);
+                               const float* chunk_magsq,
+                               const SpectralHalf* chunk_re, const SpectralHalf* chunk_im,
+                               size_t chunk_n_frames, size_t global_frame_offset);
 
 /* Finalize tracking: merges all per-thread segment arrays into a contiguous
  * SegmentArray. Frees internal arrays but does NOT free the tracker itself.

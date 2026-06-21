@@ -5,6 +5,7 @@
 #include "spectral_common.h"
 #include "spectral_error.h"
 #include "spectral_segment_math.h"
+#include "spectral_utils.h"
 #include <stdlib.h>
 
 #ifdef __cplusplus
@@ -17,6 +18,8 @@ typedef struct SegmentLoopParams {
     size_t length;
     float alpha;    /* phase increment per sample */
     float beta;     /* chirp rate (phase acceleration) */
+    float c2;       /* cubic phase coeff of offset^2 (== beta when no linkage) */
+    float c3;       /* cubic phase coeff of offset^3 (0 when no linkage) */
     float d_amp;    /* amplitude delta per sample */
     float phase;
     float amp;
@@ -25,39 +28,19 @@ typedef struct SegmentLoopParams {
 } SegmentLoopParams;
 
 SynthParams make_synth_params(float stretch, float pitch, size_t out_len, size_t num_segs);
+SpectralError synth_validate_params(float stretch, float pitch);
 SegmentLoopParams segment_loop_params_init(const Segment* s, const SynthParams* p, size_t out_len);
-
-/* Compute instantaneous phase at sample j (quadratic phase model) */
-static inline float compute_phase(float phase0, float alpha, float beta, size_t j) {
-    return spectral_segment_phase_at_f32(phase0, alpha, beta, (float)j);
-}
-
-static inline float compute_amplitude(float amp0, float d_amp, size_t j) {
-    return spectral_segment_amp_at_f32(amp0, d_amp, (float)j);
-}
-
-/* Validate synth inputs; call at start of every synth function */
-
-typedef enum {
-    SYNTH_VALIDATE_OK = 1,
-    SYNTH_VALIDATE_EARLY_EXIT = 0
-} SynthValidateResult;
-
-SynthValidateResult synth_validate_inputs(void* out_buffer, size_t out_len, size_t elem_size,
-                                          SegmentArray sa, double** t_synth_ptr);
-
-#define SYNTH_VALIDATE_FLOAT(buf, len, sa, t_ptr) \
-    synth_validate_inputs((buf), (len), sizeof(float), (sa), (t_ptr))
-
-#define SYNTH_VALIDATE_NATIVE(buf, len, sa, t_ptr) \
-    synth_validate_inputs((buf), (len), sizeof(spectral_sample_t), (sa), (t_ptr))
+/* Cheap span-only variant (valid/start_idx/length, no alpha/endpoint work) for the synth
+ * span pre-pass; segment_loop_params_init is span_init + the derived-scalar tail. */
+SegmentLoopParams segment_span_init(const Segment* s, const SynthParams* p, size_t out_len);
 
 /* Shared preflight: validate + params + timing in one call.
  * ok==0 means early exit was already handled (zero-filled or dummy timing). */
 typedef struct {
-    SynthParams params;
-    double      start_time;   /* omp_get_wtime() captured after validation */
-    int         ok;           /* 0 = early exit, 1 = proceed */
+    SynthParams   params;
+    double        start_time;   /* omp_get_wtime() captured after validation */
+    SpectralError error;        /* SPECTRAL_OK for valid early exits */
+    int           ok;           /* 0 = early exit/error, 1 = proceed */
 } SynthPreflight;
 
 SynthPreflight synth_preflight_float(
@@ -94,8 +77,13 @@ SpectralError gpu_check_timbre_or_fallback(const char* backend_name,
                                            int n_threads, double* t_synth,
                                            int* out_continue_backend);
 
+/* Highest timbre the GPU shader sets implement: the width-parameterized
+ * timbres (quantized/pwm) have no MSL/CUDA port. ONE constant — the backend
+ * vtables, this predicate, and the fallback router must agree on the cap. */
+#define SPECTRAL_GPU_MAX_TIMBRE TIMBRE_PARABOLA
+
 static inline int gpu_timbre_supported(SpectralTimbre timbre) {
-    return (int)timbre <= TIMBRE_PARABOLA;
+    return (int)timbre <= SPECTRAL_GPU_MAX_TIMBRE;
 }
 
 /* GPU tile preprocessing - shared between Metal and CUDA backends */
@@ -130,13 +118,11 @@ SpectralError gpu_tile_preprocess_cached(
 void gpu_tile_cache_set(const void* ranges, const uint32_t* segment_ids,
                         uint32_t num_tiles, uint32_t total_refs,
                         float stretch, size_t out_len);
-int  gpu_tile_cache_try_get(float stretch, size_t out_len, GpuTileData* out);
 void gpu_tile_cache_clear(void);
 
 /* Global GPU segment cache — pre-packed SegmentGpu data from the segment
  * cache (mmap'd).  Lets GPU backends skip the Segment→SegmentGpu pack loop. */
 void gpu_seg_cache_set(const SegmentGpu* segs, uint32_t count);
-int  gpu_seg_cache_try_get(uint32_t count, const SegmentGpu** out);
 void gpu_seg_cache_clear(void);
 
 /* GPU synthesis params — layout must match Metal shader SynthParams struct */
@@ -145,13 +131,53 @@ typedef struct {
     uint32_t out_len, num_segments, tile_size, timbre;
 } GpuSynthParams;
 
-static inline GpuSynthParams gpu_synth_params_pack(
-    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre) {
-    return (GpuSynthParams){
+/* Checked GPU params pack: GPU kernels expose 32-bit lengths/counts even though
+ * shared SynthParams stores out_len as size_t.  This helper is the only valid
+ * boundary-crossing pack for Metal/CUDA dispatch. */
+static inline SpectralError gpu_synth_params_pack_checked(
+    const SynthParams* sp, uint32_t tile_size, SpectralTimbre timbre, GpuSynthParams* out)
+{
+    if (!sp || !out || tile_size == 0u) return SPECTRAL_ERR_PARAM;
+    *out = (GpuSynthParams){0};
+
+    if (sp->out_len > (size_t)UINT32_MAX ||
+        (int)timbre < TIMBRE_SINE ||
+        (int)timbre > TIMBRE_PWM) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    if (!spectral_is_finite_positive_f32(sp->stretch) ||
+        !spectral_is_finite_positive_f32(sp->inv_stretch) ||
+        !spectral_is_finite_positive_f32(sp->inv_stretch_sq) ||
+        !spectral_is_finite_positive_f32(sp->pitch_factor)) {
+        return SPECTRAL_ERR_PARAM;
+    }
+
+    *out = (GpuSynthParams){
         sp->stretch, sp->inv_stretch, sp->inv_stretch_sq, sp->pitch_factor,
         (uint32_t)sp->out_len, sp->num_segments, tile_size, (uint32_t)timbre
     };
+    return SPECTRAL_OK;
 }
+
+typedef struct SpectralGpuDispatchPlan {
+    const SegmentGpu* segment_source;   /* NULL means backend must pack from SegmentArray */
+    size_t            segment_bytes;
+    GpuTileData       tiles;
+    int               owns_tile_data;
+    int               zero_output;
+    GpuSynthParams    params;
+    size_t            tile_ids_bytes;
+    size_t            tile_ranges_bytes;
+} SpectralGpuDispatchPlan;
+
+SpectralError spectral_gpu_dispatch_plan_init(SpectralGpuDispatchPlan* plan,
+                                              SegmentArray sa,
+                                              const SynthParams* params,
+                                              float stretch,
+                                              SpectralTimbre timbre,
+                                              size_t out_len);
+void spectral_gpu_dispatch_plan_free(SpectralGpuDispatchPlan* plan);
 
 #ifdef __cplusplus
 }

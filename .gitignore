@@ -11,6 +11,7 @@ build-*
 build_*
 
 # Testing
+/Testing/
 perf.*
 
 # Build directories
@@ -46,6 +47,13 @@ __pycache__/
 *.swp
 *~
 
+# Language server (clangd index/cache)
+.cache/
+
+# Claude Code local config (personal; permission mode etc. must not be shared)
+.claude/settings.json
+.claude/settings.local.json
+
 # Env
 *.env
 /env/
@@ -54,3 +62,11 @@ __pycache__/
 !resources/testing/shakespeare_he_saw_the_cat.wav
 !resources/testing/motormouth_test1_uncompressed_spear.txt
 !resources/testing/sin_440hz.wav
+/.spectral_core_audit_backups_*/
+
+# Local cross-toolchains (bootstrap-downloaded, ~1GB; never commit)
+/tools/toolchains/
+
+# Nix build artifacts
+/result
+/result-*

@@ -1,0 +1,38 @@
+if(NOT DEFINED SPECTRAL_METAL_OSC_MODE)
+    message(FATAL_ERROR "SPECTRAL_METAL_OSC_MODE is required (generate|verify).")
+endif()
+
+set(_python "@SPECTRAL_PYTHON@")
+set(_metal_osc_module "spectral_tools.generators.metal_osc")
+set(_tools_pythonpath "@SPECTRAL_TOOLS_PYTHONPATH@")
+set(_metal_osc_output "@SPECTRAL_METAL_OSC_OUTPUT@")
+set(_formulas "@SPECTRAL_CORE_DIR@/spectral_osc_formulas.h")
+set(_segment_math "@SPECTRAL_CORE_DIR@/spectral_segment_math.h")
+set(_oscillator_h "@SPECTRAL_CORE_DIR@/spectral_oscillator.h")
+set(_common_h "@SPECTRAL_CORE_DIR@/spectral_common.h")
+set(_synth_internal_h "@SPECTRAL_CORE_DIR@/spectral_synth_internal.h")
+
+if(NOT EXISTS "${_python}")
+    message(FATAL_ERROR
+        "Configured Python interpreter does not exist: ${_python}. "
+        "Run target 'prepare_python_tools' and re-run the build.")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "PYTHONPATH=${_tools_pythonpath}"
+            "${_python}" -m "${_metal_osc_module}"
+            --formulas "${_formulas}"
+            --segment-math "${_segment_math}"
+            --oscillator-h "${_oscillator_h}"
+            --common-h "${_common_h}"
+            --synth-internal-h "${_synth_internal_h}"
+            --output "${_metal_osc_output}"
+            --mode "${SPECTRAL_METAL_OSC_MODE}"
+    RESULT_VARIABLE _metal_osc_result)
+
+if(NOT _metal_osc_result EQUAL 0)
+    message(FATAL_ERROR
+        "metal_osc module '${_metal_osc_module}' failed in mode '${SPECTRAL_METAL_OSC_MODE}' "
+        "(exit=${_metal_osc_result}, python=${_python})")
+endif()

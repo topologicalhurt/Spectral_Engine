@@ -16,6 +16,7 @@
  */
 #include "spectral_hash_xx32_xx3.h"
 #include <stdlib.h>  /* free for full_direct host buffer */
+#include <stdint.h>
 #include "spectral_utils.h"
 
 /* ---------------------------------------------------------------------------
@@ -195,7 +196,8 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
 {
     uint64_t start_pos = 0;
     uint64_t end_pos = 0;
-    size_t total_len;
+    uint64_t total_len_u64 = 0;
+    size_t total_len = 0;
     unsigned char* data = NULL;
     SpectralError err;
 
@@ -218,11 +220,28 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
         return SPECTRAL_ERR_FILE_READ;
     }
 
+    /* Full-direct hashing reads the whole remaining file into one heap buffer.
+     * The file-position API reports uint64_t, but the allocation and update
+     * contract is size_t.  On a 64-bit host (every target that compiles this TU)
+     * the > SIZE_MAX guard below is always false; it is retained for a hypothetical
+     * 32-bit host port, where an over-size region falls back to streaming. */
+    total_len_u64 = end_pos - start_pos;
+    if (start_pos > (uint64_t)INT64_MAX) {
+        return SPECTRAL_ERR_OVERFLOW;
+    }
+
+    if (total_len_u64 > (uint64_t)SIZE_MAX) {
+        if (spectral_fs_seek(file, (int64_t)start_pos, SEEK_SET, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
+            return SPECTRAL_ERR_FILE_READ;
+        }
+        return spectral_hash_method_consume_file_stream_impl(method, file);
+    }
+
     if (spectral_fs_seek(file, (int64_t)start_pos, SEEK_SET, SPECTRAL_ERR_FILE_READ) != SPECTRAL_OK) {
         return SPECTRAL_ERR_FILE_READ;
     }
 
-    total_len = (size_t)(end_pos - start_pos);
+    total_len = (size_t)total_len_u64;
     if (total_len > 0u) {
         data = (unsigned char*)spectral_malloc_array(total_len, 1);
         if (!data) {
@@ -247,8 +266,8 @@ static SpectralError spectral_hash_method_consume_file_full_direct_impl(
     return err;
 }
 
-/* TODO: implement mmap-backed hashing; currently falls back to SPECTRAL_ERR_BACKEND_UNAVAIL.
- * When implemented: mmap the file, call update() over the mapped region, munmap. */
+/* mmap-backed hashing is unimplemented: this method reports
+ * SPECTRAL_ERR_BACKEND_UNAVAIL so callers fall back to the streaming path. */
 static SpectralError spectral_hash_method_consume_file_mmap_impl(
     SpectralHashFileMethod* method,
     FILE* file)
@@ -268,30 +287,22 @@ static const SpectralHashFileMethodDescriptor k_hash_file_method_desc[SPECTRAL_H
         .name      = "full_direct",
         .available = 1
     },
+    /* FULL_MMAP is registered for future support but is not advertised as available
+     * until consume_file_mmap_impl actually maps and hashes the file. */
     [SPECTRAL_HASH_FILE_FULL_MMAP] = {
         .type      = SPECTRAL_HASH_FILE_FULL_MMAP,
         .name      = "full_mmap",
-        .available = 1
+        .available = 0
     },
     /* STREAM is always available: callers feed data via update() directly.
-     * consume_file() is not available on embedded (no file API), but the
-     * reset/update/digest path works on all targets. */
+     * consume_file() is the host-file-API convenience wrapper (present on every
+     * host/simulation build); the reset/update/digest path works on all targets. */
     [SPECTRAL_HASH_FILE_STREAM] = {
         .type      = SPECTRAL_HASH_FILE_STREAM,
         .name      = "stream",
         .available = 1
     }
 };
-
-size_t spectral_hash_file_method_descriptor_count(void)
-{
-    return (size_t)SPECTRAL_HASH_FILE_METHOD_COUNT;
-}
-
-const SpectralHashFileMethodDescriptor* spectral_hash_file_method_descriptors(void)
-{
-    return k_hash_file_method_desc;
-}
 
 SpectralError spectral_hash_file_method_get_descriptor(
     SpectralHashFileMethodType type,
@@ -347,12 +358,26 @@ SpectralError spectral_hash_file_method_init(
 
 SpectralError spectral_hash_file_method_reset(SpectralHashFileMethod* method)
 {
+    SpectralError err = SPECTRAL_OK;
+    const SpectralHashFileMethodDescriptor* desc = NULL;
+
     if (!method) {
         return SPECTRAL_ERR_PARAM;
     }
 
+    /* Public reset is part of the explicit lifecycle.  A zero-initialized object
+     * has type METHOD_COUNT and must not be implicitly initialized by reset().
+     * init() sets method->type before its internal first reset, so validating the
+     * descriptor here preserves init->reset behavior while rejecting reset before
+     * init and unavailable methods. */
+    err = spectral_hash_file_method_get_descriptor(method->type, &desc);
+    if (err != SPECTRAL_OK) {
+        return err;
+    }
+
     return spectral_hash_method_reset_impl(method);
 }
+
 
 SpectralError spectral_hash_file_method_update(
     SpectralHashFileMethod* method,
@@ -381,11 +406,22 @@ SpectralError spectral_hash_file_method_consume_file(
     SpectralHashFileMethod* method,
     FILE* file)
 {
-    if (!method) {
+    SpectralError err = SPECTRAL_OK;
+    const SpectralHashFileMethodDescriptor* desc = NULL;
+
+    if (!method || !file) {
         return SPECTRAL_ERR_PARAM;
     }
+    if (!method->initialized) {
+        return SPECTRAL_ERR_NOTINIT;
+    }
 
-    switch (method->type) {
+    err = spectral_hash_file_method_get_descriptor(method->type, &desc);
+    if (err != SPECTRAL_OK) {
+        return err;
+    }
+
+    switch (desc->type) {
         case SPECTRAL_HASH_FILE_FULL_DIRECT:
             return spectral_hash_method_consume_file_full_direct_impl(method, file);
         case SPECTRAL_HASH_FILE_FULL_MMAP:
@@ -396,6 +432,7 @@ SpectralError spectral_hash_file_method_consume_file(
             return SPECTRAL_ERR_BACKEND_UNAVAIL;
     }
 }
+
 
 void spectral_hash_file_method_destroy(SpectralHashFileMethod* method)
 {
@@ -414,9 +451,20 @@ void spectral_hash_file_method_destroy(SpectralHashFileMethod* method)
 
 SpectralHashDigest spectral_hash_oneshot(const void* data, size_t len)
 {
+    static const unsigned char empty = 0u;
+    const void* src = data;
+
+    if (!src) {
+        if (len > 0u) {
+            return (SpectralHashDigest)0;
+        }
+        src = &empty;
+    }
+
 #if SPECTRAL_HASH_HAS_HOST_FILE_API
-    return XXH3_64bits(data, len);
+    return XXH3_64bits(src, len);
 #else
-    return (uint64_t)XXH32(data, len, 0u);
+    return (uint64_t)XXH32(src, len, 0u);
 #endif
 }
+
