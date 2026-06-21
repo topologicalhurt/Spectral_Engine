@@ -106,7 +106,12 @@ class CountsReport:
 
 
 def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path,
-                      *, main_src: Path | None = None) -> Path:
+                      *, main_src: Path | None = None,
+                      extra_cflags: tuple[str, ...] = ()) -> Path:
+    """Build the freestanding QEMU runner ELF. `extra_cflags` (e.g. ("-g",) for
+    the hotspots PC->line mapping) is appended to every TU; default () preserves
+    the counts build exactly. -g adds debug info only, not codegen, so the PC
+    histogram maps the same instructions the counts rig measures."""
     qemu_dir = NATIVE_DIR / "qemu"
     if main_src is None:
         main_src = qemu_dir / "qemu_main.c"   # the counts rig; siblings (audio dump) pass their own
@@ -126,7 +131,7 @@ def _build_runner_elf(tc: Toolchain, fixture: WorkloadFixture, out_dir: Path,
         obj = out_dir / (src.stem + ".o")
         result = run(
             [tc.arm_gcc, *tc.cflags(extra_includes=(arm_backend_dir, out_dir)),
-             *gc_flags, *extra, "-c", str(src), "-o", str(obj)],
+             *gc_flags, *extra_cflags, *extra, "-c", str(src), "-o", str(obj)],
             cwd=tc.repo_root,
             check=False,
         )

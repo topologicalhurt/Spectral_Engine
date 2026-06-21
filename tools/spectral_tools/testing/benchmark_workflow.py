@@ -785,6 +785,29 @@ def run_deterministic(args: argparse.Namespace, perf: Performance) -> int:
     return 1 if test["status"] == TestStatus.FAILED.value else 0
 
 
+def run_hotspots(args: argparse.Namespace, perf: Performance) -> int:
+    """Hottest functions and lines: per-PC instruction histogram -> source attribution."""
+    from ..performance.embedded import counts, fixture, hotspots, toolchain
+
+    out_dir = Path(args.out_dir) if args.out_dir else perf.repo_root / "build" / "perf_model"
+    test: dict[str, Any]
+    try:
+        tc = toolchain.discover(perf.repo_root, need=frozenset({"qemu"}))
+        spec = fixture.sustained_fixture(args.voices) if args.voices else None
+        rep = hotspots.analyze(tc, out_dir=out_dir, fixture=spec, top=args.top)
+        hot = rep["hottest_functions"][0] if rep["hottest_functions"] else {"name": "?", "pct": 0}
+        summary = (f"{rep['total_insns']:,} insns / {rep['unique_pcs']} PCs; "
+                   f"hottest {hot['name']} {hot['pct']:.0f}%")
+        test = {"name": "hotspots", "status": TestStatus.OK.value, "summary": summary, "details": rep}
+    except (toolchain.ToolchainError, counts.CountsError) as exc:
+        test = {"name": "hotspots", "status": TestStatus.FAILED.value,
+                "summary": "hotspots failed", "details": {"error": str(exc)}}
+
+    report_doc = {"suite": "m7-perf-model", "context": perf.collect_context(), "tests": [test]}
+    emit_report(args, report_doc)
+    return 1 if test["status"] == TestStatus.FAILED.value else 0
+
+
 def run_measure(args: argparse.Namespace, perf: Performance) -> int:
     """Matrix-driven orchestration: probe or run the instruments for a target.
 
@@ -987,6 +1010,17 @@ def build_parser() -> argparse.ArgumentParser:
     deterministic.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
     add_output_options(deterministic)
 
+    hotspots = sub.add_parser(
+        "hotspots",
+        help="Hottest functions and lines: per-PC instruction histogram (QEMU) mapped to "
+             "inlined function + source line via addr2line.",
+    )
+    hotspots.add_argument("--voices", type=int, default=None,
+                          help="Profile a sustained N-voice fixture (default: the stagger fixture)")
+    hotspots.add_argument("--top", type=int, default=20, help="How many hot functions/lines to show")
+    hotspots.add_argument("--out-dir", default=None, help="Artifact dir (default build/perf_model)")
+    add_output_options(hotspots)
+
     m7_stalls = sub.add_parser(
         "m7-stalls",
         help="Embedded M7: memory-stall bounds [modeled] from the QEMU address trace "
@@ -1057,6 +1091,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_m7_wcet(args, perf)
     if args.command == "deterministic":
         return run_deterministic(args, perf)
+    if args.command == "hotspots":
+        return run_hotspots(args, perf)
     if args.command == "m7-baseline":
         return run_m7_baseline(args, perf)
     if args.command == "measure":
