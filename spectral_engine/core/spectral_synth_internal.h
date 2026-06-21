@@ -47,10 +47,6 @@ SynthPreflight synth_preflight_float(
     float* out_buffer, size_t out_len, SegmentArray sa,
     float stretch, float pitch, double** t_synth);
 
-SynthPreflight synth_preflight_native(
-    spectral_sample_t* out_buffer, size_t out_len, SegmentArray sa,
-    float stretch, float pitch, double** t_synth);
-
 /* Per-dispatch effective timbre tracking for logging/reporting. */
 void synth_effective_timbre_reset(SpectralTimbre requested_timbre);
 void synth_effective_timbre_set(SpectralTimbre effective_timbre);

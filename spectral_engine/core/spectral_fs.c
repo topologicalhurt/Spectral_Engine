@@ -178,12 +178,6 @@ size_t spectral_fs_read(void* ptr, size_t size, size_t count, FILE* stream)
     return fread(ptr, size, count, stream);
 }
 
-size_t spectral_fs_write(const void* ptr, size_t size, size_t count, FILE* stream)
-{
-    if (!ptr || !stream || size == 0 || count == 0) return 0;
-    return fwrite(ptr, size, count, stream);
-}
-
 char* spectral_fs_gets(char* str, int n, FILE* stream)
 {
     if (!str || n <= 0 || !stream) return NULL;

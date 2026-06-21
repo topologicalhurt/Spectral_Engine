@@ -61,7 +61,6 @@ SpectralError spectral_audio_window(float* audio, size_t total_frames,
 /* Normalize float buffer in-place. Returns original peak. */
 float spectral_normalize_float(float* buffer, size_t len, float headroom);
 
-void spectral_mono_to_stereo_float(const float* mono, float* stereo, size_t num_frames);
 void spectral_mono_to_stereo_q15(const q15_t* mono, q15_t* stereo, size_t num_frames);
 
 /* Normalize Q15 buffer. Returns max absolute value, sets *shift. */
@@ -71,10 +70,6 @@ q15_t spectral_normalize_q15(q15_t* buffer, size_t len, int* shift);
 
 SpectralError spectral_audio_write(const char* path, const float* buffer, 
                          size_t num_frames, int sample_rate, int channels);
-
-/* Write mono as stereo (duplicates to L+R) */
-SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
-                                size_t num_frames, int sample_rate);
 
 #endif /* SPECTRAL_HAS_FILE_IO */
 

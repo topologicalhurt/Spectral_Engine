@@ -42,7 +42,6 @@ SpectralError spectral_fs_file_size(FILE* file, uint64_t* out_size);
 
 /* Standard I/O wrappers for general-purpose reading/writing (e.g. text/binary blocks). */
 size_t spectral_fs_read(void* ptr, size_t size, size_t count, FILE* stream);
-size_t spectral_fs_write(const void* ptr, size_t size, size_t count, FILE* stream);
 char* spectral_fs_gets(char* str, int n, FILE* stream);
 
 /* Read bytes from a path at offset after bounds-checking against file size. */

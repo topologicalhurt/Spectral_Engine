@@ -49,8 +49,6 @@ size_t spectral_ifft_synth_pool_bytes(size_t n_fft);
 SpectralIfftSynth* spectral_ifft_synth_init(void* pool, size_t pool_bytes,
                                             size_t n_fft, SpectralIfftBackend* backend);
 
-size_t spectral_ifft_synth_n_fft(const SpectralIfftSynth* s);
-
 /* Render `total` samples of the stationary partial sum, overlap-added
  * internally (edges fully covered; output valid from sample 0).
  * Returns 0 on success, nonzero on bad args. */

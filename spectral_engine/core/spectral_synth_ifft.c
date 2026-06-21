@@ -203,10 +203,6 @@ void spectral_ifft_synth_destroy(SpectralIfftSynth* s) {
 #endif
 }
 
-size_t spectral_ifft_synth_n_fft(const SpectralIfftSynth* s) {
-    return s ? s->n_fft : 0;
-}
-
 static inline float motif_eval(const float* t, float d) {
     float x = (d + (float)IFFT_MOTIF_K) * (float)IFFT_MOTIF_O;
     int i0 = (int)x;

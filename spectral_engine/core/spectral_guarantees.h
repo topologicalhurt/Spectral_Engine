@@ -14,9 +14,6 @@
  * The companion drift test (tests/core_contracts/test_guarantees.c) pins the
  * measured error budget for each approximation so a flip of the documented
  * effect breaks CI.
- *
- * NOTE: SPECTRAL_OPT_LEVEL is deliberately absent — it is unused in the C sources
- * today, so it gates no guarantee. Do not add a bit for it until code reads it.
  */
 #ifndef SPECTRAL_GUARANTEES_H
 #define SPECTRAL_GUARANTEES_H

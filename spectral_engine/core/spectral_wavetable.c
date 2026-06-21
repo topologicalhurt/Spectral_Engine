@@ -44,43 +44,6 @@ void spectral_wavetable_init(SpectralWavetableBank* bank) {
     bank->default_timbre = TIMBRE_SINE;
 }
 
-static spectral_sample_t spectral_wavetable_builtin_sample(uint8_t timbre_id, size_t i) {
-    float phase = SPECTRAL_TWO_PI * (float)i / (float)SPECTRAL_WAVETABLE_SIZE;
-    float rads = spectral_normalize_phase(phase);
-    float value = 0.0f;
-    switch ((SpectralTimbre)timbre_id) {
-        case TIMBRE_SINE:     value = spectral_osc_sine(rads, 0.0f); break;
-        case TIMBRE_SAW:      value = spectral_osc_saw(rads, 0.0f); break;
-        case TIMBRE_SQUARE:   value = spectral_osc_square(rads, 0.0f); break;
-        case TIMBRE_TRIANGLE: value = spectral_osc_triangle(rads, 0.0f); break;
-        default:              value = 0.0f; break;
-    }
-    return float_to_spectral_sample(value);
-}
-
-void spectral_wavetable_generate_builtins(SpectralWavetableBank* bank) {
-    if (!bank) return;
-
-    const uint8_t builtins[] = {
-        (uint8_t)TIMBRE_SINE,
-        (uint8_t)TIMBRE_SAW,
-        (uint8_t)TIMBRE_SQUARE,
-        (uint8_t)TIMBRE_TRIANGLE
-    };
-
-    for (size_t b = 0; b < sizeof(builtins) / sizeof(builtins[0]); b++) {
-        uint8_t timbre_id = builtins[b];
-        if (timbre_id >= SPECTRAL_MAX_WAVETABLES) continue;
-        SpectralWavetable* table = &bank->tables[timbre_id];
-        for (size_t i = 0; i < SPECTRAL_WAVETABLE_SIZE; i++) {
-            table->samples[i] = spectral_wavetable_builtin_sample(timbre_id, i);
-        }
-        table->samples[SPECTRAL_WAVETABLE_SIZE] = table->samples[0];
-        wavetable_mark_loaded(bank, table, timbre_id);
-    }
-}
-
-
 /* .spwt format - reads header and converts to runtime spectral_sample_t */
 
 static size_t wavetable_file_sample_size(SpectralWavetableFormat format)
@@ -278,50 +241,6 @@ WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
 }
 
 
-WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
-                                        const char* filename,
-                                        uint8_t timbre_id) {
-    FILE* f = NULL;
-    SpectralWavetableHeader hdr;
-    const SpectralWavetable* table = NULL;
-    size_t sample_bytes = 0;
-    SpectralError fs_err = SPECTRAL_OK;
-
-    if (!bank || spectral_is_empty_string(filename)) return WAVETABLE_ERR_PARAM;
-    if (timbre_id >= SPECTRAL_MAX_WAVETABLES) return WAVETABLE_ERR_PARAM;
-
-    table = &bank->tables[timbre_id];
-    if (!table->valid) return WAVETABLE_ERR_NOT_FOUND;
-    if (!wavetable_runtime_samples_valid(table->samples, SPECTRAL_WAVETABLE_SIZE)) {
-        return WAVETABLE_ERR_FORMAT;
-    }
-    if (!spectral_array_bytes(SPECTRAL_WAVETABLE_SIZE, sizeof(spectral_sample_t), &sample_bytes)) {
-        return WAVETABLE_ERR_SIZE;
-    }
-
-    fs_err = spectral_fs_open(&f, filename, "wb");
-    if (fs_err != SPECTRAL_OK || !f) return WAVETABLE_ERR_FILE;
-
-    /* Prepare header. */
-    memset(&hdr, 0, sizeof(hdr));
-    memcpy(hdr.magic, SPECTRAL_WAVETABLE_MAGIC, 4);
-    hdr.version = SPECTRAL_WAVETABLE_VERSION;
-    hdr.format = SPECTRAL_SAMPLE_IS_FIXED ? WAVETABLE_FORMAT_Q15 : WAVETABLE_FORMAT_FLOAT;
-    hdr.size = SPECTRAL_WAVETABLE_SIZE;
-    hdr.timbre_id = timbre_id;
-
-    /* Write header and exactly SPECTRAL_WAVETABLE_SIZE samples. */
-    fs_err = spectral_fs_write_exact(f, &hdr, sizeof(hdr), SPECTRAL_ERR_FILE_WRITE);
-    if (fs_err == SPECTRAL_OK) {
-        fs_err = spectral_fs_write_exact(f, table->samples, sample_bytes, SPECTRAL_ERR_FILE_WRITE);
-    }
-
-    {
-        SpectralError close_err = spectral_fs_close(&f, SPECTRAL_ERR_FILE_WRITE);
-        if (fs_err == SPECTRAL_OK && close_err != SPECTRAL_OK) fs_err = close_err;
-    }
-    return fs_err == SPECTRAL_OK ? WAVETABLE_OK : WAVETABLE_ERR_FILE;
-}
 
 
 
@@ -606,16 +525,4 @@ spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
     spectral_sample_t s0 = table->samples[idx];
     spectral_sample_t s1 = table->samples[idx + 1];
     return spectral_sample_lerp_f(s0, s1, frac);
-}
-
-spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
-                                              uint16_t phase_u16) {
-    if (!table) return SPECTRAL_SAMPLE_ZERO;
-    uint32_t idx = phase_u16 >> (16 - SPECTRAL_WAVETABLE_BITS);
-    uint32_t frac_bits = 16 - SPECTRAL_WAVETABLE_BITS;
-    uint32_t frac = (phase_u16 & ((1u << frac_bits) - 1)) >> (frac_bits > 8 ? frac_bits - 8 : 0);
-    if (frac_bits < 8) frac <<= (8 - frac_bits);
-    spectral_sample_t s0 = table->samples[idx];
-    spectral_sample_t s1 = table->samples[idx + 1];
-    return spectral_sample_lerp_q8(s0, s1, frac);
 }

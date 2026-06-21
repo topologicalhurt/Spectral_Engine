@@ -203,28 +203,6 @@ const char* spectral_getenv_nonempty(const char* key) {
     return spectral_is_empty_string(value) ? NULL : value;
 }
 
-int spectral_getenv_f64(const char* key, double* out) {
-    const char* value = spectral_getenv_nonempty(key);
-    char* end = NULL;
-    double parsed;
-    if (!out || !value) return 0;
-    errno = 0;
-    parsed = strtod(value, &end);
-    if (errno != 0 || end == value || (end && *end != '\0') || !spectral_is_finite_f64(parsed)) {
-        return 0;
-    }
-    *out = parsed;
-    return 1;
-}
-
-int spectral_getenv_f64_positive(const char* key, double* out) {
-    double value = 0.0;
-    if (!out || !spectral_getenv_f64(key, &value)) return 0;
-    if (!spectral_is_finite_positive_f64(value)) return 0;
-    *out = value;
-    return 1;
-}
-
 static int spectral_parse_bool_str(const char* s, int* out) {
     char lowered[8] = {0};
     size_t n = 0;

@@ -422,9 +422,6 @@ static inline const char* spectral_exec_mode_name(void) {
 #ifndef SPECTRAL_SEGMENT_WIDTH_MAX
 #define SPECTRAL_SEGMENT_WIDTH_MAX      16777216.0f
 #endif
-#ifndef SPECTRAL_TRACK_INTERP_POWER_RATIONAL
-#define SPECTRAL_TRACK_INTERP_POWER_RATIONAL 0
-#endif
 /* Per-frame candidate scratch batch for peak tracking.
  * [chosen: 128 entries keeps the candidate block cache-resident; the prefetch
  * benchmark profiles (benchmark_workflow) sweep 64-256 for re-evaluation.] */
@@ -571,11 +568,6 @@ _Static_assert(SPECTRAL_WAVETABLE_SIZE == (1 << SPECTRAL_WAVETABLE_BITS),
 #define SPECTRAL_FADE_SAMPLES_ACTIVE SPECTRAL_FADE_SAMPLES_DESKTOP
 #endif
 #endif
-/* Optimization level: 0=safe, 1=balanced (default), 2=aggressive, 3=reserved. */
-#ifndef SPECTRAL_OPT_LEVEL
-#define SPECTRAL_OPT_LEVEL      1
-#endif
-
 /* GPU/compute block size for Metal/CUDA backends.
  * [chosen: a multiple of the 32-wide SIMD-group/warp on both backends, at
  * half the common 1024 threads/group ceiling for register headroom; not yet

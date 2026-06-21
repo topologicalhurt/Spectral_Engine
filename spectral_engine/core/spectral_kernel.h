@@ -15,7 +15,7 @@
  *   - scene model: Segment / SegmentArray / SegmentActive / SpectralHalf (spectral_common.h)
  *   - errors: SpectralError + domains + message/ok helpers (spectral_error.h)
  *   - analysis: analyze_audio() — audio -> SegmentArray (spectral_analysis.h)
- *   - synthesis: synth_cpu / synth_cpu_wavetable (+ native twins) + the backend dispatch
+ *   - synthesis: synth_cpu / synth_cpu_wavetable + the backend dispatch
  *     (spectral_synth.h, spectral_backend.h)
  *   - audio + wavetable I/O (spectral_io.h, spectral_wavetable.h)
  *   - the renderer registry: renderer x domain x device (spectral_renderer.h; AI_CANON #31)
@@ -42,7 +42,7 @@
 #include "spectral_common.h"      /* Segment, SegmentArray, SpectralHalf — the scene model */
 #include "spectral_error.h"       /* SpectralError, error domains + message/ok helpers */
 #include "spectral_analysis.h"    /* analyze_audio: audio -> SegmentArray */
-#include "spectral_synth.h"       /* synth_cpu / synth_cpu_wavetable (+ native twins) */
+#include "spectral_synth.h"       /* synth_cpu / synth_cpu_wavetable */
 #include "spectral_backend.h"     /* spectral_synth_dispatch[_ex]: backend selection + fallback */
 #include "spectral_renderer.h"    /* renderer registry: renderer x domain x device (AI_CANON #31) */
 #include "spectral_io.h"          /* audio read/write, normalize, mono<->stereo */

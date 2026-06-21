@@ -29,16 +29,6 @@ SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out
                                   const SpectralWavetableBank* bank, SpectralTimbre timbre,
                                   int n_threads, double* t_synth);
 
-/* Native sample type synthesis */
-SpectralError synth_cpu_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
-                               float stretch, float pitch, SpectralTimbre timbre, int n_threads,
-                               double* t_synth);
-
-SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
-                                         float stretch, float pitch,
-                                         const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                                         int n_threads, double* t_synth);
-
 #ifdef __cplusplus
 }
 #endif

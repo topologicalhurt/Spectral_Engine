@@ -304,16 +304,6 @@ static const SpectralHashFileMethodDescriptor k_hash_file_method_desc[SPECTRAL_H
     }
 };
 
-size_t spectral_hash_file_method_descriptor_count(void)
-{
-    return (size_t)SPECTRAL_HASH_FILE_METHOD_COUNT;
-}
-
-const SpectralHashFileMethodDescriptor* spectral_hash_file_method_descriptors(void)
-{
-    return k_hash_file_method_desc;
-}
-
 SpectralError spectral_hash_file_method_get_descriptor(
     SpectralHashFileMethodType type,
     const SpectralHashFileMethodDescriptor** out_desc)

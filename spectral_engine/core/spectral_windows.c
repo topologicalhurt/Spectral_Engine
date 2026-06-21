@@ -139,25 +139,8 @@ const SpectralWindowDescriptor* spectral_window_descriptor(SpectralWindowType ty
     return NULL;
 }
 
-const SpectralWindowDescriptor* spectral_window_descriptor_at(size_t index) {
-    if (index >= spectral_window_descriptor_count()) return NULL;
-    return &spectral_window_descriptors[index];
-}
-
 size_t spectral_window_descriptor_count(void) {
     return sizeof(spectral_window_descriptors) / sizeof(spectral_window_descriptors[0]);
-}
-
-const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id) {
-    size_t count = spectral_window_descriptor_count();
-    if (!id) return NULL;
-    for (size_t i = 0; i < count; i++) {
-        if (spectral_window_descriptors[i].id &&
-            strcmp(spectral_window_descriptors[i].id, id) == 0) {
-            return &spectral_window_descriptors[i];
-        }
-    }
-    return NULL;
 }
 
 SpectralError spectral_window_generate(float* window, size_t length, SpectralWindowType type) {
@@ -287,12 +270,6 @@ float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, flo
      *   https://www.dsprelated.com/freebooks/sasp/quadratic_interpolation_spectral_peaks.html
      *   https://doi.org/10.1109/PROC.1978.10837
      */
-#if defined(SPECTRAL_TRACK_INTERP_POWER_RATIONAL) && SPECTRAL_TRACK_INTERP_POWER_RATIONAL
-    float denom = left_sq + right_sq + 2.0f * center_sq;
-    if (denom < SPECTRAL_TRACK_PARABOLIC_DENOM_EPS) return 0.0f;
-    float p = (right_sq - left_sq) / denom;
-    p *= 1.5f;
-#else
     float left = fmaxf(left_sq, SPECTRAL_TRACK_LOG_FLOOR);
     float center = fmaxf(center_sq, SPECTRAL_TRACK_LOG_FLOOR);
     float right = fmaxf(right_sq, SPECTRAL_TRACK_LOG_FLOOR);
@@ -315,7 +292,6 @@ float spectral_window_interp_magsq_parabolic(float left_sq, float center_sq, flo
     } else {
         p = 0.5f * (log_lc - log_rc) / denom;
     }
-#endif
     if (!isfinite(p)) return 0.0f;
     if (p > 0.5f) return 0.5f;
     if (p < -0.5f) return -0.5f;

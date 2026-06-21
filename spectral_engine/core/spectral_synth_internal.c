@@ -175,14 +175,6 @@ SynthPreflight synth_preflight_float(
                                   sa, stretch, pitch, t_synth);
 }
 
-SynthPreflight synth_preflight_native(
-    spectral_sample_t* out_buffer, size_t out_len, SegmentArray sa,
-    float stretch, float pitch, double** t_synth)
-{
-    return synth_preflight_common(out_buffer, out_len, sizeof(spectral_sample_t),
-                                  sa, stretch, pitch, t_synth);
-}
-
 SpectralError spectral_handle_unsupported_timbre(
     const char* backend_name,
     int max_supported_timbre,

@@ -69,17 +69,11 @@ typedef struct SpectralWavetableBank {
     uint8_t default_timbre;
 } SpectralWavetableBank;
 
-/* Initialization and builtin generation */
+/* Initialization */
 void spectral_wavetable_init(SpectralWavetableBank* bank);
-void spectral_wavetable_generate_builtins(SpectralWavetableBank* bank);
 
 /* Primary file loading - .spwt format with automatic conversion at load time */
 WavetableError spectral_wavetable_load(SpectralWavetableBank* bank,
-                                        const char* filename,
-                                        uint8_t timbre_id);
-
-/* Save wavetable to .spwt file in current runtime format */
-WavetableError spectral_wavetable_save(const SpectralWavetableBank* bank,
                                         const char* filename,
                                         uint8_t timbre_id);
 
@@ -104,11 +98,9 @@ const SpectralWavetable* spectral_wavetable_get(const SpectralWavetableBank* ban
 int spectral_wavetable_has_timbre(const SpectralWavetableBank* bank,
                                   uint8_t timbre_id);
 
-/* Wavetable lookup - float phase (0.0-1.0) or fixed phase (0-65535) */
+/* Wavetable lookup - float phase (0.0-1.0) */
 spectral_sample_t spectral_wavetable_lookup_f(const SpectralWavetable* table,
                                               float phase_norm);
-spectral_sample_t spectral_wavetable_lookup_q(const SpectralWavetable* table,
-                                              uint16_t phase_u16);
 
 #ifdef __cplusplus
 }

@@ -31,6 +31,9 @@ typedef struct {
     const size_t* span_len;  /* per-partition span length (samples) */
 } ThreadBuffers;
 
+/* The float OpenMP synth machinery is desktop-only; under SPECTRAL_USE_EMBEDDED_SYNTH
+ * synthesis is owned by the arm32 fixed-point kernel and synth_cpu is redirected. */
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static int synth_partition_count(size_t seg_count, int n_threads) {
     size_t n = seg_count;
     size_t thread_cap = (size_t)((n_threads > 0) ? n_threads : 1);
@@ -156,7 +159,6 @@ static void thread_buffers_free(ThreadBuffers* tb) {
     tb->n_threads = 0;
 }
 
-#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static SpectralError thread_buffers_combine_float(const ThreadBuffers* tb, float* __restrict__ out_buffer,
                                                   size_t out_len, size_t out_bytes) {
     if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
@@ -191,38 +193,10 @@ static SpectralError thread_buffers_combine_float(const ThreadBuffers* tb, float
 
 #endif
 
-static SpectralError thread_buffers_combine_native(const ThreadBuffers* tb, spectral_sample_t* __restrict__ out_buffer,
-                                                   size_t out_len, size_t out_bytes) {
-    if (!tb || !tb->bufs || !out_buffer || out_len == 0u) {
-        return SPECTRAL_ERR_PARAM;
-    }
-    if (!tb->span_lo || !tb->span_len) {
-        return SPECTRAL_ERR_PARAM;
-    }
 
-    memset(out_buffer, 0, out_bytes);
-    for (int t = 0; t < tb->n_threads; t++) {
-        const size_t lo = tb->span_lo[t];
-        const size_t len = tb->span_len[t];
-        if (len == 0u) continue;
-        if (lo > out_len || len > out_len - lo) {
-            return SPECTRAL_ERR_OVERFLOW;
-        }
-        if (len > tb->buf_size / sizeof(spectral_sample_t)) {
-            return SPECTRAL_ERR_OVERFLOW;
-        }
-        const spectral_sample_t* __restrict__ src = (const spectral_sample_t*)tb->bufs[t];
-        spectral_sample_t* __restrict__ dst = out_buffer + lo;
-        for (size_t j = 0; j < len; j++) {
-            dst[j] = spectral_sample_add(dst[j], src[j]);
-        }
-    }
-    return SPECTRAL_OK;
-}
-
-
-/* All CPU synth variants: validate -> alloc ThreadBuffers -> parallel loop -> reduce -> free */
-
+/* All CPU synth variants: validate -> alloc ThreadBuffers -> parallel loop -> reduce -> free.
+ * Desktop float path only; under SPECTRAL_USE_EMBEDDED_SYNTH synthesis is owned by arm32. */
+#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 typedef void (*SegmentSynthFn)(void* dst, const SegmentLoopParams* lp, const void* ctx);
 typedef SpectralError (*ReduceFn)(const ThreadBuffers* tb, void* out_buffer, size_t out_len, size_t out_bytes);
 
@@ -352,15 +326,10 @@ static SpectralError synth_cpu_driver(
     return SPECTRAL_OK;
 }
 
-#ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static SpectralError reduce_float_wrapper(const ThreadBuffers* tb, void* out, size_t len, size_t out_bytes) {
     return thread_buffers_combine_float(tb, (float*)out, len, out_bytes);
 }
 #endif
-
-static SpectralError reduce_native_wrapper(const ThreadBuffers* tb, void* out, size_t len, size_t out_bytes) {
-    return thread_buffers_combine_native(tb, (spectral_sample_t*)out, len, out_bytes);
-}
 
 /* Per-segment callbacks */
 
@@ -368,7 +337,6 @@ typedef struct { SpectralTimbre timbre; } TimbreCtx;
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 typedef struct { const SpectralWavetable* table; } WavetableCtx;
 #endif
-typedef struct { const SpectralWavetable* table; } NativeWavetableCtx;
 
 #ifndef SPECTRAL_USE_EMBEDDED_SYNTH
 static void segment_fn_timbre(void* dst, const SegmentLoopParams* lp, const void* ctx) {
@@ -389,33 +357,6 @@ static void segment_fn_wavetable_float(void* dst, const SegmentLoopParams* lp, c
     }
 }
 #endif
-
-static void segment_fn_native_timbre(void* dst, const SegmentLoopParams* lp, const void* ctx) {
-    const TimbreCtx* tc = (const TimbreCtx*)ctx;
-    spectral_sample_t* out = (spectral_sample_t*)dst;
-    FadeParams fp = fade_params_init(lp->length, SPECTRAL_FADE_SAMPLES_ACTIVE);
-    for (size_t j = 0; j < lp->length; j++) {
-        float p = spectral_segment_phase_at_cubic_f32(lp->phase, lp->alpha, lp->c2, lp->c3, (float)j);
-        float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
-        float sample_f = timbre_oscillator(p, amp, tc->timbre, lp->width);
-        out[j] = spectral_sample_add(out[j], float_to_spectral_sample(sample_f));
-    }
-}
-
-static void segment_fn_native_wavetable(void* dst, const SegmentLoopParams* lp, const void* ctx) {
-    const NativeWavetableCtx* nwc = (const NativeWavetableCtx*)ctx;
-    spectral_sample_t* out = (spectral_sample_t*)dst;
-    FadeParams fp = fade_params_init(lp->length, SPECTRAL_FADE_SAMPLES_ACTIVE);
-    for (size_t j = 0; j < lp->length; j++) {
-        float p = spectral_segment_phase_at_cubic_f32(lp->phase, lp->alpha, lp->c2, lp->c3, (float)j);
-        float phase_norm = p * (float)SPECTRAL_INV_TWO_PI;
-        float amp = spectral_segment_amp_at_f32(lp->amp, lp->d_amp, (float)j) * fade_envelope(j, &fp, lp->length);
-        spectral_sample_t sample = spectral_wavetable_lookup_f(nwc->table, phase_norm);
-        spectral_sample_t amp_native = float_to_spectral_sample(amp);
-        spectral_sample_t scaled = spectral_sample_mul(sample, amp_native);
-        out[j] = spectral_sample_add(out[j], scaled);
-    }
-}
 
 /* Public synthesis functions */
 
@@ -456,35 +397,3 @@ SpectralError synth_cpu_wavetable(SegmentArray sa, float* out_buffer, size_t out
                             segment_fn_wavetable_float, &ctx, reduce_float_wrapper);
 }
 #endif
-
-SpectralError synth_cpu_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
-                               float stretch, float pitch, SpectralTimbre timbre, int n_threads,
-                               double* t_synth) {
-    if (n_threads < 1) n_threads = 1;
-    SynthPreflight pf = synth_preflight_native(out_buffer, out_len, sa, stretch, pitch, &t_synth);
-    if (!pf.ok) return pf.error;
-    TimbreCtx ctx = { .timbre = timbre };
-    return synth_cpu_driver(sa, out_buffer, out_len, sizeof(spectral_sample_t),
-                            &pf.params, pf.start_time, n_threads, t_synth,
-                            segment_fn_native_timbre, &ctx, reduce_native_wrapper);
-}
-
-SpectralError synth_cpu_wavetable_native(SegmentArray sa, spectral_sample_t* out_buffer, size_t out_len,
-                                         float stretch, float pitch,
-                                         const SpectralWavetableBank* bank, SpectralTimbre timbre,
-                                         int n_threads, double* t_synth) {
-    if (n_threads < 1) n_threads = 1;
-    if (!bank) {
-        return synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
-    }
-    SynthPreflight pf = synth_preflight_native(out_buffer, out_len, sa, stretch, pitch, &t_synth);
-    if (!pf.ok) return pf.error;
-    const SpectralWavetable* table = spectral_wavetable_get(bank, (uint8_t)timbre);
-    if (!table || !table->valid) {
-        return synth_cpu_native(sa, out_buffer, out_len, stretch, pitch, timbre, n_threads, t_synth);
-    }
-    NativeWavetableCtx ctx = { .table = table };
-    return synth_cpu_driver(sa, out_buffer, out_len, sizeof(spectral_sample_t),
-                            &pf.params, pf.start_time, n_threads, t_synth,
-                            segment_fn_native_wavetable, &ctx, reduce_native_wrapper);
-}

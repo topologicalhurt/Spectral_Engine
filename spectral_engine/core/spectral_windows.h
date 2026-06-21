@@ -111,9 +111,7 @@ void spectral_window_blackman(float* window, size_t length);
 void spectral_window_rectangular(float* window, size_t length);
 
 const SpectralWindowDescriptor* spectral_window_descriptor(SpectralWindowType type);
-const SpectralWindowDescriptor* spectral_window_descriptor_at(size_t index);
 size_t spectral_window_descriptor_count(void);
-const SpectralWindowDescriptor* spectral_window_find_by_id(const char* id);
 
 /*
  * spectral_window_generate: Generate window by type

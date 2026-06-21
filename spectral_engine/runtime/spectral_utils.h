@@ -91,8 +91,6 @@ int         parse_f32_arg(const char* s, float* out);
 
 const char* spectral_getenv_nonempty(const char* key);
 int         spectral_getenv_bool(const char* key, int* out);
-int         spectral_getenv_f64(const char* key, double* out);
-int         spectral_getenv_f64_positive(const char* key, double* out);
 
 /* Inlined finiteness via the exponent bits (all-ones exponent == Inf or NaN). This is a real
  * check that READS the bit pattern, so unlike isfinite() it (a) inlines to a couple of integer

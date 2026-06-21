@@ -134,15 +134,6 @@ typedef union {
 #define OSC_DISPATCH_ALL_SIMD     ((OscDispatchWord){ .word = 0x5555 })
 #define OSC_DISPATCH_ALL_FALLBACK ((OscDispatchWord){ .word = 0xFFFF })
 
-/* SIMD vector width (floats per vector register) */
-#if defined(OSC_SIMD_CMSIS)
-    #define OSC_SIMD_WIDTH 4  /* Cortex-M4/M7 with FPU */
-#elif defined(__AVX2__) || defined(__AVX__)
-    #define OSC_SIMD_WIDTH 8
-#else
-    #define OSC_SIMD_WIDTH 4  /* SSE2/NEON via SIMDe */
-#endif
-
 /* Forward declarations */
 struct SegmentLoopParams;
 

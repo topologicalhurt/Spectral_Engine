@@ -36,23 +36,6 @@ static int spectral_size_to_sf_count(size_t value, sf_count_t* out)
 #endif
 
 /*
- * Stereo Interleaving
- */
-
-void spectral_mono_to_stereo_float(const float* mono, float* stereo, size_t num_frames) {
-    if (!mono || !stereo || num_frames == 0 || num_frames > SIZE_MAX / 2u) return;
-
-    SPECTRAL_UNROLL_4
-    for (size_t i = 0; i < num_frames; i++) {
-        size_t stereo_i = i * 2u;
-        stereo[stereo_i]     = mono[i];
-        stereo[stereo_i + 1u] = mono[i];
-    }
-}
-
-
-
-/*
  * File Output (Desktop Only)
  */
 
@@ -223,41 +206,6 @@ SpectralError spectral_audio_write(const char* path, const float* buffer,
     return SPECTRAL_ERR_FILE_WRITE;
 }
 
-
-
-SpectralError spectral_audio_write_stereo(const char* path, const float* mono,
-                                size_t num_frames, int sample_rate) {
-    size_t stereo_samples = 0;
-    size_t stereo_bytes = 0;
-    float* stereo = NULL;
-    SpectralError result = SPECTRAL_OK;
-
-    if (spectral_is_empty_string(path) || !mono || num_frames == 0) {
-        return SPECTRAL_ERR_PARAM;
-    }
-    if (sample_rate < SPECTRAL_MIN_SAMPLE_RATE || sample_rate > SPECTRAL_MAX_SAMPLE_RATE) {
-        return SPECTRAL_ERR_PARAM;
-    }
-    if (!spectral_f32_span_finite(mono, num_frames)) {
-        return SPECTRAL_ERR_PARAM;
-    }
-
-    if (!spectral_size_mul(num_frames, 2u, &stereo_samples) ||
-        !spectral_size_mul(stereo_samples, sizeof(float), &stereo_bytes)) {
-        return SPECTRAL_ERR_OVERFLOW;
-    }
-    (void)stereo_bytes;
-
-    stereo = (float*)spectral_malloc_array(stereo_samples, sizeof(float));
-    if (!stereo) return SPECTRAL_ERR_MEMORY;
-
-    spectral_mono_to_stereo_float(mono, stereo, num_frames);
-
-    result = spectral_audio_write(path, stereo, num_frames, sample_rate, 2);
-
-    free(stereo);
-    return result;
-}
 
 
 #endif /* SPECTRAL_HAS_FILE_IO */
