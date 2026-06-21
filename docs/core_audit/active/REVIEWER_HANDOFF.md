@@ -1,5 +1,17 @@
 # Spectral Kernel — Reviewer Handoff Mandate (Campaign 3)
 
+**STATUS: RECONCILED 2026-06-21 — standing doctrine, not a live ticket queue.** Every concrete
+Campaign-3 work-stream is DONE or correctly GATED: S1 (perf model P0–P6, archived
+`M7_PERF_MODEL_PLAN`), S2 (adversarial fleet ×2 + the hardening campaign, archived), S3 (refactor
+bulk landed; STFT-unify/stub-collapse DECLINED-in-writing), S4 (embedded benchmarks + the tests_all
+race fix), and F (the IFFT crossover measured ≈7 partials, the path implemented + parity-tested, and
+the renderer abstraction generalized it — see `RENDERER_ABSTRACTION_PLAN.md` + AI_CANON #31). The
+only live frontier is maintainer-gated: **S5** (maturity scorecard, sequenced last, blocked on the
+`spectral_kernel.h` 1.0 freeze — a human ABI pledge) and the **F3 golden** that gates IFFT default-on.
+The §0 doctrine still stands; **`PLAN_CLOSURE_LEDGER.md` is the live status of record** and supersedes
+the §6 doc-map below (whose `CAMPAIGN_2`/`OPTIMISATION`/`OSCILLATOR_BACKEND_CONTRACT` targets are now
+in `archive/` + `reference/`).
+
 > You are an advanced AI coding agent taking over a mature-but-unfinished DSP kernel. This is
 > your standing mandate, not a ticket. It is deliberately **abstract in places**: the maintainer
 > wants your architectural and problem-solving judgment, not literal box-checking. Where this

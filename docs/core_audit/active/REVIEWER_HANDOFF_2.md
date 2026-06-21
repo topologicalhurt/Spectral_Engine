@@ -1,5 +1,18 @@
 # Reviewer Handoff 2 — status reconciliation (as of pass 249; §4/§5 annotated pass 250)
 
+**STATUS: SUPERSEDED 2026-06-21 — historical snapshot (as-of ~pass 250; the tree is now pass 283+).**
+Every §4 concern is resolved or correctly gated (§4.1 build footguns FIXED; §4.2 width clamp DONE;
+§4.3 PRECISE_PHASE documented EXPERIMENTAL; §4.4 window convention data-gathered + maintainer-gated;
+§4.5 GPU parity CLOSED by the `gpu_backend_parity` ctest; §4.6 hardware-gated). S1 (P3–P6) CLOSED
+(`M7_PERF_MODEL_PLAN` archived); S2 done. **The biggest stale claim is §1/F: "F-stream untouched, no
+crossover measured, no IFFT implemented" is now FLATLY WRONG** — the IFFT path is implemented
+(`spectral_synth_ifft.c`, `spectral_synth_hybrid.c` + the wavetable hybrid), the crossover is measured
+(≈7 partials), and only the F3 golden remains. Genuinely-open + host-doable remainder: the public
+`spectral_kernel.h` 1.0 freeze (now overlaps the pass-283 renderer reframe — coordinate before
+freezing) and S4 reproducible desktop perf-counter benchmarks (low-value per the closed perf
+frontier). STFT-unify is a recorded DECLINE, not open work. Live status of record:
+`PLAN_CLOSURE_LEDGER.md`.
+
 > This continues `REVIEWER_HANDOFF.md`, which remains the **standing Campaign-3
 > mandate** (S1–S5 work-streams + the F synthesis fork). Nothing here supersedes
 > it. This document exists because a long run of work (passes 237–249) has landed

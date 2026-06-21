@@ -1,5 +1,16 @@
 # IFFT Synthesis (Rodet–Depalle) — F-stream plan
 
+**PREMISE REVISED 2026-06-21 — the "512 voices needs the IFFT" motivation is REFUTED.** The
+embedded-perf campaign's high-word-multiply `coupled_step` (commit d02c817) fits 512 voices in ~98%
+of the 400 MHz budget on the EXACT per-partial oscillator bank — so the IFFT is no longer *required*
+for the 512 capacity target. The IFFT is **not dead**: the crossover-pricing argument below still
+holds (it remains a ~7.5–8× density optimization for dense stationary material), and it is now the
+**substrate for the renderer abstraction's wavetable + subtractive frequency-domain paths** (renderer
+commits 078fee2 / 6232044 / 9be448f / c40c5c18; see `RENDERER_ABSTRACTION_PLAN.md` + AI_CANON #31).
+Status: F1 / F2 / F2b-Step1 / F6 DONE; **F3 golden is the single open maintainer gate**; F4 / F5 / F7
+and the F2b mixed-case ride behind F3 (dead code with no production caller until F3 wires one). So its
+urgency shifted from "required for 512" to "optional density optimization + renderer substrate."
+
 Decision basis (closed): P6/D4 priced the fork structurally; pass 255 measured
 it — one CMSIS-DSP inverse RFFT-512 (Q31, Daisy flags) = **43,910 insns**
 [measured: qemu-tcg] vs **6,528 insns per oscillator-bank partial per
