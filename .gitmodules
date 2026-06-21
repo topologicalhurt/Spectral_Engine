@@ -14,3 +14,11 @@
 	path = third_party/CMSIS_6
 	url = https://github.com/ARM-software/CMSIS_6
 	branch = main
+[submodule "third_party/libDaisy"]
+	path = third_party/libDaisy
+	url = https://github.com/electro-smith/libDaisy
+	branch = master
+[submodule "third_party/teensy_cores"]
+	path = third_party/teensy_cores
+	url = https://github.com/paulstoffregen/cores
+	branch = master

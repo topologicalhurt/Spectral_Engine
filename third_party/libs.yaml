@@ -36,3 +36,15 @@ dependencies:
     path: third_party/xxHash
     ref: dev
     notes: resource hash system (xx32/xx3)
+  libDaisy:
+    kind: submodule
+    url: https://github.com/electro-smith/libDaisy
+    path: third_party/libDaisy
+    ref: master
+    notes: Core daisy seed libraries
+  teensy_cores:
+    kind: submodule
+    url: https://github.com/paulstoffregen/cores
+    path: third_party/teensy_cores
+    ref: master
+    notes: Core teensy(4.1) libraries
