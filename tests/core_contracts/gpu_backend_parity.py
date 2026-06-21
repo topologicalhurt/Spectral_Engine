@@ -11,6 +11,10 @@ max|diff| 1.2e-7..2.4e-7, RMS 1.6e-8..6.4e-8. The bounds below carry ~30 dB
 headroom, far below audibility yet far above any real formula or dispatch
 defect (those land at -40..-70 dBFS).
 
+Also pins the fallback contract: a timbre above SPECTRAL_GPU_MAX_TIMBRE asked of
+the Metal backend must defer to CPU (bit-identical to a direct CPU render), never
+silently run the GPU kernel with an out-of-range timbre.
+
 Standalone (stdlib only) so CTest can run it without pytest. Exit codes:
 0 = pass, 77 = skipped (binary not built, or no Metal device — e.g. a
 virtualized CI host; the binary's fallback to CPU is detected and treated
@@ -30,6 +34,7 @@ from pathlib import Path
 
 SKIP = 77
 TIMBRES = (0, 1, 2, 3, 4, 5)  # all GPU-eligible: sine,saw,square,triangle,asin,parabola (<=SPECTRAL_GPU_MAX_TIMBRE)
+INELIGIBLE_TIMBRE = 7       # PWM > SPECTRAL_GPU_MAX_TIMBRE: the GPU dispatch must defer to CPU
 MAX_DIFF_BOUND = 1.0e-5     # ~-100 dBFS
 RMS_DIFF_BOUND = 1.0e-6     # ~-120 dBFS
 CPU, METAL = "1", "2"
@@ -103,6 +108,26 @@ def main() -> int:
                 print(f"FAIL timbre {timbre}: bounds max<{MAX_DIFF_BOUND:g} "
                       f"rms<{RMS_DIFF_BOUND:g}")
                 return 1
+
+        # Fallback contract: a timbre above SPECTRAL_GPU_MAX_TIMBRE asked of the
+        # Metal backend must DEFER to CPU (the dispatch gate), never run the GPU
+        # kernel with an out-of-range timbre. The fallback re-enters the same
+        # synth_cpu, so its output is bit-identical to a direct CPU render —
+        # assert exact equality, which also proves no silent GPU mis-render.
+        fb_out, fb_wav = render(binary, wav, INELIGIBLE_TIMBRE, METAL, Path(tmp))
+        if "Backend used: CPU" not in fb_out:
+            print(f"FAIL: ineligible timbre {INELIGIBLE_TIMBRE} on Metal did not "
+                  f"fall back to CPU (silent GPU render of an unsupported timbre?)")
+            return 1
+        _, cpu_wav = render(binary, wav, INELIGIBLE_TIMBRE, CPU, Path(tmp))
+        fb, cp = load_f32_wav(fb_wav), load_f32_wav(cpu_wav)
+        if len(fb) != len(cp) or fb != cp:
+            mx = (max(abs(x - y) for x, y in zip(fb, cp))
+                  if len(fb) == len(cp) else float("inf"))
+            print(f"FAIL: Metal fallback for timbre {INELIGIBLE_TIMBRE} not "
+                  f"bit-identical to CPU (max|diff| {mx:.3e})")
+            return 1
+        print(f"fallback timbre {INELIGIBLE_TIMBRE}: Metal deferred to CPU, bit-identical")
     print("PASS: Metal output matches CPU within bounds")
     return 0
 
